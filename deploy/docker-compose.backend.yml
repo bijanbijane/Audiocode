@@ -1,0 +1,52 @@
+# deploy/docker-compose.backend.yml
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: paudio_platform
+      POSTGRES_USER: paudio_app
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?required}
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+      - ../backend/db:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U paudio_app -d paudio_platform"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  platform-backend:
+    build:
+      context: ..
+      dockerfile: backend/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PORT: "4000"
+      HOST: "0.0.0.0"
+      DATABASE_URL: "postgresql://paudio_app:${POSTGRES_PASSWORD}@postgres:5432/paudio_platform"
+      MODEL_STORAGE_DIR: "/var/lib/paudio/models"
+      ENABLE_CLOUD_ASR: "false"
+      ED25519_PRIVATE_KEY_PEM: ${ED25519_PRIVATE_KEY_PEM:?required}
+      ED25519_PUBLIC_KEY_PEM: ${ED25519_PUBLIC_KEY_PEM:?required}
+      PAYMENT_WEBHOOK_HMAC_SECRET: ${PAYMENT_WEBHOOK_HMAC_SECRET:?required}
+      ADMIN_API_SECRET_KEY: ${ADMIN_API_SECRET_KEY:?required}
+    ports:
+      - "4000:4000"
+    volumes:
+      - model_chunks_storage:/var/lib/paudio/models:ro
+
+  prometheus:
+    image: prom/prometheus:v2.55.1
+    restart: unless-stopped
+    ports:
+      - "9090:9090"
+    depends_on:
+      - platform-backend
+
+volumes:
+  pg_data:
+  model_chunks_storage:

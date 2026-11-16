@@ -1,0 +1,56 @@
+name: Architecture Governance, SBOM & Release Quality Gate
+
+on:
+  push:
+    branches: [main, release/*]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  supply-chain-and-quality-gate:
+    name: Security Audit, Commercial License Check & Quality Gates
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust Toolchain for WASM Target
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Audit Rust Commercial Licenses & Advisories (Sections 44 & 59)
+        uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          manifest-path: wasm-audio-core/Cargo.toml
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install Dependencies
+        run: npm install --no-audit --no-fund
+
+      - name: Verify Zero Circular Dependencies & SPEC-01 Boundary (AC-01.1)
+        run: npx --yes madge --circular --extensions ts,tsx src/ packages/
+
+      - name: Generate CycloneDX SBOM (Section 44 Supply Chain Security)
+        run: |
+          npx --yes @cyclonedx/cyclonedx-npm --output-file sbom-npm.cdx.json
+          ls -lh sbom-npm.cdx.json
+
+      - name: Execute Typecheck, All Unit Tests & Quality Gates (Section 65)
+        run: |
+          npm run lint
+          npx --yes tsx --test $(find src packages backend -name '*.test.ts' | sort)
+          npm run build
+
+      - name: Upload SBOM & Supply-Chain Report
+        uses: actions/upload-artifact@v4
+        with:
+          name: supply-chain-sbom-and-gate-report
+          path: sbom-npm.cdx.json

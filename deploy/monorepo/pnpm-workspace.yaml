@@ -1,0 +1,8 @@
+packages:
+  - 'packages/contracts'
+  - 'packages/wasm-audio-core'
+  - 'packages/audio-runtime'
+  - 'packages/ai-engine'
+  - 'packages/project-core'
+  - 'apps/web-studio'
+  - 'apps/platform-backend'

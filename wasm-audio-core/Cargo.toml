@@ -1,0 +1,33 @@
+[package]
+name = "wasm-audio-core"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+description = "Commercial-safe streaming audio decoder, peak pyramid builder, and Persian speech DSP engine in Rust/WASM"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+wasm-bindgen = "0.2.92"
+js-sys = "0.3.69"
+
+# 100% commercial-safe audio demuxing/decoding (MPL-2.0 / MIT — zero GPL FFmpeg dependencies)
+symphonia = { version = "0.5.4", default-features = false, features = [
+  "pcm",
+  "wav",
+  "flac",
+  "mp3",
+  "aac",
+  "isomp4",
+  "ogg"
+] }
+
+# Anti-aliased polyphase sinc resampler (MIT license)
+rubato = "0.15.0"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+panic = "abort"

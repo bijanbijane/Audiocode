@@ -1,0 +1,32 @@
+# Commercial License & Supply-Chain Policy (Architecture Doc Sections 44 & 59)
+# Blocks GPL/AGPL copyleft dependencies and unpinned wildcard versions in Rust/WASM DSP core.
+
+[advisories]
+db-path = "~/.cargo/advisory-db"
+db-urls = ["https://github.com/rustsec/advisory-db"]
+yanked = "deny"
+
+[licenses]
+confidence-threshold = 0.8
+# Allow only commercial-safe licenses compatible with closed/proprietary SaaS distribution
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Unicode-DFS-2016",
+    "Unicode-3.0",
+    "MPL-2.0", # Symphonia audio decoder/demuxer
+    "Zlib"
+]
+
+[bans]
+multiple-versions = "warn"
+wildcards = "deny" # Reject '*' versions for reproducible builds (Section 44)
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]

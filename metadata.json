@@ -1,0 +1,6 @@
+{
+  "name": "آواپرداز — استودیو هوشمند تدوین صوت فارسی",
+  "description": "پلتفرم وب‌محور تدوین غیرمخرب، تحلیل آوایی فارسی، پردازش محلی DSP و ذخیره‌سازی هیبریدی OPFS (معماری نسخه ۱.۲)",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
