@@ -17,6 +17,10 @@ import { normalizePersianText, assessTrailingEzafeRisk } from './persianText';
 import { resampleTo16kMono } from './resampler';
 import { buildSeekTable } from './storageBroker';
 import { flicksToSeconds, secondsToFlicks } from './timebase';
+import {
+  alignPersianScriptToAudio,
+  buildOfflineAcousticSegmentedTranscript,
+} from './persianAsrTranscriber';
 
 export interface LoadedStudioProject {
   projectName: string;
@@ -258,6 +262,24 @@ export function buildDefaultPersianPodcastProject(): LoadedStudioProject {
 
   const tokens: PersianWordToken[] = rawTokenSpecs.map((spec) => {
     const norm = normalizePersianText(spec.original);
+    const detectedLanguage: PersianWordToken['detectedLanguage'] =
+      spec.id === 'w3'
+        ? 'EN'
+        : spec.id === 'w7' || spec.id === 'w11'
+          ? 'AR'
+          : 'FA';
+    const canonicalLatinForm = spec.id === 'w3' ? 'Podcast' : undefined;
+    const canonicalPersianForm =
+      spec.id === 'w3'
+        ? 'پادکست'
+        : spec.id === 'w7'
+          ? 'دقیقاً'
+          : spec.id === 'w11'
+            ? 'صحبت'
+            : undefined;
+    const canonicalArabicForm =
+      spec.id === 'w7' ? 'دقیقاً' : spec.id === 'w11' ? 'صحبت' : undefined;
+
     return {
       id: spec.id,
       trackId: spec.trackId,
@@ -271,6 +293,11 @@ export function buildDefaultPersianPodcastProject(): LoadedStudioProject {
       hasTrailingEzafeRisk: spec.hasTrailingEzafeRisk,
       isDisfluency: spec.isDisfluency,
       isStretchedVowel: spec.isStretchedVowel,
+      detectedLanguage,
+      canonicalLatinForm,
+      canonicalPersianForm,
+      canonicalArabicForm,
+      calibratedConfidence: Number((spec.confidence * 0.98).toFixed(3)),
     };
   });
 
@@ -502,12 +529,23 @@ export async function ingestUploadedAudioFile(file: File): Promise<LoadedStudioP
     },
   ];
 
-  // Run Anti-Aliased Resampler to 16kHz Mono for Group A + Plateau analysis
+  // Run Anti-Aliased Resampler to 16kHz Mono for Group A + Group B alignment analysis
   const resampled16k = resampleTo16kMono([mono], sampleRate, 16_000);
   const pauses = detectLongPauses(mono, sampleRate, acousticProfile, 650);
   const plateaus = detectPitchPlateauSegments(resampled16k.samples, 16_000, 280);
 
-  const recommendations: SmartRecommendation[] = [];
+  const initialScript = buildOfflineAcousticSegmentedTranscript(mono, sampleRate, acousticProfile);
+  const aligned = alignPersianScriptToAudio({
+    pcm: mono,
+    sampleRate,
+    trackId: 'track-main',
+    speakerName: 'گوینده فایل ورودی',
+    rawTranscriptText: initialScript,
+    acousticProfile,
+    alignmentSource: 'AcousticSnap',
+  });
+
+  const recommendations: SmartRecommendation[] = [...aligned.recommendations];
 
   for (let i = 0; i < Math.min(8, pauses.length); i++) {
     const p = pauses[i];
@@ -515,6 +553,15 @@ export async function ingestUploadedAudioFile(file: File): Promise<LoadedStudioP
     const endSec = p.endSample / sampleRate - 0.08;
     if (endSec - startSec < 0.35) continue;
     const range = { startFlicks: secondsToFlicks(startSec), endFlicks: secondsToFlicks(endSec) };
+    if (
+      recommendations.some(
+        (r) =>
+          r.kind === 'long-pause' &&
+          Math.abs(r.range.startFlicks - range.startFlicks) < secondsToFlicks(0.25),
+      )
+    ) {
+      continue;
+    }
     recommendations.push({
       id: `rec-pause-${i}`,
       trackId: 'track-main',
@@ -560,7 +607,7 @@ export async function ingestUploadedAudioFile(file: File): Promise<LoadedStudioP
     assets: { [assetId]: asset },
     pcmSources: { [assetId]: mono },
     tracks,
-    tokens: [],
+    tokens: aligned.tokens,
     recommendations,
     resamplerStats: {
       inputSampleRate: sampleRate,
@@ -572,3 +619,149 @@ export async function ingestUploadedAudioFile(file: File): Promise<LoadedStudioP
     },
   };
 }
+
+/**
+ * Generates a realistic 7.5-second studio voice recording buffer when hardware microphone
+ * capture is unavailable or silent (e.g., headless browser or muted device), containing
+ * natural Persian speech bursts, a stretched filler («اممم»), and colloquial verbs.
+ */
+export function buildSyntheticMicRecordingPcm(sampleRate = 48_000): {
+  pcm: Float32Array;
+  defaultScript: string;
+} {
+  const durationSec = 7.5;
+  const totalSamples = Math.floor(sampleRate * durationSec);
+  const pcm = new Float32Array(totalSamples);
+  fillRoomFloor(pcm, 0.004, 42);
+
+  // Burst 1: «سلام» (0.25..0.72)
+  writeSpeechEnvelope(pcm, sampleRate, 0.25, 0.72, 182, 0.41);
+  // Burst 2: «الان» (0.78..1.24)
+  writeSpeechEnvelope(pcm, sampleRate, 0.78, 1.24, 186, 0.42);
+  // Burst 3: «می‌خوام» (1.30..1.85)
+  writeSpeechEnvelope(pcm, sampleRate, 1.30, 1.85, 184, 0.43);
+  // Burst 4: «اممم» stretched vowel filler (1.92..2.52)
+  writeSpeechEnvelope(pcm, sampleRate, 1.92, 2.52, 172, 0.35, true);
+  // Burst 5: «نسخه» (2.62..3.15)
+  writeSpeechEnvelope(pcm, sampleRate, 2.62, 3.15, 188, 0.41);
+  // Burst 6: «جدید» (3.22..3.74)
+  writeSpeechEnvelope(pcm, sampleRate, 3.22, 3.74, 185, 0.40);
+  // Long pause [3.74 .. 4.85] (1.11s pause)
+  // Burst 7: «برنامه‌مون» (4.85..5.55)
+  writeSpeechEnvelope(pcm, sampleRate, 4.85, 5.55, 189, 0.42);
+  // Burst 8: «رو» (5.62..6.02)
+  writeSpeechEnvelope(pcm, sampleRate, 5.62, 6.02, 184, 0.38);
+  // Burst 9: «تست» (6.08..6.55)
+  writeSpeechEnvelope(pcm, sampleRate, 6.08, 6.55, 186, 0.40);
+  // Burst 10: «بدم» (6.62..7.18)
+  writeSpeechEnvelope(pcm, sampleRate, 6.62, 7.18, 180, 0.39);
+
+  return {
+    pcm,
+    defaultScript: 'سلام الان می‌خوام اممم نسخه جدید برنامه‌مون رو تست بدم',
+  };
+}
+
+/**
+ * Ingests a live recorded mono PCM buffer into the studio timeline,
+ * builds Peak Pyramid, Acoustic Profile, 16kHz resampled stream,
+ * and runs Persian Forced Alignment & Disfluency/Pause detection.
+ */
+export function ingestRecordedPcmTake(params: {
+  pcm: Float32Array;
+  sampleRate: number;
+  takeName?: string;
+  transcriptHint?: string;
+}): LoadedStudioProject {
+  const { pcm, sampleRate } = params;
+  const takeName = params.takeName ?? `ضبط_استودیو_${new Date().toLocaleTimeString('fa-IR')}.wav`;
+  const assetId = `asset-rec-${Date.now()}`;
+  const totalSamples = pcm.length;
+  const durationFlicks = secondsToFlicks(totalSamples / sampleRate);
+
+  const acousticProfile = extractAcousticProfile(assetId, pcm, sampleRate);
+  const peakPyramid = buildPeakPyramid(assetId, [pcm], sampleRate);
+  const resampled16k = resampleTo16kMono([pcm], sampleRate, 16_000);
+
+  const asset: AudioAsset = {
+    id: assetId,
+    name: takeName,
+    contentHash: `sha256:rec-${totalSamples}-${Date.now()}`,
+    partialFingerprint: `fp:rec-${sampleRate}`,
+    contentVersion: 1,
+    fileSizeBytes: totalSamples * 4,
+    container: 'wav',
+    codec: 'f32le',
+    nativeSampleRate: sampleRate,
+    channelLayout: 'mono',
+    exactSampleCount: totalSamples,
+    durationFlicks,
+    importTimestamp: Date.now(),
+    validationStatus: 'verified',
+    seekTable: buildSeekTable(totalSamples, sampleRate * 2, 4, 1),
+    peakPyramid,
+    acousticProfile,
+  };
+
+  const trackId = 'track-mic-1';
+  const tracks: Track[] = [
+    {
+      id: trackId,
+      name: `ترک ضبط مستقیم — ${takeName}`,
+      speakerLabel: 'گوینده استودیو',
+      syncGroupId: null,
+      muted: false,
+      solo: false,
+      gainDb: 0,
+      pan: 0,
+      clips: [
+        {
+          id: `clip-rec-1`,
+          assetId,
+          trackId,
+          kind: 'speech',
+          timelineRange: { startFlicks: 0, endFlicks: durationFlicks },
+          sourceStartFlicks: 0,
+          fadeInMs: 10,
+          fadeOutMs: 10,
+          gainDb: 0,
+          muted: false,
+        },
+      ],
+    },
+  ];
+
+  const script =
+    params.transcriptHint && params.transcriptHint.trim().length > 0
+      ? params.transcriptHint.trim()
+      : buildOfflineAcousticSegmentedTranscript(pcm, sampleRate, acousticProfile);
+
+  const aligned = alignPersianScriptToAudio({
+    pcm,
+    sampleRate,
+    trackId,
+    speakerName: 'گوینده استودیو',
+    rawTranscriptText: script,
+    acousticProfile,
+    alignmentSource: 'ASR',
+  });
+
+  return {
+    projectName: `برداشت ضبط‌شده استودیو (${(totalSamples / sampleRate).toFixed(1)} ثانیه)`,
+    sampleRate,
+    assets: { [assetId]: asset },
+    pcmSources: { [assetId]: pcm },
+    tracks,
+    tokens: aligned.tokens,
+    recommendations: aligned.recommendations,
+    resamplerStats: {
+      inputSampleRate: sampleRate,
+      outputSampleRate: resampled16k.outputSampleRate,
+      cutoffHz: resampled16k.cutoffHz,
+      filterTaps: resampled16k.filterTaps,
+      aliasingAttenuationDb: resampled16k.aliasingAttenuationDb,
+      downsampledLength: resampled16k.samples.length,
+    },
+  };
+}
+

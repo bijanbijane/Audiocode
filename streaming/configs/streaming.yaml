@@ -1,0 +1,27 @@
+# Phase 5 Real-Time Streaming Configuration (ASR-STREAM-PROTOCOL-V1)
+protocol:
+  magic: ASR1
+  version: 1
+  header_bytes: 24
+  audio_format: pcm16_16khz_mono_le
+  packet_duration_ms: 100
+  packet_samples: 1600
+  packet_total_bytes: 3224
+
+vad:
+  window_samples: 512
+  window_ms: 32
+  speech_start_threshold: 0.50
+  speech_end_threshold: 0.35
+  pre_roll_ms: 150
+  post_roll_ms: 150
+  silence_endpoint_ms: 600
+  soft_utterance_limit_sec: 12.0
+  hard_utterance_limit_sec: 30.0
+
+backpressure:
+  warning_queue_ms: 500
+  critical_queue_ms: 2000
+  max_concurrent_streams_local_g0: 4
+  resend_buffer_window_ms: 2000
+  stable_prefix_revisions_required: 3

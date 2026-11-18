@@ -1,0 +1,27 @@
+{
+  "preflight_version": "1.0.0-phase4",
+  "timestamp_utc": "2026-11-18T16:15:59.652728+00:00",
+  "hostname": "localhost",
+  "os_kernel": "Linux 4.19.0-gvisor (x86_64)",
+  "python_version": "3.11.2",
+  "cpu_count": 4,
+  "gpu_detected": false,
+  "gpu_model": null,
+  "total_vram_mb": 0,
+  "available_vram_mb": 0,
+  "cuda_runtime_version": null,
+  "pytorch_installed": false,
+  "pytorch_version": null,
+  "pytorch_cuda_available": false,
+  "bf16_supported": false,
+  "fp16_supported": false,
+  "flash_attention_available": false,
+  "assigned_hardware_profile": "G0_CPU_ONLY",
+  "full_1_7b_sft_ready_locally": false,
+  "local_cpu_adapter_training_ready": true,
+  "preflight_status": "BLOCKED_FOR_1_7B_GPU_SFT__READY_FOR_G0_CPU_PIPELINE",
+  "blockers": [
+    "NO_NVIDIA_GPU_DETECTED: nvidia-smi binary not found in container.",
+    "PYTORCH_NOT_INSTALLED: torch package is not installed in this G0 container."
+  ]
+}

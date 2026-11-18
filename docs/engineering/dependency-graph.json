@@ -1,0 +1,158 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "version": "1.0.0",
+  "generatedAt": "2026-11-18",
+  "acyclicVerified": true,
+  "circularDependencyCheck": {
+    "tool": "madge --circular --extensions ts,tsx src/ packages/",
+    "filesScanned": 318,
+    "circularCount": 0
+  },
+  "tracks": {
+    "productionCriticalPath": ["P0", "P1", "P2", "P3", "P4"],
+    "researchTrack": ["RES-01", "RES-02"]
+  },
+  "nodes": [
+    {
+      "id": "M-P0-01",
+      "phase": "P0",
+      "title": "Foundation Test Integrity & Truth Verification Gate",
+      "priority": "P0",
+      "status": "VERIFIED",
+      "requirements": ["CORE-001", "CORE-002", "CORE-003", "CORE-004", "ASR-001", "ASR-002"],
+      "externalBlockers": [],
+      "exitCriteria": [
+        "100% pass on npx vitest run (75/75)",
+        "100% pass on npx tsx --test across all *.test.ts files (250/250)",
+        "0 TypeScript errors (npm run lint) and clean Vite build (npm run build)",
+        "0 circular dependencies via madge"
+      ]
+    },
+    {
+      "id": "M-P0-02",
+      "phase": "P0",
+      "title": "Backend Architecture & SQL Migration Consolidation + Unified Build Scripts",
+      "priority": "P0",
+      "status": "PLANNED",
+      "requirements": ["SEC-002", "PLATFORM-002"],
+      "externalBlockers": ["Requires PostgreSQL instance for live migration smoke test (DDL authoring has no blocker)"],
+      "exitCriteria": [
+        "Root package.json exposes unified verify/test commands (vitest + node:test + lint + build)",
+        "SQL migrations consolidated under /platform/migrations/ without conflict against backend/db/",
+        "backend/Dockerfile fixed or archived under ADR-001"
+      ]
+    },
+    {
+      "id": "M-P1-01",
+      "phase": "P1",
+      "title": "Database Persistence Adapter & Local Environment Contract Hardening",
+      "priority": "P1",
+      "status": "PLANNED",
+      "requirements": ["PLATFORM-001", "PLATFORM-002", "ROUTER-001", "SEC-001"],
+      "externalBlockers": ["DATABASE_URL (PostgreSQL 16+)", "REDIS_URL"],
+      "exitCriteria": [
+        "Repository interfaces switch cleanly between in-memory sandbox and Postgres/Redis repositories",
+        "All Phase 10 & 11 migrations apply idempotently on PostgreSQL 16"
+      ]
+    },
+    {
+      "id": "M-P1-02",
+      "phase": "P1",
+      "title": "30-Hour Gold Corpus Ingestion & Multi-Speaker Freeze (D0 Milestone)",
+      "priority": "P1",
+      "status": "BLOCKED",
+      "requirements": ["MODEL-001", "ASR-005"],
+      "externalBlockers": ["External consented 30h+ FA/EN/CS studio + field audio acquisition"],
+      "exitCriteria": [
+        ">= 30.0h verified audio across >= 120 speakers",
+        "Zero train/val/test speaker leakage and 11/11 QC gates passing"
+      ]
+    },
+    {
+      "id": "M-P1-03",
+      "phase": "P1",
+      "title": "External GPU Inference Worker & Real Neural ASR Wiring",
+      "priority": "P1",
+      "status": "BLOCKED",
+      "requirements": ["ASR-004", "STREAM-003", "MODEL-002"],
+      "externalBlockers": ["CUDA GPU Worker (L4/A100) + ASR_GPU_WORKER_URL or onnxruntime-node + verified ONNX model binaries"],
+      "exitCriteria": [
+        "/v1/audio/transcriptions decodes arbitrary unseen WAV bytes via real acoustic neural worker",
+        "10k paired bootstrap runs on external frozen corpus with true blind WER/CER"
+      ]
+    },
+    {
+      "id": "M-P2-01",
+      "phase": "P2",
+      "title": "Streaming vLLM Worker, Commercial Provider Keys & Adaptive Router Validation",
+      "priority": "P2",
+      "status": "BLOCKED",
+      "requirements": ["STREAM-001", "STREAM-002", "STREAM-003", "ROUTER-001"],
+      "externalBlockers": ["ASR_GPU_WORKER_URL", "ELEVENLABS_API_KEY", "DEEPGRAM_API_KEY", "OPENAI_API_KEY", "REDIS_URL"],
+      "exitCriteria": [
+        "Live WebSocket ASR1 streaming validated against GPU worker with TTFT P95 <= 400ms",
+        "18-gate router verified under Redis distributed rate limit & budget reservation"
+      ]
+    },
+    {
+      "id": "M-P2-02",
+      "phase": "P2",
+      "title": "Continuous Learning Cron, Shadow/Canary & Rust WASM Audio Verification",
+      "priority": "P2",
+      "status": "BLOCKED",
+      "requirements": ["LEARN-001", "CORE-002"],
+      "externalBlockers": ["GPU training job runner", "cargo / rustc + wasm-pack"],
+      "exitCriteria": [
+        "WASM core builds cleanly with cargo-deny PASS",
+        "Canary rollout 1% -> 5% -> 25% -> 100% validated on staging telemetry"
+      ]
+    },
+    {
+      "id": "M-P3-01",
+      "phase": "P3",
+      "title": "Commercial Billing PSP, Neural Translation & Multi-Region Security Hardening",
+      "priority": "P3",
+      "status": "BLOCKED",
+      "requirements": ["PLATFORM-001", "INTEL-001", "INTEL-002", "SEC-001"],
+      "externalBlockers": ["Licensed PSP Checkout", "GEMINI_API_KEY / Neural MT", "OIDC/SCIM IdP", "S3/KMS", "eu-central-01 staging cluster"],
+      "exitCriteria": [
+        "End-to-end payment checkout -> HMAC webhook -> immutable ledger -> invoice reconciliation",
+        "Pen-test, KMS key rotation, and multi-region restore drill passed"
+      ]
+    },
+    {
+      "id": "RES-01",
+      "phase": "RESEARCH",
+      "title": "Track B: From-Scratch Acoustic Architecture Scaling Study (>= 500h D1 Gate)",
+      "priority": "P4",
+      "status": "DEFERRED_BY_DESIGN",
+      "requirements": ["MODEL-003"],
+      "externalBlockers": [">= 500h D1 corpus", "Multi-GPU A100/H100 training cluster"],
+      "exitCriteria": [
+        "Gate transitions from BELOW_D0 NO_GO to D1_ELIGIBLE before any pretraining spend"
+      ]
+    }
+  ],
+  "edges": [
+    { "from": "M-P0-01", "to": "M-P0-02", "type": "blocks" },
+    { "from": "M-P0-02", "to": "M-P1-01", "type": "blocks" },
+    { "from": "M-P0-01", "to": "M-P1-02", "type": "blocks" },
+    { "from": "M-P1-02", "to": "M-P1-03", "type": "blocks" },
+    { "from": "M-P1-01", "to": "M-P2-01", "type": "blocks" },
+    { "from": "M-P1-03", "to": "M-P2-01", "type": "blocks" },
+    { "from": "M-P1-03", "to": "M-P2-02", "type": "blocks" },
+    { "from": "M-P2-01", "to": "M-P3-01", "type": "blocks" },
+    { "from": "M-P2-02", "to": "M-P3-01", "type": "blocks" },
+    { "from": "M-P1-02", "to": "RES-01", "type": "informs" }
+  ],
+  "releaseGates": [
+    { "id": "R0", "name": "Foundation Truth & Zero Broken Tests", "milestone": "M-P0-01" },
+    { "id": "R1", "name": "Single Backend & Migration Authority", "milestone": "M-P0-02" },
+    { "id": "R2", "name": "Persistent PostgreSQL/Redis Control Plane", "milestone": "M-P1-01" },
+    { "id": "R3", "name": "30h D0 Frozen Evaluation Corpus", "milestone": "M-P1-02" },
+    { "id": "R4", "name": "Real Neural Acoustic Inference Connected", "milestone": "M-P1-03" },
+    { "id": "R5", "name": "Live Streaming & Distributed Adaptive Routing", "milestone": "M-P2-01" },
+    { "id": "R6", "name": "Canary Automation & WASM Build Verified", "milestone": "M-P2-02" },
+    { "id": "R7", "name": "Commercial Production GA (PSP/OIDC/KMS/DR)", "milestone": "M-P3-01" }
+  ]
+}

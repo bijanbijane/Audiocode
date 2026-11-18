@@ -1,0 +1,7 @@
+# Continuous Learning & Autonomous ASR Evolution Architecture (Phase 9)
+
+1. **Strict Artifact Isolation:** `RawAudioAsset` != `AsrOutputHypothesis` != `UserFeedbackSubmission` != `HumanAnnotationTask` != `AdjudicationDecision` != `VerifiedDatasetRelease` != `CandidateModel`. Direct unrestricted online weight updates in production are forbidden.
+2. **8-Permission Consent & Deletion Propagation:** `ALLOW_MODEL_TRAINING=false` hard-blocks promotion to `VerifiedTrainingSample` (`TRAINING_INELIGIBLE_NO_TRAINING_CONSENT`). Deletion removes hot feedback, active learning candidates, pending manifests, and transparently reports shipped model versions requiring clean scheduled retraining.
+3. **Active Learning + Control Stream:** Ranks utterances by `S = 0.30U + 0.25D + 0.20N + 0.15R + 0.10C` while reserving `>=20%` random baseline control samples and enforcing per-speaker diversity caps.
+4. **Anti-Forgetting Replay & Paired Promotion Gate:** New dataset builds enforce `>=70%` historical gold replay buffer (`<=30%` new adjudicated samples) and speaker-disjoint holdout protection. Challenger promotion requires `>=3.0%` relative CER gain, `<=0.5pp` max cohort regression, and `<=10%` P95 latency delta.
+5. **Drift & Safe Rollout:** PSI cohort drift marks `<30` samples as `INSUFFICIENT_EVIDENCE` (avoiding false alarms), triggering `TR01..TR05` alerts when validated, with Shadow -> Canary (1% -> 5% -> 25% -> 100%) -> Automatic Rollback protection.

@@ -1,0 +1,109 @@
+openapi: 3.1.0
+info:
+  title: Independent Persian-English ASR Platform Public API
+  version: 1.0.0
+  description: >
+    Provider-independent commercial ASR API with multi-tenant isolation, scoped API keys,
+    24h idempotency, region residency enforcement, and atomic usage metering.
+servers:
+  - url: http://localhost:3000
+    description: Local Development Gateway
+security:
+  - ApiKeyAuth: []
+components:
+  securitySchemes:
+    ApiKeyAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: "asr_live_<id>_<secret> | asr_test_<id>_<secret>"
+  schemas:
+    ErrorEnvelope:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message, request_id, retryable, details]
+          properties:
+            code: { type: string }
+            message: { type: string }
+            request_id: { type: string }
+            retryable: { type: boolean }
+            retry_after_seconds: { type: integer }
+            details: { type: object }
+paths:
+  /v1/models:
+    get:
+      summary: List project-permitted public ASR models
+      responses:
+        "200":
+          description: Curated public model catalog without internal research artifacts
+  /v1/models/{id}:
+    get:
+      summary: Retrieve single public model capability record
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      responses:
+        "200": { description: Public model descriptor }
+        "404": { description: RESOURCE_NOT_FOUND }
+  /v1/audio/estimates:
+    post:
+      summary: Estimate transcription cost in integer minor USD cents
+      responses:
+        "200": { description: Non-binding pre-execution cost estimate }
+        "422": { description: REGION_UNAVAILABLE if prohibited region requested }
+  /v1/audio/transcriptions:
+    post:
+      summary: Create batch or async long-form transcription job
+      parameters:
+        - in: header
+          name: Idempotency-Key
+          required: false
+          schema: { type: string }
+      responses:
+        "200": { description: Completed synchronous batch transcription }
+        "202": { description: Accepted asynchronous long-form job }
+        "402": { description: BUDGET_EXCEEDED or QUOTA_EXCEEDED }
+        "409": { description: IDEMPOTENCY_CONFLICT }
+        "422": { description: REGION_UNAVAILABLE }
+        "429": { description: RATE_LIMITED }
+        "503": { description: PROVIDER_UNAVAILABLE when GPU worker absent }
+  /v1/audio/transcriptions/{id}:
+    get:
+      summary: Retrieve transcription job status and metadata (tenant isolated)
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      responses:
+        "200": { description: Job details }
+        "403": { description: TENANT_ISOLATION_DENIED }
+    delete:
+      summary: Delete or cancel transcription job
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      responses:
+        "200": { description: Deleted }
+  /v1/audio/transcriptions/{id}/result:
+    get:
+      summary: Retrieve transcription result payload
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      responses:
+        "200": { description: Transcription result }
+  /v1/audio/streaming-sessions:
+    post:
+      summary: Create authenticated ASR1 streaming session pinned to an allowed region
+      responses:
+        "201": { description: Streaming session ticket & ASR1 endpoint metadata }
+        "422": { description: REGION_UNAVAILABLE }

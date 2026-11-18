@@ -212,12 +212,14 @@ export function buildSplicePreviewBuffer(params: {
 }
 
 /**
- * Web Audio Transport Controller managing Play/Pause/Seek and Preview playback
- * with AudioContext.currentTime synchronization (no setInterval drift!).
+ * Web Audio Transport Controller managing Play/Pause/Seek, Preview playback,
+ * and Windowed Chunk Scheduling (no main-thread freeze on 60-minute projects!)
+ * with AudioContext.currentTime synchronization.
  */
 export class StudioAudioTransport {
   private ctx: AudioContext | null = null;
   private sourceNode: AudioBufferSourceNode | null = null;
+  private activeNodes: Set<AudioBufferSourceNode> = new Set();
   private startedAtCtxTime = 0;
   private startOffsetSec = 0;
   private rafId: number | null = null;
@@ -232,6 +234,168 @@ export class StudioAudioTransport {
       void this.ctx.resume();
     }
     return this.ctx;
+  }
+
+  /**
+   * Plays a timeline range using progressive 4-second windowed buffer scheduling
+   * so long podcast timelines play immediately without allocating a huge single Float32Array.
+   */
+  playTimelineWindowed(params: {
+    tracks: Track[];
+    assets: Record<string, AudioAsset>;
+    pcmSources: Record<string, Float32Array>;
+    sampleRate: number;
+    startTimelineSec: number;
+    totalDurationSec: number;
+    endTimelineSec?: number;
+    loop?: boolean;
+    playbackRate?: number;
+    dspParams: EphemeralDspParams;
+    windowDurationSec?: number;
+    onTick?: (timelineSec: number) => void;
+    onMeter?: (peakDb: number, rmsDb: number) => void;
+    onEnded?: () => void;
+  }): void {
+    this.stop();
+    const {
+      tracks,
+      assets,
+      pcmSources,
+      sampleRate,
+      startTimelineSec,
+      totalDurationSec,
+      endTimelineSec = totalDurationSec,
+      loop = false,
+      playbackRate = 1.0,
+      dspParams,
+      windowDurationSec = 4.0,
+      onTick,
+      onMeter,
+      onEnded,
+    } = params;
+
+    const clampedEndSec = Math.min(totalDurationSec, Math.max(startTimelineSec, endTimelineSec));
+    if (clampedEndSec <= startTimelineSec + 0.01) {
+      onMeter?.(-60, -60);
+      onEnded?.();
+      return;
+    }
+
+    const ctx = this.ensureContext(sampleRate);
+    this.startedAtCtxTime = ctx.currentTime;
+    this.startOffsetSec = startTimelineSec;
+    this.isPlaying = true;
+
+    let scheduledUpToTimelineSec = startTimelineSec;
+    const totalToPlaySec = clampedEndSec - startTimelineSec;
+    const rate = Math.max(0.5, Math.min(2.0, playbackRate));
+    const bufferedMeterBlocks: Array<{ startSec: number; endSec: number; pcm: Float32Array }> = [];
+
+    const scheduleNextWindow = () => {
+      if (!this.isPlaying || !this.ctx) return;
+      if (scheduledUpToTimelineSec >= clampedEndSec - 0.005) return;
+
+      const winStartSec = scheduledUpToTimelineSec;
+      const winEndSec = Math.min(clampedEndSec, winStartSec + windowDurationSec);
+      scheduledUpToTimelineSec = winEndSec;
+
+      const chunkPcm = renderTimelineRangeToPcm({
+        tracks,
+        assets,
+        pcmSources,
+        sampleRate,
+        rangeFlicks: {
+          startFlicks: Math.round(winStartSec * 705_600_000),
+          endFlicks: Math.round(winEndSec * 705_600_000),
+        },
+        dspParams,
+      });
+
+      if (chunkPcm.length === 0) return;
+      bufferedMeterBlocks.push({ startSec: winStartSec, endSec: winEndSec, pcm: chunkPcm });
+      if (bufferedMeterBlocks.length > 6) bufferedMeterBlocks.shift();
+
+      const audioBuf = ctx.createBuffer(1, chunkPcm.length, sampleRate);
+      audioBuf.copyToChannel(new Float32Array(chunkPcm), 0);
+
+      const node = ctx.createBufferSource();
+      node.buffer = audioBuf;
+      node.playbackRate.value = rate;
+      node.connect(ctx.destination);
+      this.activeNodes.add(node);
+
+      const offsetFromPlayStartSec = (winStartSec - startTimelineSec) / rate;
+      const targetCtxStartTime = Math.max(
+        ctx.currentTime,
+        this.startedAtCtxTime + offsetFromPlayStartSec,
+      );
+
+      node.onended = () => {
+        this.activeNodes.delete(node);
+      };
+
+      node.start(targetCtxStartTime);
+    };
+
+    // Prime first two windows immediately
+    scheduleNextWindow();
+    scheduleNextWindow();
+
+    const tick = () => {
+      if (!this.isPlaying || !this.ctx) return;
+      const elapsedTimelineSec = Math.max(0, (this.ctx.currentTime - this.startedAtCtxTime) * rate);
+      const currentTimelineSec = this.startOffsetSec + elapsedTimelineSec;
+
+      if (elapsedTimelineSec >= totalToPlaySec) {
+        if (loop) {
+          this.playTimelineWindowed(params);
+          return;
+        }
+        this.isPlaying = false;
+        this.stop();
+        onMeter?.(-60, -60);
+        onTick?.(clampedEndSec);
+        onEnded?.();
+        return;
+      }
+
+      // Live Peak & RMS meter reading around current playhead
+      if (onMeter) {
+        const blk = bufferedMeterBlocks.find(
+          (b) => currentTimelineSec >= b.startSec && currentTimelineSec < b.endSec,
+        );
+        if (blk) {
+          const localIdx = Math.floor((currentTimelineSec - blk.startSec) * sampleRate);
+          const winEnd = Math.min(blk.pcm.length, localIdx + Math.round(sampleRate * 0.04));
+          let peak = 0;
+          let sumSq = 0;
+          let count = 0;
+          for (let i = Math.max(0, localIdx); i < winEnd; i++) {
+            const v = Math.abs(blk.pcm[i]);
+            if (v > peak) peak = v;
+            sumSq += blk.pcm[i] * blk.pcm[i];
+            count++;
+          }
+          const rms = count > 0 ? Math.sqrt(sumSq / count) : 0;
+          const peakDb = peak > 1e-4 ? Math.max(-60, 20 * Math.log10(peak)) : -60;
+          const rmsDb = rms > 1e-4 ? Math.max(-60, 20 * Math.log10(rms)) : -60;
+          onMeter(Number(peakDb.toFixed(1)), Number(rmsDb.toFixed(1)));
+        }
+      }
+
+      // Keep at least 3.5 seconds buffered ahead of playhead
+      if (
+        scheduledUpToTimelineSec < clampedEndSec &&
+        scheduledUpToTimelineSec - currentTimelineSec < 3.5 * rate
+      ) {
+        scheduleNextWindow();
+      }
+
+      onTick?.(currentTimelineSec);
+      this.rafId = requestAnimationFrame(tick);
+    };
+
+    this.rafId = requestAnimationFrame(tick);
   }
 
   playBuffer(
@@ -256,6 +420,7 @@ export class StudioAudioTransport {
     src.connect(ctx.destination);
 
     this.sourceNode = src;
+    this.activeNodes.add(src);
     this.startedAtCtxTime = ctx.currentTime;
     this.startOffsetSec = startTimelineSec;
     this.isPlaying = true;
@@ -263,6 +428,7 @@ export class StudioAudioTransport {
     const totalSec = pcm.length / sampleRate;
 
     src.onended = () => {
+      this.activeNodes.delete(src);
       if (this.sourceNode === src) {
         this.isPlaying = false;
         this.stopRaf();
@@ -296,16 +462,17 @@ export class StudioAudioTransport {
   stop(): void {
     this.isPlaying = false;
     this.stopRaf();
-    if (this.sourceNode) {
+    for (const node of this.activeNodes) {
       try {
-        this.sourceNode.onended = null;
-        this.sourceNode.stop();
-        this.sourceNode.disconnect();
+        node.onended = null;
+        node.stop();
+        node.disconnect();
       } catch {
         // Ignore already-stopped source
       }
-      this.sourceNode = null;
     }
+    this.activeNodes.clear();
+    this.sourceNode = null;
   }
 
   dispose(): void {

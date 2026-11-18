@@ -1,5 +1,15 @@
 import React from 'react';
-import { Check, X, Play, AlertTriangle, Scissors, ShieldCheck, SlidersHorizontal } from 'lucide-react';
+import {
+  Check,
+  X,
+  Play,
+  AlertTriangle,
+  Scissors,
+  ShieldCheck,
+  SlidersHorizontal,
+  Sparkles,
+  RefreshCw,
+} from 'lucide-react';
 import { SmartRecommendation } from '../contracts/v1_2';
 import { flicksToSeconds } from '../engine/timebase';
 
@@ -12,6 +22,10 @@ interface SuggestionsPanelProps {
   onAccept: (rec: SmartRecommendation) => void;
   onReject: (id: string) => void;
   onNudgeBoundary: (id: string, deltaMs: number) => void;
+  onBatchAcceptAllSafe?: () => void;
+  onRescanDeepDisfluencies?: () => void;
+  onSoftenBreathsAndCoughs?: () => void;
+  onScanMultiTrackCrosstalk?: () => void;
 }
 
 const KIND_LABELS: Record<SmartRecommendation['kind'], string> = {
@@ -31,25 +45,95 @@ export const SuggestionsPanel: React.FC<SuggestionsPanelProps> = ({
   onAccept,
   onReject,
   onNudgeBoundary,
+  onBatchAcceptAllSafe,
+  onRescanDeepDisfluencies,
+  onSoftenBreathsAndCoughs,
+  onScanMultiTrackCrosstalk,
 }) => {
   const pendingCount = recommendations.filter((r) => r.status === 'Pending').length;
+  const safeBatchCount = recommendations.filter(
+    (r) =>
+      r.status === 'Pending' &&
+      !r.id.startsWith('rec-ezafe-') &&
+      !r.relatedText.startsWith('بررسی کسره اضافه') &&
+      !(r.boundary.trailingEzafeRisk && r.kind === 'repetition'),
+  ).length;
 
   return (
     <section
       aria-label="پیشنهادهای تدوین هوشمند"
       className="border border-[#252F42] bg-[#131924] rounded-lg flex flex-col"
     >
-      <div className="flex items-center justify-between gap-3 px-4 py-3 border-b border-[#252F42]">
+      <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-3 border-b border-[#252F42]">
         <div>
           <h2 className="text-sm font-semibold text-slate-100">پیشنهادهای هوشمند تدوین</h2>
           <p className="text-xs text-slate-400 mt-0.5">
-            تراز آکوستیکی فارسی · اعمال تنها با تأیید صریح کاربر
+            تراز آکوستیکی فارسی · اعمال تک‌به‌تک یا پاک‌سازی دسته‌ای با قابلیت بازگشت (Undo)
           </p>
         </div>
-        <span className="text-xs font-mono text-amber-400">
+        <span data-testid="pending-recommendations-count" className="text-xs font-mono text-amber-400">
           {pendingCount} در انتظار بررسی
         </span>
       </div>
+
+      {/* Batch Auto-Cleanup, Deep Disfluency/Retake Scan, Non-Verbal Breath Softening & Crosstalk Diarization Bar */}
+      {(onBatchAcceptAllSafe ||
+        onRescanDeepDisfluencies ||
+        onSoftenBreathsAndCoughs ||
+        onScanMultiTrackCrosstalk) && (
+        <div className="px-4 py-2 border-b border-[#252F42] bg-[#0E131D]/80 flex flex-wrap items-center justify-between gap-1.5">
+          {onBatchAcceptAllSafe && (
+            <button
+              type="button"
+              data-testid="btn-batch-apply-recommendations"
+              disabled={safeBatchCount === 0}
+              onClick={onBatchAcceptAllSafe}
+              className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-semibold rounded bg-emerald-500 text-slate-950 hover:bg-emerald-400 disabled:opacity-40 cursor-pointer disabled:cursor-not-allowed"
+            >
+              <Sparkles className="w-3.5 h-3.5" aria-hidden="true" />
+              <span>پاک‌سازی دسته‌ای تپق و مکث ({safeBatchCount})</span>
+            </button>
+          )}
+
+          <div className="flex flex-wrap items-center gap-1.5">
+            {onSoftenBreathsAndCoughs && (
+              <button
+                type="button"
+                data-testid="btn-soften-breaths-coughs"
+                onClick={onSoftenBreathsAndCoughs}
+                title="کاهش نرم ۱۰ دسی‌بل صدای نفس‌های پیش از جمله و حذف سرفه با Room Tone"
+                className="inline-flex items-center gap-1 px-2 py-1 text-xs rounded border border-amber-500/40 bg-amber-500/15 text-amber-200 hover:bg-amber-500/25 cursor-pointer"
+              >
+                <span>نرم‌سازی نفس‌ها (-10dB)</span>
+              </button>
+            )}
+
+            {onScanMultiTrackCrosstalk && (
+              <button
+                type="button"
+                data-testid="btn-scan-multitrack-crosstalk"
+                onClick={onScanMultiTrackCrosstalk}
+                title="تفکیک هم‌پوشانی گفتار از نشت صدای میکروفون (Normalized Cross-Correlation)"
+                className="inline-flex items-center gap-1 px-2 py-1 text-xs rounded border border-[#252F42] bg-[#131924] text-slate-200 hover:bg-[#1E2738] cursor-pointer"
+              >
+                <span>تفکیک نشت و هم‌پوشانی</span>
+              </button>
+            )}
+
+            {onRescanDeepDisfluencies && (
+              <button
+                type="button"
+                data-testid="btn-rescan-disfluencies"
+                onClick={onRescanDeepDisfluencies}
+                className="inline-flex items-center gap-1 px-2 py-1 text-xs rounded border border-[#252F42] bg-[#131924] text-slate-200 hover:bg-[#1E2738] cursor-pointer"
+              >
+                <RefreshCw className="w-3 h-3 text-sky-400" aria-hidden="true" />
+                <span>اسکن عمیق تپق</span>
+              </button>
+            )}
+          </div>
+        </div>
+      )}
 
       <div className="divide-y divide-[#252F42] max-h-[460px] overflow-y-auto">
         {recommendations.length === 0 ? (
@@ -196,6 +280,8 @@ export const SuggestionsPanel: React.FC<SuggestionsPanelProps> = ({
                   <div className="mt-2.5 text-xs font-medium">
                     {rec.status === 'Accepted' ? (
                       <span className="text-emerald-400">اعمال شد (قابل بازگشت با Undo)</span>
+                    ) : rec.status === 'Superseded' ? (
+                      <span className="text-slate-400">پوشش داده‌شده توسط برش قبلی</span>
                     ) : (
                       <span className="text-slate-500">رد شد</span>
                     )}

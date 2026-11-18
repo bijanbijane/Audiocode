@@ -1,0 +1,44 @@
+# Phase 4 Training Configuration — Qwen3-ASR-1.7B Persian-English Adaptation (Track A)
+# Hardware Requirement: G1/G2 CUDA GPU (A100 40GB+ for Full SFT, RTX 4090 / A10 24GB for LoRA)
+# Note: Container G0_CPU_ONLY uses this config for validation & manifest parity only; GPU execution is blocked locally.
+
+experiment:
+  name: qwen3_asr_fa_en_sft_v1
+  release_candidate: ASR-FA-EN-1.0.0-RC1
+  seed: 42
+  hardware_profile_required: G1_CUDA_GPU
+  current_container_profile: G0_CPU_ONLY
+
+model:
+  candidate_id: M01
+  base_model_id: Qwen/Qwen3-ASR-1.7B
+  pinned_revision: qwen3-asr-1.7b-rev-2026-01-29-official
+  license: Apache-2.0
+  adapter_method: lora
+  lora_r: 32
+  lora_alpha: 64
+  lora_dropout: 0.05
+  target_modules: ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"]
+
+dataset:
+  train_manifest: training/data/train_manifest.jsonl
+  validation_manifest: training/data/validation_manifest.jsonl
+  final_test_manifest: training/data/final_test_manifest.jsonl
+  transcript_tiers: ["text_raw", "text_normalized", "text_training"]
+  speaker_disjoint_enforced: true
+  train_only_augmentation: true
+  augmentation_profiles: ["A00_CLEAN", "A01_GAIN_PERTURB", "A02_WHITE_SNR_18DB", "A03_BAND_LIMIT_TELEPHONE"]
+  hard_example_sampler_ratio:
+    regular_samples: 0.70
+    hard_examples: 0.30
+
+training:
+  epochs: 5
+  per_device_batch_size: 4
+  gradient_accumulation_steps: 8
+  learning_rate: 1.5e-4
+  lr_scheduler: cosine
+  warmup_ratio: 0.1
+  bf16: true
+  save_every_steps: 100
+  resume_from_checkpoint: auto

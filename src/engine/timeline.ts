@@ -3,16 +3,17 @@ import {
   FlickRange,
   PersianWordToken,
   RecommendationActionMode,
+  SmartRecommendation,
   TimelineClip,
   Track,
 } from '../contracts/v1_2';
-import { rangeDurationFlicks, rangesOverlap } from './timebase';
+import { msToFlicks, rangeDurationFlicks, rangesOverlap } from './timebase';
 
 /**
  * Multi-Track Sync-Locked Non-Destructive Timeline Engine (v1.2 Spec Sections 24 & 25)
  * - Enforces Sync-Lock Protection: Ripple Cut only shifts time when ALL synced tracks are silent in [start, end).
  * - Automatically falls back to In-Place Range Suppression (Room Tone Fill) when another track has active speech.
- * - Supports Gesture Coalescing (Ephemeral state vs committed EditTransaction) and full Undo/Redo.
+ * - Synchronizes PersianWordToken timestamps and SmartRecommendation ranges across all edits and Undo/Redo.
  */
 
 export function cloneTracks(tracks: Track[]): Track[] {
@@ -22,6 +23,25 @@ export function cloneTracks(tracks: Track[]): Track[] {
       ...c,
       timelineRange: { ...c.timelineRange },
     })),
+  }));
+}
+
+export function cloneTokens(tokens: PersianWordToken[]): PersianWordToken[] {
+  return tokens.map((tok) => ({
+    ...tok,
+    range: { ...tok.range },
+  }));
+}
+
+export function cloneRecommendations(recs: SmartRecommendation[]): SmartRecommendation[] {
+  return recs.map((r) => ({
+    ...r,
+    range: { ...r.range },
+    boundary: {
+      ...r.boundary,
+      rawRange: { ...r.boundary.rawRange },
+      snappedRange: { ...r.boundary.snappedRange },
+    },
   }));
 }
 
@@ -187,6 +207,294 @@ export function applySyncSafeCut(
   });
 }
 
+/**
+ * Projects word-level Persian tokens through a timeline edit so transcript highlighting,
+ * click-to-seek, and subsequent text-based edits stay 100% synchronized with audio clips.
+ */
+export function projectTokensAfterCut(
+  tokens: PersianWordToken[],
+  tracks: Track[],
+  targetTrackId: string,
+  cutRange: FlickRange,
+  mode: RecommendationActionMode,
+): PersianWordToken[] {
+  const targetTrack = tracks.find((t) => t.id === targetTrackId);
+  if (!targetTrack) return cloneTokens(tokens);
+
+  const cutDur = rangeDurationFlicks(cutRange);
+  if (cutDur <= 0) return cloneTokens(tokens);
+
+  if (mode === 'in-place-room-tone-suppression') {
+    return tokens.map((tok) => {
+      if (tok.trackId !== targetTrackId || !rangesOverlap(tok.range, cutRange)) {
+        return { ...tok, range: { ...tok.range } };
+      }
+      const overlapStart = Math.max(tok.range.startFlicks, cutRange.startFlicks);
+      const overlapEnd = Math.min(tok.range.endFlicks, cutRange.endFlicks);
+      const tokDur = Math.max(1, rangeDurationFlicks(tok.range));
+      // Mark suppressed if >= 35% of the word falls inside the room-tone fill range
+      if ((overlapEnd - overlapStart) / tokDur >= 0.35) {
+        return {
+          ...tok,
+          range: { ...tok.range },
+          isCrosstalkSuppressed: true,
+        };
+      }
+      return { ...tok, range: { ...tok.range } };
+    });
+  }
+
+  // sync-locked-ripple-cut: all tracks in the same syncGroupId (or targetTrackId) shift time
+  const syncGroup = targetTrack.syncGroupId;
+  const affectedTrackIds = new Set(
+    tracks
+      .filter((t) => t.id === targetTrackId || (syncGroup !== null && t.syncGroupId === syncGroup))
+      .map((t) => t.id),
+  );
+
+  const projected: PersianWordToken[] = [];
+  for (const tok of tokens) {
+    if (!affectedTrackIds.has(tok.trackId)) {
+      projected.push({ ...tok, range: { ...tok.range } });
+      continue;
+    }
+
+    const r = tok.range;
+    // 1. Token is completely before cutRange
+    if (r.endFlicks <= cutRange.startFlicks) {
+      projected.push({ ...tok, range: { ...r } });
+      continue;
+    }
+
+    // 2. Token is completely after cutRange -> shift backward by cutDur
+    if (r.startFlicks >= cutRange.endFlicks) {
+      projected.push({
+        ...tok,
+        range: {
+          startFlicks: Math.max(0, r.startFlicks - cutDur),
+          endFlicks: Math.max(1, r.endFlicks - cutDur),
+        },
+      });
+      continue;
+    }
+
+    // 3. Token overlaps cutRange: check how much of the word remains outside cutRange
+    const overlapStart = Math.max(r.startFlicks, cutRange.startFlicks);
+    const overlapEnd = Math.min(r.endFlicks, cutRange.endFlicks);
+    const overlapDur = Math.max(0, overlapEnd - overlapStart);
+    const tokDur = Math.max(1, rangeDurationFlicks(r));
+
+    // If >= 45% of the token was cut, remove the word token from the active timeline
+    if (overlapDur / tokDur >= 0.45) {
+      continue;
+    }
+
+    // Otherwise trim the boundary and shift if needed
+    if (r.startFlicks < cutRange.startFlicks && r.endFlicks <= cutRange.endFlicks) {
+      projected.push({
+        ...tok,
+        range: {
+          startFlicks: r.startFlicks,
+          endFlicks: cutRange.startFlicks,
+        },
+      });
+    } else if (r.startFlicks >= cutRange.startFlicks && r.endFlicks > cutRange.endFlicks) {
+      projected.push({
+        ...tok,
+        range: {
+          startFlicks: cutRange.startFlicks,
+          endFlicks: Math.max(cutRange.startFlicks + 1, r.endFlicks - cutDur),
+        },
+      });
+    }
+  }
+
+  return projected;
+}
+
+/**
+ * Projects pending SmartRecommendations through a timeline cut so subsequent suggestion markers
+ * on the waveform and in the suggestions panel remain aligned with shifted audio.
+ */
+export function projectRecommendationsAfterCut(
+  recommendations: SmartRecommendation[],
+  tracks: Track[],
+  targetTrackId: string,
+  cutRange: FlickRange,
+  mode: RecommendationActionMode,
+  acceptedRecId?: string,
+): SmartRecommendation[] {
+  const targetTrack = tracks.find((t) => t.id === targetTrackId);
+  const cutDur = rangeDurationFlicks(cutRange);
+  const syncGroup = targetTrack?.syncGroupId ?? null;
+  const affectedTrackIds = new Set(
+    tracks
+      .filter((t) => t.id === targetTrackId || (syncGroup !== null && t.syncGroupId === syncGroup))
+      .map((t) => t.id),
+  );
+
+  const shiftFlickRange = (r: FlickRange, delta: number): FlickRange => ({
+    startFlicks: Math.max(0, r.startFlicks - delta),
+    endFlicks: Math.max(1, r.endFlicks - delta),
+  });
+
+  return recommendations.map((rec) => {
+    const cloned = cloneRecommendations([rec])[0];
+    if (acceptedRecId && cloned.id === acceptedRecId) {
+      return { ...cloned, status: 'Accepted' };
+    }
+
+    if (mode === 'in-place-room-tone-suppression') {
+      if (
+        cloned.status === 'Pending' &&
+        cloned.trackId === targetTrackId &&
+        rangesOverlap(cloned.boundary.snappedRange, cutRange)
+      ) {
+        return { ...cloned, status: 'Superseded' };
+      }
+      return cloned;
+    }
+
+    // Ripple cut
+    if (!affectedTrackIds.has(cloned.trackId)) {
+      return cloned;
+    }
+
+    const r = cloned.boundary.snappedRange;
+    if (r.endFlicks <= cutRange.startFlicks) {
+      return cloned;
+    }
+
+    if (r.startFlicks >= cutRange.endFlicks) {
+      return {
+        ...cloned,
+        range: shiftFlickRange(cloned.range, cutDur),
+        boundary: {
+          ...cloned.boundary,
+          rawRange: shiftFlickRange(cloned.boundary.rawRange, cutDur),
+          snappedRange: shiftFlickRange(cloned.boundary.snappedRange, cutDur),
+        },
+      };
+    }
+
+    // Overlaps the cut range
+    if (cloned.status === 'Pending') {
+      return { ...cloned, status: 'Superseded' };
+    }
+    return cloned;
+  });
+}
+
+/**
+ * Splits clips at `playheadFlicks` on `targetTrackId` (or across all synced tracks when `targetTrackId` is omitted)
+ * with 10ms micro-crossfades to prevent boundary clicks.
+ */
+export function splitTrackClipsAtPlayhead(
+  tracks: Track[],
+  playheadFlicks: number,
+  targetTrackId?: string,
+): { tracks: Track[]; splitCount: number } {
+  const minEdgeFlicks = msToFlicks(40); // Prevent microscopic <40ms slivers
+  let splitCount = 0;
+
+  const nextTracks = tracks.map((track) => {
+    if (targetTrackId && track.id !== targetTrackId) {
+      return {
+        ...track,
+        clips: track.clips.map((c) => ({ ...c, timelineRange: { ...c.timelineRange } })),
+      };
+    }
+
+    const nextClips: TimelineClip[] = [];
+    for (const clip of track.clips) {
+      const r = clip.timelineRange;
+      if (
+        playheadFlicks > r.startFlicks + minEdgeFlicks &&
+        playheadFlicks < r.endFlicks - minEdgeFlicks
+      ) {
+        splitCount++;
+        const leftDuration = playheadFlicks - r.startFlicks;
+        nextClips.push({
+          ...clip,
+          id: `${clip.id}-sL`,
+          timelineRange: {
+            startFlicks: r.startFlicks,
+            endFlicks: playheadFlicks,
+          },
+          fadeOutMs: 10,
+        });
+        nextClips.push({
+          ...clip,
+          id: `${clip.id}-sR`,
+          timelineRange: {
+            startFlicks: playheadFlicks,
+            endFlicks: r.endFlicks,
+          },
+          sourceStartFlicks:
+            clip.kind === 'speech' ? clip.sourceStartFlicks + leftDuration : 0,
+          fadeInMs: 10,
+        });
+      } else {
+        nextClips.push({ ...clip, timelineRange: { ...r } });
+      }
+    }
+
+    return {
+      ...track,
+      clips: nextClips,
+    };
+  });
+
+  return { tracks: nextTracks, splitCount };
+}
+
+/**
+ * Computes the bounding cut range and track for one or more selected word tokens in the transcript
+ * to enable direct Descript-style Text-Based Audio Editing.
+ */
+export function computeMultiWordCutRange(
+  tokens: PersianWordToken[],
+  selectedTokenIds: readonly string[],
+): {
+  trackId: string;
+  range: FlickRange;
+  combinedText: string;
+  hasTrailingEzafeRisk: boolean;
+  ezafeWarningFa?: string;
+} | null {
+  if (selectedTokenIds.length === 0) return null;
+  const selectedSet = new Set(selectedTokenIds);
+  const matched = tokens.filter((t) => selectedSet.has(t.id));
+  if (matched.length === 0) return null;
+
+  const primaryTrackId = matched[0].trackId;
+  const sameTrackTokens = matched
+    .filter((t) => t.trackId === primaryTrackId)
+    .sort((a, b) => a.range.startFlicks - b.range.startFlicks);
+
+  const startFlicks = sameTrackTokens[0].range.startFlicks;
+  const endFlicks = sameTrackTokens[sameTrackTokens.length - 1].range.endFlicks;
+  const combinedText = sameTrackTokens.map((t) => t.displayText).join(' ');
+
+  // Check if the immediately preceding token on the same track has a trailing Ezafe risk
+  const trackTokens = tokens
+    .filter((t) => t.trackId === primaryTrackId)
+    .sort((a, b) => a.range.startFlicks - b.range.startFlicks);
+  const firstIdx = trackTokens.findIndex((t) => t.id === sameTrackTokens[0].id);
+  const prevToken = firstIdx > 0 ? trackTokens[firstIdx - 1] : undefined;
+  const hasTrailingEzafeRisk = Boolean(prevToken?.hasTrailingEzafeRisk);
+
+  return {
+    trackId: primaryTrackId,
+    range: { startFlicks, endFlicks },
+    combinedText,
+    hasTrailingEzafeRisk,
+    ezafeWarningFa: hasTrailingEzafeRisk
+      ? `هشدار آوایی: کلمه قبلی («${prevToken?.displayText}») دارای کسره اضافه «ـِ» است؛ برش با Micro-Crossfade نرم انجام می‌شود.`
+      : undefined,
+  };
+}
+
 export function computeTimelineDurationFlicks(tracks: Track[]): number {
   let maxEnd = 0;
   for (const t of tracks) {
@@ -200,8 +508,109 @@ export function computeTimelineDurationFlicks(tracks: Track[]): number {
 }
 
 /**
+ * Applies all eligible pending SmartRecommendations sequentially in a single atomic batch,
+ * projecting tracks, tokens, and subsequent recommendation ranges at every step so a single
+ * Undo restores the entire batch cleanly.
+ */
+export function applyBatchRecommendationsAtomically(params: {
+  tracks: Track[];
+  tokens: PersianWordToken[];
+  recommendations: SmartRecommendation[];
+  targetRecIds?: readonly string[];
+}): {
+  tracks: Track[];
+  tokens: PersianWordToken[];
+  recommendations: SmartRecommendation[];
+  appliedCount: number;
+  rippleCutCount: number;
+  roomToneCount: number;
+} {
+  let currentTracks = cloneTracks(params.tracks);
+  let currentTokens = cloneTokens(params.tokens);
+  let currentRecs = cloneRecommendations(params.recommendations);
+
+  const explicitSet = params.targetRecIds ? new Set(params.targetRecIds) : null;
+
+  const isEligibleForAutoBatch = (r: SmartRecommendation): boolean => {
+    if (r.status !== 'Pending') return false;
+    if (explicitSet) return explicitSet.has(r.id);
+    // Do not auto-delete valid content words that only carry an Ezafe caution notice
+    if (r.id.startsWith('rec-ezafe-') || r.relatedText.startsWith('بررسی کسره اضافه')) {
+      return false;
+    }
+    if (r.boundary.trailingEzafeRisk && r.kind === 'repetition') {
+      return false;
+    }
+    return true;
+  };
+
+  let appliedCount = 0;
+  let rippleCutCount = 0;
+  let roomToneCount = 0;
+
+  // Guard against infinite loops; at most currentRecs.length iterations
+  const maxSteps = currentRecs.length;
+  for (let step = 0; step < maxSteps; step++) {
+    // Pick the earliest eligible pending recommendation
+    const candidates = currentRecs
+      .filter(isEligibleForAutoBatch)
+      .sort((a, b) => a.boundary.snappedRange.startFlicks - b.boundary.snappedRange.startFlicks);
+
+    if (candidates.length === 0) break;
+    const rec = candidates[0];
+    const cutRange = rec.boundary.snappedRange;
+
+    const safety = determineSyncSafeEditMode(
+      currentTracks,
+      rec.trackId,
+      cutRange,
+      currentTokens,
+    );
+    const effectiveMode: RecommendationActionMode =
+      rec.recommendedMode === 'in-place-room-tone-suppression'
+        ? 'in-place-room-tone-suppression'
+        : safety.mode;
+
+    const tracksBeforeStep = currentTracks;
+    currentTracks = applySyncSafeCut(tracksBeforeStep, rec.trackId, cutRange, effectiveMode);
+    currentTokens = projectTokensAfterCut(
+      currentTokens,
+      tracksBeforeStep,
+      rec.trackId,
+      cutRange,
+      effectiveMode,
+    );
+    currentRecs = projectRecommendationsAfterCut(
+      currentRecs,
+      tracksBeforeStep,
+      rec.trackId,
+      cutRange,
+      effectiveMode,
+      rec.id,
+    );
+
+    appliedCount++;
+    if (effectiveMode === 'sync-locked-ripple-cut') {
+      rippleCutCount++;
+    } else {
+      roomToneCount++;
+    }
+  }
+
+  return {
+    tracks: currentTracks,
+    tokens: currentTokens,
+    recommendations: currentRecs,
+    appliedCount,
+    rippleCutCount,
+    roomToneCount,
+  };
+}
+
+/**
  * Transaction History Stack with Gesture Coalescing support (Section 25).
- * Ensures continuous slider drags only emit ONE committed transaction upon release.
+ * Ensures continuous slider drags only emit ONE committed transaction upon release,
+ * and atomically snapshots tracks, tokens, and recommendations.
  */
 export class TimelineHistoryManager {
   private undoStack: EditTransaction[] = [];
@@ -221,6 +630,10 @@ export class TimelineHistoryManager {
       now - prev.timestamp < 1500
     ) {
       prev.afterTracks = cloneTracks(params.afterTracks);
+      if (params.afterTokens) prev.afterTokens = cloneTokens(params.afterTokens);
+      if (params.afterRecommendations) {
+        prev.afterRecommendations = cloneRecommendations(params.afterRecommendations);
+      }
       prev.description = params.description;
       prev.timestamp = now;
       this.redoStack = [];
@@ -234,6 +647,14 @@ export class TimelineHistoryManager {
       timestamp: now,
       beforeTracks: cloneTracks(params.beforeTracks),
       afterTracks: cloneTracks(params.afterTracks),
+      beforeTokens: params.beforeTokens ? cloneTokens(params.beforeTokens) : undefined,
+      afterTokens: params.afterTokens ? cloneTokens(params.afterTokens) : undefined,
+      beforeRecommendations: params.beforeRecommendations
+        ? cloneRecommendations(params.beforeRecommendations)
+        : undefined,
+      afterRecommendations: params.afterRecommendations
+        ? cloneRecommendations(params.afterRecommendations)
+        : undefined,
       commitStatus: 'committed',
     };
 
@@ -274,3 +695,4 @@ export class TimelineHistoryManager {
     return this.projectVersion;
   }
 }
+

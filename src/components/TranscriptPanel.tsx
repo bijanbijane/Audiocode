@@ -1,22 +1,130 @@
-import React, { useState } from 'react';
-import { AlertTriangle } from 'lucide-react';
-import { PersianWordToken } from '../contracts/v1_2';
+import React, { useMemo, useState } from 'react';
+import {
+  AlertTriangle,
+  BookOpenCheck,
+  Check,
+  Download,
+  Edit3,
+  FileDiff,
+  FileText,
+  Gauge,
+  Hash,
+  ListTree,
+  Loader2,
+  Mic,
+  Scissors,
+  Search,
+  ShieldAlert,
+  Sparkles,
+  VolumeX,
+  Wand2,
+  X,
+} from 'lucide-react';
+import {
+  PersianWordToken,
+  RecommendationActionMode,
+  Track,
+} from '../contracts/v1_2';
 import { flicksToSeconds, secondsToFlicks } from '../engine/timebase';
+import {
+  computeMultiWordCutRange,
+  determineSyncSafeEditMode,
+} from '../engine/timeline';
+import {
+  compareReferenceScriptWithTranscript,
+  computeTrilingualTranscriptStats,
+  exportTranscriptToPraatTextGrid,
+  exportTranscriptToSrt,
+  exportTranscriptToVtt,
+  ProsodyAndChaptersReport,
+  searchTranscriptPhonetically,
+} from '../engine/persianAsrTranscriber';
+import { EnglishScriptRenderMode } from '../ai-engine/asr/MultilingualCodeSwitchAndArabicEngine';
+import { AudioRedactionMaskMode } from '../../packages/audio-runtime/src/SensitiveContentAndPiiRedactorEngine';
 
 type TranscriptLayer = 'display' | 'normalized' | 'original';
 
 interface TranscriptPanelProps {
   tokens: PersianWordToken[];
+  tracks: Track[];
   playheadSec: number;
+  totalDurationSec?: number;
+  isTranscribingAsr?: boolean;
   onSeekSec: (sec: number) => void;
+  onCutSelectedWords: (
+    selectedTokenIds: string[],
+    explicitMode?: RecommendationActionMode,
+  ) => void;
+  onUpdateTokenDisplayText: (tokenId: string, newDisplayText: string) => void;
+  onRunPersianAsr: () => void;
+  onRunForcedAlignment: (customPersianScript: string, targetTrackId: string) => void;
+  onRestoreProsodicPunctuation?: () => void;
+  onConvertColloquialToFormal?: () => void;
+  onNormalizeNumbersAndCompounds?: () => void;
+  onRedactSelectedWords?: (
+    selectedTokenIds: string[],
+    mode: AudioRedactionMaskMode,
+  ) => void;
+  prosodyAndChaptersReport?: ProsodyAndChaptersReport | null;
+  onApplyCustomLexicon?: (customVocabularyCsv: string) => void;
+  onWsolaTimeStretchSelectedWords?: (
+    selectedTokenIds: string[],
+    tempoRatio: number,
+  ) => void;
+  onPunchInSpectralMatchSelectedWords?: (selectedTokenIds: string[]) => void;
+  onOptimizeTrilingualAsr?: (mode: EnglishScriptRenderMode) => void;
+  englishRenderMode?: EnglishScriptRenderMode;
 }
 
 export const TranscriptPanel: React.FC<TranscriptPanelProps> = ({
   tokens,
+  tracks,
   playheadSec,
+  totalDurationSec = 12,
+  isTranscribingAsr = false,
   onSeekSec,
+  onCutSelectedWords,
+  onUpdateTokenDisplayText,
+  onRunPersianAsr,
+  onRunForcedAlignment,
+  onRestoreProsodicPunctuation,
+  onConvertColloquialToFormal,
+  onNormalizeNumbersAndCompounds,
+  onRedactSelectedWords,
+  prosodyAndChaptersReport,
+  onApplyCustomLexicon,
+  onWsolaTimeStretchSelectedWords,
+  onPunchInSpectralMatchSelectedWords,
+  onOptimizeTrilingualAsr,
+  englishRenderMode = 'LATIN_TECHNICAL',
 }) => {
   const [layer, setLayer] = useState<TranscriptLayer>('display');
+  const [selectedTokenIds, setSelectedTokenIds] = useState<string[]>([]);
+  const [editingTokenId, setEditingTokenId] = useState<string | null>(null);
+  const [editingTextValue, setEditingTextValue] = useState<string>('');
+  const [showForcedAlignDrawer, setShowForcedAlignDrawer] = useState<boolean>(false);
+  const [forcedAlignTrackId, setForcedAlignTrackId] = useState<string>(
+    () => tracks[0]?.id ?? 'track-host',
+  );
+  const [customScriptText, setCustomScriptText] = useState<string>(() =>
+    tokens
+      .filter((t) => t.trackId === (tracks[0]?.id ?? 'track-host'))
+      .map((t) => t.displayText)
+      .join(' '),
+  );
+  const [phoneticQuery, setPhoneticQuery] = useState<string>('');
+  const [subtitlePreviewMode, setSubtitlePreviewMode] = useState<
+    'none' | 'srt' | 'vtt' | 'textgrid'
+  >('none');
+  const [showScriptDiffDrawer, setShowScriptDiffDrawer] = useState<boolean>(false);
+  const [referenceBookScript, setReferenceBookScript] = useState<string>(
+    'سلام امروز پادکست جذاب ما درباره هوش مصنوعی صحبت می‌کنیم و نتیجه‌هایش عالی است',
+  );
+  const [showProsodyLexiconDrawer, setShowProsodyLexiconDrawer] = useState<boolean>(false);
+  const [customLexiconInput, setCustomLexiconInput] = useState<string>(
+    'طالقانی، تایپ‌اسکریپت، آواپرداز، صحبت، پادکست، هوش مصنوعی',
+  );
+
   const playheadFlicks = secondsToFlicks(playheadSec);
 
   const layerLabels: { id: TranscriptLayer; label: string }[] = [
@@ -25,57 +133,1025 @@ export const TranscriptPanel: React.FC<TranscriptPanelProps> = ({
     { id: 'original', label: 'خام ASR' },
   ];
 
+  // Clean up any stale selected IDs if tokens changed after a cut or Undo
+  const activeSelectedIds = useMemo(() => {
+    const validSet = new Set(tokens.map((t) => t.id));
+    return selectedTokenIds.filter((id) => validSet.has(id));
+  }, [tokens, selectedTokenIds]);
+
+  // Phonetic & homophone search results
+  const searchHits = useMemo(
+    () => searchTranscriptPhonetically(tokens, phoneticQuery),
+    [tokens, phoneticQuery],
+  );
+
+  const searchMatchedTokenIdSet = useMemo(
+    () => new Set(searchHits.flatMap((h) => h.matchedTokenIds)),
+    [searchHits],
+  );
+
+  const hasHomophoneHit = useMemo(
+    () => searchHits.some((h) => h.matchType === 'HOMOPHONE_PHONETIC'),
+    [searchHits],
+  );
+
+  const trilingualStats = useMemo(
+    () => computeTrilingualTranscriptStats(tokens),
+    [tokens],
+  );
+
+  // Script-to-Audio Deviation Report (Needleman-Wunsch Phonetic Alignment)
+  const scriptDiffReport = useMemo(() => {
+    if (!showScriptDiffDrawer) return null;
+    const primaryTrackId = tracks[0]?.id ?? 'track-host';
+    return compareReferenceScriptWithTranscript({
+      referenceScript: referenceBookScript,
+      tokens,
+      targetTrackId: primaryTrackId,
+    });
+  }, [showScriptDiffDrawer, referenceBookScript, tokens, tracks]);
+
+  const multiWordCutSpec = useMemo(
+    () => computeMultiWordCutRange(tokens, activeSelectedIds),
+    [tokens, activeSelectedIds],
+  );
+
+  const syncSafetyDecision = useMemo(() => {
+    if (!multiWordCutSpec) return null;
+    return determineSyncSafeEditMode(
+      tracks,
+      multiWordCutSpec.trackId,
+      multiWordCutSpec.range,
+      tokens,
+    );
+  }, [tracks, multiWordCutSpec, tokens]);
+
+  const subtitlePreviewContent = useMemo(() => {
+    if (subtitlePreviewMode === 'srt') return exportTranscriptToSrt(tokens);
+    if (subtitlePreviewMode === 'vtt') return exportTranscriptToVtt(tokens);
+    if (subtitlePreviewMode === 'textgrid') {
+      return exportTranscriptToPraatTextGrid(tokens, totalDurationSec);
+    }
+    return '';
+  }, [tokens, subtitlePreviewMode, totalDurationSec]);
+
+  const handleDownloadSubtitleFile = (format: 'srt' | 'vtt' | 'textgrid') => {
+    const content =
+      format === 'srt'
+        ? exportTranscriptToSrt(tokens)
+        : format === 'vtt'
+          ? exportTranscriptToVtt(tokens)
+          : exportTranscriptToPraatTextGrid(tokens, totalDurationSec);
+    const ext = format === 'textgrid' ? 'TextGrid' : format;
+    const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `avapardaz-transcript.${ext}`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 2000);
+  };
+
+  const handleSelectAllSearchHits = () => {
+    const ids = Array.from(searchMatchedTokenIdSet);
+    if (ids.length === 0) return;
+    const firstTok = tokens.find((t) => t.id === ids[0]);
+    if (!firstTok) return;
+    const sameTrackIds = ids.filter((id) => {
+      const tok = tokens.find((t) => t.id === id);
+      return tok?.trackId === firstTok.trackId;
+    });
+    setSelectedTokenIds(sameTrackIds);
+    onSeekSec(flicksToSeconds(firstTok.range.startFlicks));
+  };
+
+  const handleSelectScriptExtras = () => {
+    if (!scriptDiffReport || scriptDiffReport.extraSpokenTokenIds.length === 0) return;
+    setSelectedTokenIds(scriptDiffReport.extraSpokenTokenIds);
+    const firstTok = tokens.find((t) => t.id === scriptDiffReport.extraSpokenTokenIds[0]);
+    if (firstTok) {
+      onSeekSec(flicksToSeconds(firstTok.range.startFlicks));
+    }
+  };
+
+  const handleWordClick = (tok: PersianWordToken, e: React.MouseEvent<HTMLButtonElement>) => {
+    const startSec = flicksToSeconds(tok.range.startFlicks);
+    onSeekSec(startSec);
+
+    if (e.shiftKey && activeSelectedIds.length > 0) {
+      const lastId = activeSelectedIds[activeSelectedIds.length - 1];
+      const sameTrack = tokens.filter((t) => t.trackId === tok.trackId);
+      const idxA = sameTrack.findIndex((t) => t.id === lastId);
+      const idxB = sameTrack.findIndex((t) => t.id === tok.id);
+      if (idxA !== -1 && idxB !== -1) {
+        const [lo, hi] = idxA < idxB ? [idxA, idxB] : [idxB, idxA];
+        const rangeIds = sameTrack.slice(lo, hi + 1).map((t) => t.id);
+        setSelectedTokenIds(rangeIds);
+        return;
+      }
+    }
+
+    setSelectedTokenIds((prev) => {
+      const validPrev = prev.filter((id) => tokens.some((t) => t.id === id));
+      if (validPrev.includes(tok.id)) {
+        return validPrev.filter((id) => id !== tok.id);
+      }
+      const existingTrackId =
+        validPrev.length > 0
+          ? tokens.find((t) => t.id === validPrev[0])?.trackId
+          : tok.trackId;
+      if (existingTrackId && existingTrackId !== tok.trackId) {
+        return [tok.id];
+      }
+      return [...validPrev, tok.id];
+    });
+  };
+
+  const handleStartEditSingleWord = () => {
+    if (activeSelectedIds.length !== 1) return;
+    const tok = tokens.find((t) => t.id === activeSelectedIds[0]);
+    if (!tok) return;
+    setEditingTokenId(tok.id);
+    setEditingTextValue(tok.displayText);
+  };
+
+  const handleSaveSingleWordEdit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingTokenId || !editingTextValue.trim()) return;
+    onUpdateTokenDisplayText(editingTokenId, editingTextValue.trim());
+    setEditingTokenId(null);
+  };
+
+  const handleApplyCut = (explicitMode?: RecommendationActionMode) => {
+    if (activeSelectedIds.length === 0) return;
+    onCutSelectedWords(activeSelectedIds, explicitMode);
+    setSelectedTokenIds([]);
+    setEditingTokenId(null);
+  };
+
+  const handleApplyRedaction = (mode: AudioRedactionMaskMode) => {
+    if (!onRedactSelectedWords || activeSelectedIds.length === 0) return;
+    onRedactSelectedWords(activeSelectedIds, mode);
+    setSelectedTokenIds([]);
+    setEditingTokenId(null);
+  };
+
+  const handleApplyWsolaStretch = (tempoRatio: number) => {
+    if (!onWsolaTimeStretchSelectedWords || activeSelectedIds.length === 0) return;
+    onWsolaTimeStretchSelectedWords(activeSelectedIds, tempoRatio);
+    setSelectedTokenIds([]);
+    setEditingTokenId(null);
+  };
+
+  const handleApplyPunchInMatch = () => {
+    if (!onPunchInSpectralMatchSelectedWords || activeSelectedIds.length === 0) return;
+    onPunchInSpectralMatchSelectedWords(activeSelectedIds);
+    setSelectedTokenIds([]);
+    setEditingTokenId(null);
+  };
+
+  const handleSelectBestTeaserTokens = () => {
+    if (!prosodyAndChaptersReport || prosodyAndChaptersReport.bestTeaserTokenIds.length === 0) {
+      return;
+    }
+    const ids = prosodyAndChaptersReport.bestTeaserTokenIds;
+    setSelectedTokenIds(ids);
+    const firstTok = tokens.find((t) => t.id === ids[0]);
+    if (firstTok) {
+      onSeekSec(flicksToSeconds(firstTok.range.startFlicks));
+    }
+  };
+
+  const handleOpenForcedAlign = () => {
+    const nextOpen = !showForcedAlignDrawer;
+    setShowForcedAlignDrawer(nextOpen);
+    if (nextOpen) {
+      const targetId = tracks[0]?.id ?? 'track-host';
+      setForcedAlignTrackId(targetId);
+      const currentTrackText = tokens
+        .filter((t) => t.trackId === targetId)
+        .map((t) => t.displayText)
+        .join(' ');
+      if (currentTrackText.trim().length > 0) {
+        setCustomScriptText(currentTrackText);
+      }
+    }
+  };
+
+  const handleExecuteForcedAlign = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!customScriptText.trim()) return;
+    onRunForcedAlignment(customScriptText.trim(), forcedAlignTrackId);
+    setShowForcedAlignDrawer(false);
+    setSelectedTokenIds([]);
+  };
+
   return (
     <section
-      aria-label="متن همگام‌شده فارسی"
+      aria-label="متن همگام‌شده فارسی و تدوین متن‌محور"
       className="border border-[#252F42] bg-[#131924] rounded-lg flex flex-col"
     >
+      {/* Top Header & ASR / Forced Alignment Controls */}
       <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3 border-b border-[#252F42]">
         <div>
-          <h2 className="text-sm font-semibold text-slate-100">متن و تراز آوایی فارسی</h2>
+          <h2 className="text-sm font-semibold text-slate-100">
+            تدوین متن‌محور و تراز آوایی فارسی (Text-Based Audio Editor)
+          </h2>
           <p className="text-xs text-slate-400 mt-0.5">
-            تفکیک سه لایه متن (اصل، نرمال‌شده با نیم‌فاصله، و نمایشی) متصل به Timebase بدون رانش
+            روی هر واژه کلیک کنید تا انتخاب شود؛ با حذف یا بوق سانسور، صدای آن به‌صورت هوشمند و همگام روی تایم‌لاین اعمال می‌شود
           </p>
         </div>
 
-        <div
-          role="group"
-          aria-label="لایه متن فارسی"
-          className="flex items-center gap-1 p-1 bg-[#0E131D] border border-[#252F42] rounded-md"
-        >
-          {layerLabels.map((item) => (
-            <button
-              key={item.id}
-              type="button"
-              onClick={() => setLayer(item.id)}
-              aria-pressed={layer === item.id}
-              className={`px-2.5 py-1 text-xs font-medium rounded transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
-                layer === item.id
-                  ? 'bg-amber-400 text-slate-950'
-                  : 'text-slate-400 hover:text-slate-100'
-              }`}
-            >
-              {item.label}
-            </button>
-          ))}
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            data-testid="btn-run-persian-asr"
+            disabled={isTranscribingAsr}
+            onClick={onRunPersianAsr}
+            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium rounded-md border border-sky-500/40 bg-sky-500/15 text-sky-200 hover:bg-sky-500/25 disabled:opacity-50 cursor-pointer"
+          >
+            {isTranscribingAsr ? (
+              <Loader2 className="w-3.5 h-3.5 animate-spin text-sky-400" aria-hidden="true" />
+            ) : (
+              <Mic className="w-3.5 h-3.5 text-sky-400" aria-hidden="true" />
+            )}
+            <span>{isTranscribingAsr ? 'در حال استخراج متن...' : 'تبدیل صوت به متن (ASR)'}</span>
+          </button>
+
+          <button
+            type="button"
+            data-testid="btn-toggle-forced-align"
+            onClick={handleOpenForcedAlign}
+            aria-expanded={showForcedAlignDrawer}
+            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium rounded-md border border-[#252F42] bg-[#0E131D] text-slate-200 hover:bg-[#1E2738] cursor-pointer"
+          >
+            <Sparkles className="w-3.5 h-3.5 text-amber-400" aria-hidden="true" />
+            <span>هم‌ترازی متن با صوت (Forced Align)</span>
+          </button>
+
+          <button
+            type="button"
+            data-testid="btn-toggle-script-diff"
+            onClick={() => setShowScriptDiffDrawer((prev) => !prev)}
+            aria-expanded={showScriptDiffDrawer}
+            className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium rounded-md border cursor-pointer ${
+              showScriptDiffDrawer
+                ? 'border-amber-400/60 bg-amber-400/15 text-amber-200'
+                : 'border-[#252F42] bg-[#0E131D] text-slate-200 hover:bg-[#1E2738]'
+            }`}
+          >
+            <FileDiff className="w-3.5 h-3.5 text-amber-400" aria-hidden="true" />
+            <span>تطبیق با متن مرجع (Script Diff)</span>
+          </button>
+
+          <div
+            role="group"
+            aria-label="لایه متن فارسی"
+            className="flex items-center gap-1 p-1 bg-[#0E131D] border border-[#252F42] rounded-md"
+          >
+            {layerLabels.map((item) => (
+              <button
+                key={item.id}
+                type="button"
+                onClick={() => setLayer(item.id)}
+                aria-pressed={layer === item.id}
+                className={`px-2.5 py-1 text-xs font-medium rounded transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
+                  layer === item.id
+                    ? 'bg-amber-400 text-slate-950'
+                    : 'text-slate-400 hover:text-slate-100'
+                }`}
+              >
+                {item.label}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
 
+      {/* Phonetic & Homophone Search + Non-Destructive Prosodic/Colloquial Enhancements Bar */}
+      <div className="px-4 py-2 border-b border-[#252F42] bg-[#0E131D]/80 flex flex-wrap items-center justify-between gap-2">
+        <div className="flex flex-wrap items-center gap-2 flex-1 min-w-[230px]">
+          <div className="relative flex-1 max-w-xs">
+            <Search
+              className="w-3.5 h-3.5 text-slate-400 absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none"
+              aria-hidden="true"
+            />
+            <input
+              type="text"
+              data-testid="input-phonetic-search"
+              value={phoneticQuery}
+              onChange={(e) => setPhoneticQuery(e.target.value)}
+              placeholder="جستجوی آوایی سه‌زبانه (فارسی/انگلیسی/عربی: TypeScript، سهبط، دقیقاً)..."
+              aria-label="جستجوی آوایی در متن"
+              className="w-full pr-8 pl-6 py-1 rounded bg-[#131924] border border-[#252F42] text-xs text-slate-100 placeholder:text-slate-500 focus:outline-none focus:border-sky-400"
+            />
+            {phoneticQuery && (
+              <button
+                type="button"
+                onClick={() => setPhoneticQuery('')}
+                aria-label="پاک کردن جستجو"
+                className="absolute left-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-200 cursor-pointer"
+              >
+                <X className="w-3 h-3" />
+              </button>
+            )}
+          </div>
+
+          {phoneticQuery.trim().length > 0 && (
+            <div className="flex items-center gap-2 text-xs">
+              <span
+                data-testid="phonetic-search-hit-count"
+                className="text-sky-300 font-medium"
+              >
+                {searchMatchedTokenIdSet.size} منطبق
+                {hasHomophoneHit ? ' (شامل تطبیق آوایی/هم‌آوا)' : ''}
+              </span>
+              {searchMatchedTokenIdSet.size > 0 && (
+                <button
+                  type="button"
+                  data-testid="btn-select-search-hits"
+                  onClick={handleSelectAllSearchHits}
+                  className="px-2 py-0.5 rounded bg-sky-500/20 border border-sky-400/40 text-sky-200 hover:bg-sky-500/30 text-[11px] cursor-pointer"
+                >
+                  انتخاب برای برش
+                </button>
+              )}
+            </div>
+          )}
+        </div>
+
+        <div className="flex flex-wrap items-center gap-1.5">
+          {onOptimizeTrilingualAsr && (
+            <button
+              type="button"
+              data-testid="btn-optimize-trilingual-asr"
+              onClick={() =>
+                onOptimizeTrilingualAsr(
+                  englishRenderMode === 'LATIN_TECHNICAL'
+                    ? 'PERSIAN_TRANSLITERATED'
+                    : 'LATIN_TECHNICAL',
+                )
+              }
+              title="بهینه‌سازی سه‌زبانه ASR (فارسی + انگلیسی + عربی)، بازامتیازدهی دوطرفه هم‌آواها و سوئیچ نگارش انگلیسی (Latin / فارسی)"
+              className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium rounded border border-indigo-500/40 bg-indigo-500/15 text-indigo-200 hover:bg-indigo-500/25 cursor-pointer"
+            >
+              <Sparkles className="w-3.5 h-3.5 text-indigo-300" aria-hidden="true" />
+              <span>
+                سه‌زبانه FA/EN/AR ({englishRenderMode === 'LATIN_TECHNICAL' ? 'EN: Latin' : 'EN: فارسی'})
+              </span>
+            </button>
+          )}
+
+          {onRestoreProsodicPunctuation && (
+            <button
+              type="button"
+              data-testid="btn-restore-punctuation"
+              onClick={onRestoreProsodicPunctuation}
+              title="گذاری خودکار ویرگول، نقطه و علامت سؤال بر اساس مکث و شیب فرکانس پایه F0"
+              className="inline-flex items-center gap-1 px-2.5 py-1 text-xs rounded border border-[#252F42] bg-[#131924] text-slate-200 hover:bg-[#1E2738] cursor-pointer"
+            >
+              <Wand2 className="w-3.5 h-3.5 text-amber-400" aria-hidden="true" />
+              <span>علائم نگارشی (F0)</span>
+            </button>
+          )}
+
+          {onConvertColloquialToFormal && (
+            <button
+              type="button"
+              data-testid="btn-formalize-colloquial"
+              onClick={onConvertColloquialToFormal}
+              title="تبدیل غیرمخرب افعال و ضمایر محاوره‌ای به فارسی معیار در لایه نمایشی"
+              className="inline-flex items-center gap-1 px-2.5 py-1 text-xs rounded border border-[#252F42] bg-[#131924] text-slate-200 hover:bg-[#1E2738] cursor-pointer"
+            >
+              <BookOpenCheck className="w-3.5 h-3.5 text-emerald-400" aria-hidden="true" />
+              <span>معیارسازی محاوره</span>
+            </button>
+          )}
+
+          {onNormalizeNumbersAndCompounds && (
+            <button
+              type="button"
+              data-testid="btn-normalize-numbers-compounds"
+              onClick={onNormalizeNumbersAndCompounds}
+              title="تبدیل اعداد گفتاری به ارقام فارسی و اتصال ترکیبات نیم‌فاصله و اصطلاحات فنی"
+              className="inline-flex items-center gap-1 px-2.5 py-1 text-xs rounded border border-[#252F42] bg-[#131924] text-slate-200 hover:bg-[#1E2738] cursor-pointer"
+            >
+              <Hash className="w-3.5 h-3.5 text-sky-400" aria-hidden="true" />
+              <span>اعداد و ترکیبات</span>
+            </button>
+          )}
+
+          <button
+            type="button"
+            data-testid="btn-toggle-prosody-lexicon"
+            onClick={() => setShowProsodyLexiconDrawer((prev) => !prev)}
+            aria-expanded={showProsodyLexiconDrawer}
+            className={`inline-flex items-center gap-1 px-2.5 py-1 text-xs rounded border cursor-pointer ${
+              showProsodyLexiconDrawer
+                ? 'border-emerald-400/60 bg-emerald-400/15 text-emerald-200'
+                : 'border-[#252F42] bg-[#131924] text-slate-300 hover:bg-[#1E2738]'
+            }`}
+          >
+            <ListTree className="w-3.5 h-3.5 text-emerald-400" aria-hidden="true" />
+            <span>واژه‌نامه، آهنگ بیان و سرفصل‌ها</span>
+          </button>
+
+          <button
+            type="button"
+            data-testid="btn-toggle-srt-preview"
+            onClick={() =>
+              setSubtitlePreviewMode((prev) => (prev === 'none' ? 'srt' : 'none'))
+            }
+            className={`inline-flex items-center gap-1 px-2.5 py-1 text-xs rounded border cursor-pointer ${
+              subtitlePreviewMode !== 'none'
+                ? 'border-amber-400/60 bg-amber-400/15 text-amber-200'
+                : 'border-[#252F42] bg-[#131924] text-slate-300 hover:bg-[#1E2738]'
+            }`}
+          >
+            <FileText className="w-3.5 h-3.5 text-amber-400" aria-hidden="true" />
+            <span>زیرنویس / TextGrid</span>
+          </button>
+        </div>
+      </div>
+
+      {/* Collapsible Custom Lexicon, Prosody/Pacing WPM & Chapter Markers Drawer */}
+      {showProsodyLexiconDrawer && (
+        <div
+          data-testid="prosody-lexicon-drawer"
+          className="px-4 py-3 border-b border-[#252F42] bg-[#0E131D] space-y-3"
+        >
+          {/* 1. Custom Persian Lexicon & Homophone Corrector */}
+          <div className="space-y-1.5">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <label
+                htmlFor="custom-lexicon-input"
+                className="text-xs font-semibold text-emerald-300"
+              >
+                واژه‌نامه اختصاصی و اصلاح هم‌آواها (ت/ط، س/ص/ث، ق/غ، ز/ذ/ض/ظ):
+              </label>
+              {onApplyCustomLexicon && (
+                <button
+                  type="button"
+                  data-testid="btn-apply-custom-lexicon"
+                  onClick={() => onApplyCustomLexicon(customLexiconInput)}
+                  className="inline-flex items-center gap-1 px-2.5 py-1 rounded bg-emerald-500 text-slate-950 hover:bg-emerald-400 text-xs font-semibold cursor-pointer"
+                >
+                  <Check className="w-3.5 h-3.5" aria-hidden="true" />
+                  <span>اعمال واژه‌نامه و اصلاح هم‌آواها</span>
+                </button>
+              )}
+            </div>
+            <input
+              id="custom-lexicon-input"
+              type="text"
+              data-testid="input-custom-lexicon"
+              value={customLexiconInput}
+              onChange={(e) => setCustomLexiconInput(e.target.value)}
+              placeholder="واژگان تخصصی یا اسامی خاص را با ویرگول جدا کنید..."
+              className="w-full px-3 py-1.5 rounded bg-[#131924] border border-[#252F42] text-xs text-slate-100 focus:outline-none focus:border-emerald-400"
+            />
+          </div>
+
+          {/* 2. Prosody & Pacing WPM Coach + Chapter Markers */}
+          {prosodyAndChaptersReport && (
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+              <div
+                data-testid="prosody-window-list"
+                className="p-2.5 rounded bg-[#131924] border border-[#252F42] space-y-1.5"
+              >
+                <div className="text-xs font-semibold text-sky-300 flex items-center gap-1.5">
+                  <Gauge className="w-3.5 h-3.5 text-sky-400" aria-hidden="true" />
+                  <span>سرعت بیان (WPM) و پویایی آهنگ صدا (F0):</span>
+                </div>
+                {prosodyAndChaptersReport.prosodyWindows.length === 0 ? (
+                  <p className="text-[11px] text-slate-400">
+                    بازه صوتی برای تحلیل سرعت بیان کافی نیست.
+                  </p>
+                ) : (
+                  <div className="space-y-1.5 max-h-28 overflow-y-auto">
+                    {prosodyAndChaptersReport.prosodyWindows.map((win, idx) => {
+                      const startSec = flicksToSeconds(Number(win.windowRange.start));
+                      const endSec = flicksToSeconds(Number(win.windowRange.end));
+                      return (
+                        <button
+                          key={idx}
+                          type="button"
+                          onClick={() => onSeekSec(startSec)}
+                          className="w-full text-right p-1.5 rounded bg-[#0E131D] border border-[#252F42] hover:border-sky-400/50 text-[11px] flex flex-wrap items-center justify-between gap-2 cursor-pointer"
+                        >
+                          <span className="text-slate-200 font-medium">
+                            {win.netWordsPerMinute} کلمه/دقیقه · {win.syllablesPerSecond} هجا/ثانیه · F0:{' '}
+                            {win.medianPitchHz}Hz (±{win.pitchStdDevSemitones} نیم‌پرده)
+                          </span>
+                          <span dir="ltr" className="font-mono text-sky-300">
+                            {startSec.toFixed(1)}s–{endSec.toFixed(1)}s
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
+              <div
+                data-testid="chapter-markers-list"
+                className="p-2.5 rounded bg-[#131924] border border-[#252F42] space-y-1.5"
+              >
+                <div className="text-xs font-semibold text-amber-300 flex items-center gap-1.5">
+                  <ListTree className="w-3.5 h-3.5 text-amber-400" aria-hidden="true" />
+                  <span>سرفصل‌های موضوعی خودکار (TextTiling + TF-IDF):</span>
+                </div>
+                {prosodyAndChaptersReport.chapters.length === 0 ? (
+                  <p className="text-[11px] text-slate-400">سرفصلی استخراج نشد.</p>
+                ) : (
+                  <div className="space-y-1.5 max-h-28 overflow-y-auto">
+                    {prosodyAndChaptersReport.chapters.map((ch) => {
+                      const startSec = flicksToSeconds(Number(ch.range.start));
+                      return (
+                        <button
+                          key={ch.chapterIndex}
+                          type="button"
+                          data-testid={`btn-seek-chapter-${ch.chapterIndex}`}
+                          onClick={() => onSeekSec(startSec)}
+                          className="w-full text-right p-1.5 rounded bg-[#0E131D] border border-[#252F42] hover:border-amber-400/50 text-[11px] flex items-center justify-between gap-2 cursor-pointer"
+                        >
+                          <span className="text-slate-200 truncate">{ch.suggestedTitleFa}</span>
+                          <span dir="ltr" className="font-mono text-amber-300 shrink-0">
+                            {ch.startTimestampFormatted}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* 3. Cold-Open Podcast Teaser & TextRank Key Excerpt */}
+          {prosodyAndChaptersReport && prosodyAndChaptersReport.bestTeaserExcerptFa && (
+            <div
+              data-testid="teaser-textrank-card"
+              className="p-2.5 rounded bg-[#131924] border border-[#252F42] flex flex-wrap items-center justify-between gap-2"
+            >
+              <div className="space-y-0.5">
+                <div className="text-xs font-semibold text-amber-300 flex items-center gap-1.5">
+                  <Sparkles className="w-3.5 h-3.5 text-amber-400" aria-hidden="true" />
+                  <span>تیزر برگزیده پادکست (امتیاز ترکیبی هیجان آوایی F0 و چگالی واژگانی):</span>
+                </div>
+                <p className="text-xs text-slate-200">
+                  «{prosodyAndChaptersReport.bestTeaserExcerptFa}»
+                </p>
+              </div>
+              {prosodyAndChaptersReport.bestTeaserTokenIds.length > 0 && (
+                <button
+                  type="button"
+                  data-testid="btn-select-best-teaser"
+                  onClick={handleSelectBestTeaserTokens}
+                  className="inline-flex items-center gap-1 px-2.5 py-1 rounded bg-amber-400/20 border border-amber-400/50 text-amber-200 hover:bg-amber-400/30 text-xs font-semibold cursor-pointer"
+                >
+                  <Sparkles className="w-3 h-3" aria-hidden="true" />
+                  <span>
+                    انتخاب واژگان تیزر برگزیده ({prosodyAndChaptersReport.bestTeaserTokenIds.length})
+                  </span>
+                </button>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Collapsible Script-to-Audio Deviation Drawer (Needleman-Wunsch Phonetic Alignment) */}
+      {showScriptDiffDrawer && scriptDiffReport && (
+        <div
+          data-testid="script-diff-drawer"
+          className="px-4 py-3 border-b border-[#252F42] bg-[#0E131D] space-y-2.5"
+        >
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <label
+              htmlFor="reference-book-script-input"
+              className="text-xs font-semibold text-amber-300"
+            >
+              متن مرجع کتاب / اسکریپت اصلی (مقایسه آوایی Needleman-Wunsch با گفتار گوینده):
+            </label>
+            <div className="flex flex-wrap items-center gap-3 text-xs">
+              <span
+                data-testid="script-diff-extra-count"
+                className="text-rose-300 font-medium"
+              >
+                اضافه‌گویی/تپق خارج از متن: {scriptDiffReport.extraCount}
+              </span>
+              <span className="text-amber-300 font-medium">
+                جاافتاده از متن: {scriptDiffReport.omittedCount}
+              </span>
+              <span className="text-sky-300 font-medium">
+                خوانش متفاوت: {scriptDiffReport.misreadCount}
+              </span>
+              {scriptDiffReport.extraSpokenTokenIds.length > 0 && (
+                <button
+                  type="button"
+                  data-testid="btn-select-script-extras"
+                  onClick={handleSelectScriptExtras}
+                  className="inline-flex items-center gap-1 px-2.5 py-1 rounded bg-rose-500/20 border border-rose-400/40 text-rose-200 hover:bg-rose-500/30 text-xs font-semibold cursor-pointer"
+                >
+                  <Scissors className="w-3 h-3" aria-hidden="true" />
+                  <span>
+                    انتخاب واژگان اضافه برای برش ({scriptDiffReport.extraSpokenTokenIds.length})
+                  </span>
+                </button>
+              )}
+            </div>
+          </div>
+
+          <textarea
+            id="reference-book-script-input"
+            data-testid="input-reference-script"
+            rows={2}
+            value={referenceBookScript}
+            onChange={(e) => setReferenceBookScript(e.target.value)}
+            className="w-full px-3 py-2 rounded-md bg-[#131924] border border-[#252F42] text-xs text-slate-100 focus:outline-none focus:border-amber-400 leading-6"
+          />
+
+          {scriptDiffReport.findings.length > 0 && (
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-28 overflow-y-auto pt-1">
+              {scriptDiffReport.findings.map((f) => (
+                <div
+                  key={f.findingId}
+                  className="p-2 rounded bg-[#131924] border border-[#252F42] text-[11px] flex items-center justify-between gap-2"
+                >
+                  <span className="text-slate-200">{f.descriptionFa}</span>
+                  <span
+                    dir="ltr"
+                    className="font-mono text-slate-400 shrink-0"
+                  >
+                    {flicksToSeconds(Number(f.audioRange.start)).toFixed(2)}s
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Collapsible Forced Alignment Script Editor */}
+      {showForcedAlignDrawer && (
+        <form
+          onSubmit={handleExecuteForcedAlign}
+          className="px-4 py-3 border-b border-[#252F42] bg-[#0E131D] space-y-2.5"
+        >
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <label
+              htmlFor="forced-align-script-input"
+              className="text-xs font-semibold text-amber-300"
+            >
+              متن فارسی جهت هم‌ترازی آوایی کلمه‌به‌کلمه روی موج صوت (اسنپ به دره انرژی و تشخیص تپق):
+            </label>
+            {tracks.length > 1 && (
+              <div className="flex items-center gap-2 text-xs">
+                <label htmlFor="forced-align-track-select" className="text-slate-400">
+                  ترک هدف:
+                </label>
+                <select
+                  id="forced-align-track-select"
+                  value={forcedAlignTrackId}
+                  onChange={(e) => {
+                    const nextId = e.target.value;
+                    setForcedAlignTrackId(nextId);
+                    const txt = tokens
+                      .filter((t) => t.trackId === nextId)
+                      .map((t) => t.displayText)
+                      .join(' ');
+                    if (txt) setCustomScriptText(txt);
+                  }}
+                  className="px-2 py-1 rounded bg-[#131924] border border-[#252F42] text-slate-200 text-xs"
+                >
+                  {tracks.map((trk) => (
+                    <option key={trk.id} value={trk.id}>
+                      {trk.name} ({trk.speakerLabel})
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+          </div>
+
+          <textarea
+            id="forced-align-script-input"
+            data-testid="input-forced-align-script"
+            rows={2}
+            value={customScriptText}
+            onChange={(e) => setCustomScriptText(e.target.value)}
+            placeholder="متن گفتار فارسی را وارد کنید..."
+            className="w-full px-3 py-2 rounded-md bg-[#131924] border border-[#252F42] text-xs text-slate-100 focus:outline-none focus:border-amber-400 leading-6"
+          />
+
+          <div className="flex items-center justify-end gap-2">
+            <button
+              type="button"
+              onClick={() => setShowForcedAlignDrawer(false)}
+              className="px-2.5 py-1 text-xs rounded border border-[#252F42] text-slate-300 hover:bg-[#1E2738] cursor-pointer"
+            >
+              انصراف
+            </button>
+            <button
+              type="submit"
+              data-testid="btn-apply-forced-align"
+              className="inline-flex items-center gap-1.5 px-3 py-1 text-xs font-semibold rounded bg-amber-400 text-slate-950 hover:bg-amber-300 cursor-pointer"
+            >
+              <Check className="w-3.5 h-3.5" aria-hidden="true" />
+              <span>اعمال هم‌ترازی آوایی روی موج صوت</span>
+            </button>
+          </div>
+        </form>
+      )}
+
+      {/* Collapsible Subtitle SRT / VTT / Praat TextGrid Preview & Export Drawer */}
+      {subtitlePreviewMode !== 'none' && (
+        <div
+          data-testid="subtitle-export-drawer"
+          className="px-4 py-3 border-b border-[#252F42] bg-[#0E131D] space-y-2"
+        >
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex items-center gap-2 text-xs">
+              <span className="font-semibold text-amber-300">
+                پیش‌نمایش خروجی زمان‌بندی‌شده همگام با تایم‌لاین:
+              </span>
+              <button
+                type="button"
+                onClick={() => setSubtitlePreviewMode('srt')}
+                className={`px-2 py-0.5 rounded text-xs cursor-pointer ${
+                  subtitlePreviewMode === 'srt'
+                    ? 'bg-amber-400 text-slate-950 font-semibold'
+                    : 'bg-[#131924] text-slate-300'
+                }`}
+              >
+                SRT
+              </button>
+              <button
+                type="button"
+                onClick={() => setSubtitlePreviewMode('vtt')}
+                className={`px-2 py-0.5 rounded text-xs cursor-pointer ${
+                  subtitlePreviewMode === 'vtt'
+                    ? 'bg-amber-400 text-slate-950 font-semibold'
+                    : 'bg-[#131924] text-slate-300'
+                }`}
+              >
+                WebVTT
+              </button>
+              <button
+                type="button"
+                data-testid="btn-preview-textgrid"
+                onClick={() => setSubtitlePreviewMode('textgrid')}
+                className={`px-2 py-0.5 rounded text-xs cursor-pointer ${
+                  subtitlePreviewMode === 'textgrid'
+                    ? 'bg-amber-400 text-slate-950 font-semibold'
+                    : 'bg-[#131924] text-slate-300'
+                }`}
+              >
+                Praat TextGrid
+              </button>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                data-testid="btn-download-srt"
+                onClick={() => handleDownloadSubtitleFile('srt')}
+                className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-semibold rounded bg-amber-400 text-slate-950 hover:bg-amber-300 cursor-pointer"
+              >
+                <Download className="w-3.5 h-3.5" aria-hidden="true" />
+                <span>دانلود .SRT</span>
+              </button>
+              <button
+                type="button"
+                data-testid="btn-download-vtt"
+                onClick={() => handleDownloadSubtitleFile('vtt')}
+                className="inline-flex items-center gap-1 px-2.5 py-1 text-xs rounded border border-[#252F42] bg-[#131924] text-slate-200 hover:bg-[#1E2738] cursor-pointer"
+              >
+                <Download className="w-3.5 h-3.5" aria-hidden="true" />
+                <span>دانلود .VTT</span>
+              </button>
+              <button
+                type="button"
+                data-testid="btn-download-textgrid"
+                onClick={() => handleDownloadSubtitleFile('textgrid')}
+                className="inline-flex items-center gap-1 px-2.5 py-1 text-xs rounded border border-[#252F42] bg-[#131924] text-slate-200 hover:bg-[#1E2738] cursor-pointer"
+              >
+                <Download className="w-3.5 h-3.5" aria-hidden="true" />
+                <span>دانلود .TextGrid</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setSubtitlePreviewMode('none')}
+                aria-label="بستن پیش‌نمایش زیرنویس"
+                className="p-1 text-slate-400 hover:text-slate-100 cursor-pointer"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          </div>
+
+          <pre
+            dir="ltr"
+            data-testid="subtitle-preview-text"
+            className="p-2.5 rounded bg-[#0B0F17] border border-[#252F42] text-[11px] font-mono text-slate-200 max-h-36 overflow-y-auto whitespace-pre-wrap"
+          >
+            {subtitlePreviewContent}
+          </pre>
+        </div>
+      )}
+
+      {/* Active Text-Based Audio Editing Toolbar when word(s) are selected */}
+      {multiWordCutSpec && syncSafetyDecision && (
+        <div
+          data-testid="transcript-word-edit-bar"
+          className="px-4 py-2.5 border-b border-amber-500/30 bg-amber-500/10 flex flex-col gap-2"
+        >
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex flex-wrap items-center gap-2 text-xs">
+              <span className="font-semibold text-amber-300">
+                {activeSelectedIds.length} واژه انتخاب‌شده:
+              </span>
+              <span className="px-2 py-0.5 rounded bg-[#0E131D] border border-amber-400/40 text-slate-100 font-medium">
+                «{multiWordCutSpec.combinedText}»
+              </span>
+              <span dir="ltr" className="font-mono text-[11px] text-slate-300">
+                [{flicksToSeconds(multiWordCutSpec.range.startFlicks).toFixed(2)}s ..{' '}
+                {flicksToSeconds(multiWordCutSpec.range.endFlicks).toFixed(2)}s]
+              </span>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-1.5">
+              <button
+                type="button"
+                data-testid="btn-cut-selected-words"
+                onClick={() => handleApplyCut()}
+                className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-semibold rounded bg-amber-400 text-slate-950 hover:bg-amber-300 cursor-pointer"
+              >
+                <Scissors className="w-3.5 h-3.5" aria-hidden="true" />
+                <span>
+                  {syncSafetyDecision.mode === 'sync-locked-ripple-cut'
+                    ? 'برش هوشمند از صوت (Ripple Cut)'
+                    : 'جایگزینی هوشمند با Room Tone (حفظ سینک)'}
+                </span>
+              </button>
+
+              {syncSafetyDecision.mode !== 'in-place-room-tone-suppression' && (
+                <button
+                  type="button"
+                  data-testid="btn-roomtone-cut-words"
+                  onClick={() => handleApplyCut('in-place-room-tone-suppression')}
+                  className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium rounded border border-emerald-500/40 bg-emerald-500/15 text-emerald-200 hover:bg-emerald-500/25 cursor-pointer"
+                >
+                  <VolumeX className="w-3.5 h-3.5" aria-hidden="true" />
+                  <span>سکوت درجا (Room Tone)</span>
+                </button>
+              )}
+
+              {onRedactSelectedWords && (
+                <>
+                  <button
+                    type="button"
+                    data-testid="btn-redact-bleep-words"
+                    onClick={() => handleApplyRedaction('BROADCAST_BLEEP_1KHZ')}
+                    className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium rounded border border-rose-500/40 bg-rose-500/15 text-rose-200 hover:bg-rose-500/25 cursor-pointer"
+                  >
+                    <ShieldAlert className="w-3.5 h-3.5" aria-hidden="true" />
+                    <span>بوق سانسور ۱kHz</span>
+                  </button>
+                  <button
+                    type="button"
+                    data-testid="btn-redact-muffle-words"
+                    onClick={() => handleApplyRedaction('LOW_PASS_VOICE_MUFFLE')}
+                    className="inline-flex items-center gap-1 px-2 py-1 text-xs rounded border border-[#252F42] bg-[#0E131D] text-slate-200 hover:bg-[#1E2738] cursor-pointer"
+                  >
+                    <span>مات‌سازی صدا</span>
+                  </button>
+                </>
+              )}
+
+              {onWsolaTimeStretchSelectedWords && (
+                <>
+                  <button
+                    type="button"
+                    data-testid="btn-wsola-slow-words"
+                    onClick={() => handleApplyWsolaStretch(0.8)}
+                    title="کشش زمانی بدون تغییر زیر و بمی صدا (WSOLA 0.8x)"
+                    className="inline-flex items-center gap-1 px-2 py-1 text-xs rounded border border-sky-500/40 bg-sky-500/15 text-sky-200 hover:bg-sky-500/25 cursor-pointer"
+                  >
+                    <Gauge className="w-3 h-3" aria-hidden="true" />
+                    <span>کندتر ۰.۸x (WSOLA)</span>
+                  </button>
+                  <button
+                    type="button"
+                    data-testid="btn-wsola-fast-words"
+                    onClick={() => handleApplyWsolaStretch(1.25)}
+                    title="فشرده‌سازی زمانی بدون تغییر زیر و بمی صدا (WSOLA 1.25x)"
+                    className="inline-flex items-center gap-1 px-2 py-1 text-xs rounded border border-sky-500/40 bg-sky-500/15 text-sky-200 hover:bg-sky-500/25 cursor-pointer"
+                  >
+                    <Gauge className="w-3 h-3" aria-hidden="true" />
+                    <span>سریع‌تر ۱.۲۵x (WSOLA)</span>
+                  </button>
+                </>
+              )}
+
+              {onPunchInSpectralMatchSelectedWords && (
+                <button
+                  type="button"
+                  data-testid="btn-punchin-spectral-match"
+                  onClick={handleApplyPunchInMatch}
+                  title="تطبیق طیفی ۴ بانده برداشت جایگزین با رنگ صدای استودیو و درج واترمارک نامحسوس ۱۹ کیلوهرتز BPSK"
+                  className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium rounded border border-purple-500/40 bg-purple-500/15 text-purple-200 hover:bg-purple-500/25 cursor-pointer"
+                >
+                  <Wand2 className="w-3 h-3 text-purple-300" aria-hidden="true" />
+                  <span>تطبیق طیفی ۴ بانده + واترمارک ۱۹kHz</span>
+                </button>
+              )}
+
+              {activeSelectedIds.length === 1 && (
+                <button
+                  type="button"
+                  data-testid="btn-edit-word-spelling"
+                  onClick={handleStartEditSingleWord}
+                  className="inline-flex items-center gap-1 px-2 py-1 text-xs rounded border border-[#252F42] bg-[#0E131D] text-slate-200 hover:bg-[#1E2738] cursor-pointer"
+                >
+                  <Edit3 className="w-3 h-3" aria-hidden="true" />
+                  <span>اصلاح املا</span>
+                </button>
+              )}
+
+              <button
+                type="button"
+                onClick={() => {
+                  setSelectedTokenIds([]);
+                  setEditingTokenId(null);
+                }}
+                aria-label="لغو انتخاب واژگان"
+                className="p-1 rounded border border-[#252F42] bg-[#0E131D] text-slate-400 hover:text-slate-100 cursor-pointer"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-3 text-[11px] text-slate-300">
+            <span>{syncSafetyDecision.reasonFa}</span>
+            {multiWordCutSpec.hasTrailingEzafeRisk && multiWordCutSpec.ezafeWarningFa && (
+              <span className="inline-flex items-center gap-1 text-rose-300 font-medium">
+                <AlertTriangle className="w-3 h-3 text-rose-400 shrink-0" aria-hidden="true" />
+                <span>{multiWordCutSpec.ezafeWarningFa}</span>
+              </span>
+            )}
+          </div>
+
+          {editingTokenId && (
+            <form onSubmit={handleSaveSingleWordEdit} className="flex items-center gap-2 pt-1">
+              <label htmlFor="edit-word-display-input" className="text-xs text-slate-300">
+                املای نمایشی جدید:
+              </label>
+              <input
+                id="edit-word-display-input"
+                type="text"
+                value={editingTextValue}
+                onChange={(e) => setEditingTextValue(e.target.value)}
+                className="px-2.5 py-1 rounded bg-[#0E131D] border border-amber-400/60 text-xs text-slate-100 focus:outline-none"
+              />
+              <button
+                type="submit"
+                className="px-2.5 py-1 rounded bg-emerald-500 text-slate-950 font-semibold text-xs cursor-pointer"
+              >
+                ذخیره
+              </button>
+            </form>
+          )}
+        </div>
+      )}
+
+      {/* Word Token Stream */}
       <div className="p-4 min-h-[210px] max-h-[340px] overflow-y-auto">
         {tokens.length === 0 ? (
-          <div className="py-10 text-center text-xs text-slate-400 space-y-2">
+          <div className="py-10 text-center text-xs text-slate-400 space-y-3">
             <p className="text-slate-200 font-medium">
-              فایل صوتی واردشده در حال حاضر در سطح گروه A (پردازش فوری DSP) تحلیل شده است.
+              هنوز هیچ واژه‌ای در تایم‌لاین باقی نمانده یا استخراج نشده است.
             </p>
-            <p>
-              تشخیص مکث‌های طولانی و کشیدگی واکه بلافاصله فعال است؛ پیاده‌سازی متن کامل با دانلود بلوکی مدل فارسی (گروه B) تکمیل می‌شود.
-            </p>
+            <button
+              type="button"
+              onClick={onRunPersianAsr}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-sky-500 text-slate-950 font-semibold text-xs hover:bg-sky-400 cursor-pointer"
+            >
+              <Mic className="w-3.5 h-3.5" aria-hidden="true" />
+              <span>اجرای تبدیل صوت به متن و هم‌ترازی آوایی</span>
+            </button>
           </div>
         ) : (
           <div className="flex flex-wrap items-baseline gap-x-2 gap-y-3 leading-8">
             {tokens.map((tok) => {
-              const isActive =
+              const isActivePlayhead =
                 playheadFlicks >= tok.range.startFlicks && playheadFlicks < tok.range.endFlicks;
+              const isSelected = activeSelectedIds.includes(tok.id);
+              const isSearchHit = searchMatchedTokenIdSet.has(tok.id);
               const textValue =
                 layer === 'original'
                   ? tok.originalText
@@ -89,27 +1165,71 @@ export const TranscriptPanel: React.FC<TranscriptPanelProps> = ({
                 <button
                   key={tok.id}
                   type="button"
-                  onClick={() => onSeekSec(startSec)}
-                  title={`${tok.speakerName} · ${startSec.toFixed(2)}s · اطمینان ${(tok.confidence * 100).toFixed(0)}٪ · منبع: ${tok.alignmentSource}`}
+                  data-testid={`transcript-token-${tok.id}`}
+                  aria-pressed={isSelected}
+                  onClick={(e) => handleWordClick(tok, e)}
+                  title={`${tok.speakerName} · ${startSec.toFixed(2)}s · اطمینان ${(tok.confidence * 100).toFixed(0)}٪ · منبع: ${tok.alignmentSource} (کلیک: انتخاب واژه برای برش صوتی)`}
                   className={`group inline-flex items-center gap-1 px-2 py-0.5 rounded text-sm transition-colors cursor-pointer ${
-                    isActive
-                      ? 'bg-amber-400/20 text-amber-200 ring-1 ring-amber-400/60'
-                      : tok.isDisfluency
-                        ? 'bg-rose-500/10 text-rose-300 hover:bg-rose-500/20'
-                        : tok.hasTrailingEzafeRisk
-                          ? 'bg-sky-500/10 text-sky-200 hover:bg-sky-500/20'
-                          : 'text-slate-200 hover:bg-[#1E2738]'
+                    isSelected
+                      ? 'bg-amber-400 text-slate-950 font-semibold ring-2 ring-amber-300'
+                      : isSearchHit
+                        ? 'bg-sky-500/25 text-sky-100 ring-2 ring-sky-400 font-medium'
+                        : isActivePlayhead
+                          ? 'bg-amber-400/20 text-amber-200 ring-1 ring-amber-400/60'
+                          : tok.isCrosstalkSuppressed
+                            ? 'bg-emerald-500/10 text-emerald-300/70 line-through decoration-emerald-400/70'
+                            : tok.isDisfluency
+                              ? 'bg-rose-500/10 text-rose-300 hover:bg-rose-500/20'
+                              : tok.hasTrailingEzafeRisk
+                                ? 'bg-sky-500/10 text-sky-200 hover:bg-sky-500/20'
+                                : 'text-slate-200 hover:bg-[#1E2738]'
                   }`}
                 >
-                  <span className="text-[11px] text-slate-500 font-normal">
+                  <span
+                    className={`text-[11px] font-normal ${
+                      isSelected ? 'text-slate-800' : 'text-slate-500'
+                    }`}
+                  >
                     {tok.speakerName === 'آرش' ? 'آرش:' : ''}
                   </span>
-                  <span className={tok.isDisfluency ? 'line-through decoration-rose-400/70' : ''}>
+                  <span
+                    className={
+                      tok.isDisfluency && !isSelected
+                        ? 'line-through decoration-rose-400/70'
+                        : ''
+                    }
+                  >
                     {textValue}
                   </span>
+                  {tok.detectedLanguage === 'EN' && (
+                    <span
+                      dir="ltr"
+                      className={`text-[9px] font-mono px-1 py-0.2 rounded ${
+                        isSelected
+                          ? 'bg-slate-900 text-amber-300'
+                          : 'bg-indigo-500/25 text-indigo-200 border border-indigo-400/40'
+                      }`}
+                    >
+                      EN
+                    </span>
+                  )}
+                  {tok.detectedLanguage === 'AR' && (
+                    <span
+                      dir="ltr"
+                      className={`text-[9px] font-mono px-1 py-0.2 rounded ${
+                        isSelected
+                          ? 'bg-slate-900 text-amber-300'
+                          : 'bg-emerald-500/25 text-emerald-200 border border-emerald-400/40'
+                      }`}
+                    >
+                      AR
+                    </span>
+                  )}
                   {tok.hasTrailingEzafeRisk && (
                     <AlertTriangle
-                      className="w-3 h-3 text-amber-400 shrink-0"
+                      className={`w-3 h-3 shrink-0 ${
+                        isSelected ? 'text-slate-900' : 'text-amber-400'
+                      }`}
                       aria-label="خطر کسره اضافه معلق"
                     />
                   )}
@@ -120,9 +1240,28 @@ export const TranscriptPanel: React.FC<TranscriptPanelProps> = ({
         )}
       </div>
 
-      <div className="px-4 py-2 border-t border-[#252F42] bg-[#101520] flex flex-wrap items-center justify-between gap-2 text-[11px] text-slate-400">
-        <span>کلیک روی هر کلمه مکان‌نما را با دقت Flick به همان نقطه منتقل می‌کند</span>
-        <span className="font-mono">
+      <div
+        data-testid="trilingual-asr-telemetry-bar"
+        className="px-4 py-2 border-t border-[#252F42] bg-[#101520] flex flex-wrap items-center justify-between gap-2 text-[11px] text-slate-400"
+      >
+        <div className="flex flex-wrap items-center gap-3">
+          <span>
+            تشخیص چندزبانه (Code-Switching):
+          </span>
+          <span className="text-slate-200 font-mono">
+            FA: {trilingualStats.persianCount}
+          </span>
+          <span className="text-indigo-300 font-mono">
+            EN: {trilingualStats.englishCount}
+          </span>
+          <span className="text-emerald-300 font-mono">
+            AR: {trilingualStats.arabicCount}
+          </span>
+          <span className="text-amber-300 font-mono">
+            اطمینان کالیبره‌شده (Platt): {(trilingualStats.meanCalibratedConfidence * 100).toFixed(1)}٪
+          </span>
+        </div>
+        <span data-testid="transcript-token-count" className="font-mono">
           واژگان همگام‌شده: {tokens.length}
         </span>
       </div>

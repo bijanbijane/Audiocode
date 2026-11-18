@@ -10,7 +10,9 @@
     "preview": "vite preview",
     "clean": "rm -rf dist server.js",
     "lint": "tsc --noEmit",
-    "test:quality-gates": "vitest run src/quality-gate/__tests__/full-pipeline.spec.ts"
+    "test:quality-gates": "vitest run src/quality-gate/__tests__/full-pipeline.spec.ts",
+    "test:unit": "bash -c 'tsx --test $(find src packages backend -name \"*.test.ts\" | sort)'",
+    "verify:foundation": "npm run lint && npx vitest run && npm run test:unit && npm run build"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",

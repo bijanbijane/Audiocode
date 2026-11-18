@@ -1,0 +1,10 @@
+# Pinned Dependencies Lockfile — Track Whisper Large-v3 / Turbo Fine-Tuning
+torch==2.5.1
+torchaudio==2.5.1
+transformers==4.51.3
+accelerate==1.2.1
+peft==0.14.0
+openai-whisper==20240930
+faster-whisper==1.1.0
+evaluate==0.4.3
+jiwer==3.1.0

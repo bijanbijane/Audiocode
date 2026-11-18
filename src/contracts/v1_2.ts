@@ -131,6 +131,10 @@ export interface EditTransaction {
   timestamp: number;
   beforeTracks: Track[];
   afterTracks: Track[];
+  beforeTokens?: PersianWordToken[];
+  afterTokens?: PersianWordToken[];
+  beforeRecommendations?: SmartRecommendation[];
+  afterRecommendations?: SmartRecommendation[];
   affectedRecommendationId?: string;
   commitStatus: 'committed' | 'reverted';
 }
@@ -203,6 +207,36 @@ export interface PersianWordToken {
   isDisfluency?: boolean;
   isStretchedVowel?: boolean;
   isCrosstalkSuppressed?: boolean;
+  /** Detected word language in trilingual Persian/English/Arabic code-switched speech */
+  detectedLanguage?: 'FA' | 'EN' | 'AR';
+  canonicalLatinForm?: string;
+  canonicalPersianForm?: string;
+  canonicalArabicForm?: string;
+  /** Platt-scaled calibrated empirical confidence score */
+  calibratedConfidence?: number;
+  /** ElevenLabs Scribe v3: 20ms CTC Viterbi character-level timestamp spans */
+  characterSpans?: {
+    readonly char: string;
+    readonly startMs: number;
+    readonly endMs: number;
+    readonly confidence: number;
+  }[];
+  /** ElevenLabs Scribe v3: Inline non-verbal audio event tag attached to or preceding token */
+  audioEventTag?: 'BREATH' | 'COUGH_THROAT' | 'LAUGHTER' | 'MUSIC_JINGLE' | 'LONG_PAUSE';
+  /** ROVER 3-Model Consensus agreement ratio (Scribe v3 + GPT-Transcribe + Nova-3) */
+  roverAgreementRatio?: number;
+  /** N-Best Word Confusion Network alternatives with posterior probabilities */
+  nBestAlternatives?: {
+    readonly word: string;
+    readonly posteriorProb: number;
+  }[];
+  /** Deepgram Nova-3 & GPT-Transcribe: Whether this token was boosted/verified via Keyterm Prompting Trie */
+  keytermBoosted?: boolean;
+  /** OpenAI gpt-live-transcribe: Syntactic & prosodic utterance endpoint state */
+  syntacticEndpointState?:
+    | 'COMPLETE_VERB_OR_CLAUSE'
+    | 'NEUTRAL_NOMINAL'
+    | 'INCOMPLETE_CONJUNCTION_OR_PREP';
 }
 
 export interface ProcessingNodeDescriptor {

@@ -142,11 +142,13 @@ export class PersianProsodicPunctuationRestorer {
     const maxLag = Math.min(Math.floor(sliceLen / 2), Math.floor(sampleRate / 80));
     if (maxLag <= minLag) return 0;
 
-    let bestLag = 0;
-    let maxCorr = 0;
+    const lagCount = maxLag - minLag + 1;
+    const corrs = new Float64Array(lagCount);
     const compareLen = sliceLen - maxLag;
+    let maxCorr = 0;
 
-    for (let lag = minLag; lag <= maxLag; lag += 2) {
+    for (let idx = 0; idx < lagCount; idx++) {
+      const lag = minLag + idx;
       let dot = 0;
       let e1 = 0;
       let e2 = 0;
@@ -158,12 +160,50 @@ export class PersianProsodicPunctuationRestorer {
         e2 += b * b;
       }
       const corr = dot / (Math.sqrt(e1 * e2) + 1e-12);
+      corrs[idx] = corr;
       if (corr > maxCorr) {
         maxCorr = corr;
-        bestLag = lag;
       }
     }
 
-    return maxCorr >= 0.55 && bestLag > 0 ? sampleRate / bestLag : 0;
+    if (maxCorr < 0.55) return 0;
+
+    // Pick the first strong local peak (>= 85% of global max) to prevent octave-halving at 2*T0
+    const peakThreshold = Math.max(0.55, maxCorr * 0.85);
+    let bestIdx = -1;
+    for (let idx = 1; idx < lagCount - 1; idx++) {
+      const c = corrs[idx];
+      if (c >= peakThreshold && c >= corrs[idx - 1] && c >= corrs[idx + 1]) {
+        bestIdx = idx;
+        break;
+      }
+    }
+
+    if (bestIdx === -1) {
+      let fallbackMax = -Infinity;
+      for (let idx = 0; idx < lagCount; idx++) {
+        if (corrs[idx] > fallbackMax) {
+          fallbackMax = corrs[idx];
+          bestIdx = idx;
+        }
+      }
+    }
+
+    if (bestIdx < 0) return 0;
+
+    // Parabolic interpolation around bestIdx for sub-sample period accuracy
+    let refinedLag = minLag + bestIdx;
+    if (bestIdx > 0 && bestIdx < lagCount - 1) {
+      const y0 = corrs[bestIdx - 1];
+      const y1 = corrs[bestIdx];
+      const y2 = corrs[bestIdx + 1];
+      const denom = 2 * (y0 - 2 * y1 + y2);
+      if (Math.abs(denom) > 1e-9) {
+        const delta = Math.max(-0.5, Math.min(0.5, (y0 - y2) / denom));
+        refinedLag += delta;
+      }
+    }
+
+    return refinedLag > 0 ? sampleRate / refinedLag : 0;
   }
 }

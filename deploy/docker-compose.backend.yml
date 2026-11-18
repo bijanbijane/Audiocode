@@ -9,7 +9,7 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?required}
     volumes:
       - pg_data:/var/lib/postgresql/data
-      - ../backend/db:/docker-entrypoint-initdb.d:ro
+      - ../platform/migrations:/docker-entrypoint-initdb.d:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U paudio_app -d paudio_platform"]
       interval: 10s

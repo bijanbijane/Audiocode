@@ -37,9 +37,11 @@ export class AutomatedQualityGateRunner {
     const rawHypWords = hypothesisText.trim().split(/\s+/).filter(Boolean);
 
     const normRefWords = PersianTextNormalizer.normalizeTokenText(referenceText)
+      .replace(/\u200c/g, '')
       .split(/\s+/)
       .filter(Boolean);
     const normHypWords = PersianTextNormalizer.normalizeTokenText(hypothesisText)
+      .replace(/\u200c/g, '')
       .split(/\s+/)
       .filter(Boolean);
 

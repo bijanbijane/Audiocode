@@ -46,12 +46,18 @@ const defaultOpfsJournalStore: RecoveryJournalStore = {
   },
 };
 
+const sameTabHeldLocks = new Map<
+  string,
+  { refCount: number; releaseFn: (() => void) | null; pendingPromise: Promise<boolean> | null }
+>();
+
 /**
  * Multi-Tab Web Locks & Crash Recovery Journal (Architecture Doc Sections 45 & 48)
  */
 export class CrashRecoveryAndSessionLock {
   private readonly sessionId = `sess_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-  private releaseLockFn: (() => void) | null = null;
+  private heldProjectId: string | null = null;
+  private isReleased = false;
   private readonly journalStore: RecoveryJournalStore;
 
   constructor(journalStore: RecoveryJournalStore = defaultOpfsJournalStore) {
@@ -63,30 +69,75 @@ export class CrashRecoveryAndSessionLock {
   }
 
   public async acquireExclusiveProjectLock(projectId: string): Promise<boolean> {
+    this.isReleased = false;
+    this.heldProjectId = projectId;
     if (typeof navigator === 'undefined' || !('locks' in navigator)) return true;
 
-    return new Promise<boolean>((resolve) => {
+    const existing = sameTabHeldLocks.get(projectId);
+    if (existing) {
+      existing.refCount += 1;
+      if (existing.pendingPromise) {
+        return existing.pendingPromise;
+      }
+      return true;
+    }
+
+    const entry: {
+      refCount: number;
+      releaseFn: (() => void) | null;
+      pendingPromise: Promise<boolean> | null;
+    } = {
+      refCount: 1,
+      releaseFn: null,
+      pendingPromise: null,
+    };
+    sameTabHeldLocks.set(projectId, entry);
+
+    const promise = new Promise<boolean>((resolve) => {
       navigator.locks.request(
         `project_edit_lock_${projectId}`,
         { ifAvailable: true },
         async (lock) => {
           if (!lock) {
+            sameTabHeldLocks.delete(projectId);
             resolve(false);
+            return;
+          }
+          if (entry.refCount <= 0) {
+            sameTabHeldLocks.delete(projectId);
+            resolve(true);
             return;
           }
           resolve(true);
           await new Promise<void>((release) => {
-            this.releaseLockFn = release;
+            if (entry.refCount <= 0) {
+              sameTabHeldLocks.delete(projectId);
+              release();
+              return;
+            }
+            entry.releaseFn = release;
           });
         },
       );
     });
+
+    entry.pendingPromise = promise;
+    return promise;
   }
 
   public releaseProjectLock(): void {
-    if (this.releaseLockFn) {
-      this.releaseLockFn();
-      this.releaseLockFn = null;
+    if (this.isReleased || !this.heldProjectId) return;
+    this.isReleased = true;
+    const projectId = this.heldProjectId;
+    this.heldProjectId = null;
+    const entry = sameTabHeldLocks.get(projectId);
+    if (!entry) return;
+    entry.refCount -= 1;
+    if (entry.refCount <= 0 && entry.releaseFn) {
+      sameTabHeldLocks.delete(projectId);
+      const fn = entry.releaseFn;
+      entry.releaseFn = null;
+      fn();
     }
   }
 

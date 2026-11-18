@@ -1,0 +1,13 @@
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "asr-platform-python"
+version = "1.0.0a1"
+description = "Official Python SDK for the Independent Persian-English ASR Platform"
+requires-python = ">=3.11"
+license = {text = "MIT"}
+dependencies = [
+  "httpx>=0.27.0"
+]

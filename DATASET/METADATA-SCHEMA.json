@@ -1,0 +1,142 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://avapardaz.lab/schemas/asr-dataset-metadata-v1.json",
+  "title": "Avapardaz Persian-English ASR Dataset Sample Metadata Schema v1.0",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "sample_id",
+    "speaker_id",
+    "language",
+    "language_segments",
+    "transcript_raw",
+    "transcript_normalized",
+    "duration",
+    "sample_rate",
+    "channel_count",
+    "recording_environment",
+    "noise_level",
+    "speaking_style",
+    "accent_label",
+    "speaker_count",
+    "dataset_source",
+    "license",
+    "consent_status",
+    "audio_hash",
+    "annotation_version",
+    "quality_status"
+  ],
+  "properties": {
+    "sample_id": {
+      "type": "string",
+      "pattern": "^[A-Z0-9_-]{6,64}$",
+      "description": "Unique immutable sample identifier (e.g., AVP-FAEN-0001)"
+    },
+    "speaker_id": {
+      "type": "string",
+      "pattern": "^SPK_[A-Z0-9_]{3,32}$",
+      "description": "Anonymized non-personal speaker identifier (must never contain PII, names, emails, or phone numbers)"
+    },
+    "language": {
+      "type": "string",
+      "enum": ["fa", "en", "fa-en", "fa-ar", "fa-en-ar"],
+      "description": "Primary or mixed language tag of the audio sample"
+    },
+    "language_segments": {
+      "type": "array",
+      "description": "Token or span-level language annotations for code-switched utterances",
+      "items": {
+        "type": "object",
+        "required": ["text", "lang", "start_sec", "end_sec"],
+        "properties": {
+          "text": { "type": "string" },
+          "accepted_alt_script": { "type": "string" },
+          "lang": { "type": "string", "enum": ["fa", "en", "ar"] },
+          "start_sec": { "type": "number", "minimum": 0 },
+          "end_sec": { "type": "number", "minimum": 0 }
+        }
+      }
+    },
+    "transcript_raw": {
+      "type": "string",
+      "minLength": 2,
+      "description": "Human-verified verbatim reference transcript preserving punctuation and ZWNJ"
+    },
+    "transcript_normalized": {
+      "type": "string",
+      "minLength": 2,
+      "description": "Canonical normalized transcript produced by Norm-FA-v1.0"
+    },
+    "duration": {
+      "type": "number",
+      "minimum": 0.2,
+      "maximum": 3600,
+      "description": "Audio duration in seconds"
+    },
+    "sample_rate": {
+      "type": "integer",
+      "enum": [8000, 16000, 22050, 24000, 32000, 44100, 48000, 96000],
+      "description": "Audio sample rate in Hz"
+    },
+    "channel_count": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 8
+    },
+    "recording_environment": {
+      "type": "string",
+      "enum": ["studio_clean", "home_quiet", "office_room", "street_traffic", "cafe_crowd", "vehicle_cabin", "telephone_8khz"]
+    },
+    "noise_level": {
+      "type": "object",
+      "required": ["snr_db", "rms_dbfs", "peak_dbfs"],
+      "properties": {
+        "snr_db": { "type": "number" },
+        "rms_dbfs": { "type": "number", "maximum": 0 },
+        "peak_dbfs": { "type": "number", "maximum": 0 }
+      }
+    },
+    "speaking_style": {
+      "type": "string",
+      "enum": ["formal_read", "conversational_spontaneous", "technical_discussion", "multi_speaker_debate", "fast_paced"]
+    },
+    "accent_label": {
+      "type": "string",
+      "description": "Verified regional or dialect label (e.g., fa-IR-Tehran, fa-IR-Isfahan, en-US-General, or unspecified)"
+    },
+    "speaker_count": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 10
+    },
+    "dataset_source": {
+      "type": "string",
+      "enum": ["AVAPARDAZ_STUDIO_CONSENT", "COMMON_VOICE_CC0", "FLEURS_CC_BY_4", "PESTE_BENCHMARK", "EXTERNAL_ACADEMIC_NC"]
+    },
+    "license": {
+      "type": "string",
+      "enum": ["CC0-1.0", "CC-BY-4.0", "PROPRIETARY_CONSENT_VERIFIED", "ACADEMIC_NON_COMMERCIAL", "UNKNOWN_RESTRICTED"]
+    },
+    "consent_status": {
+      "type": "string",
+      "enum": ["VERIFIED_WRITTEN_CONSENT", "PUBLIC_DOMAIN_CC0", "PUBLIC_ATTRIBUTION_CC_BY", "UNVERIFIED_BLOCKED"]
+    },
+    "audio_hash": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$",
+      "description": "SHA-256 hex digest of the original audio file"
+    },
+    "annotation_version": {
+      "type": "string",
+      "pattern": "^ANNOT-FA-EN-v[0-9]+\\.[0-9]+$"
+    },
+    "quality_status": {
+      "type": "string",
+      "enum": ["APPROVED_GOLD", "NEEDS_HUMAN_REVIEW", "REJECTED_QC_FAILED"]
+    },
+    "assigned_split": {
+      "type": "string",
+      "enum": ["train", "validation", "test", "unassigned"]
+    }
+  }
+}
