@@ -130,27 +130,35 @@ export class SpeechEventEngine {
   ): Promise<SpeechEventAnalysisResult> {
     const config = request.config ?? DEFAULT_SPEECH_EVENT_THRESHOLDS_V1;
     const budget = request.memoryBudgetManager ?? getSharedMemoryBudgetManager();
-    const sampleRate = request.sampleRate;
-    const totalSamples = Math.max(
-      0,
-      Math.trunc(request.totalSamples || request.pcmMono?.length || 0),
-    );
+    const sampleRate: SampleRate =
+      Number.isFinite(request.sampleRate) && request.sampleRate > 0
+        ? request.sampleRate
+        : (0 as unknown as SampleRate);
+    const rawTotal = request.totalSamples || request.pcmMono?.length || 0;
+    const totalSamples =
+      Number.isFinite(rawTotal) && rawTotal > 0 ? Math.max(0, Math.trunc(rawTotal)) : 0;
     const totalRecordingDurationSec =
       sampleRate > 0 ? Number((totalSamples / sampleRate).toFixed(4)) : 0;
 
     // Resolve immutable normalized token copy (never mutating caller tokens)
-    const timedTokens: TimedPersianToken[] = request.tokens
-      ? [...request.tokens].filter((t) => t.trackId === request.trackId)
-      : request.wordTokens
-        ? convertWordTokensToTimedTokens(request.wordTokens, request.trackId)
-        : [];
+    const timedTokens: TimedPersianToken[] = (
+      request.tokens
+        ? [...request.tokens].filter((t) => t.trackId === request.trackId)
+        : request.wordTokens
+          ? convertWordTokensToTimedTokens(request.wordTokens, request.trackId)
+          : []
+    ).filter((t) => Number.isFinite(t.range?.start) && Number.isFinite(t.range?.end));
 
     const hasAudio = Boolean(
-      totalSamples > 0 && (request.pcmMono || request.readPcmWindow),
+      sampleRate > 0 && totalSamples > 0 && (request.pcmMono || request.readPcmWindow),
     );
 
-    const windowSec = Math.max(2, config.analysisWindowSec);
-    const windowSamples = Math.max(1, Math.floor(windowSec * sampleRate));
+    const safeWindowSec =
+      Number.isFinite(config.analysisWindowSec) && config.analysisWindowSec > 0
+        ? config.analysisWindowSec
+        : 15;
+    const windowSec = Math.max(2, safeWindowSec);
+    const windowSamples = Math.max(1, Math.floor(windowSec * Math.max(1, sampleRate)));
     const totalWindows = hasAudio ? Math.max(1, Math.ceil(totalSamples / windowSamples)) : 1;
 
     const allEvents: SpeechEvent[] = [];
@@ -173,8 +181,13 @@ export class SpeechEventEngine {
     const defaultVadAdapter =
       request.vadProvider === undefined ? new OnnxPersianAsrAndVadAdapter() : request.vadProvider;
 
+    const maxBufferedEvents =
+      Number.isFinite(config.maxBufferedEvents) && config.maxBufferedEvents > 0
+        ? Math.trunc(config.maxBufferedEvents)
+        : 4000;
+
     const pushEventBounded = (ev: SpeechEvent) => {
-      if (allEvents.length >= config.maxBufferedEvents) {
+      if (allEvents.length >= maxBufferedEvents) {
         truncatedByEventCap = true;
         return;
       }
@@ -200,9 +213,13 @@ export class SpeechEventEngine {
 
         // Memory budget reservation for bounded PCM window + transient feature buffers
         const pcmBytes = count * Float32Array.BYTES_PER_ELEMENT;
+        const safeHopMs =
+          Number.isFinite(config.silenceHopMs) && config.silenceHopMs > 0
+            ? config.silenceHopMs
+            : 10;
         const numFramesEst = Math.max(
           1,
-          Math.ceil((count / sampleRate) * (1000 / Math.max(5, config.silenceHopMs))),
+          Math.ceil((count / sampleRate) * (1000 / Math.max(5, safeHopMs))),
         );
         const featureBytes = numFramesEst * 4 * Float32Array.BYTES_PER_ELEMENT;
 
@@ -964,24 +981,30 @@ export class SpeechEventEngine {
     endSample: number,
     sampleRate: number,
   ): { hasSignal: boolean; evidence: SpeechEventAcousticEvidence } {
-    if (endSample <= startSample || startSample < 0 || endSample > windowPcm.length) {
+    if (
+      !Number.isFinite(startSample) ||
+      !Number.isFinite(endSample) ||
+      endSample <= startSample ||
+      startSample < 0 ||
+      endSample > windowPcm.length
+    ) {
       return { hasSignal: false, evidence: { notes: ['بازه خارج از پنجره PCM'] } };
     }
     const len = endSample - startSample;
     let sumSq = 0;
     let peak = 0;
     let zcr = 0;
+    let prev = 0;
     for (let i = startSample; i < endSample; i++) {
-      const s = windowPcm[i];
+      const raw = windowPcm[i];
+      const s = Number.isFinite(raw) ? raw : 0;
       const abs = Math.abs(s);
       sumSq += s * s;
       if (abs > peak) peak = abs;
-      if (
-        i > startSample &&
-        ((windowPcm[i - 1] >= 0 && s < 0) || (windowPcm[i - 1] < 0 && s >= 0))
-      ) {
+      if (i > startSample && ((prev >= 0 && s < 0) || (prev < 0 && s >= 0))) {
         zcr++;
       }
+      prev = s;
     }
     const rms = Math.sqrt(sumSq / len);
     const rmsDb = Number((20 * Math.log10(Math.max(rms, 1e-9))).toFixed(1));

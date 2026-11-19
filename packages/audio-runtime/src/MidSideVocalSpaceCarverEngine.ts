@@ -20,8 +20,10 @@ export class MidSideVocalSpaceCarverEngine {
     const invSqrt2 = Math.SQRT1_2;
 
     for (let i = 0; i < len; i++) {
-      mid[i] = (left[i] + right[i]) * invSqrt2;
-      side[i] = (left[i] - right[i]) * invSqrt2;
+      const l = Number.isFinite(left[i]) ? left[i] : 0;
+      const r = Number.isFinite(right[i]) ? right[i] : 0;
+      mid[i] = (l + r) * invSqrt2;
+      side[i] = (l - r) * invSqrt2;
     }
     return { mid, side };
   }
@@ -38,11 +40,12 @@ export class MidSideVocalSpaceCarverEngine {
     const left = new Float32Array(len);
     const right = new Float32Array(len);
     const invSqrt2 = Math.SQRT1_2;
-    const clampedWidth = Math.max(0.0, Math.min(1.6, stereoWidthFactor));
+    const safeWidth = Number.isFinite(stereoWidthFactor) ? stereoWidthFactor : 1.0;
+    const clampedWidth = Math.max(0.0, Math.min(1.6, safeWidth));
 
     for (let i = 0; i < len; i++) {
-      const m = mid[i];
-      const s = side[i] * clampedWidth;
+      const m = Number.isFinite(mid[i]) ? mid[i] : 0;
+      const s = (Number.isFinite(side[i]) ? side[i] : 0) * clampedWidth;
       left[i] = (m + s) * invSqrt2;
       right[i] = (m - s) * invSqrt2;
     }
@@ -62,20 +65,25 @@ export class MidSideVocalSpaceCarverEngine {
   ): [Float32Array, Float32Array] {
     const { mid, side } = this.encodeStereoToMidSide(musicLeft, musicRight);
     const len = mid.length;
+    if (len === 0 || !Number.isFinite(sampleRate) || sampleRate <= 0) {
+      return this.decodeMidSideToStereo(mid, side, 1.05);
+    }
 
     const alphaLow300 = Math.exp((-2.0 * Math.PI * 300.0) / sampleRate);
     const alphaHigh3500 = Math.exp((-2.0 * Math.PI * 3500.0) / sampleRate);
     const envAttack = Math.exp(-1.0 / (0.015 * sampleRate));  // 15ms Attack
     const envRelease = Math.exp(-1.0 / (0.140 * sampleRate)); // 140ms Release
 
-    const minCarveGainLin = Math.pow(10, -Math.abs(maxMidVocalCarveDb) / 20.0);
+    const safeCarveDb = Number.isFinite(maxMidVocalCarveDb) ? maxMidVocalCarveDb : 6.5;
+    const minCarveGainLin = Math.pow(10, -Math.abs(safeCarveDb) / 20.0);
 
     let lp300 = 0;
     let lp3500 = 0;
     let voiceEnv = 0;
 
     for (let i = 0; i < len; i++) {
-      const vAbs = i < narratorVoiceMono.length ? Math.abs(narratorVoiceMono[i]) : 0;
+      const rawVoice = i < narratorVoiceMono.length ? narratorVoiceMono[i] : 0;
+      const vAbs = Number.isFinite(rawVoice) ? Math.abs(rawVoice) : 0;
       if (vAbs > voiceEnv) {
         voiceEnv = envAttack * voiceEnv + (1.0 - envAttack) * vAbs;
       } else {

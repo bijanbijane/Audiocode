@@ -17,7 +17,9 @@ export class PerformanceAggregator {
   private readonly overBudgetCounts = new Map<PerformanceMetricName, number>();
 
   constructor(maxWindowSamples = 200) {
-    this.maxWindowSamples = Math.max(16, maxWindowSamples);
+    this.maxWindowSamples = Number.isFinite(maxWindowSamples)
+      ? Math.max(16, Math.floor(maxWindowSamples))
+      : 200;
   }
 
   public record(metric: PerformanceMetricName, value: number, overBudget: boolean): void {

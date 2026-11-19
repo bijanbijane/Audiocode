@@ -156,9 +156,14 @@ export class StreamingWavExportEncoder {
     this.syncHandle.write(finalHeader, { at: 0 });
     this.syncHandle.flush();
 
+    const safeSampleRate =
+      Number.isFinite(this.profile.sampleRate) && this.profile.sampleRate > 0
+        ? this.profile.sampleRate
+        : 48000;
+
     return {
       totalBytes: 44 + this.totalDataBytesWritten,
-      durationSeconds: this.totalFramesWritten / this.profile.sampleRate,
+      durationSeconds: this.totalFramesWritten / safeSampleRate,
     };
   }
 
@@ -200,13 +205,17 @@ export class StreamingWavExportEncoder {
     tokens: readonly TimedPersianToken[],
     maxWordsPerCaption = 8,
   ): string {
+    const step =
+      Number.isFinite(maxWordsPerCaption) && maxWordsPerCaption >= 1
+        ? Math.floor(maxWordsPerCaption)
+        : 8;
     const lines: string[] = ['WEBVTT', 'Kind: captions', 'Language: fa', ''];
-    for (let i = 0; i < tokens.length; i += maxWordsPerCaption) {
-      const group = tokens.slice(i, i + maxWordsPerCaption);
+    for (let i = 0; i < tokens.length; i += step) {
+      const group = tokens.slice(i, i + step);
       if (group.length === 0) continue;
 
       const startSec = TimeMath.flicksToSeconds(group[0].range.start);
-      const endSec = TimeMath.flicksToSeconds(group[group.length - 1].range.end);
+      const endSec = Math.max(startSec, TimeMath.flicksToSeconds(group[group.length - 1].range.end));
       const text = group.map((t) => t.displayText).join(' ');
 
       lines.push(`${this.formatTimestamp(startSec, '.')} --> ${this.formatTimestamp(endSec, '.')}`);
@@ -223,14 +232,18 @@ export class StreamingWavExportEncoder {
     tokens: readonly TimedPersianToken[],
     maxWordsPerCaption = 8,
   ): string {
+    const step =
+      Number.isFinite(maxWordsPerCaption) && maxWordsPerCaption >= 1
+        ? Math.floor(maxWordsPerCaption)
+        : 8;
     const lines: string[] = [];
     let cueIndex = 1;
-    for (let i = 0; i < tokens.length; i += maxWordsPerCaption) {
-      const group = tokens.slice(i, i + maxWordsPerCaption);
+    for (let i = 0; i < tokens.length; i += step) {
+      const group = tokens.slice(i, i + step);
       if (group.length === 0) continue;
 
       const startSec = TimeMath.flicksToSeconds(group[0].range.start);
-      const endSec = TimeMath.flicksToSeconds(group[group.length - 1].range.end);
+      const endSec = Math.max(startSec, TimeMath.flicksToSeconds(group[group.length - 1].range.end));
       const text = group.map((t) => t.displayText).join(' ');
 
       lines.push(String(cueIndex++));
@@ -249,9 +262,13 @@ export class StreamingWavExportEncoder {
     const lines: string[] = ['WEBVTT', 'Kind: chapters', 'Language: fa', ''];
     for (let i = 0; i < sorted.length; i++) {
       const ch = sorted[i];
+      const safeStart = Number.isFinite(ch.startSeconds) ? Math.max(0, ch.startSeconds) : 0;
+      const safeEnd = Number.isFinite(ch.endSeconds)
+        ? Math.max(safeStart, ch.endSeconds)
+        : safeStart;
       lines.push(`Chapter ${i + 1}`);
       lines.push(
-        `${this.formatTimestamp(ch.startSeconds, '.')} --> ${this.formatTimestamp(ch.endSeconds, '.')}`,
+        `${this.formatTimestamp(safeStart, '.')} --> ${this.formatTimestamp(safeEnd, '.')}`,
       );
       lines.push(ch.titleFa);
       lines.push('');
@@ -260,7 +277,8 @@ export class StreamingWavExportEncoder {
   }
 
   private static formatTimestamp(seconds: number, msSeparator: '.' | ','): string {
-    const totalMs = Math.max(0, Math.round(seconds * 1000));
+    const safeSec = Number.isFinite(seconds) ? seconds : 0;
+    const totalMs = Math.max(0, Math.round(safeSec * 1000));
     const hrs = Math.floor(totalMs / 3_600_000);
     const mins = Math.floor((totalMs % 3_600_000) / 60_000);
     const secs = Math.floor((totalMs % 60_000) / 1000);

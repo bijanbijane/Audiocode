@@ -152,11 +152,26 @@ export function createPersianTranscriptDocument(params: {
     readonly speechEventIds?: readonly string[];
   }>;
 }): PersianTranscriptDocument {
-  const sampleRate = params.sampleRate ?? 48000;
+  const sampleRate =
+    typeof params.sampleRate === 'number' && Number.isFinite(params.sampleRate) && params.sampleRate > 0
+      ? Math.trunc(params.sampleRate)
+      : 48000;
   const scanned = tokenizePersianTranscript(params.rawAsrText, `${params.documentId}_tok`);
 
   const tokens: PersianTranscriptTokenRecord[] = scanned.map((t, i) => {
     const span = params.tokenSampleSpans?.[i];
+    const validStart =
+      typeof span?.sourceStartSample === 'number' &&
+      Number.isFinite(span.sourceStartSample) &&
+      span.sourceStartSample >= 0
+        ? Math.trunc(span.sourceStartSample)
+        : null;
+    const validEnd =
+      typeof span?.sourceEndSample === 'number' &&
+      Number.isFinite(span.sourceEndSample) &&
+      span.sourceEndSample >= 0
+        ? Math.max(validStart ?? 0, Math.trunc(span.sourceEndSample))
+        : null;
     return {
       tokenId: t.tokenId,
       index: t.index,
@@ -168,8 +183,8 @@ export function createPersianTranscriptDocument(params: {
       userConfirmed: false,
       startCharOffset: t.startCharOffset,
       endCharOffset: t.endCharOffset,
-      sourceStartSample: span?.sourceStartSample ?? null,
-      sourceEndSample: span?.sourceEndSample ?? null,
+      sourceStartSample: validStart,
+      sourceEndSample: validEnd,
       sampleRate,
       language: t.language,
       epistemicSource: 'MODEL_GENERATED_RECOGNITION',

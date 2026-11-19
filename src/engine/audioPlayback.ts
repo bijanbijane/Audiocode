@@ -11,10 +11,10 @@ import {
   StreamingWavExportEncoder,
   WavSyncAccessTarget,
 } from '../processing-core/StreamingExportEncoder';
-import { applyEqualPowerMicroCrossfade, synthesizeRoomToneFill } from './dsp';
-import { processChunkWithPreRoll } from './processingGraph';
+import { synthesizeRoomToneFill } from './dsp';
+import { DspBypassFlags, processChunkWithPreRoll } from './processingGraph';
 import { computeTimelineDurationFlicks } from './timeline';
-import { flicksToSamples, flicksToSeconds } from './timebase';
+import { flicksToSamples, flicksToSeconds, samplesToFlicks } from './timebase';
 
 export type ReadAssetRangeFn = (
   assetId: string,
@@ -33,6 +33,7 @@ export function renderTimelineRangeToPcm(params: {
   sampleRate: number;
   rangeFlicks: FlickRange;
   dspParams: EphemeralDspParams;
+  dspBypassFlags?: DspBypassFlags;
   preRollSamples?: number;
 }): Float32Array {
   const {
@@ -42,8 +43,14 @@ export function renderTimelineRangeToPcm(params: {
     sampleRate,
     rangeFlicks,
     dspParams,
+    dspBypassFlags,
     preRollSamples = 2400, // 50ms default pre-roll priming
   } = params;
+
+  if (!Number.isFinite(sampleRate) || sampleRate <= 0) {
+    return new Float32Array(0);
+  }
+  const safePreRoll = Number.isFinite(preRollSamples) ? Math.max(0, Math.floor(preRollSamples)) : 0;
 
   const startSample = Math.max(0, flicksToSamples(rangeFlicks.startFlicks, sampleRate));
   const endSample = Math.max(startSample, flicksToSamples(rangeFlicks.endFlicks, sampleRate));
@@ -51,7 +58,7 @@ export function renderTimelineRangeToPcm(params: {
   if (outLen <= 0) return new Float32Array(0);
 
   // Extended window [renderStart .. endSample) for Pre-Roll state priming
-  const renderStart = Math.max(0, startSample - preRollSamples);
+  const renderStart = Math.max(0, startSample - safePreRoll);
   const actualPreRoll = startSample - renderStart;
   const mixLen = outLen + actualPreRoll;
   const mixBuf = new Float32Array(mixLen);
@@ -74,13 +81,19 @@ export function renderTimelineRangeToPcm(params: {
       if (overlapEnd <= overlapStart) continue;
 
       const clipGain = trackGain * Math.pow(10, clip.gainDb / 20);
-      const fadeInSamples = Math.round((clip.fadeInMs * sampleRate) / 1000);
-      const fadeOutSamples = Math.round((clip.fadeOutMs * sampleRate) / 1000);
+      const clipLenSamples = Math.max(0, clipEnd - clipStart);
+      const maxFadeSamples = Math.floor(clipLenSamples * 0.45);
+      const fadeInSamples = Math.min(maxFadeSamples, Math.max(0, Math.round((clip.fadeInMs * sampleRate) / 1000)));
+      const fadeOutSamples = Math.min(maxFadeSamples, Math.max(0, Math.round((clip.fadeOutMs * sampleRate) / 1000)));
 
       if (clip.kind === 'room-tone-fill') {
         const asset = assets[clip.assetId];
         if (!asset) continue;
-        const fill = synthesizeRoomToneFill(asset.acousticProfile, overlapEnd - overlapStart);
+        const fill = synthesizeRoomToneFill(
+          asset.acousticProfile,
+          overlapEnd - overlapStart,
+          overlapStart - clipStart,
+        );
         for (let i = 0; i < fill.length; i++) {
           const tlSample = overlapStart + i;
           const distFromStart = tlSample - clipStart;
@@ -115,12 +128,15 @@ export function renderTimelineRangeToPcm(params: {
           env *= Math.sin((distFromEnd / fadeOutSamples) * Math.PI * 0.5);
         }
 
-        mixBuf[tlSample - renderStart] += src[srcIdx] * clipGain * env;
+        const rawSample = src[srcIdx];
+        if (Number.isFinite(rawSample)) {
+          mixBuf[tlSample - renderStart] += rawSample * clipGain * env;
+        }
       }
     }
   }
 
-  return processChunkWithPreRoll(mixBuf, actualPreRoll, sampleRate, dspParams);
+  return processChunkWithPreRoll(mixBuf, actualPreRoll, sampleRate, dspParams, dspBypassFlags);
 }
 
 /**
@@ -133,29 +149,35 @@ export function streamingChunkedRender(params: {
   pcmSources: Record<string, Float32Array>;
   sampleRate: number;
   dspParams: EphemeralDspParams;
+  dspBypassFlags?: DspBypassFlags;
   chunkSeconds?: number;
   onProgress?: (pct: number) => void;
 }): Float32Array {
+  if (!Number.isFinite(params.sampleRate) || params.sampleRate <= 0) {
+    return new Float32Array(0);
+  }
   const totalFlicks = computeTimelineDurationFlicks(params.tracks);
   const totalSamples = flicksToSamples(totalFlicks, params.sampleRate);
   if (totalSamples <= 0) return new Float32Array(0);
 
-  const chunkSec = params.chunkSeconds ?? 2.0;
-  const chunkSamples = Math.round(chunkSec * params.sampleRate);
+  const rawChunkSec = params.chunkSeconds ?? 2.0;
+  const chunkSec = Number.isFinite(rawChunkSec) && rawChunkSec > 0 ? Math.max(0.05, rawChunkSec) : 2.0;
+  const chunkSamples = Math.max(1, Math.round(chunkSec * params.sampleRate));
   const out = new Float32Array(totalSamples);
   const preRollSamples = Math.round(params.sampleRate * 0.08); // 80ms Pre-Roll priming
 
   let cursor = 0;
   while (cursor < totalSamples) {
     const nextCursor = Math.min(totalSamples, cursor + chunkSamples);
-    const startFlicks = Math.round((cursor / params.sampleRate) * 705_600_000);
-    const endFlicks = Math.round((nextCursor / params.sampleRate) * 705_600_000);
+    const startFlicks = samplesToFlicks(cursor, params.sampleRate);
+    const endFlicks = samplesToFlicks(nextCursor, params.sampleRate);
     const chunkPcm = renderTimelineRangeToPcm({
       ...params,
       rangeFlicks: { startFlicks, endFlicks },
       preRollSamples,
     });
-    out.set(chunkPcm.subarray(0, nextCursor - cursor), cursor);
+    const copyLen = Math.min(chunkPcm.length, nextCursor - cursor);
+    out.set(chunkPcm.subarray(0, copyLen), cursor);
     cursor = nextCursor;
     params.onProgress?.(Math.round((cursor / totalSamples) * 100));
   }
@@ -174,6 +196,7 @@ export function buildSplicePreviewBuffer(params: {
   sampleRate: number;
   cutRange: FlickRange;
   dspParams: EphemeralDspParams;
+  dspBypassFlags?: DspBypassFlags;
   mode: 'before' | 'after';
   tracksBeforeEdit: Track[];
 }): Float32Array {
@@ -194,13 +217,14 @@ export function buildSplicePreviewBuffer(params: {
         endFlicks: Math.round(previewEndSec * 705_600_000),
       },
       dspParams: params.dspParams,
+      dspBypassFlags: params.dspBypassFlags,
     });
   }
 
-  // After edit: render left + right seamlessly with Equal-Power Micro-Crossfade
+  // After edit: render left + right seamlessly (cut/split clip boundaries already enforce 10ms equal-power micro-fades)
   const totalDurSec = flicksToSeconds(computeTimelineDurationFlicks(params.tracksAfterEdit));
   const previewEndSec = Math.min(totalDurSec, cutStartSec + contextSec * 1.3);
-  const rendered = renderTimelineRangeToPcm({
+  return renderTimelineRangeToPcm({
     tracks: params.tracksAfterEdit,
     assets: params.assets,
     pcmSources: params.pcmSources,
@@ -210,18 +234,8 @@ export function buildSplicePreviewBuffer(params: {
       endFlicks: Math.round(previewEndSec * 705_600_000),
     },
     dspParams: params.dspParams,
+    dspBypassFlags: params.dspBypassFlags,
   });
-
-  // Ensure smooth micro-fade on splice boundary
-  const spliceSample = Math.round((cutStartSec - previewStartSec) * params.sampleRate);
-  const xfLen = Math.min(480, Math.floor(rendered.length / 4));
-  if (spliceSample > xfLen && spliceSample + xfLen < rendered.length) {
-    const left = rendered.slice(spliceSample - xfLen, spliceSample);
-    const right = rendered.slice(spliceSample, spliceSample + xfLen);
-    const blended = applyEqualPowerMicroCrossfade(left, right);
-    rendered.set(blended, spliceSample - Math.floor(xfLen / 2));
-  }
-  return rendered;
 }
 
 /**
@@ -241,7 +255,14 @@ export class StudioAudioTransport {
   private ensureContext(sampleRate: number): AudioContext {
     if (!this.ctx || this.ctx.state === 'closed') {
       const AudioCtx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
-      this.ctx = new AudioCtx({ sampleRate });
+      try {
+        this.ctx =
+          Number.isFinite(sampleRate) && sampleRate >= 8000 && sampleRate <= 96000
+            ? new AudioCtx({ sampleRate })
+            : new AudioCtx();
+      } catch {
+        this.ctx = new AudioCtx();
+      }
     }
     if (this.ctx.state === 'suspended') {
       void this.ctx.resume();
@@ -264,6 +285,7 @@ export class StudioAudioTransport {
     loop?: boolean;
     playbackRate?: number;
     dspParams: EphemeralDspParams;
+    dspBypassFlags?: DspBypassFlags;
     windowDurationSec?: number;
     onTick?: (timelineSec: number) => void;
     onMeter?: (peakDb: number, rmsDb: number) => void;
@@ -281,6 +303,7 @@ export class StudioAudioTransport {
       loop = false,
       playbackRate = 1.0,
       dspParams,
+      dspBypassFlags,
       windowDurationSec = 4.0,
       onTick,
       onMeter,
@@ -295,7 +318,10 @@ export class StudioAudioTransport {
     }
 
     const ctx = this.ensureContext(sampleRate);
-    this.startedAtCtxTime = ctx.currentTime;
+    // Anchor startedAtCtxTime lazily on the first scheduled window (after synchronous DSP render)
+    // with a small lookahead lead so window 1 and window 2 never overlap or drift.
+    let anchorInitialized = false;
+    this.startedAtCtxTime = ctx.currentTime + 0.03;
     this.startOffsetSec = startTimelineSec;
     this.isPlaying = true;
 
@@ -322,6 +348,7 @@ export class StudioAudioTransport {
           endFlicks: Math.round(winEndSec * 705_600_000),
         },
         dspParams,
+        dspBypassFlags,
       });
 
       if (chunkPcm.length === 0) return;
@@ -336,6 +363,11 @@ export class StudioAudioTransport {
       node.playbackRate.value = rate;
       node.connect(ctx.destination);
       this.activeNodes.add(node);
+
+      if (!anchorInitialized) {
+        this.startedAtCtxTime = ctx.currentTime + 0.025;
+        anchorInitialized = true;
+      }
 
       const offsetFromPlayStartSec = (winStartSec - startTimelineSec) / rate;
       const targetCtxStartTime = Math.max(
@@ -419,7 +451,7 @@ export class StudioAudioTransport {
     onEnded?: () => void,
   ): void {
     this.stop();
-    if (pcm.length === 0) {
+    if (pcm.length === 0 || !Number.isFinite(sampleRate) || sampleRate <= 0) {
       onEnded?.();
       return;
     }
@@ -456,6 +488,7 @@ export class StudioAudioTransport {
       const elapsed = Math.max(0, this.ctx.currentTime - this.startedAtCtxTime);
       if (elapsed >= totalSec) {
         this.isPlaying = false;
+        this.rafId = null;
         onTick?.(startTimelineSec + totalSec);
         return;
       }

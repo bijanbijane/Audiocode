@@ -213,7 +213,11 @@ export function parseWaveContainerBytes(bytes: Uint8Array): ParsedWaveArtifact {
   }
 
   const actualPayloadBytes = bytes.byteLength - dataOffsetBytes;
-  if (actualPayloadBytes < dataByteLength) {
+  if (
+    !Number.isFinite(dataByteLength) ||
+    dataByteLength < 0 ||
+    actualPayloadBytes < dataByteLength
+  ) {
     return {
       valid: false,
       container,
@@ -227,7 +231,7 @@ export function parseWaveContainerBytes(bytes: Uint8Array): ParsedWaveArtifact {
       dataOffsetBytes,
       dataByteLength,
       sampleCountPerChannel: 0,
-      error: `Truncated data chunk: header declares ${dataByteLength} B, actual buffer has ${actualPayloadBytes} B.`,
+      error: `Truncated or invalid data chunk: header declares ${dataByteLength} B, actual buffer has ${actualPayloadBytes} B.`,
     };
   }
 
@@ -334,7 +338,11 @@ export class AudioRenderValidator {
   }): RenderValidationReport {
     const failures: RenderValidationFailure[] = [];
     const { plan, outputMetadata, outputBytes } = params;
-    const maxAllowedClippedSamples = params.maxAllowedClippedSamples ?? 0;
+    const rawMaxClipped = params.maxAllowedClippedSamples ?? 0;
+    const maxAllowedClippedSamples =
+      Number.isFinite(rawMaxClipped) && rawMaxClipped >= 0
+        ? Math.floor(rawMaxClipped)
+        : 0;
 
     if (!outputBytes || outputBytes.byteLength === 0) {
       failures.push({
@@ -452,9 +460,15 @@ export class AudioRenderValidator {
     }
 
     // Independent scan of float32 samples for NaN/Infinity and peak amplitude
-    let scannedNonFinite = outputMetadata.nonFiniteSampleCount;
-    let scannedPeak = outputMetadata.peakAmplitude;
-    let scannedClipped = outputMetadata.clippedSampleCount;
+    let scannedNonFinite = Number.isFinite(outputMetadata.nonFiniteSampleCount)
+      ? Math.max(0, Math.floor(outputMetadata.nonFiniteSampleCount))
+      : 0;
+    let scannedPeak = Number.isFinite(outputMetadata.peakAmplitude)
+      ? Math.max(0, outputMetadata.peakAmplitude)
+      : 0;
+    let scannedClipped = Number.isFinite(outputMetadata.clippedSampleCount)
+      ? Math.max(0, Math.floor(outputMetadata.clippedSampleCount))
+      : 0;
 
     if (parsed.valid && parsed.encoding === 'float32') {
       scannedNonFinite = 0;

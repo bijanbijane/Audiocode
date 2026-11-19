@@ -23,7 +23,10 @@ import {
 } from './contracts/v1_2';
 import { HeaderNav, WorkspaceTab } from './components/HeaderNav';
 import { WaveformCanvas } from './components/WaveformCanvas';
-import { TranscriptPanel } from './components/TranscriptPanel';
+import {
+  AsrInlineFeedbackState,
+  TranscriptPanel,
+} from './components/TranscriptPanel';
 import { SuggestionsPanel } from './components/SuggestionsPanel';
 import { DspControlRack } from './components/DspControlRack';
 import { ProcessingGraphView } from './components/ProcessingGraphView';
@@ -75,7 +78,11 @@ import {
   streamingChunkedRender,
   StudioAudioTransport,
 } from './engine/audioPlayback';
-import { createDefaultStudioGraph } from './engine/processingGraph';
+import {
+  createDefaultStudioGraph,
+  deriveDspBypassFlags,
+  DspBypassFlags,
+} from './engine/processingGraph';
 import { ProcessingGraphEngine, ProcessingNodeSpec } from './processing-core/ProcessingGraphEngine';
 import { ExportValidator, RenderManifest } from './processing-core/ExportValidator';
 import {
@@ -124,7 +131,7 @@ import {
   applySpectralWienerDenoiseToPcm,
   applyWsolaTimeStretchToSelectedTokens,
   attenuateBreathsAndCoughsInAudio,
-  buildOfflineAcousticSegmentedTranscript,
+  buildHonestAcousticSpeechSegments,
   convertTranscriptColloquialToFormal,
   encodeMono16kWavBase64,
   normalizeNumbersAndCompoundsInTranscript,
@@ -160,6 +167,8 @@ export default function App() {
     () => project.recommendations[0]?.id ?? null,
   );
   const [isTranscribingAsr, setIsTranscribingAsr] = useState<boolean>(false);
+  const [asrInlineFeedback, setAsrInlineFeedback] =
+    useState<AsrInlineFeedbackState | null>(null);
   const [englishRenderMode, setEnglishRenderMode] =
     useState<EnglishScriptRenderMode>('LATIN_TECHNICAL');
 
@@ -191,6 +200,7 @@ export default function App() {
   // Processing Graph & PDC
   const defaultGraph = useMemo(() => createDefaultStudioGraph(), []);
   const [graphNodes, setGraphNodes] = useState<ProcessingNodeDescriptor[]>(defaultGraph.nodes);
+  const dspBypassFlags = useMemo(() => deriveDspBypassFlags(graphNodes), [graphNodes]);
 
   // Storage Broker & Capabilities
   const capabilities = useMemo(() => detectRuntimeCapabilities(), []);
@@ -235,6 +245,7 @@ export default function App() {
   const [exportManifest, setExportManifest] = useState<RenderManifest | null>(null);
   const [exportStrictErrors, setExportStrictErrors] = useState<string[]>([]);
   const [exportDownloadUrl, setExportDownloadUrl] = useState<string | null>(null);
+  const [exportFileName, setExportFileName] = useState<string>('avapardaz-export.wav');
 
   // Mission 07/09/10/Unified Processing state controllers
   const workflowRef = useRef<StudioWorkflowController | null>(null);
@@ -256,6 +267,8 @@ export default function App() {
   const [activeFailure, setActiveFailure] = useState<UserFacingFailureModel | null>(null);
 
   const transportRef = useRef<StudioAudioTransport | null>(null);
+  const exportTimerRef = useRef<number | null>(null);
+  const exportDownloadUrlRef = useRef<string | null>(null);
   const historyRef = useRef<TimelineHistoryManager>(new TimelineHistoryManager());
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const keydownHandlerRef = useRef<(e: KeyboardEvent) => void>(() => {});
@@ -266,6 +279,7 @@ export default function App() {
   const [checkpointStatus, setCheckpointStatus] = useState<RecoveryWriteResult | null>(null);
   const [recoveryInspection, setRecoveryInspection] =
     useState<CrashRecoveryInspectionResult | null>(null);
+  const [projectSessionNonce, setProjectSessionNonce] = useState(0);
   const projectRevisionRef = useRef<number>(1);
   const latestTracksRef = useRef<Track[]>(tracks);
   latestTracksRef.current = tracks;
@@ -530,44 +544,49 @@ export default function App() {
     };
   }, [activeProjectId]);
 
-  // Subscribe to StudioWorkflowController and sync document theme & RTL/LTR direction
+  // Keep StudioWorkflowController subscribed for the full app lifetime
   useEffect(() => {
     const ctrl = workflowRef.current!;
     const unsub = ctrl.subscribe(setWorkflowState);
+    return () => {
+      unsub();
+    };
+  }, []);
 
-    const primaryAssetId = Object.keys(project.assets)[0];
-    const primaryAsset = primaryAssetId ? project.assets[primaryAssetId] : undefined;
-    const primaryPcm = primaryAssetId ? project.pcmSources[primaryAssetId] : undefined;
+  // Open project in StudioWorkflowController ONLY when a genuinely new project session loads
+  // (never on in-place PCM edits like denoise/redaction/EQ/WSOLA or Undo/Redo!)
+  useEffect(() => {
+    const ctrl = workflowRef.current!;
+    const currentProject = latestProjectRef.current;
+    const primaryAssetId = Object.keys(currentProject.assets)[0];
+    const primaryAsset = primaryAssetId ? currentProject.assets[primaryAssetId] : undefined;
+    const primaryPcm = primaryAssetId ? currentProject.pcmSources[primaryAssetId] : undefined;
 
     if (primaryAsset && primaryPcm) {
       ctrl.openProject({
         projectId: primaryAsset.id,
-        projectName: project.projectName,
+        projectName: currentProject.projectName,
         sourceAudio: {
           sourceAudioId: primaryAsset.id,
           sourceAudioHash: primaryAsset.contentHash,
           fileName: primaryAsset.name,
           format: primaryAsset.container,
-          sampleRate: (project.sampleRate as SampleRate) || 48000,
+          sampleRate: (currentProject.sampleRate as SampleRate) || 48000,
           channelCount: 1,
           bitDepth: 32,
           totalSamples: primaryPcm.length,
-          durationSec: primaryPcm.length / project.sampleRate,
+          durationSec: primaryPcm.length / currentProject.sampleRate,
           fileSizeBytes: primaryAsset.fileSizeBytes,
           importStatus: primaryAsset.container === 'synthetic-pcm' ? 'SYNTHETIC_FIXTURE' : 'VALIDATED',
           isDemoFixture: primaryAsset.container === 'synthetic-pcm',
         },
         initialSegments: buildTranscriptSegmentsFromTokens(
-          project.tokens,
-          Object.fromEntries(project.tracks.map((tr) => [tr.id, tr.name])),
+          currentProject.tokens,
+          Object.fromEntries(currentProject.tracks.map((tr) => [tr.id, tr.name])),
         ),
       });
     }
-
-    return () => {
-      unsub();
-    };
-  }, [project]);
+  }, [activeProjectId, projectSessionNonce]);
 
   useEffect(() => {
     if (typeof document === 'undefined') return;
@@ -575,6 +594,19 @@ export default function App() {
     document.documentElement.lang = workflowState.locale === 'fa' ? 'fa' : 'en';
     document.documentElement.dir = workflowState.locale === 'fa' ? 'rtl' : 'ltr';
   }, [workflowState.theme, workflowState.locale]);
+
+  useEffect(() => {
+    return () => {
+      if (exportTimerRef.current !== null) {
+        window.clearTimeout(exportTimerRef.current);
+        exportTimerRef.current = null;
+      }
+      if (exportDownloadUrlRef.current) {
+        URL.revokeObjectURL(exportDownloadUrlRef.current);
+        exportDownloadUrlRef.current = null;
+      }
+    };
+  }, []);
 
   const totalDurationFlicks = useMemo(() => computeTimelineDurationFlicks(tracks), [tracks]);
   const totalDurationSec = flicksToSeconds(totalDurationFlicks);
@@ -585,6 +617,43 @@ export default function App() {
     setPreviewingId(null);
     setMeterDb({ peakDb: -60, rmsDb: -60 });
     setPlayheadSec(selection ? selection.startSec : 0);
+  };
+
+  const resyncActivePlayback = (overrides?: {
+    tracks?: Track[];
+    dspParams?: EphemeralDspParams;
+    dspBypassFlags?: DspBypassFlags;
+    startSec?: number;
+    playbackRate?: number;
+    loop?: boolean;
+  }) => {
+    if (!isPlaying || !transportRef.current) return;
+    const activeTracks = overrides?.tracks ?? tracks;
+    const activeDurationSec = flicksToSeconds(computeTimelineDurationFlicks(activeTracks));
+    const startSec = Math.max(
+      0,
+      Math.min(activeDurationSec, overrides?.startSec ?? playheadSec),
+    );
+    const activeLoop = overrides?.loop ?? loopSelection;
+    transportRef.current.playTimelineWindowed({
+      tracks: activeTracks,
+      assets: project.assets,
+      pcmSources: project.pcmSources,
+      sampleRate: project.sampleRate,
+      startTimelineSec: startSec,
+      totalDurationSec: activeDurationSec,
+      endTimelineSec: activeDurationSec,
+      loop: activeLoop && !selection,
+      playbackRate: overrides?.playbackRate ?? playbackRate,
+      dspParams: overrides?.dspParams ?? ephemeralDsp,
+      dspBypassFlags: overrides?.dspBypassFlags ?? dspBypassFlags,
+      onTick: (tSec) => setPlayheadSec(Math.min(activeDurationSec, tSec)),
+      onMeter: (peakDb, rmsDb) => setMeterDb({ peakDb, rmsDb }),
+      onEnded: () => {
+        setIsPlaying(false);
+        setMeterDb({ peakDb: -60, rmsDb: -60 });
+      },
+    });
   };
 
   const handleTogglePlay = () => {
@@ -611,6 +680,7 @@ export default function App() {
       loop: loopSelection && !selection,
       playbackRate,
       dspParams: ephemeralDsp,
+      dspBypassFlags,
       onTick: (tSec) => setPlayheadSec(Math.min(totalDurationSec, tSec)),
       onMeter: (peakDb, rmsDb) => setMeterDb({ peakDb, rmsDb }),
       onEnded: () => {
@@ -639,6 +709,7 @@ export default function App() {
       loop: loopSelection,
       playbackRate,
       dspParams: ephemeralDsp,
+      dspBypassFlags,
       onTick: (tSec) => setPlayheadSec(Math.min(totalDurationSec, tSec)),
       onMeter: (peakDb, rmsDb) => setMeterDb({ peakDb, rmsDb }),
       onEnded: () => {
@@ -661,6 +732,7 @@ export default function App() {
         totalDurationSec,
         playbackRate,
         dspParams: ephemeralDsp,
+        dspBypassFlags,
         onTick: (tSec) => setPlayheadSec(Math.min(totalDurationSec, tSec)),
         onMeter: (peakDb, rmsDb) => setMeterDb({ peakDb, rmsDb }),
         onEnded: () => {
@@ -671,13 +743,32 @@ export default function App() {
     }
   };
 
-  const clampSelectionRange = (sel: WaveformSelectionState | null): WaveformSelectionState | null => {
+  const getTrackPrimaryAssetId = (
+    track: Track | undefined,
+    fallbackRecord?: Record<string, unknown>,
+  ): string | undefined => {
+    const speechAsset = track?.clips.find((c) => c.kind === 'speech')?.assetId;
+    if (speechAsset) return speechAsset;
+    if (track?.clips[0]?.assetId) return track.clips[0].assetId;
+    return fallbackRecord ? Object.keys(fallbackRecord)[0] : undefined;
+  };
+
+  const clampSelectionRange = (
+    sel: WaveformSelectionState | null,
+    maxDurationSec: number = totalDurationSec,
+  ): WaveformSelectionState | null => {
     if (!sel) return null;
-    const maxSec = Math.max(0.05, totalDurationSec);
+    const maxSec = Math.max(0.05, maxDurationSec);
     const startSec = Number(Math.max(0, Math.min(maxSec, sel.startSec)).toFixed(3));
     const endSec = Number(Math.max(startSec, Math.min(maxSec, sel.endSec)).toFixed(3));
     if (endSec - startSec < 0.01) return null;
     return { ...sel, startSec, endSec };
+  };
+
+  const clampPlaybackAndSelectionToTracks = (nextTracks: Track[]) => {
+    const nextDurationSec = flicksToSeconds(computeTimelineDurationFlicks(nextTracks));
+    setPlayheadSec((prev) => (prev > nextDurationSec ? Math.max(0, nextDurationSec) : prev));
+    setSelection((prev) => clampSelectionRange(prev, nextDurationSec));
   };
 
   const handleSetInAtPlayhead = () => {
@@ -719,11 +810,25 @@ export default function App() {
     transportRef.current.stop();
     setIsPlaying(false);
 
+    const liveSafety = determineSyncSafeEditMode(
+      tracks,
+      rec.trackId,
+      rec.boundary.snappedRange,
+      tokens,
+      project.pcmSources,
+      project.sampleRate,
+    );
+    const effectiveMode: RecommendationActionMode =
+      rec.recommendedMode === 'in-place-room-tone-suppression' ||
+      liveSafety.mode === 'in-place-room-tone-suppression'
+        ? 'in-place-room-tone-suppression'
+        : 'sync-locked-ripple-cut';
+
     const previewTracksAfter = applySyncSafeCut(
       tracks,
       rec.trackId,
       rec.boundary.snappedRange,
-      rec.recommendedMode,
+      effectiveMode,
     );
 
     const buf = buildSplicePreviewBuffer({
@@ -734,6 +839,7 @@ export default function App() {
       sampleRate: project.sampleRate,
       cutRange: rec.boundary.snappedRange,
       dspParams: ephemeralDsp,
+      dspBypassFlags,
       mode,
     });
 
@@ -753,7 +859,7 @@ export default function App() {
    * Unified non-destructive cut executor that updates tracks, shifts/updates word tokens,
    * updates recommendations, and records an atomic Undo/Redo transaction.
    */
-  const isReadOnlyLocked = projectLockState !== 'LOCKED' && projectLockState !== 'ACQUIRING';
+  const isReadOnlyLocked = projectLockState !== 'LOCKED';
 
   const executeSynchronizedCut = (params: {
     targetTrackId: string;
@@ -761,36 +867,82 @@ export default function App() {
     mode: RecommendationActionMode;
     descriptionFa: string;
     affectedRecommendationId?: string;
-  }) => {
+    scope?: 'track' | 'all';
+  }): boolean => {
     if (isReadOnlyLocked) {
       setStatusNotice('ویرایش غیرفعال است: پروژه بدون قفل انحصاری در حالت فقط‌خواندنی قرار دارد.');
-      return;
+      return false;
     }
     transportRef.current?.stop();
     setIsPlaying(false);
     setPreviewingId(null);
 
-    const nextTracks = applySyncSafeCut(
-      tracks,
-      params.targetTrackId,
-      params.cutRange,
-      params.mode,
-    );
-    const nextTokens = projectTokensAfterCut(
-      tokens,
-      tracks,
-      params.targetTrackId,
-      params.cutRange,
-      params.mode,
-    );
-    const nextRecs = projectRecommendationsAfterCut(
-      recommendations,
-      tracks,
-      params.targetTrackId,
-      params.cutRange,
-      params.mode,
-      params.affectedRecommendationId,
-    );
+    let nextTracks: Track[];
+    let nextTokens: PersianWordToken[];
+    let nextRecs: SmartRecommendation[];
+
+    if (params.mode === 'in-place-room-tone-suppression' && params.scope === 'all') {
+      const targetTrack = tracks.find((t) => t.id === params.targetTrackId);
+      const targetSyncGroup = targetTrack?.syncGroupId;
+      const affectedTracks = tracks.filter(
+        (t) =>
+          !t.muted &&
+          (targetSyncGroup ? t.syncGroupId === targetSyncGroup : true),
+      );
+      const trackIdsToSuppress =
+        affectedTracks.length > 0 ? affectedTracks.map((t) => t.id) : [params.targetTrackId];
+
+      nextTracks = cloneTracks(tracks);
+      nextTokens = cloneTokens(tokens);
+      nextRecs = cloneRecommendations(recommendations);
+
+      for (const tid of trackIdsToSuppress) {
+        const prevTracksSnapshot = nextTracks;
+        nextTracks = applySyncSafeCut(
+          prevTracksSnapshot,
+          tid,
+          params.cutRange,
+          'in-place-room-tone-suppression',
+        );
+        nextTokens = projectTokensAfterCut(
+          nextTokens,
+          prevTracksSnapshot,
+          tid,
+          params.cutRange,
+          'in-place-room-tone-suppression',
+        );
+        nextRecs = projectRecommendationsAfterCut(
+          nextRecs,
+          prevTracksSnapshot,
+          tid,
+          params.cutRange,
+          'in-place-room-tone-suppression',
+          tid === params.targetTrackId ? params.affectedRecommendationId : undefined,
+        );
+      }
+    } else {
+      nextTracks = applySyncSafeCut(
+        tracks,
+        params.targetTrackId,
+        params.cutRange,
+        params.mode,
+      );
+      nextTokens = projectTokensAfterCut(
+        tokens,
+        tracks,
+        params.targetTrackId,
+        params.cutRange,
+        params.mode,
+      );
+      nextRecs = projectRecommendationsAfterCut(
+        recommendations,
+        tracks,
+        params.targetTrackId,
+        params.cutRange,
+        params.mode,
+        params.affectedRecommendationId,
+      );
+    }
 
     historyRef.current.commitTransaction({
       coalescingKey: '',
@@ -812,42 +964,58 @@ export default function App() {
     setTokens(nextTokens);
     setRecommendations(nextRecs);
     persistDirtyCheckpointForCurrentState(nextTracks);
-    const nextDurationSec = flicksToSeconds(computeTimelineDurationFlicks(nextTracks));
-    if (playheadSec > nextDurationSec) {
-      setPlayheadSec(Math.max(0, nextDurationSec));
-    }
+    clampPlaybackAndSelectionToTracks(nextTracks);
     setHistoryTick((v) => v + 1);
+    return true;
   };
 
   const handleAcceptRecommendation = (rec: SmartRecommendation) => {
-    executeSynchronizedCut({
+    // Re-evaluate sync safety against live tracks, tokens, and peer PCM energy so stale recommendations cannot break sync
+    const liveSafety = determineSyncSafeEditMode(
+      tracks,
+      rec.trackId,
+      rec.boundary.snappedRange,
+      tokens,
+      project.pcmSources,
+      project.sampleRate,
+    );
+    const effectiveMode: RecommendationActionMode =
+      rec.recommendedMode === 'in-place-room-tone-suppression' ||
+      liveSafety.mode === 'in-place-room-tone-suppression'
+        ? 'in-place-room-tone-suppression'
+        : 'sync-locked-ripple-cut';
+
+    const applied = executeSynchronizedCut({
       targetTrackId: rec.trackId,
       cutRange: rec.boundary.snappedRange,
-      mode: rec.recommendedMode,
+      mode: effectiveMode,
       descriptionFa: `${
-        rec.recommendedMode === 'sync-locked-ripple-cut' ? 'برش هم‌زمان' : 'جایگزینی Room Tone'
+        effectiveMode === 'sync-locked-ripple-cut' ? 'برش هم‌زمان' : 'جایگزینی Room Tone'
       }: ${rec.relatedText}`,
       affectedRecommendationId: rec.id,
     });
+    if (!applied) return;
     setStatusNotice(`تغییر «${rec.relatedText}» به‌صورت غیرمخرب و همگام با متن اعمال شد.`);
   };
 
   const handleCutSelectedWords = (
     selectedTokenIds: string[],
     explicitMode?: RecommendationActionMode,
-  ) => {
+  ): boolean => {
     const cutSpec = computeMultiWordCutRange(tokens, selectedTokenIds);
-    if (!cutSpec) return;
+    if (!cutSpec) return false;
 
     const decision = determineSyncSafeEditMode(
       tracks,
       cutSpec.trackId,
       cutSpec.range,
       tokens,
+      project.pcmSources,
+      project.sampleRate,
     );
     const modeToUse = explicitMode ?? decision.mode;
 
-    executeSynchronizedCut({
+    const applied = executeSynchronizedCut({
       targetTrackId: cutSpec.trackId,
       cutRange: cutSpec.range,
       mode: modeToUse,
@@ -855,6 +1023,7 @@ export default function App() {
         modeToUse === 'sync-locked-ripple-cut' ? 'برش متنی (Ripple)' : 'سکوت درجا (Room Tone)'
       }: «${cutSpec.combinedText}»`,
     });
+    if (!applied) return false;
 
     setStatusNotice(
       `تدوین متن‌محور: «${cutSpec.combinedText}» با حالت ${
@@ -863,24 +1032,29 @@ export default function App() {
           : 'جایگزینی درجا با Room Tone'
       } اعمال شد.`,
     );
+    return true;
   };
 
   const handleCutWaveformRange = (
     range: FlickRange,
     targetTrackId: string,
     mode: RecommendationActionMode,
-  ) => {
+    scope?: 'track' | 'all',
+  ): boolean => {
     const startSec = flicksToSeconds(range.startFlicks).toFixed(2);
     const endSec = flicksToSeconds(range.endFlicks).toFixed(2);
-    executeSynchronizedCut({
+    const applied = executeSynchronizedCut({
       targetTrackId,
       cutRange: range,
       mode,
+      scope,
       descriptionFa: `${
         mode === 'sync-locked-ripple-cut' ? 'برش بازه موج صوت' : 'Room Tone بازه موج صوت'
       } [${startSec}s..${endSec}s]`,
     });
+    if (!applied) return false;
     setStatusNotice(`بازه [${startSec}s تا ${endSec}s] با موفقیت تدوین و با واژگان همگام شد.`);
+    return true;
   };
 
   const handleSplitAtPlayhead = () => {
@@ -916,19 +1090,84 @@ export default function App() {
   };
 
   const handleUpdateTokenDisplayText = (tokenId: string, newDisplayText: string) => {
-    setTokens((prev) =>
-      prev.map((tok) => (tok.id === tokenId ? { ...tok, displayText: newDisplayText } : tok)),
+    if (isReadOnlyLocked) {
+      setStatusNotice('ویرایش غیرفعال است: پروژه بدون قفل انحصاری در حالت فقط‌خواندنی قرار دارد.');
+      return;
+    }
+    const existing = tokens.find((tok) => tok.id === tokenId);
+    if (!existing || existing.displayText === newDisplayText) {
+      return;
+    }
+    const beforeTokensSnapshot = cloneTokens(tokens);
+    const nextTokens = tokens.map((tok) =>
+      tok.id === tokenId ? { ...tok, displayText: newDisplayText } : tok,
     );
+    historyRef.current.commitTransaction({
+      coalescingKey: '',
+      type: 'dsp-parameter-change',
+      description: `ویرایش املای نمایشی واژه به «${newDisplayText}»`,
+      beforeTracks: tracks,
+      afterTracks: tracks,
+      beforeTokens: beforeTokensSnapshot,
+      afterTokens: nextTokens,
+      beforeRecommendations: recommendations,
+      afterRecommendations: recommendations,
+    });
+    setTokens(nextTokens);
+    setHistoryTick((v) => v + 1);
     setStatusNotice(`املای نمایشی واژه به «${newDisplayText}» با حفظ لایه خام ASR به‌روزرسانی شد.`);
   };
 
+  const resolveTrackAssetAndPcm = async (targetTrack: Track | undefined) => {
+    if (!targetTrack) return null;
+    const primaryAssetId = getTrackPrimaryAssetId(targetTrack, project.assets);
+    if (!primaryAssetId) return null;
+    const asset = project.assets[primaryAssetId];
+    if (!asset) return null;
+
+    let pcm = project.pcmSources[primaryAssetId];
+    if (!pcm && brokerRef.current && asset.exactSampleCount > 0) {
+      const blockSize = asset.blockSizeSamples ?? Math.max(1, asset.nativeSampleRate * 4);
+      pcm = await brokerRef.current.streamReadRange(
+        primaryAssetId,
+        0,
+        asset.exactSampleCount,
+        blockSize,
+        undefined,
+        'io-broker',
+      );
+    }
+    if (!pcm || pcm.length === 0) return null;
+    return { targetTrack, primaryAssetId, asset, pcm };
+  };
+
   const handleRunForcedAlignment = (customPersianScript: string, targetTrackId: string) => {
+    if (isReadOnlyLocked) {
+      setStatusNotice('ویرایش غیرفعال است: پروژه بدون قفل انحصاری در حالت فقط‌خواندنی قرار دارد.');
+      setAsrInlineFeedback({
+        kind: 'READ_ONLY',
+        titleFa: 'ویرایش غیرفعال است',
+        messageFa: 'پروژه بدون قفل انحصاری در حالت فقط‌خواندنی قرار دارد.',
+      });
+      return;
+    }
     const targetTrack = tracks.find((t) => t.id === targetTrackId) ?? tracks[0];
     if (!targetTrack) return;
-    const primaryAssetId = targetTrack.clips[0]?.assetId ?? Object.keys(project.assets)[0];
-    const pcm = project.pcmSources[primaryAssetId];
-    const asset = project.assets[primaryAssetId];
-    if (!pcm || !asset) return;
+    const primaryAssetId = getTrackPrimaryAssetId(targetTrack, project.assets);
+    const pcm = primaryAssetId ? project.pcmSources[primaryAssetId] : undefined;
+    const asset = primaryAssetId ? project.assets[primaryAssetId] : undefined;
+    if (!pcm || !asset) {
+      setStatusNotice('بافر صوتی ترک انتخاب‌شده در دسترس نیست؛ لطفاً فایل صوتی را دوباره وارد کنید.');
+      setAsrInlineFeedback({
+        kind: 'AUDIO_MISSING',
+        titleFa: 'داده صوتی برای هم‌ترازی در دسترس نیست',
+        messageFa: 'فایل صوتی این ترک در حافظه فعال یافت نشد.',
+      });
+      return;
+    }
+
+    const beforeTokensSnapshot = cloneTokens(tokens);
+    const beforeRecsSnapshot = cloneRecommendations(recommendations);
 
     const aligned = alignPersianScriptToAudio({
       pcm,
@@ -948,9 +1187,29 @@ export default function App() {
     const otherTrackRecs = recommendations.filter((r) => r.trackId !== targetTrack.id);
     const mergedRecs = [...otherTrackRecs, ...aligned.recommendations];
 
+    historyRef.current.commitTransaction({
+      coalescingKey: '',
+      type: 'dsp-parameter-change',
+      description: `هم‌ترازی اجباری (${aligned.tokens.length} واژه فارسی)`,
+      beforeTracks: tracks,
+      afterTracks: tracks,
+      beforeTokens: beforeTokensSnapshot,
+      afterTokens: mergedTokens,
+      beforeRecommendations: beforeRecsSnapshot,
+      afterRecommendations: mergedRecs,
+    });
+
     setTokens(mergedTokens);
     setRecommendations(mergedRecs);
     setSelectedRecId(mergedRecs[0]?.id ?? null);
+    setActiveFailure(null);
+    setAsrInlineFeedback({
+      kind: 'SUCCESS',
+      titleFa: 'هم‌ترازی آوایی متن با صوت انجام شد',
+      messageFa: `${aligned.tokens.length} واژه فارسی با دره‌های انرژی و نقاط عبور از صفر موج صوت هم‌تراز شدند.`,
+    });
+    persistDirtyCheckpointForCurrentState(tracks);
+    setHistoryTick((v) => v + 1);
     setStatusNotice(
       `هم‌ترازی اجباری (Forced Alignment) انجام شد: ${aligned.tokens.length} واژه فارسی به مرزهای آوایی موج صوت اسنپ شد.`,
     );
@@ -962,6 +1221,10 @@ export default function App() {
       nextMode === 'CLOUD' ? { explicitCloudOptIn: true } : undefined,
     );
     setExecutionMode(nextMode);
+    if (nextMode === 'LOCAL' && asrInlineFeedback?.kind === 'CLOUD_UNCONFIGURED') {
+      setAsrInlineFeedback(null);
+      setActiveFailure(null);
+    }
     setStatusNotice(
       nextMode === 'LOCAL'
         ? 'مسیر پردازش روی حالت محلی (پیش‌فرض Local-First) تنظیم شد. این تغییر فقط روی کارهای جدید اعمال می‌شود.'
@@ -969,13 +1232,117 @@ export default function App() {
     );
   };
 
+  const handleRunAcousticSegmentation = async () => {
+    if (isReadOnlyLocked) {
+      setStatusNotice('ویرایش غیرفعال است: پروژه بدون قفل انحصاری در حالت فقط‌خواندنی قرار دارد.');
+      setAsrInlineFeedback({
+        kind: 'READ_ONLY',
+        titleFa: 'ویرایش غیرفعال است',
+        messageFa: 'پروژه بدون قفل انحصاری در حالت فقط‌خواندنی قرار دارد.',
+      });
+      return;
+    }
+
+    setIsTranscribingAsr(true);
+    try {
+      const resolved = await resolveTrackAssetAndPcm(tracks[0]);
+      if (!resolved) {
+        setStatusNotice('فایل صوتی قابل پردازش روی ترک اصلی یافت نشد.');
+        setAsrInlineFeedback({
+          kind: 'AUDIO_MISSING',
+          titleFa: 'فایل صوتی یافت نشد',
+          messageFa: 'برای تحلیل و هم‌ترازی آوایی، ابتدا یک فایل صوتی وارد یا ضبط کنید.',
+        });
+        return;
+      }
+
+      const { targetTrack, asset, pcm } = resolved;
+      const beforeTokensSnapshot = cloneTokens(tokens);
+      const beforeRecsSnapshot = cloneRecommendations(recommendations);
+
+      const segResult = buildHonestAcousticSpeechSegments({
+        pcm,
+        sampleRate: project.sampleRate,
+        trackId: targetTrack.id,
+        speakerName: targetTrack.speakerLabel,
+        acousticProfile: asset.acousticProfile,
+      });
+
+      if (segResult.burstCount === 0 || segResult.tokens.length === 0) {
+        workflowRef.current?.setAsrState({
+          state: 'NO_SPEECH_DETECTED',
+          message: 'در این سیگنال صوتی بخش گفتاری فعال بالاتر از کف نویز اتاق شناسایی نشد.',
+        });
+        setAsrInlineFeedback({
+          kind: 'NO_SPEECH',
+          titleFa: 'گفتاری بالاتر از کف نویز شناسایی نشد',
+          messageFa:
+            'فایل صوتی بررسی شد اما بازه گفتاری فعالی با مدت حداقل ۹۰ میلی‌ثانیه بالاتر از سطح سکوت پیدا نشد.',
+        });
+        setStatusNotice('در تحلیل آوایی، بخش گفتاری فعالی بالاتر از کف نویز شناسایی نشد.');
+        return;
+      }
+
+      const otherTrackTokens = tokens.filter((t) => t.trackId !== targetTrack.id);
+      const mergedTokens = [...otherTrackTokens, ...segResult.tokens].sort(
+        (a, b) => a.range.startFlicks - b.range.startFlicks,
+      );
+      const otherTrackRecs = recommendations.filter((r) => r.trackId !== targetTrack.id);
+      const mergedRecs = [...otherTrackRecs, ...segResult.recommendations];
+
+      historyRef.current.commitTransaction({
+        coalescingKey: '',
+        type: 'dsp-parameter-change',
+        description: `بخش‌بندی و هم‌ترازی آوایی (${segResult.tokens.length} قطعه گفتاری)`,
+        beforeTracks: tracks,
+        afterTracks: tracks,
+        beforeTokens: beforeTokensSnapshot,
+        afterTokens: mergedTokens,
+        beforeRecommendations: beforeRecsSnapshot,
+        afterRecommendations: mergedRecs,
+      });
+
+      setTokens(mergedTokens);
+      setRecommendations(mergedRecs);
+      setSelectedRecId(mergedRecs[0]?.id ?? null);
+      setActiveFailure(null);
+      setAsrInlineFeedback({
+        kind: 'SUCCESS',
+        titleFa: 'بخش‌بندی و هم‌ترازی آوایی محلی انجام شد',
+        messageFa: `${segResult.tokens.length} قطعه گفتار آوایی از روی انرژی موج صوت استخراج و به مرزهای عبور از صفر اسنپ شد (بدون نیاز به مدل ONNX؛ برای متن دقیق واژگان می‌توانید از «هم‌ترازی با متن دلخواه» یا نصب مدل ONNX استفاده کنید).`,
+      });
+      persistDirtyCheckpointForCurrentState(tracks);
+      setHistoryTick((v) => v + 1);
+      setStatusNotice(
+        `بخش‌بندی آوایی محلی تکمیل شد: ${segResult.tokens.length} قطعه گفتاری هم‌تراز‌شده و ${segResult.recommendations.length} پیشنهاد تدوین شناسایی شد.`,
+      );
+    } finally {
+      setIsTranscribingAsr(false);
+    }
+  };
+
   const handleRunPersianAsr = async () => {
-    const targetTrack = tracks[0];
-    if (!targetTrack) return;
-    const primaryAssetId = targetTrack.clips[0]?.assetId ?? Object.keys(project.assets)[0];
-    const pcm = project.pcmSources[primaryAssetId];
-    const asset = project.assets[primaryAssetId];
-    if (!pcm || !asset) return;
+    if (isReadOnlyLocked) {
+      setStatusNotice('ویرایش غیرفعال است: پروژه بدون قفل انحصاری در حالت فقط‌خواندنی قرار دارد.');
+      setAsrInlineFeedback({
+        kind: 'READ_ONLY',
+        titleFa: 'ویرایش غیرفعال است',
+        messageFa: 'پروژه بدون قفل انحصاری در حالت فقط‌خواندنی قرار دارد.',
+      });
+      return;
+    }
+
+    const resolved = await resolveTrackAssetAndPcm(tracks[0]);
+    if (!resolved) {
+      setStatusNotice('فایل صوتی قابل پردازش روی ترک اصلی یافت نشد.');
+      setAsrInlineFeedback({
+        kind: 'AUDIO_MISSING',
+        titleFa: 'فایل صوتی یافت نشد',
+        messageFa: 'برای اجرای تبدیل صوت به متن و هم‌ترازی آوایی، ابتدا یک فایل صوتی معتبر وارد کنید.',
+      });
+      return;
+    }
+    const { targetTrack, asset, pcm } = resolved;
 
     // Unified Processing Architecture: explicit LOCAL default vs explicit CLOUD opt-in; ZERO silent fallback
     if (executionMode === 'CLOUD') {
@@ -990,6 +1357,12 @@ export default function App() {
         message: 'Explicit Cloud execution requested while no Cloud provider is configured.',
       });
       setActiveFailure(buildUserFacingFailure(err, workflowState.locale));
+      setAsrInlineFeedback({
+        kind: 'CLOUD_UNCONFIGURED',
+        titleFa: 'حالت ابری پیکربندی نشده است',
+        messageFa:
+          'مسیر پردازش روی «ابری (اختیاری)» قرار دارد اما هیچ سرور ابری متصل نیست. برای حفظ شفافیت، بازگشت خودکار پنهان انجام نشد؛ می‌توانید حالت محلی را فعال کنید یا هم‌ترازی آوایی محلی را اجرا نمایید.',
+      });
       setStatusNotice(
         'حالت ابری انتخاب شده است اما هیچ سرویس‌دهنده ابری پیکربندی نشده است؛ بازگشت خودکار پنهان به محلی انجام نشد.',
       );
@@ -1014,6 +1387,12 @@ export default function App() {
         message: 'Local ASR requested with no installed ONNX weights.',
       });
       setActiveFailure(buildUserFacingFailure(err, workflowState.locale));
+      setAsrInlineFeedback({
+        kind: 'MODEL_NOT_INSTALLED',
+        titleFa: 'مدل عصبی محلی (.onnx) نصب نشده است',
+        messageFa:
+          'برای جلوگیری از تولید متن ساختگی، رونویسی خودکار واژگان بدون فایل وزن .onnx انجام نمی‌شود. هم‌اکنون می‌توانید بدون مدل، «بخش‌بندی و هم‌ترازی آوایی موج صوت» یا «هم‌ترازی با متن دلخواه» را اجرا کنید یا فایل .onnx خود را نصب نمایید.',
+      });
       setStatusNotice(
         'مدل عصبی محلی نصب نشده است — خروجی ساختگی تولید نمی‌شود و صوت به هیچ سرور خارجی ارسال نشد.',
       );
@@ -1031,44 +1410,95 @@ export default function App() {
     });
 
     try {
+      const beforeTokensSnapshot = cloneTokens(tokens);
+      const beforeRecsSnapshot = cloneRecommendations(recommendations);
       const existingTrackText = tokens
         .filter((t) => t.trackId === targetTrack.id)
         .map((t) => t.originalText)
         .join(' ');
-      const scriptToAlign =
-        existingTrackText.trim().length > 0
-          ? existingTrackText
-          : buildOfflineAcousticSegmentedTranscript(pcm, project.sampleRate, asset.acousticProfile);
 
-      const aligned = alignPersianScriptToAudio({
-        pcm,
-        sampleRate: project.sampleRate,
-        trackId: targetTrack.id,
-        speakerName: targetTrack.speakerLabel,
-        rawTranscriptText: scriptToAlign,
-        acousticProfile: asset.acousticProfile,
-        alignmentSource: 'AcousticSnap',
-      });
+      let nextTrackTokens: PersianWordToken[];
+      let nextTrackRecs: SmartRecommendation[];
+
+      if (existingTrackText.trim().length > 0) {
+        const aligned = alignPersianScriptToAudio({
+          pcm,
+          sampleRate: project.sampleRate,
+          trackId: targetTrack.id,
+          speakerName: targetTrack.speakerLabel,
+          rawTranscriptText: existingTrackText,
+          acousticProfile: asset.acousticProfile,
+          alignmentSource: 'AcousticSnap',
+        });
+        nextTrackTokens = aligned.tokens;
+        nextTrackRecs = aligned.recommendations;
+      } else {
+        const segResult = buildHonestAcousticSpeechSegments({
+          pcm,
+          sampleRate: project.sampleRate,
+          trackId: targetTrack.id,
+          speakerName: targetTrack.speakerLabel,
+          acousticProfile: asset.acousticProfile,
+        });
+        nextTrackTokens = segResult.tokens;
+        nextTrackRecs = segResult.recommendations;
+      }
+
+      if (nextTrackTokens.length === 0) {
+        workflowRef.current?.setAsrState({
+          state: 'NO_SPEECH_DETECTED',
+          modelId: activeModel.modelId,
+          modelVersion: activeModel.version,
+          progressPct: 100,
+          message: 'گفتاری بالاتر از کف نویز اتاق در این فایل شناسایی نشد.',
+        });
+        setAsrInlineFeedback({
+          kind: 'NO_SPEECH',
+          titleFa: 'گفتاری شناسایی نشد',
+          messageFa: 'بازه گفتاری فعالی بالاتر از کف نویز اتاق در این فایل صوتی یافت نشد.',
+        });
+        setStatusNotice('در پردازش محلی، گفتاری بالاتر از کف نویز شناسایی نشد.');
+        return;
+      }
 
       const otherTrackTokens = tokens.filter((t) => t.trackId !== targetTrack.id);
-      const mergedTokens = [...otherTrackTokens, ...aligned.tokens].sort(
+      const mergedTokens = [...otherTrackTokens, ...nextTrackTokens].sort(
         (a, b) => a.range.startFlicks - b.range.startFlicks,
       );
       const otherTrackRecs = recommendations.filter((r) => r.trackId !== targetTrack.id);
-      const mergedRecs = [...otherTrackRecs, ...aligned.recommendations];
+      const mergedRecs = [...otherTrackRecs, ...nextTrackRecs];
+
+      historyRef.current.commitTransaction({
+        coalescingKey: '',
+        type: 'dsp-parameter-change',
+        description: `هم‌ترازی و رونویسی محلی (${nextTrackTokens.length} بخش)`,
+        beforeTracks: tracks,
+        afterTracks: tracks,
+        beforeTokens: beforeTokensSnapshot,
+        afterTokens: mergedTokens,
+        beforeRecommendations: beforeRecsSnapshot,
+        afterRecommendations: mergedRecs,
+      });
 
       setTokens(mergedTokens);
       setRecommendations(mergedRecs);
       setSelectedRecId(mergedRecs[0]?.id ?? null);
+      persistDirtyCheckpointForCurrentState(tracks);
+      setHistoryTick((v) => v + 1);
       workflowRef.current?.setAsrState({
         state: 'TRANSCRIPTION_COMPLETED',
         modelId: activeModel.modelId,
         modelVersion: activeModel.version,
         progressPct: 100,
-        message: `پردازش محلی تکمیل شد (${aligned.tokens.length} قطعه هم‌ترازی‌شده).`,
+        message: `پردازش محلی تکمیل شد (${nextTrackTokens.length} قطعه هم‌ترازی‌شده).`,
+      });
+      setAsrInlineFeedback({
+        kind: 'SUCCESS',
+        titleFa: 'هم‌ترازی آوایی محلی تکمیل شد',
+        messageFa: `${nextTrackTokens.length} بخش هم‌ترازی‌شده و ${nextTrackRecs.length} پیشنهاد تدوین با مدل ${activeModel.modelId} استخراج شد.`,
       });
       setStatusNotice(
-        `پردازش محلی تکمیل شد: ${aligned.tokens.length} بخش زمان‌بندی‌شده و ${aligned.recommendations.length} پیشنهاد تدوین شناسایی شد.`,
+        `پردازش محلی تکمیل شد: ${nextTrackTokens.length} بخش زمان‌بندی‌شده و ${nextTrackRecs.length} پیشنهاد تدوین شناسایی شد.`,
       );
     } finally {
       setIsTranscribingAsr(false);
@@ -1076,8 +1506,12 @@ export default function App() {
   };
 
   const handleRestoreProsodicPunctuation = () => {
+    if (isReadOnlyLocked) {
+      setStatusNotice('ویرایش غیرفعال است: پروژه بدون قفل انحصاری در حالت فقط‌خواندنی قرار دارد.');
+      return;
+    }
     const primaryTrack = tracks[0];
-    const primaryAssetId = primaryTrack?.clips[0]?.assetId ?? Object.keys(project.pcmSources)[0];
+    const primaryAssetId = getTrackPrimaryAssetId(primaryTrack, project.pcmSources);
     const pcm = primaryAssetId ? project.pcmSources[primaryAssetId] : undefined;
     if (!pcm || tokens.length === 0) return;
 
@@ -1104,6 +1538,10 @@ export default function App() {
   };
 
   const handleConvertColloquialToFormal = () => {
+    if (isReadOnlyLocked) {
+      setStatusNotice('ویرایش غیرفعال است: پروژه بدون قفل انحصاری در حالت فقط‌خواندنی قرار دارد.');
+      return;
+    }
     if (tokens.length === 0) return;
     const beforeTokensSnapshot = cloneTokens(tokens);
     const { tokens: nextTokens, convertedCount } = convertTranscriptColloquialToFormal(tokens);
@@ -1133,6 +1571,10 @@ export default function App() {
   };
 
   const handleNormalizeNumbersAndCompounds = () => {
+    if (isReadOnlyLocked) {
+      setStatusNotice('ویرایش غیرفعال است: پروژه بدون قفل انحصاری در حالت فقط‌خواندنی قرار دارد.');
+      return;
+    }
     if (tokens.length === 0) return;
     const beforeTokensSnapshot = cloneTokens(tokens);
     const { tokens: nextTokens, updatedCount } = normalizeNumbersAndCompoundsInTranscript(tokens);
@@ -1164,13 +1606,19 @@ export default function App() {
   const handleRedactSelectedWords = (
     selectedTokenIds: string[],
     maskMode: AudioRedactionMaskMode,
-  ) => {
-    if (selectedTokenIds.length === 0) return;
+  ): boolean => {
+    if (isReadOnlyLocked) {
+      setStatusNotice('ویرایش غیرفعال است: پروژه بدون قفل انحصاری در حالت فقط‌خواندنی قرار دارد.');
+      return false;
+    }
+    if (selectedTokenIds.length === 0) return false;
     transportRef.current?.stop();
     setIsPlaying(false);
     setPreviewingId(null);
 
     const beforeTokensSnapshot = cloneTokens(tokens);
+    const beforePcmSourcesSnapshot = { ...project.pcmSources };
+    const beforeAssetsSnapshot = { ...project.assets };
     const updatedPcmSources = { ...project.pcmSources };
     const updatedAssets = { ...project.assets };
     let currentTokens = cloneTokens(tokens);
@@ -1181,7 +1629,7 @@ export default function App() {
         currentTokens.some((tok) => tok.id === id && tok.trackId === trk.id),
       );
       if (trkTokenIds.length === 0) continue;
-      const assetId = trk.clips[0]?.assetId;
+      const assetId = getTrackPrimaryAssetId(trk);
       const pcm = assetId ? updatedPcmSources[assetId] : undefined;
       const asset = assetId ? updatedAssets[assetId] : undefined;
       if (!assetId || !pcm || !asset) continue;
@@ -1203,7 +1651,7 @@ export default function App() {
       totalRedacted += res.redactedCount;
     }
 
-    if (totalRedacted === 0) return;
+    if (totalRedacted === 0) return false;
 
     historyRef.current.commitTransaction({
       coalescingKey: '',
@@ -1215,6 +1663,10 @@ export default function App() {
       afterTokens: currentTokens,
       beforeRecommendations: recommendations,
       afterRecommendations: recommendations,
+      beforePcmSources: beforePcmSourcesSnapshot,
+      afterPcmSources: updatedPcmSources,
+      beforeAssets: beforeAssetsSnapshot,
+      afterAssets: updatedAssets,
     });
 
     setProject((prev) => ({
@@ -1223,6 +1675,7 @@ export default function App() {
       assets: updatedAssets,
     }));
     setTokens(currentTokens);
+    persistDirtyCheckpointForCurrentState(tracks);
     setHistoryTick((v) => v + 1);
     setStatusNotice(
       `پوشش صوتی (${
@@ -1231,13 +1684,20 @@ export default function App() {
           : 'فیلتر مات‌سازی صدا (210Hz Low-Pass)'
       }) با شیب ۱۵ms روی ${totalRedacted} واژه اعمال شد.`,
     );
+    return true;
   };
 
   const handleApplySpectralWienerDenoise = () => {
+    if (isReadOnlyLocked) {
+      setStatusNotice('ویرایش غیرفعال است: پروژه بدون قفل انحصاری در حالت فقط‌خواندنی قرار دارد.');
+      return;
+    }
     transportRef.current?.stop();
     setIsPlaying(false);
     setPreviewingId(null);
 
+    const beforePcmSourcesSnapshot = { ...project.pcmSources };
+    const beforeAssetsSnapshot = { ...project.assets };
     const updatedPcmSources = { ...project.pcmSources };
     const updatedAssets = { ...project.assets };
     let avgFloorDropDb = 0;
@@ -1262,11 +1722,29 @@ export default function App() {
     if (count === 0) return;
     const meanSnrGain = (avgFloorDropDb / count).toFixed(1);
 
+    historyRef.current.commitTransaction({
+      coalescingKey: '',
+      type: 'dsp-parameter-change',
+      description: `حذف نویز طیفی تطبیقی Wiener (-${meanSnrGain} dB)`,
+      beforeTracks: tracks,
+      afterTracks: tracks,
+      beforeTokens: tokens,
+      afterTokens: tokens,
+      beforeRecommendations: recommendations,
+      afterRecommendations: recommendations,
+      beforePcmSources: beforePcmSourcesSnapshot,
+      afterPcmSources: updatedPcmSources,
+      beforeAssets: beforeAssetsSnapshot,
+      afterAssets: updatedAssets,
+    });
+
     setProject((prev) => ({
       ...prev,
       pcmSources: updatedPcmSources,
       assets: updatedAssets,
     }));
+    persistDirtyCheckpointForCurrentState(tracks);
+    setHistoryTick((v) => v + 1);
     setStatusNotice(
       `حذف نویز طیفی تطبیقی (Decision-Directed Wiener Denoiser) روی تمام ترک‌ها اعمال شد (کاهش کف نویز: -${meanSnrGain} dB).`,
     );
@@ -1274,8 +1752,7 @@ export default function App() {
 
   const prosodyAndChaptersReport = useMemo(() => {
     const primaryTrack = tracks[0];
-    const primaryAssetId =
-      primaryTrack?.clips[0]?.assetId ?? Object.keys(project.pcmSources)[0];
+    const primaryAssetId = getTrackPrimaryAssetId(primaryTrack, project.pcmSources);
     const pcm = primaryAssetId ? project.pcmSources[primaryAssetId] : undefined;
     if (!pcm || tokens.length === 0) return null;
     return analyzeTranscriptProsodyAndChapters({
@@ -1286,6 +1763,10 @@ export default function App() {
   }, [tokens, tracks, project.pcmSources, project.sampleRate]);
 
   const handleApplyCustomLexicon = (customVocabularyCsv: string) => {
+    if (isReadOnlyLocked) {
+      setStatusNotice('ویرایش غیرفعال است: پروژه بدون قفل انحصاری در حالت فقط‌خواندنی قرار دارد.');
+      return;
+    }
     if (tokens.length === 0) return;
     const beforeTokensSnapshot = cloneTokens(tokens);
     const { tokens: nextTokens, correctedCount } =
@@ -1321,9 +1802,12 @@ export default function App() {
   };
 
   const handleOptimizeTrilingualAsr = (nextMode: EnglishScriptRenderMode) => {
+    if (isReadOnlyLocked) {
+      setStatusNotice('ویرایش غیرفعال است: پروژه بدون قفل انحصاری در حالت فقط‌خواندنی قرار دارد.');
+      return;
+    }
     const primaryTrack = tracks[0];
-    const primaryAssetId =
-      primaryTrack?.clips[0]?.assetId ?? Object.keys(project.pcmSources)[0];
+    const primaryAssetId = getTrackPrimaryAssetId(primaryTrack, project.pcmSources);
     const pcm = primaryAssetId ? project.pcmSources[primaryAssetId] : undefined;
     if (!pcm || tokens.length === 0) return;
 
@@ -1363,15 +1847,19 @@ export default function App() {
   const handleWsolaTimeStretchSelectedWords = (
     selectedTokenIds: string[],
     tempoRatio: number,
-  ) => {
-    if (selectedTokenIds.length === 0) return;
+  ): boolean => {
+    if (isReadOnlyLocked) {
+      setStatusNotice('ویرایش غیرفعال است: پروژه بدون قفل انحصاری در حالت فقط‌خواندنی قرار دارد.');
+      return false;
+    }
+    if (selectedTokenIds.length === 0) return false;
     const firstTok = tokens.find((t) => selectedTokenIds.includes(t.id));
-    if (!firstTok) return;
+    if (!firstTok) return false;
     const targetTrack = tracks.find((t) => t.id === firstTok.trackId);
-    const assetId = targetTrack?.clips[0]?.assetId;
+    const assetId = getTrackPrimaryAssetId(targetTrack);
     const pcm = assetId ? project.pcmSources[assetId] : undefined;
     const asset = assetId ? project.assets[assetId] : undefined;
-    if (!targetTrack || !assetId || !pcm || !asset) return;
+    if (!targetTrack || !assetId || !pcm || !asset) return false;
 
     transportRef.current?.stop();
     setIsPlaying(false);
@@ -1379,6 +1867,8 @@ export default function App() {
 
     const beforeTracksSnapshot = cloneTracks(tracks);
     const beforeTokensSnapshot = cloneTokens(tokens);
+    const beforePcmSourcesSnapshot = { ...project.pcmSources };
+    const beforeAssetsSnapshot = { ...project.assets };
 
     const stretched = applyWsolaTimeStretchToSelectedTokens({
       pcm,
@@ -1398,6 +1888,8 @@ export default function App() {
       ...project.assets,
       [assetId]: {
         ...asset,
+        exactSampleCount: stretched.stretchedPcm.length,
+        durationFlicks: secondsToFlicks(stretched.stretchedPcm.length / project.sampleRate),
         peakPyramid: buildPeakPyramid(
           assetId,
           [stretched.stretchedPcm],
@@ -1416,6 +1908,10 @@ export default function App() {
       afterTokens: stretched.updatedTokens,
       beforeRecommendations: recommendations,
       afterRecommendations: recommendations,
+      beforePcmSources: beforePcmSourcesSnapshot,
+      afterPcmSources: updatedPcmSources,
+      beforeAssets: beforeAssetsSnapshot,
+      afterAssets: updatedAssets,
     });
 
     setProject((prev) => ({
@@ -1425,18 +1921,19 @@ export default function App() {
     }));
     setTracks(stretched.updatedTracks);
     setTokens(stretched.updatedTokens);
+    persistDirtyCheckpointForCurrentState(stretched.updatedTracks);
     setHistoryTick((v) => v + 1);
     setStatusNotice(
       `کشش/فشرده‌سازی زمانی بدون تغییر زیر و بمی صدا (WSOLA ${tempoRatio}x) روی واژگان انتخاب‌شده اعمال شد (تغییر زمان: ${
         stretched.deltaDurationSec >= 0 ? '+' : ''
       }${stretched.deltaDurationSec}s).`,
     );
+    return true;
   };
 
   const acousticAdvisor = useMemo(() => {
     const primaryTrack = tracks[0];
-    const primaryAssetId =
-      primaryTrack?.clips[0]?.assetId ?? Object.keys(project.pcmSources)[0];
+    const primaryAssetId = getTrackPrimaryAssetId(primaryTrack, project.pcmSources);
     const pcm = primaryAssetId ? project.pcmSources[primaryAssetId] : undefined;
     const asset = primaryAssetId ? project.assets[primaryAssetId] : undefined;
     if (!pcm || !asset) return null;
@@ -1448,7 +1945,12 @@ export default function App() {
   }, [tracks, project.pcmSources, project.assets, project.sampleRate]);
 
   const handleApplyAcousticAdvisorPreset = () => {
+    if (isReadOnlyLocked) {
+      setStatusNotice('ویرایش غیرفعال است: پروژه بدون قفل انحصاری در حالت فقط‌خواندنی قرار دارد.');
+      return;
+    }
     if (!acousticAdvisor) return;
+    const beforeDspSnapshot = { ...committedDsp };
     const nextDsp = acousticAdvisor.recommendedDsp;
     setEphemeralDsp(nextDsp);
     setCommittedDsp(nextDsp);
@@ -1464,6 +1966,8 @@ export default function App() {
       afterTokens: tokens,
       beforeRecommendations: recommendations,
       afterRecommendations: recommendations,
+      beforeDsp: beforeDspSnapshot,
+      afterDsp: { ...nextDsp },
     });
     setHistoryTick((v) => v + 1);
     setStatusNotice(
@@ -1482,10 +1986,16 @@ export default function App() {
   }, [project.pcmSources, project.sampleRate]);
 
   const handleApply8BandPersianVoiceEq = () => {
+    if (isReadOnlyLocked) {
+      setStatusNotice('ویرایش غیرفعال است: پروژه بدون قفل انحصاری در حالت فقط‌خواندنی قرار دارد.');
+      return;
+    }
     transportRef.current?.stop();
     setIsPlaying(false);
     setPreviewingId(null);
 
+    const beforePcmSourcesSnapshot = { ...project.pcmSources };
+    const beforeAssetsSnapshot = { ...project.assets };
     const updatedPcmSources = { ...project.pcmSources };
     const updatedAssets = { ...project.assets };
     let latestCurve: { freqHz: number; gainDb: number }[] | null = null;
@@ -1509,32 +2019,56 @@ export default function App() {
 
     if (processedTracks === 0) return;
 
+    historyRef.current.commitTransaction({
+      coalescingKey: '',
+      type: 'dsp-parameter-change',
+      description: 'اکوالایزر پارامتریک ۸ بانده ویژه کلام فارسی',
+      beforeTracks: tracks,
+      afterTracks: tracks,
+      beforeTokens: tokens,
+      afterTokens: tokens,
+      beforeRecommendations: recommendations,
+      afterRecommendations: recommendations,
+      beforePcmSources: beforePcmSourcesSnapshot,
+      afterPcmSources: updatedPcmSources,
+      beforeAssets: beforeAssetsSnapshot,
+      afterAssets: updatedAssets,
+    });
+
     setProject((prev) => ({
       ...prev,
       pcmSources: updatedPcmSources,
       assets: updatedAssets,
     }));
     setEqResponseCurveDb(latestCurve);
+    persistDirtyCheckpointForCurrentState(tracks);
+    setHistoryTick((v) => v + 1);
     setStatusNotice(
       'اکوالایزر پارامتریک ۸ بانده ویژه کلام فارسی (حذف هام ۵۰Hz، شفافیت همخوان ۳.۲kHz و مهار صفیر ۶.۵kHz) اعمال شد.',
     );
   };
 
-  const handlePunchInSpectralMatchSelectedWords = (selectedTokenIds: string[]) => {
-    if (selectedTokenIds.length === 0) return;
+  const handlePunchInSpectralMatchSelectedWords = (selectedTokenIds: string[]): boolean => {
+    if (isReadOnlyLocked) {
+      setStatusNotice('ویرایش غیرفعال است: پروژه بدون قفل انحصاری در حالت فقط‌خواندنی قرار دارد.');
+      return false;
+    }
+    if (selectedTokenIds.length === 0) return false;
     const firstTok = tokens.find((t) => selectedTokenIds.includes(t.id));
-    if (!firstTok) return;
+    if (!firstTok) return false;
     const targetTrack = tracks.find((t) => t.id === firstTok.trackId);
-    const assetId = targetTrack?.clips[0]?.assetId;
+    const assetId = getTrackPrimaryAssetId(targetTrack);
     const pcm = assetId ? project.pcmSources[assetId] : undefined;
     const asset = assetId ? project.assets[assetId] : undefined;
-    if (!targetTrack || !assetId || !pcm || !asset) return;
+    if (!targetTrack || !assetId || !pcm || !asset) return false;
 
     transportRef.current?.stop();
     setIsPlaying(false);
     setPreviewingId(null);
 
     const beforeTokensSnapshot = cloneTokens(tokens);
+    const beforePcmSourcesSnapshot = { ...project.pcmSources };
+    const beforeAssetsSnapshot = { ...project.assets };
     const res = applyPunchInSpectralMatchAndWatermarkToSelectedTokens({
       pcm,
       roomToneSample: asset.acousticProfile.roomToneSample,
@@ -1565,6 +2099,10 @@ export default function App() {
       afterTokens: res.updatedTokens,
       beforeRecommendations: recommendations,
       afterRecommendations: recommendations,
+      beforePcmSources: beforePcmSourcesSnapshot,
+      afterPcmSources: updatedPcmSources,
+      beforeAssets: beforeAssetsSnapshot,
+      afterAssets: updatedAssets,
     });
 
     setProject((prev) => ({
@@ -1573,26 +2111,35 @@ export default function App() {
       assets: updatedAssets,
     }));
     setTokens(res.updatedTokens);
+    persistDirtyCheckpointForCurrentState(tracks);
     setHistoryTick((v) => v + 1);
     setStatusNotice(
       `تطبیق طیفی ۴ بانده (4-Band Spectral EQ Match) با رنگ صدای استودیو و درج واترمارک اصالت ۱۹kHz BPSK روی ${selectedTokenIds.length} واژه انجام شد (تأیید واترمارک: ${
         res.isWatermarked ? 'معتبر ✓' : 'نامشخص'
       }).`,
     );
+    return true;
   };
 
   const handleSoftenBreathsAndCoughs = () => {
+    if (isReadOnlyLocked) {
+      setStatusNotice('ویرایش غیرفعال است: پروژه بدون قفل انحصاری در حالت فقط‌خواندنی قرار دارد.');
+      return;
+    }
     transportRef.current?.stop();
     setIsPlaying(false);
     setPreviewingId(null);
 
+    const beforePcmSourcesSnapshot = { ...project.pcmSources };
+    const beforeAssetsSnapshot = { ...project.assets };
     const updatedPcmSources = { ...project.pcmSources };
     const updatedAssets = { ...project.assets };
     let totalBreaths = 0;
     let totalCoughs = 0;
+    let processedCount = 0;
 
     for (const trk of tracks) {
-      const assetId = trk.clips[0]?.assetId;
+      const assetId = getTrackPrimaryAssetId(trk);
       const pcm = assetId ? updatedPcmSources[assetId] : undefined;
       const asset = assetId ? updatedAssets[assetId] : undefined;
       if (!assetId || !pcm || !asset) continue;
@@ -1616,13 +2163,34 @@ export default function App() {
       };
       totalBreaths += res.attenuatedBreathCount;
       totalCoughs += res.suppressedCoughCount;
+      processedCount++;
     }
+
+    if (processedCount === 0) return;
+
+    historyRef.current.commitTransaction({
+      coalescingKey: '',
+      type: 'dsp-parameter-change',
+      description: `کنترل تنفس و سرفه (${totalBreaths} نفس · ${totalCoughs} سرفه)`,
+      beforeTracks: tracks,
+      afterTracks: tracks,
+      beforeTokens: tokens,
+      afterTokens: tokens,
+      beforeRecommendations: recommendations,
+      afterRecommendations: recommendations,
+      beforePcmSources: beforePcmSourcesSnapshot,
+      afterPcmSources: updatedPcmSources,
+      beforeAssets: beforeAssetsSnapshot,
+      afterAssets: updatedAssets,
+    });
 
     setProject((prev) => ({
       ...prev,
       pcmSources: updatedPcmSources,
       assets: updatedAssets,
     }));
+    persistDirtyCheckpointForCurrentState(tracks);
+    setHistoryTick((v) => v + 1);
     setStatusNotice(
       `کنترل غیرکلامی تنفس و سرفه اعمال شد: ${totalBreaths} نفس پیش از جمله با شیب ۱۵ms به میزان -10dB نرم‌سازی شد${
         totalCoughs > 0 ? ` و ${totalCoughs} سرفه با Room Tone جایگزین گردید` : ''
@@ -1644,6 +2212,10 @@ export default function App() {
   };
 
   const handleBatchAcceptAllSafe = () => {
+    if (isReadOnlyLocked) {
+      setStatusNotice('ویرایش غیرفعال است: پروژه بدون قفل انحصاری در حالت فقط‌خواندنی قرار دارد.');
+      return;
+    }
     transportRef.current?.stop();
     setIsPlaying(false);
     setPreviewingId(null);
@@ -1656,6 +2228,8 @@ export default function App() {
       tracks,
       tokens,
       recommendations,
+      pcmSources: project.pcmSources,
+      sampleRate: project.sampleRate,
     });
 
     if (batchResult.appliedCount === 0) {
@@ -1678,6 +2252,8 @@ export default function App() {
     setTracks(batchResult.tracks);
     setTokens(batchResult.tokens);
     setRecommendations(batchResult.recommendations);
+    persistDirtyCheckpointForCurrentState(batchResult.tracks);
+    clampPlaybackAndSelectionToTracks(batchResult.tracks);
     setHistoryTick((v) => v + 1);
     setStatusNotice(
       `پاک‌سازی دسته‌ای انجام شد: ${batchResult.appliedCount} مورد (${batchResult.rippleCutCount} برش زمانی و ${batchResult.roomToneCount} جایگزینی Room Tone) در یک تراکنش واحد اعمال شد.`,
@@ -1689,7 +2265,7 @@ export default function App() {
     let addedTotal = 0;
 
     for (const trk of tracks) {
-      const assetId = trk.clips[0]?.assetId;
+      const assetId = getTrackPrimaryAssetId(trk);
       const pcm = assetId ? project.pcmSources[assetId] : undefined;
       if (!pcm) continue;
       const beforeLen = updatedRecs.length;
@@ -1725,11 +2301,15 @@ export default function App() {
     });
 
     setProject(recordedProject);
+    setProjectSessionNonce((n) => n + 1);
     setTracks(cloneTracks(recordedProject.tracks));
     setTokens(cloneTokens(recordedProject.tokens));
     setRecommendations(cloneRecommendations(recordedProject.recommendations));
     setSelectedRecId(recordedProject.recommendations[0]?.id ?? null);
+    setSelection(null);
     setPlayheadSec(0);
+    setAsrInlineFeedback(null);
+    setActiveFailure(null);
     historyRef.current = new TimelineHistoryManager();
     setHistoryTick((v) => v + 1);
     setStatusNotice(
@@ -1738,12 +2318,20 @@ export default function App() {
   };
 
   const handleRejectRecommendation = (id: string) => {
+    if (isReadOnlyLocked) {
+      setStatusNotice('ویرایش غیرفعال است: پروژه بدون قفل انحصاری در حالت فقط‌خواندنی قرار دارد.');
+      return;
+    }
     setRecommendations((prev) =>
       prev.map((r) => (r.id === id ? { ...r, status: 'Rejected' } : r)),
     );
   };
 
   const handleNudgeBoundary = (id: string, deltaMs: number) => {
+    if (isReadOnlyLocked) {
+      setStatusNotice('ویرایش غیرفعال است: پروژه بدون قفل انحصاری در حالت فقط‌خواندنی قرار دارد.');
+      return;
+    }
     const deltaFlicks = msToFlicks(deltaMs);
     setRecommendations((prev) =>
       prev.map((r) => {
@@ -1768,11 +2356,16 @@ export default function App() {
   };
 
   const handleUndo = () => {
+    if (isReadOnlyLocked) {
+      setStatusNotice('ویرایش غیرفعال است: پروژه بدون قفل انحصاری در حالت فقط‌خواندنی قرار دارد.');
+      return;
+    }
     const tx = historyRef.current.undo();
     if (!tx) return;
     transportRef.current?.stop();
     setIsPlaying(false);
-    setTracks(cloneTracks(tx.beforeTracks));
+    const restoredTracks = cloneTracks(tx.beforeTracks);
+    setTracks(restoredTracks);
     if (tx.beforeTokens) {
       setTokens(cloneTokens(tx.beforeTokens));
     }
@@ -1785,16 +2378,35 @@ export default function App() {
         ),
       );
     }
+    if (tx.beforeDsp) {
+      setEphemeralDsp({ ...tx.beforeDsp });
+      setCommittedDsp({ ...tx.beforeDsp });
+      setIsGestureActive(false);
+    }
+    if (tx.beforePcmSources || tx.beforeAssets) {
+      setProject((prev) => ({
+        ...prev,
+        pcmSources: tx.beforePcmSources ? { ...tx.beforePcmSources } : prev.pcmSources,
+        assets: tx.beforeAssets ? { ...tx.beforeAssets } : prev.assets,
+      }));
+    }
+    persistDirtyCheckpointForCurrentState(restoredTracks);
+    clampPlaybackAndSelectionToTracks(restoredTracks);
     setHistoryTick((v) => v + 1);
     setStatusNotice(`تراکنش «${tx.description}» بازگردانی شد (Undo).`);
   };
 
   const handleRedo = () => {
+    if (isReadOnlyLocked) {
+      setStatusNotice('ویرایش غیرفعال است: پروژه بدون قفل انحصاری در حالت فقط‌خواندنی قرار دارد.');
+      return;
+    }
     const tx = historyRef.current.redo();
     if (!tx) return;
     transportRef.current?.stop();
     setIsPlaying(false);
-    setTracks(cloneTracks(tx.afterTracks));
+    const restoredTracks = cloneTracks(tx.afterTracks);
+    setTracks(restoredTracks);
     if (tx.afterTokens) {
       setTokens(cloneTokens(tx.afterTokens));
     }
@@ -1807,6 +2419,20 @@ export default function App() {
         ),
       );
     }
+    if (tx.afterDsp) {
+      setEphemeralDsp({ ...tx.afterDsp });
+      setCommittedDsp({ ...tx.afterDsp });
+      setIsGestureActive(false);
+    }
+    if (tx.afterPcmSources || tx.afterAssets) {
+      setProject((prev) => ({
+        ...prev,
+        pcmSources: tx.afterPcmSources ? { ...tx.afterPcmSources } : prev.pcmSources,
+        assets: tx.afterAssets ? { ...tx.afterAssets } : prev.assets,
+      }));
+    }
+    persistDirtyCheckpointForCurrentState(restoredTracks);
+    clampPlaybackAndSelectionToTracks(restoredTracks);
     setHistoryTick((v) => v + 1);
     setStatusNotice(`تراکنش «${tx.description}» دوباره اعمال شد (Redo).`);
   };
@@ -1818,8 +2444,15 @@ export default function App() {
 
   const handleCommitDspGesture = (coalescingKey: string, labelFa: string) => {
     setIsGestureActive(false);
+    if (isReadOnlyLocked) {
+      setEphemeralDsp(committedDsp);
+      setStatusNotice('ویرایش غیرفعال است: پروژه بدون قفل انحصاری در حالت فقط‌خواندنی قرار دارد.');
+      return;
+    }
     if (JSON.stringify(ephemeralDsp) === JSON.stringify(committedDsp)) return;
-    setCommittedDsp(ephemeralDsp);
+    const beforeDspSnapshot = { ...committedDsp };
+    const afterDspSnapshot = { ...ephemeralDsp };
+    setCommittedDsp(afterDspSnapshot);
     historyRef.current.commitTransaction({
       coalescingKey,
       type: 'dsp-parameter-change',
@@ -1830,29 +2463,63 @@ export default function App() {
       afterTokens: tokens,
       beforeRecommendations: recommendations,
       afterRecommendations: recommendations,
+      beforeDsp: beforeDspSnapshot,
+      afterDsp: afterDspSnapshot,
     });
     setHistoryTick((v) => v + 1);
+    resyncActivePlayback({ dspParams: afterDspSnapshot });
   };
 
   const handleResetDsp = () => {
-    setEphemeralDsp(DEFAULT_DSP_PARAMS);
-    setCommittedDsp(DEFAULT_DSP_PARAMS);
+    if (isReadOnlyLocked) {
+      setStatusNotice('ویرایش غیرفعال است: پروژه بدون قفل انحصاری در حالت فقط‌خواندنی قرار دارد.');
+      return;
+    }
+    if (JSON.stringify(committedDsp) === JSON.stringify(DEFAULT_DSP_PARAMS)) {
+      setEphemeralDsp(DEFAULT_DSP_PARAMS);
+      setIsGestureActive(false);
+      return;
+    }
+    const beforeDspSnapshot = { ...committedDsp };
+    const nextDsp = { ...DEFAULT_DSP_PARAMS };
+    setEphemeralDsp(nextDsp);
+    setCommittedDsp(nextDsp);
     setIsGestureActive(false);
+    historyRef.current.commitTransaction({
+      coalescingKey: '',
+      type: 'dsp-parameter-change',
+      description: 'بازنشانی تنظیمات DSP به مقادیر پیش‌فرض',
+      beforeTracks: tracks,
+      afterTracks: tracks,
+      beforeTokens: tokens,
+      afterTokens: tokens,
+      beforeRecommendations: recommendations,
+      afterRecommendations: recommendations,
+      beforeDsp: beforeDspSnapshot,
+      afterDsp: nextDsp,
+    });
+    setHistoryTick((v) => v + 1);
+    resyncActivePlayback({ dspParams: nextDsp });
+    setStatusNotice('تنظیمات DSP به مقادیر پیش‌فرض بازنشانی شد (قابل بازگردانی با Undo).');
   };
 
   const handleToggleTrackMute = (trackId: string) => {
-    setTracks((prev) =>
-      prev.map((t) => (t.id === trackId ? { ...t, muted: !t.muted } : t)),
-    );
+    const nextTracks = tracks.map((t) => (t.id === trackId ? { ...t, muted: !t.muted } : t));
+    setTracks(nextTracks);
+    resyncActivePlayback({ tracks: nextTracks });
   };
 
   const handleToggleTrackSolo = (trackId: string) => {
-    setTracks((prev) =>
-      prev.map((t) => (t.id === trackId ? { ...t, solo: !t.solo } : t)),
-    );
+    const nextTracks = tracks.map((t) => (t.id === trackId ? { ...t, solo: !t.solo } : t));
+    setTracks(nextTracks);
+    resyncActivePlayback({ tracks: nextTracks });
   };
 
-  const applySyncedTrackTimelineShiftMs = (shiftMs: number, descriptionFa: string) => {
+  const applySyncedTrackTimelineShiftMs = (shiftMs: number, descriptionFa: string): boolean => {
+    if (isReadOnlyLocked) {
+      setStatusNotice('ویرایش غیرفعال است: پروژه بدون قفل انحصاری در حالت فقط‌خواندنی قرار دارد.');
+      return false;
+    }
     const deltaFlicks = msToFlicks(shiftMs);
     const nextTracks = tracks.map((trk, idx) => {
       if (idx === 0 || !trk.syncGroupId) return trk;
@@ -1885,15 +2552,19 @@ export default function App() {
     });
 
     setTracks(nextTracks);
+    persistDirtyCheckpointForCurrentState(nextTracks);
+    clampPlaybackAndSelectionToTracks(nextTracks);
     setHistoryTick((v) => v + 1);
+    return true;
   };
 
   const handleAutoAlignSyncedTracks = () => {
     const offsetToCorrect = -detectedSyncOffsetMs;
-    applySyncedTrackTimelineShiftMs(
+    const applied = applySyncedTrackTimelineShiftMs(
       offsetToCorrect,
       `هم‌ترازسازی خودکار ترک‌های همگام (${detectedSyncOffsetMs.toFixed(1)}ms و جبران دریفت ${detectedClockDriftPpm.toFixed(1)}ppm)`,
     );
+    if (!applied) return;
     setDetectedSyncOffsetMs(0);
     setDetectedClockDriftPpm(0);
     setStatusNotice(
@@ -1902,10 +2573,11 @@ export default function App() {
   };
 
   const handleNudgeSyncedTracksMs = (deltaMs: number) => {
-    applySyncedTrackTimelineShiftMs(
+    const applied = applySyncedTrackTimelineShiftMs(
       deltaMs,
       `جابجایی دستی زمان‌بندی ترک همگام (${deltaMs > 0 ? '+' : ''}${deltaMs}ms)`,
     );
+    if (!applied) return;
     setDetectedSyncOffsetMs((prev) => Number((prev + deltaMs).toFixed(1)));
     setStatusNotice(
       `زمان‌بندی ترک همگام به میزان ${deltaMs > 0 ? '+' : ''}${deltaMs} میلی‌ثانیه جابجا شد (Nudge).`,
@@ -1958,12 +2630,14 @@ export default function App() {
       const loaded = await ingestUploadedAudioFile(file);
       historyRef.current = new TimelineHistoryManager();
       setProject(loaded);
+      setProjectSessionNonce((n) => n + 1);
       setTracks(cloneTracks(loaded.tracks));
       setTokens(cloneTokens(loaded.tokens));
       setRecommendations(cloneRecommendations(loaded.recommendations));
       setSelectedRecId(loaded.recommendations[0]?.id ?? null);
       setSelection(null);
       setPlayheadSec(0);
+      setAsrInlineFeedback(null);
       setHistoryTick((v) => v + 1);
       setStatusNotice(
         `فایل «${file.name}» وارد شد (${loaded.tokens.length} بخش آوایی و ${loaded.recommendations.length} پیشنهاد تدوین شناسایی شد).`,
@@ -1995,11 +2669,15 @@ export default function App() {
     const fresh = buildDefaultPersianPodcastProject();
     historyRef.current = new TimelineHistoryManager();
     setProject(fresh);
+    setProjectSessionNonce((n) => n + 1);
     setTracks(cloneTracks(fresh.tracks));
     setTokens(cloneTokens(fresh.tokens));
     setRecommendations(cloneRecommendations(fresh.recommendations));
     setSelectedRecId(fresh.recommendations[0]?.id ?? null);
+    setSelection(null);
     setPlayheadSec(0);
+    setAsrInlineFeedback(null);
+    setActiveFailure(null);
     setEphemeralDsp(DEFAULT_DSP_PARAMS);
     setCommittedDsp(DEFAULT_DSP_PARAMS);
     setDetectedSyncOffsetMs(38.5);
@@ -2009,24 +2687,32 @@ export default function App() {
   };
 
   const handleOpenExport = () => {
+    if (exportTimerRef.current !== null) {
+      window.clearTimeout(exportTimerRef.current);
+      exportTimerRef.current = null;
+    }
     setExportOpen(true);
     setIsRenderingExport(true);
     setExportProgress(0);
     setExportReport(null);
     setExportManifest(null);
     setExportStrictErrors([]);
-    if (exportDownloadUrl) {
-      URL.revokeObjectURL(exportDownloadUrl);
+    setExportFileName(`avapardaz-export-${Date.now()}.wav`);
+    if (exportDownloadUrlRef.current) {
+      URL.revokeObjectURL(exportDownloadUrlRef.current);
+      exportDownloadUrlRef.current = null;
       setExportDownloadUrl(null);
     }
 
-    setTimeout(() => {
+    exportTimerRef.current = window.setTimeout(() => {
+      exportTimerRef.current = null;
       const rendered = streamingChunkedRender({
         tracks,
         assets: project.assets,
         pcmSources: project.pcmSources,
         sampleRate: project.sampleRate,
         dspParams: ephemeralDsp,
+        dspBypassFlags,
         onProgress: (pct) => setExportProgress(pct),
       });
       const { blob, report } = encodeAndValidateWavExport([rendered], project.sampleRate);
@@ -2085,6 +2771,7 @@ export default function App() {
       };
 
       const url = URL.createObjectURL(blob);
+      exportDownloadUrlRef.current = url;
       setExportReport(report);
       setExportManifest(manifest);
       setExportStrictErrors(strictReport.errors);
@@ -2121,9 +2808,11 @@ export default function App() {
   };
 
   const handleToggleNodeBypass = (nodeId: string) => {
-    setGraphNodes((prev) =>
-      prev.map((n) => (n.id === nodeId ? { ...n, bypassed: !n.bypassed } : n)),
+    const nextNodes = graphNodes.map((n) =>
+      n.id === nodeId ? { ...n, bypassed: !n.bypassed } : n,
     );
+    setGraphNodes(nextNodes);
+    resyncActivePlayback({ dspBypassFlags: deriveDspBypassFlags(nextNodes) });
   };
 
   const auditionMarkers = useMemo(() => {
@@ -2158,7 +2847,7 @@ export default function App() {
   // Mission 04/05/06/07 StudioWorkflowController handlers
   const handleRunMissionEdlAnalysis = async () => {
     const primaryTrack = tracks[0];
-    const primaryAssetId = primaryTrack?.clips[0]?.assetId ?? Object.keys(project.pcmSources)[0];
+    const primaryAssetId = getTrackPrimaryAssetId(primaryTrack, project.pcmSources);
     const pcm = primaryAssetId ? project.pcmSources[primaryAssetId] : undefined;
     if (!primaryTrack || !pcm) return;
 
@@ -2172,6 +2861,8 @@ export default function App() {
       setStatusNotice(
         `تحلیل محلی رویدادها و EDL کامل شد: ${res.eventResult?.events.length ?? 0} رویداد و ${res.edl.proposals.length} پیشنهاد تدوین (هیچ برشی بدون تأیید اعمال نمی‌شود).`,
       );
+    } else if (!res.ok) {
+      setStatusNotice('تحلیل رویدادها و EDL ناموفق بود یا به‌دلیل تغییر جلسه لغو شد.');
     }
   };
 
@@ -2210,7 +2901,7 @@ export default function App() {
     resumeFromCheckpoint: boolean,
   ) => {
     const primaryTrack = tracks[0];
-    const primaryAssetId = primaryTrack?.clips[0]?.assetId ?? Object.keys(project.pcmSources)[0];
+    const primaryAssetId = getTrackPrimaryAssetId(primaryTrack, project.pcmSources);
     const pcm = primaryAssetId ? project.pcmSources[primaryAssetId] : undefined;
     if (!pcm) return;
 
@@ -2219,6 +2910,17 @@ export default function App() {
       config,
       resumeCheckpoint: resumeFromCheckpoint ? workflowState.recoverableCheckpoint : null,
     });
+  };
+
+  const handleToggleLoopSelection = () => {
+    const nextLoop = !loopSelection;
+    setLoopSelection(nextLoop);
+    resyncActivePlayback({ loop: nextLoop });
+  };
+
+  const handleChangePlaybackRate = (nextRate: number) => {
+    setPlaybackRate(nextRate);
+    resyncActivePlayback({ playbackRate: nextRate });
   };
 
   // Audition DAW Keyboard Shortcuts — single stable window listener (no re-registration per render)
@@ -2232,9 +2934,45 @@ export default function App() {
     ) {
       return;
     }
+
+    const hasOpenModal =
+      renderModalOpen ||
+      exportOpen ||
+      lifecycleModalOpen ||
+      asrLabOpen ||
+      devPortalOpen ||
+      speechIntelOpen ||
+      dataFactoryOpen ||
+      modelFactoryOpen ||
+      securityOpen;
+    if (hasOpenModal) {
+      return;
+    }
+
+    const mod = e.ctrlKey || e.metaKey;
+    if (mod && !e.altKey) {
+      const lower = e.key.toLowerCase();
+      if (lower === 'z' && !e.shiftKey) {
+        e.preventDefault();
+        handleUndo();
+        return;
+      }
+      if ((lower === 'z' && e.shiftKey) || lower === 'y') {
+        e.preventDefault();
+        handleRedo();
+        return;
+      }
+      return;
+    }
+
+    if (e.altKey) return;
+
     if (e.code === 'Space') {
       e.preventDefault();
       handleTogglePlay();
+    } else if (e.key === 'Home') {
+      e.preventDefault();
+      handleStopAndReset();
     } else if (e.key === 'i' || e.key === 'I') {
       e.preventDefault();
       handleSetInAtPlayhead();
@@ -2243,7 +2981,7 @@ export default function App() {
       handleSetOutAtPlayhead();
     } else if (e.key === 'l' || e.key === 'L') {
       e.preventDefault();
-      setLoopSelection((v) => !v);
+      handleToggleLoopSelection();
     } else if (e.key === 'Escape') {
       setSelection(null);
     }
@@ -2526,9 +3264,20 @@ export default function App() {
                     <TranscriptPanel
                       tokens={tokens}
                       tracks={tracks}
+                      pcmSources={project.pcmSources}
+                      sampleRate={project.sampleRate}
                       playheadSec={playheadSec}
                       totalDurationSec={totalDurationSec}
                       isTranscribingAsr={isTranscribingAsr}
+                      projectSessionNonce={projectSessionNonce}
+                      asrInlineFeedback={asrInlineFeedback}
+                      onDismissAsrInlineFeedback={() => setAsrInlineFeedback(null)}
+                      onRunAcousticSegmentation={handleRunAcousticSegmentation}
+                      onOpenLocalModelInstaller={() => {
+                        setLifecycleInitialTab('model');
+                        setLifecycleModalOpen(true);
+                      }}
+                      onSwitchToLocalExecutionMode={() => handleChangeExecutionMode('LOCAL')}
                       onSeekSec={handleSeekSec}
                       onCutSelectedWords={handleCutSelectedWords}
                       onUpdateTokenDisplayText={handleUpdateTokenDisplayText}
@@ -2574,6 +3323,10 @@ export default function App() {
                       canRedoEdl={workflowState.edlRedoStack.length > 0}
                       onRunAnalysis={handleRunMissionEdlAnalysis}
                       onApproveProposal={(proposalId) => {
+                        if (isReadOnlyLocked) {
+                          setStatusNotice('ویرایش غیرفعال است: پروژه بدون قفل انحصاری در حالت فقط‌خواندنی قرار دارد.');
+                          return;
+                        }
                         const r = workflowRef.current!.applyHumanDecision({
                           action: 'APPROVE',
                           proposalId,
@@ -2582,16 +3335,37 @@ export default function App() {
                           setStatusNotice(`تأیید پیشنهاد مسدود شد: ${r.failure.message}`);
                         }
                       }}
-                      onRejectProposal={(proposalId) =>
-                        workflowRef.current!.applyHumanDecision({ action: 'REJECT', proposalId })
-                      }
-                      onRequestReviewProposal={(proposalId) =>
-                        workflowRef.current!.applyHumanDecision({
+                      onRejectProposal={(proposalId) => {
+                        if (isReadOnlyLocked) {
+                          setStatusNotice('ویرایش غیرفعال است: پروژه بدون قفل انحصاری در حالت فقط‌خواندنی قرار دارد.');
+                          return;
+                        }
+                        const r = workflowRef.current!.applyHumanDecision({
+                          action: 'REJECT',
+                          proposalId,
+                        });
+                        if (!r.ok && r.failure) {
+                          setStatusNotice(`رد پیشنهاد ناموفق بود: ${r.failure.message}`);
+                        }
+                      }}
+                      onRequestReviewProposal={(proposalId) => {
+                        if (isReadOnlyLocked) {
+                          setStatusNotice('ویرایش غیرفعال است: پروژه بدون قفل انحصاری در حالت فقط‌خواندنی قرار دارد.');
+                          return;
+                        }
+                        const r = workflowRef.current!.applyHumanDecision({
                           action: 'REQUEST_REVIEW',
                           proposalId,
-                        })
-                      }
+                        });
+                        if (!r.ok && r.failure) {
+                          setStatusNotice(`ثبت درخواست بازبینی ناموفق بود: ${r.failure.message}`);
+                        }
+                      }}
                       onReviseBoundaryMs={(proposalId, dStartMs, dEndMs) => {
+                        if (isReadOnlyLocked) {
+                          setStatusNotice('ویرایش غیرفعال است: پروژه بدون قفل انحصاری در حالت فقط‌خواندنی قرار دارد.');
+                          return;
+                        }
                         const prop = workflowState.edlSnapshot?.proposals.find(
                           (p) => p.proposalId === proposalId,
                         );
@@ -2600,7 +3374,7 @@ export default function App() {
                         if (!activeRange) return;
                         const deltaStart = Math.round((dStartMs / 1000) * project.sampleRate);
                         const deltaEnd = Math.round((dEndMs / 1000) * project.sampleRate);
-                        workflowRef.current!.reviseProposalBoundaries({
+                        const r = workflowRef.current!.reviseProposalBoundaries({
                           proposalId,
                           newStartSample: Math.max(0, activeRange.startSample + deltaStart),
                           newEndSample: Math.min(
@@ -2608,11 +3382,26 @@ export default function App() {
                             activeRange.endSample + deltaEnd,
                           ),
                         });
+                        if (!r.ok && r.failure) {
+                          setStatusNotice(`تغییر مرز پیشنهاد مجاز نیست: ${r.failure.message}`);
+                        }
                       }}
                       onPreviewProposal={handlePreviewEdlProposal}
                       onSeekSec={handleSeekSec}
-                      onUndoEdl={() => workflowRef.current!.undoEdlDecision()}
-                      onRedoEdl={() => workflowRef.current!.redoEdlDecision()}
+                      onUndoEdl={() => {
+                        if (isReadOnlyLocked) {
+                          setStatusNotice('ویرایش غیرفعال است: پروژه بدون قفل انحصاری در حالت فقط‌خواندنی قرار دارد.');
+                          return;
+                        }
+                        workflowRef.current!.undoEdlDecision();
+                      }}
+                      onRedoEdl={() => {
+                        if (isReadOnlyLocked) {
+                          setStatusNotice('ویرایش غیرفعال است: پروژه بدون قفل انحصاری در حالت فقط‌خواندنی قرار دارد.');
+                          return;
+                        }
+                        workflowRef.current!.redoEdlDecision();
+                      }}
                       onApplyLinguisticReadableText={handleUpdateTokenDisplayText}
                     />
 
@@ -2673,8 +3462,8 @@ export default function App() {
         onPlaySelection={() => handlePlaySelectionRange(selection)}
         onStopAndReset={handleStopAndReset}
         onSeekSec={handleSeekSec}
-        onToggleLoop={() => setLoopSelection((v) => !v)}
-        onChangePlaybackRate={(r) => setPlaybackRate(r)}
+        onToggleLoop={handleToggleLoopSelection}
+        onChangePlaybackRate={handleChangePlaybackRate}
         onJumpPrevMarker={handleJumpPrevMarker}
         onJumpNextMarker={handleJumpNextMarker}
         onSetInAtPlayhead={handleSetInAtPlayhead}
@@ -2702,6 +3491,10 @@ export default function App() {
         onModelStateChanged={() => {
           const snap = modelManagerRef.current.getSnapshot();
           if (snap.activeModel) {
+            setActiveFailure(null);
+            setAsrInlineFeedback((prev) =>
+              prev?.kind === 'MODEL_NOT_INSTALLED' ? null : prev,
+            );
             workflowRef.current?.setAsrState({
               state: 'MODEL_READY',
               modelId: snap.activeModel.modelId,
@@ -2727,7 +3520,7 @@ export default function App() {
         manifest={exportManifest}
         validationErrors={exportStrictErrors}
         downloadUrl={exportDownloadUrl}
-        fileName={`avapardaz-export-${Date.now()}.wav`}
+        fileName={exportFileName}
         onClose={() => setExportOpen(false)}
       />
 

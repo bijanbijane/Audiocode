@@ -33,7 +33,8 @@ export class SpectralWienerDenoiserEngine {
       real.fill(0);
       imag.fill(0);
       for (let i = 0; i < this.fftSize; i++) {
-        real[i] = roomTone[start + i] * this.synthesisWindow[i];
+        const s = roomTone[start + i];
+        real[i] = (Number.isFinite(s) ? s : 0) * this.synthesisWindow[i];
       }
       this.fftInPlace(real, imag, false);
 
@@ -59,7 +60,7 @@ export class SpectralWienerDenoiserEngine {
     reductionStrength = 0.85,
   ): Float32Array {
     const len = inputPcm.length;
-    if (len < this.fftSize || reductionStrength <= 0) {
+    if (len < this.fftSize || !Number.isFinite(reductionStrength) || reductionStrength <= 0) {
       return new Float32Array(inputPcm);
     }
 
@@ -73,7 +74,8 @@ export class SpectralWienerDenoiserEngine {
 
     for (let start = 0; start < len; start += this.hopSize) {
       for (let i = 0; i < this.fftSize; i++) {
-        const sample = start + i < len ? inputPcm[start + i] : 0;
+        const raw = start + i < len ? inputPcm[start + i] : 0;
+        const sample = Number.isFinite(raw) ? raw : 0;
         real[i] = sample * this.synthesisWindow[i];
         imag[i] = 0;
       }

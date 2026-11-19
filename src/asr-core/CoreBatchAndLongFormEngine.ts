@@ -39,18 +39,26 @@ export function findBestBoundaryValleySample(
   targetSample: number,
   searchRadiusSamples = CORE_SAMPLE_RATE * 2,
 ): number {
+  const safeTarget = Number.isFinite(targetSample)
+    ? Math.max(0, Math.min(pcm16k.length, Math.round(targetSample)))
+    : Math.floor(pcm16k.length / 2);
+  const safeRadius =
+    Number.isFinite(searchRadiusSamples) && searchRadiusSamples >= 0
+      ? Math.round(searchRadiusSamples)
+      : CORE_SAMPLE_RATE * 2;
   const win = 320; // 20ms
-  const lo = Math.max(win, targetSample - searchRadiusSamples);
-  const hi = Math.min(pcm16k.length - win, targetSample + searchRadiusSamples);
-  if (hi <= lo) return targetSample;
+  const lo = Math.max(win, safeTarget - safeRadius);
+  const hi = Math.min(pcm16k.length - win, safeTarget + safeRadius);
+  if (hi <= lo) return safeTarget;
 
-  let bestSample = targetSample;
+  let bestSample = safeTarget;
   let bestEnergy = Infinity;
 
   for (let pos = lo; pos <= hi; pos += 160) {
     let e = 0;
     for (let i = pos; i < pos + win && i < pcm16k.length; i++) {
-      e += pcm16k[i] * pcm16k[i];
+      const s = Number.isFinite(pcm16k[i]) ? pcm16k[i] : 0;
+      e += s * s;
     }
     if (e < bestEnergy) {
       bestEnergy = e;
@@ -116,8 +124,21 @@ export class CoreBatchAndLongFormEngine {
     const sha256 =
       params.audioSha256 ?? crypto.createHash('sha256').update(Buffer.from(pcm16k.buffer)).digest('hex');
 
-    const maxSegSamples = Math.max(CORE_SAMPLE_RATE * 2, Math.round(cfg.maxSegmentDurationSec * CORE_SAMPLE_RATE));
-    const overlapSamples = Math.max(0, Math.round(cfg.contextOverlapSec * CORE_SAMPLE_RATE));
+    const maxSegmentDurationSec =
+      Number.isFinite(cfg.maxSegmentDurationSec) && cfg.maxSegmentDurationSec >= 2.0
+        ? cfg.maxSegmentDurationSec
+        : DEFAULT_LONG_FORM_CONFIG.maxSegmentDurationSec;
+    const contextOverlapSec =
+      Number.isFinite(cfg.contextOverlapSec) && cfg.contextOverlapSec >= 0
+        ? Math.min(maxSegmentDurationSec * 0.5, cfg.contextOverlapSec)
+        : DEFAULT_LONG_FORM_CONFIG.contextOverlapSec;
+    const maxRetriesPerSegment =
+      Number.isFinite(cfg.maxRetriesPerSegment) && cfg.maxRetriesPerSegment >= 0
+        ? Math.min(10, Math.floor(cfg.maxRetriesPerSegment))
+        : DEFAULT_LONG_FORM_CONFIG.maxRetriesPerSegment;
+
+    const maxSegSamples = Math.max(CORE_SAMPLE_RATE * 2, Math.round(maxSegmentDurationSec * CORE_SAMPLE_RATE));
+    const overlapSamples = Math.max(0, Math.round(contextOverlapSec * CORE_SAMPLE_RATE));
 
     // Plan segments anchored cleanly on acoustic energy valleys
     const plannedRanges: Array<{ startSample: number; endSample: number }> = [];
@@ -149,7 +170,7 @@ export class CoreBatchAndLongFormEngine {
       let seg: CoreTranscriptionSegment | null = null;
       let lastErr: string | null = null;
 
-      while (retries <= cfg.maxRetriesPerSegment) {
+      while (retries <= maxRetriesPerSegment) {
         try {
           if (cfg.simulateFailureOnSegmentIndex === idx) {
             throw new Error(`INJECTED_SEGMENT_FAILURE_ON_INDEX_${idx}`);

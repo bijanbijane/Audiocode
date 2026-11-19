@@ -37,6 +37,8 @@ export class PersianProsodicPunctuationRestorer {
     sampleRate: SampleRate,
   ): TimedPersianToken[] {
     if (tokens.length === 0) return [];
+    const safeRate: SampleRate =
+      Number.isFinite(sampleRate) && sampleRate > 0 ? sampleRate : 48000;
 
     const out: TimedPersianToken[] = [];
     let currentClauseHasInterrogative = false;
@@ -54,9 +56,11 @@ export class PersianProsodicPunctuationRestorer {
       // حذف علائم نگارشی تکراری احتمالی از انتهای کلمه پیش از تصمیم‌گیری
       const cleanDisplay = tok.displayText.replace(/[،؛.!؟]+$/, '');
 
-      const pauseAfterMs = nextTok
-        ? TimeMath.flicksToSeconds(nextTok.range.start - tok.range.end) * 1000
-        : 1000;
+      const rawPauseMs =
+        nextTok && Number.isFinite(nextTok.range.start) && Number.isFinite(tok.range.end)
+          ? TimeMath.flicksToSeconds(nextTok.range.start - tok.range.end) * 1000
+          : 1000;
+      const pauseAfterMs = Number.isFinite(rawPauseMs) ? rawPauseMs : 1000;
 
       const nextIsConjunction =
         nextTok !== null && this.CONJUNCTION_AFTER_COMMA.has(nextTok.normalizedText);
@@ -65,16 +69,31 @@ export class PersianProsodicPunctuationRestorer {
       if (pauseAfterMs >= 420 || !nextTok) {
         if (clauseLengthWords >= 2) {
           // محاسبه شیب زیر و بمی صدا (Terminal Pitch Slope) روی کلمه پایانی جمله
-          const startSample = TimeMath.flicksToSamplesFloor(tok.range.start, sampleRate);
-          const endSample = Math.min(
-            pcmMono.length,
-            TimeMath.flicksToSamplesFloor(tok.range.end, sampleRate),
+          const startSample = Math.max(
+            0,
+            Math.min(
+              pcmMono.length,
+              TimeMath.flicksToSamplesFloor(
+                Number.isFinite(tok.range.start) ? tok.range.start : 0,
+                safeRate,
+              ),
+            ),
+          );
+          const endSample = Math.max(
+            startSample,
+            Math.min(
+              pcmMono.length,
+              TimeMath.flicksToSamplesFloor(
+                Number.isFinite(tok.range.end) ? tok.range.end : 0,
+                safeRate,
+              ),
+            ),
           );
           const pitchRiseSemitones = this.measureWordPitchSlopeSemitones(
             pcmMono,
             startSample,
             endSample,
-            sampleRate,
+            safeRate,
           );
 
           // در زبان فارسی، خیز فرکانس پایه بیش از +2.0 نیم‌پرده در انتهای عبارت یا وجود واژه پرسشی = علامت سؤال (؟)
@@ -137,8 +156,10 @@ export class PersianProsodicPunctuationRestorer {
     end: number,
     sampleRate: SampleRate,
   ): number {
-    const sliceLen = end - start;
-    const minLag = Math.floor(sampleRate / 350);
+    const s = Math.max(0, Math.min(pcm.length, start));
+    const e = Math.max(s, Math.min(pcm.length, end));
+    const sliceLen = e - s;
+    const minLag = Math.max(1, Math.floor(sampleRate / 350));
     const maxLag = Math.min(Math.floor(sliceLen / 2), Math.floor(sampleRate / 80));
     if (maxLag <= minLag) return 0;
 
@@ -153,8 +174,10 @@ export class PersianProsodicPunctuationRestorer {
       let e1 = 0;
       let e2 = 0;
       for (let i = 0; i < compareLen; i += 2) {
-        const a = pcm[start + i];
-        const b = pcm[start + i + lag];
+        const rawA = pcm[s + i];
+        const rawB = pcm[s + i + lag];
+        const a = Number.isFinite(rawA) ? rawA : 0;
+        const b = Number.isFinite(rawB) ? rawB : 0;
         dot += a * b;
         e1 += a * a;
         e2 += b * b;

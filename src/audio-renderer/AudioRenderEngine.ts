@@ -269,7 +269,11 @@ export class AudioRenderEngine {
         }
       }
 
-      const chunkSizeSamples = request.config.chunkSizeSamples ?? 16384;
+      const rawChunkSize = request.config.chunkSizeSamples ?? 16384;
+      const chunkSizeSamples = Math.max(
+        1024,
+        Math.min(65536, Math.trunc(Number.isFinite(rawChunkSize) ? rawChunkSize : 16384)),
+      );
       const estimatedWorkingBytes =
         chunkSizeSamples * plan.channelCount * Float32Array.BYTES_PER_ELEMENT * 2;
 
@@ -327,24 +331,32 @@ export class AudioRenderEngine {
         sink,
       });
 
-      await writer.begin();
+      const headerSizeBytes = plan.container === 'rf64' ? 80 : 44;
+      const canResumeSinkInPlace =
+        Boolean(checkpointToResume) &&
+        plan.outputSampleRate === plan.sourceSampleRate &&
+        sink.getTotalBytesWritten() === headerSizeBytes + checkpointToResume!.writtenDataBytes;
 
-      // If resuming from a verified checkpoint on a fresh sink, cleanly re-stream prefix chunks
-      // deterministically only if the sink does not already hold prior bytes, ensuring zero
-      // duplicated or missing samples and deterministic byte-for-byte output.
-      const effectiveResume =
-        checkpointToResume && sink.getTotalBytesWritten() > (plan.container === 'rf64' ? 80 : 44)
-          ? checkpointToResume
-          : null;
+      let effectiveResume: RenderCheckpoint | null = null;
+      if (canResumeSinkInPlace && checkpointToResume) {
+        writer.resumeFromCheckpointState({
+          writtenSamples: checkpointToResume.writtenOutputSamples,
+          writtenDataBytes: checkpointToResume.writtenDataBytes,
+          partialHashState: checkpointToResume.partialOutputHashState,
+        });
+        effectiveResume = checkpointToResume;
+      } else {
+        await writer.begin();
+      }
 
       emitState(
         'RENDERING',
         'در حال مونتاژ جریانی و اعمال Crossfade ایمن در مرز برش‌ها',
         8,
         0,
-        0,
+        writer.getWrittenSamples(),
         plan.expectedOutputSamples,
-        0,
+        effectiveResume?.completedSegmentIndex ?? 0,
         plan.retainedSegments.length,
       );
 
@@ -398,7 +410,11 @@ export class AudioRenderEngine {
           nowMs: Date.now(),
         });
         await this.checkpointStore.saveCheckpoint(checkpoint);
-        await writer.abort();
+        // Preserve already-written bytes on persistent sinks when pausing so resume works in-place;
+        // always abort & clean up on explicit cancellation or non-persistent RAM sinks.
+        if (assembly.status === 'CANCELLED' || !sink.persistedExternally) {
+          await writer.abort();
+        }
 
         emitState(
           assembly.status,

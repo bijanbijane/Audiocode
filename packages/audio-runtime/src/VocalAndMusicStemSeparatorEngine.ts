@@ -21,7 +21,7 @@ export class VocalAndMusicStemSeparatorEngine {
     const musicLeft = new Float32Array(len);
     const musicRight = new Float32Array(len);
 
-    if (len === 0) {
+    if (len === 0 || !Number.isFinite(sampleRate) || sampleRate <= 0) {
       return {
         vocalMonoStem,
         musicStereoStem: [musicLeft, musicRight],
@@ -44,8 +44,8 @@ export class VocalAndMusicStemSeparatorEngine {
     let musicEnergySum = 0;
 
     for (let i = 0; i < len; i++) {
-      const l = inputLeft[i];
-      const r = inputRight[i];
+      const l = Number.isFinite(inputLeft[i]) ? inputLeft[i] : 0;
+      const r = Number.isFinite(inputRight[i]) ? inputRight[i] : 0;
 
       const mid = 0.5 * (l + r);
       const side = 0.5 * (l - r);

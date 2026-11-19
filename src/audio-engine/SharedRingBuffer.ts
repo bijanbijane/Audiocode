@@ -28,8 +28,16 @@ export class SharedAudioRingBuffer {
     channelCount = 2,
     existingBuffers?: { controlBuffer: RingBufferBacking; audioBuffer: RingBufferBacking },
   ) {
-    this.capacityFrames = capacityFrames;
-    this.channelCount = channelCount;
+    const safeCapacity =
+      Number.isFinite(capacityFrames) && capacityFrames >= 2
+        ? Math.floor(capacityFrames)
+        : 2;
+    const safeChannels =
+      Number.isFinite(channelCount) && channelCount >= 1
+        ? Math.floor(channelCount)
+        : 1;
+    this.capacityFrames = safeCapacity;
+    this.channelCount = safeChannels;
 
     const canUseSab = typeof SharedArrayBuffer !== 'undefined';
 
@@ -40,25 +48,25 @@ export class SharedAudioRingBuffer {
     } else if (canUseSab) {
       this.controlBuffer = new SharedArrayBuffer(4 * Int32Array.BYTES_PER_ELEMENT);
       this.audioBuffer = new SharedArrayBuffer(
-        capacityFrames * channelCount * Float32Array.BYTES_PER_ELEMENT,
+        safeCapacity * safeChannels * Float32Array.BYTES_PER_ELEMENT,
       );
       this.isShared = true;
     } else {
       this.controlBuffer = new ArrayBuffer(4 * Int32Array.BYTES_PER_ELEMENT);
       this.audioBuffer = new ArrayBuffer(
-        capacityFrames * channelCount * Float32Array.BYTES_PER_ELEMENT,
+        safeCapacity * safeChannels * Float32Array.BYTES_PER_ELEMENT,
       );
       this.isShared = false;
     }
 
     this.ctrl = new Int32Array(this.controlBuffer);
     this.channels = [];
-    for (let c = 0; c < channelCount; c++) {
+    for (let c = 0; c < safeChannels; c++) {
       this.channels.push(
         new Float32Array(
           this.audioBuffer,
-          c * capacityFrames * Float32Array.BYTES_PER_ELEMENT,
-          capacityFrames,
+          c * safeCapacity * Float32Array.BYTES_PER_ELEMENT,
+          safeCapacity,
         ),
       );
     }
@@ -92,9 +100,14 @@ export class SharedAudioRingBuffer {
     this.storeCtrl(CTRL_STATE.UNDERRUN_COUNT, 0);
   }
 
+  private normalizeIndex(raw: number): number {
+    if (!Number.isFinite(raw)) return 0;
+    return ((Math.trunc(raw) % this.capacityFrames) + this.capacityFrames) % this.capacityFrames;
+  }
+
   public availableRead(): number {
-    const write = this.loadCtrl(CTRL_STATE.WRITE_INDEX);
-    const read = this.loadCtrl(CTRL_STATE.READ_INDEX);
+    const write = this.normalizeIndex(this.loadCtrl(CTRL_STATE.WRITE_INDEX));
+    const read = this.normalizeIndex(this.loadCtrl(CTRL_STATE.READ_INDEX));
     return (write - read + this.capacityFrames) % this.capacityFrames;
   }
 
@@ -103,11 +116,26 @@ export class SharedAudioRingBuffer {
   }
 
   public push(sourceChannels: Float32Array[], frameCount: number): number {
-    const free = this.availableWrite();
-    const toWrite = Math.min(frameCount, free);
-    if (toWrite === 0) return 0;
+    if (
+      sourceChannels.length === 0 ||
+      !Number.isFinite(frameCount) ||
+      frameCount <= 0
+    ) {
+      return 0;
+    }
 
-    const writeIdx = this.loadCtrl(CTRL_STATE.WRITE_INDEX);
+    let minSourceLen = Math.floor(frameCount);
+    for (let c = 0; c < this.channelCount; c++) {
+      const src = sourceChannels[c] ?? sourceChannels[0];
+      if (!src) return 0;
+      if (src.length < minSourceLen) minSourceLen = src.length;
+    }
+
+    const free = this.availableWrite();
+    const toWrite = Math.min(minSourceLen, free);
+    if (toWrite <= 0) return 0;
+
+    const writeIdx = this.normalizeIndex(this.loadCtrl(CTRL_STATE.WRITE_INDEX));
     const firstPart = Math.min(toWrite, this.capacityFrames - writeIdx);
     const secondPart = toWrite - firstPart;
 
@@ -125,39 +153,51 @@ export class SharedAudioRingBuffer {
   }
 
   public pull(outputChannels: Float32Array[], frameCount: number): boolean {
+    if (!Number.isFinite(frameCount) || frameCount <= 0) {
+      return true;
+    }
+    const requested = Math.floor(frameCount);
+
     if (this.loadCtrl(CTRL_STATE.IS_PLAYING) === 0) {
-      this.fillSilence(outputChannels, frameCount);
+      this.fillSilence(outputChannels, requested);
       return true;
     }
 
     const avail = this.availableRead();
-    if (avail < frameCount) {
+    if (avail < requested) {
       this.addCtrl(CTRL_STATE.UNDERRUN_COUNT, 1);
-      this.fillSilence(outputChannels, frameCount);
+      this.fillSilence(outputChannels, requested);
       return false;
     }
 
-    const readIdx = this.loadCtrl(CTRL_STATE.READ_INDEX);
-    const firstPart = Math.min(frameCount, this.capacityFrames - readIdx);
-    const secondPart = frameCount - firstPart;
+    const readIdx = this.normalizeIndex(this.loadCtrl(CTRL_STATE.READ_INDEX));
+    const firstPart = Math.min(requested, this.capacityFrames - readIdx);
+    const secondPart = requested - firstPart;
 
     for (let c = 0; c < this.channelCount; c++) {
       const src = this.channels[c];
       const dst = outputChannels[c];
       if (!dst) continue;
-      dst.set(src.subarray(readIdx, readIdx + firstPart), 0);
-      if (secondPart > 0) {
-        dst.set(src.subarray(0, secondPart), firstPart);
+      const safeFirst = Math.min(firstPart, dst.length);
+      if (safeFirst > 0) {
+        dst.set(src.subarray(readIdx, readIdx + safeFirst), 0);
+      }
+      const remainingDst = Math.max(0, dst.length - safeFirst);
+      const safeSecond = Math.min(secondPart, remainingDst);
+      if (safeSecond > 0) {
+        dst.set(src.subarray(0, safeSecond), safeFirst);
       }
     }
 
-    this.storeCtrl(CTRL_STATE.READ_INDEX, (readIdx + frameCount) % this.capacityFrames);
+    this.storeCtrl(CTRL_STATE.READ_INDEX, (readIdx + requested) % this.capacityFrames);
     return true;
   }
 
   private fillSilence(outputChannels: Float32Array[], frameCount: number): void {
     for (let c = 0; c < outputChannels.length; c++) {
-      outputChannels[c].fill(0, 0, frameCount);
+      const ch = outputChannels[c];
+      if (!ch) continue;
+      ch.fill(0, 0, Math.min(frameCount, ch.length));
     }
   }
 }

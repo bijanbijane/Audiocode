@@ -65,6 +65,12 @@ export class CustomPersianLexiconManager {
     tokens: readonly TimedPersianToken[],
     uncertaintyThreshold = 0.75,
   ): UncertainTokenSuggestion[] {
+    const safeThreshold =
+      Number.isFinite(uncertaintyThreshold) &&
+      uncertaintyThreshold >= 0 &&
+      uncertaintyThreshold <= 1
+        ? uncertaintyThreshold
+        : 0.75;
     const suggestions: UncertainTokenSuggestion[] = [];
 
     for (const token of tokens) {
@@ -91,11 +97,15 @@ export class CustomPersianLexiconManager {
         bestSim >= 0.78 &&
         token.displayText !== bestEntry.canonicalDisplayForm;
 
-      if (isStrongLexiconMatch || token.confidence < uncertaintyThreshold) {
+      const safeConf = Number.isFinite(token.confidence)
+        ? Math.max(0, Math.min(1, token.confidence))
+        : 0;
+
+      if (isStrongLexiconMatch || safeConf < safeThreshold) {
         suggestions.push({
           tokenId: token.tokenId,
           currentDisplayText: token.displayText,
-          asrConfidence: token.confidence,
+          asrConfidence: safeConf,
           suggestedReplacement:
             isStrongLexiconMatch && bestEntry
               ? bestEntry.canonicalDisplayForm

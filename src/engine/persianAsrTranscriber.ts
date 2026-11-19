@@ -475,6 +475,8 @@ export function alignPersianScriptToAudio(params: {
  * for fast server-side ASR transcription when requested.
  */
 export function encodeMono16kWavBase64(pcm16k: Float32Array, sampleRate = 16_000): string {
+  const safeSampleRate =
+    Number.isFinite(sampleRate) && sampleRate > 0 ? Math.round(sampleRate) : 16_000;
   const numSamples = pcm16k.length;
   const buffer = new ArrayBuffer(44 + numSamples * 2);
   const view = new DataView(buffer);
@@ -492,8 +494,8 @@ export function encodeMono16kWavBase64(pcm16k: Float32Array, sampleRate = 16_000
   view.setUint32(16, 16, true);
   view.setUint16(20, 1, true); // PCM
   view.setUint16(22, 1, true); // Mono
-  view.setUint32(24, sampleRate, true);
-  view.setUint32(28, sampleRate * 2, true);
+  view.setUint32(24, safeSampleRate, true);
+  view.setUint32(28, safeSampleRate * 2, true);
   view.setUint16(32, 2, true);
   view.setUint16(34, 16, true);
   writeStr(36, 'data');
@@ -501,14 +503,16 @@ export function encodeMono16kWavBase64(pcm16k: Float32Array, sampleRate = 16_000
 
   let offset = 44;
   for (let i = 0; i < numSamples; i++) {
-    const clamped = Math.max(-1, Math.min(1, pcm16k[i]));
-    view.setInt16(offset, clamped < 0 ? clamped * 0x8000 : clamped * 0x7fff, true);
+    const raw = pcm16k[i];
+    const safeSample = Number.isFinite(raw) ? raw : 0;
+    const clamped = Math.max(-1, Math.min(1, safeSample));
+    view.setInt16(offset, clamped < 0 ? Math.round(clamped * 0x8000) : Math.round(clamped * 0x7fff), true);
     offset += 2;
   }
 
   const bytes = new Uint8Array(buffer);
   let binary = '';
-  const chunkSize = 0x8000;
+  const chunkSize = 0x4000;
   for (let i = 0; i < bytes.length; i += chunkSize) {
     binary += String.fromCharCode(...bytes.subarray(i, i + chunkSize));
   }
@@ -553,6 +557,155 @@ export function buildOfflineAcousticSegmentedTranscript(
     }
   }
   return generatedWords.join(' ');
+}
+
+export interface HonestAcousticSegmentationResult {
+  readonly tokens: PersianWordToken[];
+  readonly recommendations: SmartRecommendation[];
+  readonly burstCount: number;
+  readonly plateauCount: number;
+  readonly pauseCount: number;
+}
+
+/**
+ * Performs genuine deterministic local acoustic speech-burst segmentation and alignment
+ * directly from PCM energy envelopes, pitch plateaus, and long pauses without fabricating
+ * open-vocabulary words when no local ONNX neural model is installed.
+ */
+export function buildHonestAcousticSpeechSegments(params: {
+  pcm: Float32Array;
+  sampleRate: number;
+  trackId: string;
+  speakerName: string;
+  acousticProfile: AcousticProfile;
+}): HonestAcousticSegmentationResult {
+  const { pcm, sampleRate, trackId, speakerName, acousticProfile } = params;
+  if (pcm.length === 0 || sampleRate <= 0) {
+    return {
+      tokens: [],
+      recommendations: [],
+      burstCount: 0,
+      plateauCount: 0,
+      pauseCount: 0,
+    };
+  }
+
+  const bursts = extractAcousticSpeechBursts(pcm, sampleRate, acousticProfile);
+  const pauses = detectLongPauses(pcm, sampleRate, acousticProfile, 600);
+  const resampled16k = resampleTo16kMono([pcm], sampleRate, 16_000);
+  const plateaus = detectPitchPlateauSegments(resampled16k.samples, 16_000, 240);
+
+  if (bursts.length === 0) {
+    return {
+      tokens: [],
+      recommendations: [],
+      burstCount: 0,
+      plateauCount: plateaus.length,
+      pauseCount: pauses.length,
+    };
+  }
+
+  const tokens: PersianWordToken[] = [];
+  const recommendations: SmartRecommendation[] = [];
+
+  for (let i = 0; i < bursts.length; i++) {
+    const burst = bursts[i];
+    const rawRange: FlickRange = {
+      startFlicks: secondsToFlicks(burst.startSec),
+      endFlicks: secondsToFlicks(Math.max(burst.startSec + 0.09, burst.endSec)),
+    };
+    const snapped = refinePersianCutBoundary(pcm, sampleRate, rawRange, {
+      microCrossfadeMs: 10,
+    });
+
+    const overlapsPlateau = plateaus.some((pl) => {
+      const plStart = pl.startSample / 16_000;
+      const plEnd = pl.endSample / 16_000;
+      return Math.min(burst.endSec, plEnd) > Math.max(burst.startSec, plStart);
+    });
+
+    const labelRaw = overlapsPlateau
+      ? `[کشیدگی_آوایی_${i + 1}]`
+      : `[گفتار_آوایی_${i + 1}]`;
+    const norm = normalizePersianText(labelRaw);
+    const rawConf = overlapsPlateau ? 0.86 : 0.92;
+    const calibratedConf = Number(
+      PersianAsrConfidenceCalibrator.calibrateConfidence(rawConf, {
+        slopeA: 0.92,
+        interceptB: -0.12,
+      }).toFixed(3),
+    );
+
+    const token: PersianWordToken = {
+      id: `tok-ac-${trackId}-${i + 1}`,
+      trackId,
+      speakerName,
+      originalText: norm.original,
+      normalizedText: norm.normalized,
+      displayText: norm.display,
+      range: snapped.snappedRange,
+      confidence: rawConf,
+      alignmentSource: 'AcousticSnap',
+      hasTrailingEzafeRisk: false,
+      isDisfluency: overlapsPlateau,
+      isStretchedVowel: overlapsPlateau,
+      detectedLanguage: 'FA',
+      calibratedConfidence: calibratedConf,
+    };
+    tokens.push(token);
+
+    if (overlapsPlateau) {
+      recommendations.push({
+        id: `rec-ac-plateau-${token.id}`,
+        trackId,
+        kind: 'co-articulated-filler',
+        recommendedMode: 'sync-locked-ripple-cut',
+        range: token.range,
+        relatedText: `${token.displayText} (کشیدگی آوایی / واکه ثابت)`,
+        reasonFa:
+          'شناسایی بخش گفتاری با ثبات فرکانس پایه (F0 Plateau) و اسنپ مرز به نقطه عبور از صفر.',
+        confidence: 0.9,
+        sourceTier: 'Group-A-DSP',
+        status: 'Pending',
+        boundary: refinePersianCutBoundary(pcm, sampleRate, token.range, {
+          pitchPlateauDetected: true,
+          microCrossfadeMs: 12,
+        }),
+      });
+    }
+  }
+
+  for (let i = 0; i < Math.min(6, pauses.length); i++) {
+    const p = pauses[i];
+    const startSec = p.startSample / sampleRate + 0.07;
+    const endSec = p.endSample / sampleRate - 0.07;
+    if (endSec - startSec < 0.35) continue;
+    const range: FlickRange = {
+      startFlicks: secondsToFlicks(startSec),
+      endFlicks: secondsToFlicks(endSec),
+    };
+    recommendations.push({
+      id: `rec-ac-pause-${trackId}-${i}`,
+      trackId,
+      kind: 'long-pause',
+      recommendedMode: 'sync-locked-ripple-cut',
+      range,
+      relatedText: `مکث ${(p.durationMs / 1000).toFixed(2)} ثانیه‌ای`,
+      reasonFa: `شناسایی سکوت طولانی در بازه ${startSec.toFixed(2)} تا ${endSec.toFixed(2)} ثانیه با حفظ تنفس طبیعی.`,
+      confidence: 0.95,
+      sourceTier: 'Group-A-DSP',
+      status: 'Pending',
+      boundary: refinePersianCutBoundary(pcm, sampleRate, range, { microCrossfadeMs: 10 }),
+    });
+  }
+
+  return {
+    tokens,
+    recommendations,
+    burstCount: bursts.length,
+    plateauCount: plateaus.length,
+    pauseCount: pauses.length,
+  };
 }
 
 function toTimedPersianTokens(tokens: readonly PersianWordToken[]): TimedPersianToken[] {
@@ -810,13 +963,13 @@ export function analyzeDeepPersianDisfluenciesAndRetakes(params: {
 }
 
 function formatSubtitleTime(sec: number, separator: ',' | '.'): string {
-  const safe = Math.max(0, sec);
-  const hours = Math.floor(safe / 3600);
-  const mins = Math.floor((safe % 3600) / 60);
-  const secs = Math.floor(safe % 60);
-  const millis = Math.round((safe - Math.floor(safe)) * 1000);
+  const totalMs = Number.isFinite(sec) ? Math.max(0, Math.round(sec * 1000)) : 0;
+  const hours = Math.floor(totalMs / 3_600_000);
+  const mins = Math.floor((totalMs % 3_600_000) / 60_000);
+  const secs = Math.floor((totalMs % 60_000) / 1000);
+  const millis = totalMs % 1000;
   const pad2 = (n: number) => String(n).padStart(2, '0');
-  const pad3 = (n: number) => String(Math.min(999, n)).padStart(3, '0');
+  const pad3 = (n: number) => String(n).padStart(3, '0');
   return `${pad2(hours)}:${pad2(mins)}:${pad2(secs)}${separator}${pad3(millis)}`;
 }
 
@@ -1253,6 +1406,20 @@ export function applyWsolaTimeStretchToSelectedTokens(params: {
     selectedTokenIds,
     tempoRatio,
   } = params;
+  if (
+    !Number.isFinite(sampleRate) ||
+    sampleRate <= 0 ||
+    !Number.isFinite(tempoRatio) ||
+    tempoRatio <= 0 ||
+    pcm.length === 0
+  ) {
+    return {
+      stretchedPcm: pcm,
+      updatedTokens: [...tokens],
+      updatedTracks: [...tracks],
+      deltaDurationSec: 0,
+    };
+  }
   const validRate = ([16000, 22050, 24000, 32000, 44100, 48000, 96000].includes(sampleRate)
     ? sampleRate
     : 48000) as SampleRate;
@@ -1273,13 +1440,26 @@ export function applyWsolaTimeStretchToSelectedTokens(params: {
   const spanEndFlicks = Math.max(...selectedTrackTokens.map((t) => t.range.endFlicks));
   const oldSpanFlicks = Math.max(1, spanEndFlicks - spanStartFlicks);
 
+  // Map timeline span into source PCM coordinates via the enclosing clip so WSOLA works accurately after ripple cuts
+  const targetTrack = tracks.find((t) => t.id === targetTrackId);
+  const enclosingClip = targetTrack?.clips.find(
+    (c) =>
+      c.timelineRange.startFlicks <= spanStartFlicks &&
+      c.timelineRange.endFlicks >= spanStartFlicks,
+  );
+  const sourceOffsetFlicks = enclosingClip
+    ? enclosingClip.sourceStartFlicks - enclosingClip.timelineRange.startFlicks
+    : 0;
+  const sourceSpanStartFlicks = Math.max(0, spanStartFlicks + sourceOffsetFlicks);
+  const sourceSpanEndFlicks = Math.max(sourceSpanStartFlicks, spanEndFlicks + sourceOffsetFlicks);
+
   const startSample = Math.max(
     0,
-    Math.floor(flicksToSeconds(spanStartFlicks) * sampleRate),
+    Math.floor(flicksToSeconds(sourceSpanStartFlicks) * sampleRate),
   );
   const endSample = Math.min(
     pcm.length,
-    Math.ceil(flicksToSeconds(spanEndFlicks) * sampleRate),
+    Math.ceil(flicksToSeconds(sourceSpanEndFlicks) * sampleRate),
   );
 
   if (endSample <= startSample) {
@@ -1320,35 +1500,50 @@ export function applyWsolaTimeStretchToSelectedTokens(params: {
     ) {
       const relStart = tok.range.startFlicks - spanStartFlicks;
       const relEnd = tok.range.endFlicks - spanStartFlicks;
+      const nextStart = Math.max(0, Math.round(spanStartFlicks + relStart * scaleFactor));
+      const nextEnd = Math.max(nextStart + 1, Math.round(spanStartFlicks + relEnd * scaleFactor));
       return {
         ...tok,
         range: {
-          startFlicks: Math.round(spanStartFlicks + relStart * scaleFactor),
-          endFlicks: Math.round(spanStartFlicks + relEnd * scaleFactor),
+          startFlicks: nextStart,
+          endFlicks: nextEnd,
         },
       };
     }
     if (tok.range.startFlicks >= spanEndFlicks) {
+      const nextStart = Math.max(0, tok.range.startFlicks + deltaFlicks);
+      const nextEnd = Math.max(nextStart + 1, tok.range.endFlicks + deltaFlicks);
       return {
         ...tok,
         range: {
-          startFlicks: Math.max(0, tok.range.startFlicks + deltaFlicks),
-          endFlicks: Math.max(0, tok.range.endFlicks + deltaFlicks),
+          startFlicks: nextStart,
+          endFlicks: nextEnd,
         },
       };
     }
     return tok;
   });
 
+  const stretchedAssetId = enclosingClip?.assetId ?? targetTrack?.clips[0]?.assetId ?? null;
   const updatedTracks = tracks.map((trk) => {
     if (trk.id !== targetTrackId) return trk;
     return {
       ...trk,
       clips: trk.clips.map((c) => {
-        if (c.timelineRange.endFlicks <= spanStartFlicks) return c;
+        const sharesAsset = stretchedAssetId === null || c.assetId === stretchedAssetId;
+        const shiftedSourceStart =
+          sharesAsset && c.sourceStartFlicks >= sourceSpanEndFlicks
+            ? Math.max(0, c.sourceStartFlicks + deltaFlicks)
+            : c.sourceStartFlicks;
+        if (c.timelineRange.endFlicks <= spanStartFlicks) {
+          return shiftedSourceStart === c.sourceStartFlicks
+            ? c
+            : { ...c, sourceStartFlicks: shiftedSourceStart };
+        }
         if (c.timelineRange.startFlicks >= spanEndFlicks) {
           return {
             ...c,
+            sourceStartFlicks: shiftedSourceStart,
             timelineRange: {
               startFlicks: Math.max(0, c.timelineRange.startFlicks + deltaFlicks),
               endFlicks: Math.max(0, c.timelineRange.endFlicks + deltaFlicks),
@@ -1357,6 +1552,7 @@ export function applyWsolaTimeStretchToSelectedTokens(params: {
         }
         return {
           ...c,
+          sourceStartFlicks: shiftedSourceStart,
           timelineRange: {
             startFlicks: c.timelineRange.startFlicks,
             endFlicks: Math.max(

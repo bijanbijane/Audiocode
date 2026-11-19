@@ -138,7 +138,8 @@ export function extractAcousticFeatureFrames(pcm16k: Float32Array): {
     const start = f * CORE_HOP_LEN;
     let sqSum = 0;
     for (let n = 0; n < CORE_FRAME_LEN; n++) {
-      const s = pcm16k[start + n];
+      const rawS = pcm16k[start + n];
+      const s = Number.isFinite(rawS) ? rawS : 0;
       sqSum += s * s;
     }
     frameRms[f] = Math.sqrt(sqSum / CORE_FRAME_LEN);
@@ -151,7 +152,8 @@ export function extractAcousticFeatureFrames(pcm16k: Float32Array): {
       const cw = bandCos[b];
       const sw = bandSin[b];
       for (let n = 0; n < CORE_FRAME_LEN; n++) {
-        const s = pcm16k[start + n];
+        const rawS = pcm16k[start + n];
+        const s = Number.isFinite(rawS) ? rawS : 0;
         re += s * cw[n];
         im += s * sw[n];
       }
@@ -179,12 +181,24 @@ export function synthesizeAcousticSpeechFromText(
   text: string,
   options?: { charDurationSec?: number; noiseLevel?: number; speakerPitchHz?: number },
 ): Float32Array {
-  const charDur = options?.charDurationSec ?? 0.06; // 6 frames per token
-  const noiseLevel = options?.noiseLevel ?? 0.005;
-  const f0 = options?.speakerPitchHz ?? 145;
+  const rawCharDur = options?.charDurationSec;
+  const charDur =
+    typeof rawCharDur === 'number' && Number.isFinite(rawCharDur) && rawCharDur > 0
+      ? Math.min(2.0, rawCharDur)
+      : 0.06; // 6 frames per token
+  const rawNoise = options?.noiseLevel;
+  const noiseLevel =
+    typeof rawNoise === 'number' && Number.isFinite(rawNoise) && rawNoise >= 0
+      ? Math.min(0.5, rawNoise)
+      : 0.005;
+  const rawF0 = options?.speakerPitchHz;
+  const f0 =
+    typeof rawF0 === 'number' && Number.isFinite(rawF0) && rawF0 > 20
+      ? Math.min(1000, rawF0)
+      : 145;
 
   const chars = Array.from(text.toLowerCase());
-  const samplesPerChar = Math.round(charDur * CORE_SAMPLE_RATE);
+  const samplesPerChar = Math.max(16, Math.round(charDur * CORE_SAMPLE_RATE));
   const totalSamples = Math.max(CORE_FRAME_LEN, (chars.length + 4) * samplesPerChar);
   const pcm = new Float32Array(totalSamples);
 
@@ -383,7 +397,15 @@ export class CoreAcousticCtcEngine {
     segmentOffsetSamples: number;
     languageHint?: DetectedLanguageTag | 'auto';
   }): CoreTranscriptionSegment {
-    const { pcm16k, segmentIndex, segmentOffsetSamples, languageHint = 'auto' } = params;
+    const { pcm16k, languageHint = 'auto' } = params;
+    const segmentIndex =
+      Number.isFinite(params.segmentIndex) && params.segmentIndex >= 0
+        ? Math.floor(params.segmentIndex)
+        : 0;
+    const segmentOffsetSamples =
+      Number.isFinite(params.segmentOffsetSamples) && params.segmentOffsetSamples >= 0
+        ? Math.round(params.segmentOffsetSamples)
+        : 0;
     const startSec = Number((segmentOffsetSamples / CORE_SAMPLE_RATE).toFixed(3));
     const endSec = Number(((segmentOffsetSamples + pcm16k.length) / CORE_SAMPLE_RATE).toFixed(3));
 
@@ -565,8 +587,16 @@ export function trainAcousticAdapterOnCorpus(params: {
   updatedPrototypeCount: number;
 } {
   const base = params.baseWeights ?? createBaselineAdapterWeights();
-  const lr = params.learningRate ?? 0.35;
-  const epochs = params.epochs ?? 3;
+  const rawLr = params.learningRate;
+  const lr =
+    typeof rawLr === 'number' && Number.isFinite(rawLr) && rawLr > 0
+      ? Math.min(1.0, rawLr)
+      : 0.35;
+  const rawEpochs = params.epochs;
+  const epochs =
+    typeof rawEpochs === 'number' && Number.isFinite(rawEpochs) && rawEpochs >= 0
+      ? Math.min(50, Math.floor(rawEpochs))
+      : 3;
 
   const prototypes = base.prototypes.map((p) => new Float32Array(p));
   const tokenBias = new Float32Array(base.tokenBias);

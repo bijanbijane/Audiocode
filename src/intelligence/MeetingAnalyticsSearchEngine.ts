@@ -51,10 +51,12 @@ export function sanitizeUntrustedTranscriptForIntelligence(rawText: string): {
 }
 
 function buildEvidence(seg: TimedSegmentInput): EvidenceReference {
+  const safeStart = Number.isFinite(seg.startSec) ? Math.max(0, seg.startSec) : 0;
+  const safeEnd = Number.isFinite(seg.endSec) ? Math.max(safeStart, seg.endSec) : safeStart;
   return {
     segmentId: seg.segmentId,
-    startSec: Number(seg.startSec.toFixed(3)),
-    endSec: Number(seg.endSec.toFixed(3)),
+    startSec: Number(safeStart.toFixed(3)),
+    endSec: Number(safeEnd.toFixed(3)),
     excerpt: seg.text.slice(0, 140),
   };
 }
@@ -231,7 +233,10 @@ export function runConversationAnalyticsCapability(params: {
   let overlapDurationSec = 0;
   let heuristicInterruptionCount = 0;
 
-  const sortedDiar = [...params.diarizationSegments].sort((a, b) => a.startSec - b.startSec);
+  const validDiar = params.diarizationSegments.filter(
+    (s) => Number.isFinite(s.startSec) && Number.isFinite(s.endSec),
+  );
+  const sortedDiar = [...validDiar].sort((a, b) => a.startSec - b.startSec);
   for (let i = 0; i < sortedDiar.length; i++) {
     const seg = sortedDiar[i];
     const dur = Math.max(0, seg.endSec - seg.startSec);
@@ -252,7 +257,11 @@ export function runConversationAnalyticsCapability(params: {
     }
   }
 
-  const effectiveTotalDur = Math.max(params.totalDurationSec, totalSpeechCoveredSec, 0.1);
+  const safeTotalDuration =
+    typeof params.totalDurationSec === 'number' && Number.isFinite(params.totalDurationSec) && params.totalDurationSec > 0
+      ? params.totalDurationSec
+      : 0;
+  const effectiveTotalDur = Math.max(safeTotalDuration, totalSpeechCoveredSec, 0.1);
   const silenceDurationSec = Math.max(0, effectiveTotalDur - Math.min(effectiveTotalDur, totalSpeechCoveredSec));
   const speechToSilenceRatio =
     silenceDurationSec > 0.01 ? Number((totalSpeechCoveredSec / silenceDurationSec).toFixed(3)) : totalSpeechCoveredSec;
@@ -588,8 +597,8 @@ export class TenantIsolatedSemanticIndex {
       if (params.recordingId && r.recordingId !== params.recordingId) return false;
       if (params.speakerId && r.speakerId !== params.speakerId) return false;
       if (params.language && r.language !== params.language) return false;
-      if (params.minStartSec !== undefined && r.endSec < params.minStartSec) return false;
-      if (params.maxEndSec !== undefined && r.startSec > params.maxEndSec) return false;
+      if (typeof params.minStartSec === 'number' && Number.isFinite(params.minStartSec) && r.endSec < params.minStartSec) return false;
+      if (typeof params.maxEndSec === 'number' && Number.isFinite(params.maxEndSec) && r.startSec > params.maxEndSec) return false;
       return true;
     });
 
@@ -624,10 +633,15 @@ export class TenantIsolatedSemanticIndex {
       };
     });
 
+    const safeTopK =
+      typeof params.topK === 'number' && Number.isFinite(params.topK) && params.topK > 0
+        ? Math.max(1, Math.trunc(params.topK))
+        : 10;
+
     return scored
       .filter((s) => s.similarityScore > 0)
       .sort((a, b) => b.similarityScore - a.similarityScore)
-      .slice(0, params.topK ?? 10);
+      .slice(0, safeTopK);
   }
 
   public countForRecording(organizationId: string, recordingId: string): number {
@@ -664,8 +678,16 @@ export class RealtimeIntelligenceStreamCoordinator {
     throttledOptionalWorkers: boolean;
     emittedEvents: RealtimeIntelligenceEvent[];
   } {
-    const startSec = Number((params.chunkStartSample / 16000).toFixed(3));
-    const endSec = Number((params.chunkEndSample / 16000).toFixed(3));
+    const safeStartSample =
+      typeof params.chunkStartSample === 'number' && Number.isFinite(params.chunkStartSample) && params.chunkStartSample >= 0
+        ? Math.trunc(params.chunkStartSample)
+        : 0;
+    const safeEndSample =
+      typeof params.chunkEndSample === 'number' && Number.isFinite(params.chunkEndSample) && params.chunkEndSample >= safeStartSample
+        ? Math.trunc(params.chunkEndSample)
+        : safeStartSample;
+    const startSec = Number((safeStartSample / 16000).toFixed(3));
+    const endSec = Number((safeEndSample / 16000).toFixed(3));
     const batch: RealtimeIntelligenceEvent[] = [];
 
     const pushEvent = (
@@ -681,8 +703,8 @@ export class RealtimeIntelligenceStreamCoordinator {
         sequenceNumber: this.sequenceCounter,
         eventType,
         payloadVersion: '1.0',
-        startSample: params.chunkStartSample,
-        endSample: params.chunkEndSample,
+        startSample: safeStartSample,
+        endSample: safeEndSample,
         startSec,
         endSec,
         sourceArtifactRef,
@@ -707,8 +729,19 @@ export class RealtimeIntelligenceStreamCoordinator {
 
     // Priority 2: Optional Real-Time Intelligence with strict latency isolation budget (§13.3)
     if (params.enableOptionalIntelligence) {
-      const optLat = params.simulatedOptionalWorkerLatencyMs ?? 2;
-      const maxAllowedOptLat = Math.max(10, params.asrBaselineLatencyMs * (1 + this.asrP95BudgetOverheadRatio) - params.asrBaselineLatencyMs);
+      const optLat =
+        typeof params.simulatedOptionalWorkerLatencyMs === 'number' && Number.isFinite(params.simulatedOptionalWorkerLatencyMs)
+          ? params.simulatedOptionalWorkerLatencyMs
+          : 2;
+      const safeBaselineLat =
+        typeof params.asrBaselineLatencyMs === 'number' && Number.isFinite(params.asrBaselineLatencyMs) && params.asrBaselineLatencyMs > 0
+          ? params.asrBaselineLatencyMs
+          : 100;
+      const safeRatio =
+        Number.isFinite(this.asrP95BudgetOverheadRatio) && this.asrP95BudgetOverheadRatio > 0
+          ? this.asrP95BudgetOverheadRatio
+          : 0.1;
+      const maxAllowedOptLat = Math.max(10, safeBaselineLat * (1 + safeRatio) - safeBaselineLat);
       if (optLat > maxAllowedOptLat) {
         this.throttledOptionalWorkers = true;
         pushEvent('capability.failed', false, 'speech.realtime_backpressure', {

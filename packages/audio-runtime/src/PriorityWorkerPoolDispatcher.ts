@@ -58,13 +58,17 @@ export class PriorityWorkerPoolDispatcher {
       maxQueuedTasksBeforeBackpressure?: number;
     },
   ) {
-    this.maxQueuedTasksBeforeBackpressure = options?.maxQueuedTasksBeforeBackpressure ?? 256;
+    const rawMaxQueue = options?.maxQueuedTasksBeforeBackpressure ?? 256;
+    this.maxQueuedTasksBeforeBackpressure =
+      Number.isFinite(rawMaxQueue) && rawMaxQueue >= 1 ? Math.floor(rawMaxQueue) : 256;
 
-    const logicalCores =
+    const rawCores =
       options?.hardwareConcurrencyOverride ??
       (typeof navigator !== 'undefined' && navigator.hardwareConcurrency
         ? navigator.hardwareConcurrency
         : 4);
+    const logicalCores =
+      Number.isFinite(rawCores) && rawCores >= 1 ? Math.floor(rawCores) : 4;
 
     const maxAllowedByTier =
       deviceTier === 'MOBILE_COMPANION'
@@ -98,8 +102,13 @@ export class PriorityWorkerPoolDispatcher {
     transferables?: Transferable[];
     abortSignal?: AbortSignal;
   }): Promise<TResult> {
+    const safePriority: WorkerTaskPriority =
+      Number.isFinite(params.priority) && params.priority >= 0 && params.priority <= 3
+        ? (Math.floor(params.priority) as WorkerTaskPriority)
+        : 3;
+
     const totalPending = this.getTotalPendingCount();
-    if (totalPending >= this.maxQueuedTasksBeforeBackpressure && params.priority === 3) {
+    if (totalPending >= this.maxQueuedTasksBeforeBackpressure && safePriority === 3) {
       return Promise.reject(
         new Error(
           'WORKER_POOL_BACKPRESSURE_LIMIT: صف پردازش پس‌زمینه پر است؛ لطفاً منتظر تخلیه قطعات فعلی بمانید.',
@@ -114,7 +123,7 @@ export class PriorityWorkerPoolDispatcher {
     return new Promise<TResult>((resolve, reject) => {
       const req: WorkerTaskRequest<unknown, unknown> = {
         taskId: params.taskId,
-        priority: params.priority,
+        priority: safePriority,
         taskType: params.taskType,
         payload: params.payload,
         transferables: params.transferables,
@@ -123,7 +132,7 @@ export class PriorityWorkerPoolDispatcher {
         reject,
       };
 
-      this.priorityQueues[params.priority].push(req);
+      this.priorityQueues[safePriority].push(req);
       this.pumpNextAvailableTasks();
     });
   }

@@ -236,7 +236,10 @@ export class ScalableTranscriptStore {
       this.prefixIndex.get(lookupKey) ?? this.prefixIndex.get(folded) ?? [],
     );
 
-    const yieldEvery = Math.max(25, options?.yieldEvery ?? 250);
+    const rawYield = options?.yieldEvery ?? 250;
+    const yieldEvery = Number.isFinite(rawYield) ? Math.max(25, Math.floor(rawYield)) : 250;
+    const rawDelay = options?.delayStepMs ?? 0;
+    const delayStepMs = Number.isFinite(rawDelay) ? Math.max(0, rawDelay) : 0;
     const matchedTokenIds: string[] = [];
 
     for (let i = 0; i < candidateIds.length; i += 1) {
@@ -254,7 +257,7 @@ export class ScalableTranscriptStore {
         }
       }
       if ((i + 1) % yieldEvery === 0) {
-        await new Promise((r) => setTimeout(r, options?.delayStepMs ?? 0));
+        await new Promise((r) => setTimeout(r, delayStepMs));
       }
     }
 

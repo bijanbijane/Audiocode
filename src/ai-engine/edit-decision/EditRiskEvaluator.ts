@@ -80,7 +80,7 @@ export class EditRiskEvaluator {
       matchedTokens.length === 0
     ) {
       wordBoundaryLevel = 'UNKNOWN';
-    } else if (matchedTokens.some((t) => t.confidence < 0.7)) {
+    } else if (matchedTokens.some((t) => !Number.isFinite(t.confidence) || t.confidence < 0.7)) {
       wordBoundaryLevel = 'MEDIUM';
     }
     dimensions.push({
@@ -223,7 +223,9 @@ export class EditRiskEvaluator {
     });
 
     // 9. Overlapping-event risk
-    const overlapCount = input.overlappingEventCount ?? 0;
+    const rawOverlapCount = input.overlappingEventCount ?? 0;
+    const overlapCount =
+      Number.isFinite(rawOverlapCount) && rawOverlapCount > 0 ? Math.trunc(rawOverlapCount) : 0;
     const overlapLevel: EditRiskLevel = input.overlapsProtectedEvent
       ? 'CRITICAL'
       : overlapCount > 0

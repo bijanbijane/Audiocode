@@ -67,20 +67,35 @@ export function virtualizeTimelineEvents(
   sortedEvents: readonly TimelineVirtualizableEvent[],
   viewport: TimelineViewportSpec,
 ): TimelineVirtualizationResult {
-  const spanSamples = Math.max(1, viewport.viewportEndSample - viewport.viewportStartSample);
-  const overscanRatio = Math.max(0, Math.min(1, viewport.overscanRatio ?? 0.15));
+  const safeStartSample = Number.isFinite(viewport.viewportStartSample)
+    ? Math.max(0, viewport.viewportStartSample)
+    : 0;
+  const safeEndSample =
+    Number.isFinite(viewport.viewportEndSample) && viewport.viewportEndSample > safeStartSample
+      ? viewport.viewportEndSample
+      : safeStartSample + 1;
+  const safeWidthPx =
+    Number.isFinite(viewport.viewportWidthPx) && viewport.viewportWidthPx > 0
+      ? viewport.viewportWidthPx
+      : 800;
+
+  const spanSamples = Math.max(1, safeEndSample - safeStartSample);
+  const rawOverscan = viewport.overscanRatio ?? 0.15;
+  const overscanRatio = Number.isFinite(rawOverscan) ? Math.max(0, Math.min(1, rawOverscan)) : 0.15;
   const overscanSamples = Math.round(spanSamples * overscanRatio);
-  const overscanStart = Math.max(0, viewport.viewportStartSample - overscanSamples);
-  const overscanEnd = viewport.viewportEndSample + overscanSamples;
-  const pxPerSample = viewport.viewportWidthPx / spanSamples;
-  const minWidthPx = Math.max(2, viewport.minItemWidthPx ?? 6);
+  const overscanStart = Math.max(0, safeStartSample - overscanSamples);
+  const overscanEnd = safeEndSample + overscanSamples;
+  const pxPerSample = safeWidthPx / spanSamples;
+  const rawMinWidth = viewport.minItemWidthPx ?? 6;
+  const minWidthPx = Number.isFinite(rawMinWidth) ? Math.max(2, rawMinWidth) : 6;
 
   // Filter strictly to visible + overscan window (binary search start for O(log N + K))
   let lo = 0;
   let hi = sortedEvents.length;
   while (lo < hi) {
     const mid = (lo + hi) >>> 1;
-    if (sortedEvents[mid].sourceEndSample < overscanStart) {
+    const endS = sortedEvents[mid].sourceEndSample;
+    if (Number.isFinite(endS) && endS < overscanStart) {
       lo = mid + 1;
     } else {
       hi = mid;
@@ -90,6 +105,7 @@ export function virtualizeTimelineEvents(
   const visibleEvents: TimelineVirtualizableEvent[] = [];
   for (let i = lo; i < sortedEvents.length; i += 1) {
     const ev = sortedEvents[i];
+    if (!Number.isFinite(ev.sourceStartSample) || !Number.isFinite(ev.sourceEndSample)) continue;
     if (ev.sourceStartSample > overscanEnd) break;
     if (ev.sourceEndSample >= overscanStart) {
       visibleEvents.push(ev);
@@ -103,7 +119,7 @@ export function virtualizeTimelineEvents(
   let i = 0;
   while (i < visibleEvents.length) {
     const ev = visibleEvents[i];
-    const leftPx = (ev.sourceStartSample - viewport.viewportStartSample) * pxPerSample;
+    const leftPx = (ev.sourceStartSample - safeStartSample) * pxPerSample;
     const rawWidthPx = Math.max(1, (ev.sourceEndSample - ev.sourceStartSample) * pxPerSample);
 
     if (rawWidthPx >= minWidthPx || i + 1 >= visibleEvents.length) {
@@ -127,8 +143,8 @@ export function virtualizeTimelineEvents(
     while (j < visibleEvents.length) {
       const next = visibleEvents[j];
       if (next.trackId !== ev.trackId) break;
-      const nextLeftPx = (next.sourceStartSample - viewport.viewportStartSample) * pxPerSample;
-      const currRightPx = (clusterEndSample - viewport.viewportStartSample) * pxPerSample;
+      const nextLeftPx = (next.sourceStartSample - safeStartSample) * pxPerSample;
+      const currRightPx = (clusterEndSample - safeStartSample) * pxPerSample;
       const nextWidthPx = (next.sourceEndSample - next.sourceStartSample) * pxPerSample;
       if (nextLeftPx - currRightPx < minWidthPx && nextWidthPx < minWidthPx) {
         clusterMembers.push(next);

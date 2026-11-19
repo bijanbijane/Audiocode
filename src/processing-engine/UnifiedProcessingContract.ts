@@ -486,11 +486,15 @@ export function validateUnifiedProcessingRequest(
       detailEn: 'audio.payloadBase64 is required for base64 encodings.',
     });
   }
-  if (req.audio.metadata.byteLength <= 0) {
+  if (
+    typeof req.audio.metadata.byteLength !== 'number' ||
+    !Number.isFinite(req.audio.metadata.byteLength) ||
+    req.audio.metadata.byteLength <= 0
+  ) {
     throw new UnifiedProcessingError({
       code: 'UNSUPPORTED_AUDIO_FORMAT',
       executionMode: resolvedMode,
-      detailEn: 'Audio input cannot be empty (0 bytes).',
+      detailEn: 'Audio input cannot be empty (0 bytes) or have non-finite byteLength.',
     });
   }
   if (!req.config || !VALID_NORMALIZATION_PROFILES.has(req.config.normalizationProfile)) {

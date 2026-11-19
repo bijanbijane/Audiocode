@@ -40,7 +40,7 @@ import {
   buildSyntheticMicRecordingPcm,
   ingestRecordedPcmTake,
 } from './audioFixtures';
-import { PersianWordToken, Track } from '../contracts/v1_2';
+import { PersianWordToken, SmartRecommendation, Track } from '../contracts/v1_2';
 import { flicksToSeconds, secondsToFlicks } from './timebase';
 import {
   sanitizeSecretsFromText,
@@ -1511,5 +1511,180 @@ test('Phase 10B: Idempotency-Key deduplication, integer billing ledger reconcili
   assert.equal(sdkResult.status, 'completed');
   assert.equal(typeof sdkResult.text, 'string');
 });
+
+test('Editing Engine Audit Fixes: interior token preservation, 10ms cut micro-fades, bounded clip IDs, acoustic peer RMS sync check, and bounded history', () => {
+  // 1. Strictly interior cut (<45% of token duration) preserves token with reduced duration instead of dropping it
+  const tracks = makeSyncedTracks();
+  const longToken: PersianWordToken = {
+    id: 'tok-long',
+    trackId: 't1',
+    speakerName: 'سارا',
+    originalText: 'پادکست',
+    normalizedText: 'پادکست',
+    displayText: 'پادکست',
+    range: { startFlicks: secondsToFlicks(1.0), endFlicks: secondsToFlicks(2.0) },
+    confidence: 0.95,
+    alignmentSource: 'ASR',
+  };
+  const projected = projectTokensAfterCut(
+    [longToken],
+    tracks,
+    't1',
+    { startFlicks: secondsToFlicks(1.4), endFlicks: secondsToFlicks(1.6) }, // 20% interior cut
+    'sync-locked-ripple-cut',
+  );
+  assert.equal(projected.length, 1);
+  assert.equal(flicksToSeconds(projected[0].range.startFlicks), 1.0);
+  assert.ok(Math.abs(flicksToSeconds(projected[0].range.endFlicks) - 1.8) < 1e-6);
+
+  // 2. Ripple cut enforces >=10ms protective micro-fades on split boundaries and bounds clip ID length
+  const zeroFadeTracks = makeSyncedTracks();
+  zeroFadeTracks[0].clips[0].fadeInMs = 0;
+  zeroFadeTracks[0].clips[0].fadeOutMs = 0;
+  const cutOnce = applySyncSafeCut(
+    zeroFadeTracks,
+    't1',
+    { startFlicks: secondsToFlicks(2.0), endFlicks: secondsToFlicks(2.5) },
+    'sync-locked-ripple-cut',
+  );
+  assert.equal(cutOnce[0].clips.length, 2);
+  assert.ok(cutOnce[0].clips[0].fadeOutMs >= 10);
+  assert.ok(cutOnce[0].clips[1].fadeInMs >= 10);
+
+  let repeated = cutOnce;
+  for (let i = 0; i < 30; i++) {
+    repeated = applySyncSafeCut(
+      repeated,
+      't1',
+      { startFlicks: secondsToFlicks(0.05), endFlicks: secondsToFlicks(0.08) },
+      'sync-locked-ripple-cut',
+    );
+  }
+  for (const clip of repeated[0].clips) {
+    assert.ok(clip.id.length <= 64, `Clip ID grew unbounded: ${clip.id}`);
+  }
+
+  // 3. Acoustic peer RMS fallback protects multi-track sync even when peer has zero ASR tokens
+  const sampleRate = 48_000;
+  const loudPeerPcm = new Float32Array(sampleRate * 10);
+  for (let i = sampleRate * 3; i < sampleRate * 4; i++) {
+    loudPeerPcm[i] = 0.25 * Math.sin((2 * Math.PI * 300 * i) / sampleRate);
+  }
+  const acousticDecision = determineSyncSafeEditMode(
+    tracks,
+    't1',
+    { startFlicks: secondsToFlicks(3.2), endFlicks: secondsToFlicks(3.6) },
+    [], // No ASR tokens at all!
+    { a1: new Float32Array(sampleRate * 10), a2: loudPeerPcm },
+    sampleRate,
+  );
+  assert.equal(acousticDecision.mode, 'in-place-room-tone-suppression');
+
+  // 4. TimelineHistoryManager caps depth at maxDepth and preserves DSP snapshots across Undo/Redo
+  const mgr = new TimelineHistoryManager(12);
+  for (let i = 0; i < 25; i++) {
+    mgr.commitTransaction({
+      coalescingKey: '',
+      type: 'dsp-parameter-change',
+      description: `step-${i}`,
+      beforeTracks: tracks,
+      afterTracks: tracks,
+      beforeDsp: {
+        highPassHz: 80 + i,
+        compressorThresholdDb: -18,
+        compressorRatio: 3,
+        noiseGateThresholdDb: -45,
+        masterGainDb: 0,
+      },
+      afterDsp: {
+        highPassHz: 81 + i,
+        compressorThresholdDb: -18,
+        compressorRatio: 3,
+        noiseGateThresholdDb: -45,
+        masterGainDb: 0,
+      },
+    });
+  }
+  assert.equal(mgr.getHistory().length, 12);
+  const undone = mgr.undo()!;
+  assert.equal(undone.beforeDsp?.highPassHz, 104);
+  assert.equal(undone.afterDsp?.highPassHz, 105);
+});
+
+test('Editing Engine Pass-2 Fixes: bounded split clip IDs, clamped fades on short pieces, and acoustic peer RMS protection in batch clean', () => {
+  // 1. Repeated playhead splits keep clip IDs bounded and clamp both fadeInMs & fadeOutMs <= 45% of clip duration
+  let splitTracks = makeSyncedTracks();
+  splitTracks[0].clips[0].fadeInMs = 180;
+  splitTracks[0].clips[0].fadeOutMs = 180;
+
+  for (let i = 1; i <= 25; i++) {
+    const splitAt = secondsToFlicks(0.08 * i);
+    const res = splitTrackClipsAtPlayhead(splitTracks, splitAt);
+    splitTracks = res.tracks;
+  }
+
+  assert.ok(splitTracks[0].clips.length >= 20);
+  for (const clip of splitTracks[0].clips) {
+    assert.ok(clip.id.length <= 64, `Split clip ID grew unbounded: ${clip.id}`);
+    const durMs = flicksToSeconds(clip.timelineRange.endFlicks - clip.timelineRange.startFlicks) * 1000;
+    assert.ok(
+      clip.fadeInMs <= durMs * 0.45 + 1e-6,
+      `fadeInMs (${clip.fadeInMs}) exceeded 45% of clip duration (${durMs}ms)`,
+    );
+    assert.ok(
+      clip.fadeOutMs <= durMs * 0.45 + 1e-6,
+      `fadeOutMs (${clip.fadeOutMs}) exceeded 45% of clip duration (${durMs}ms)`,
+    );
+  }
+
+  // 2. applyBatchRecommendationsAtomically enforces acoustic peer RMS crosstalk protection when pcmSources are supplied
+  const sampleRate = 48_000;
+  const silentHost = new Float32Array(sampleRate * 10);
+  const loudPeer = new Float32Array(sampleRate * 10);
+  for (let i = sampleRate * 4; i < sampleRate * 5; i++) {
+    loudPeer[i] = 0.3 * Math.sin((2 * Math.PI * 260 * i) / sampleRate);
+  }
+
+  const batchTracks = makeSyncedTracks();
+  const batchRecs: SmartRecommendation[] = [
+    {
+      id: 'rec-acoustic-crosstalk',
+      trackId: 't1',
+      kind: 'standalone-filler',
+      recommendedMode: 'sync-locked-ripple-cut',
+      range: { startFlicks: secondsToFlicks(4.2), endFlicks: secondsToFlicks(4.6) },
+      relatedText: 'اِمم',
+      reasonFa: 'تست نشت آکوستیک هم‌زمان در ترک همگام',
+      confidence: 0.92,
+      sourceTier: 'Group-A-DSP',
+      status: 'Pending',
+      boundary: {
+        rawRange: { startFlicks: secondsToFlicks(4.2), endFlicks: secondsToFlicks(4.6) },
+        snappedRange: { startFlicks: secondsToFlicks(4.2), endFlicks: secondsToFlicks(4.6) },
+        rmsValleyShiftMs: 0,
+        zeroCrossingAdjusted: true,
+        microCrossfadeMs: 10,
+        pitchPlateauDetected: false,
+        trailingEzafeRisk: false,
+        reasonFa: 'تست',
+      },
+    },
+  ];
+
+  const batchOut = applyBatchRecommendationsAtomically({
+    tracks: batchTracks,
+    tokens: [], // Zero peer ASR tokens — only acoustic PCM energy reveals peer speech!
+    recommendations: batchRecs,
+    pcmSources: { a1: silentHost, a2: loudPeer },
+    sampleRate,
+  });
+
+  assert.equal(batchOut.appliedCount, 1);
+  assert.equal(batchOut.rippleCutCount, 0);
+  assert.equal(batchOut.roomToneCount, 1);
+  // Total duration must remain 10s (in-place room-tone suppression instead of ripple cut)
+  assert.equal(flicksToSeconds(computeTimelineDurationFlicks(batchOut.tracks)), 10);
+});
+
 
 

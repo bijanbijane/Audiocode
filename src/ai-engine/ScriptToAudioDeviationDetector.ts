@@ -82,6 +82,11 @@ export class ScriptToAudioDeviationDetector {
     let i = n;
     let j = m;
 
+    const sanitizeRange = (r: TimeRange): TimeRange => ({
+      start: Number.isFinite(r.start) ? r.start : 0,
+      end: Number.isFinite(r.end) ? r.end : 0,
+    });
+
     while (i > 0 || j > 0) {
       const move = ptr[i][j];
       if (i > 0 && j > 0 && move === 1) {
@@ -92,7 +97,7 @@ export class ScriptToAudioDeviationDetector {
             kind: 'NARRATOR_MISREAD_WORD',
             expectedBookText: bookWords[i - 1],
             actualSpokenText: tok.displayText,
-            audioRange: tok.range,
+            audioRange: sanitizeRange(tok.range),
             descriptionFa: `در متن کتاب «${bookWords[i - 1]}» آمده اما گوینده «${tok.displayText}» خوانده است.`,
           });
         }
@@ -106,7 +111,7 @@ export class ScriptToAudioDeviationDetector {
           kind: 'OMITTED_FROM_BOOK',
           expectedBookText: bookWords[i - 1],
           actualSpokenText: '[خوانده نشده]',
-          audioRange: anchorToken.range,
+          audioRange: sanitizeRange(anchorToken.range),
           descriptionFa: `واژه «${bookWords[i - 1]}» از متن کتاب جا افتاده است.`,
         });
         i--;
@@ -117,7 +122,7 @@ export class ScriptToAudioDeviationDetector {
           kind: 'EXTRA_SPOKEN_RETAKE',
           expectedBookText: '',
           actualSpokenText: tok.displayText,
-          audioRange: tok.range,
+          audioRange: sanitizeRange(tok.range),
           descriptionFa: `واژه اضافه یا تکراری «${tok.displayText}» خارج از متن کتاب بیان شده است.`,
         });
         j--;

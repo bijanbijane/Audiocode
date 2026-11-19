@@ -79,9 +79,10 @@ export class AudioSegmentAssembler {
     } = options;
 
     const budget = options.memoryBudgetManager ?? getSharedMemoryBudgetManager();
+    const rawBaseChunk = options.baseChunkSizeSamples ?? 16384;
     const baseChunkSamples = Math.max(
       1024,
-      Math.min(65536, Math.trunc(options.baseChunkSizeSamples ?? 16384)),
+      Math.min(65536, Math.trunc(Number.isFinite(rawBaseChunk) ? rawBaseChunk : 16384)),
     );
 
     const needsResample = plan.outputSampleRate !== plan.sourceSampleRate;
@@ -107,46 +108,97 @@ export class AudioSegmentAssembler {
 
     // Evaluate each transition junction using small bounded windows only
     for (const tr of plan.transitions) {
-      const leftSeg = plan.retainedSegments[tr.leftSegmentIndex];
-      const rightSeg = plan.retainedSegments[tr.rightSegmentIndex];
+      const leftIdx = tr.leftSegmentIndex;
+      const rightIdx = tr.rightSegmentIndex;
+      const leftSeg = plan.retainedSegments[leftIdx];
+      const rightSeg = plan.retainedSegments[rightIdx];
       if (!leftSeg || !rightSeg) continue;
+
+      const curLeftStart = effectiveStarts[leftIdx];
+      const curLeftEnd = effectiveEnds[leftIdx];
+      const curRightStart = effectiveStarts[rightIdx];
+      const curRightEnd = effectiveEnds[rightIdx];
+      const curLeftLen = curLeftEnd - curLeftStart;
+      const curRightLen = curRightEnd - curRightStart;
 
       const evalRadius = Math.max(
         tr.maxAdjustmentSamples + 64,
         Math.round(plan.sourceSampleRate * 0.02),
       );
-      const leftWinLen = Math.min(evalRadius, leftSeg.sampleCount);
-      const rightWinLen = Math.min(evalRadius, rightSeg.sampleCount);
+      const leftWinLen = Math.min(evalRadius, curLeftLen);
+      const rightWinLen = Math.min(evalRadius, curRightLen);
 
-      const leftWindow = await reader.readRange(
-        leftSeg.sourceEndSample - leftWinLen,
-        leftWinLen,
-      );
-      const rightWindow = await reader.readRange(rightSeg.sourceStartSample, rightWinLen);
+      const leftWindow = await reader.readRange(curLeftEnd - leftWinLen, leftWinLen);
+      const rightWindow = await reader.readRange(curRightStart, rightWinLen);
+
+      const gapSamples = Math.max(0, curRightStart - curLeftEnd);
+      const extRadius = Math.min(tr.maxAdjustmentSamples, gapSamples);
+      const leftPostLen = Math.min(extRadius, Math.max(0, plan.totalSourceSamples - curLeftEnd));
+      const rightPreLen = Math.min(extRadius, Math.max(0, curRightStart));
+      const leftPostWindow =
+        leftPostLen > 0 ? await reader.readRange(curLeftEnd, leftPostLen) : undefined;
+      const rightPreWindow =
+        rightPreLen > 0
+          ? await reader.readRange(curRightStart - rightPreLen, rightPreLen)
+          : undefined;
 
       const check = AudioBoundaryProcessor.evaluateAndRefineJunction({
         transitionIndex: tr.transitionIndex,
         proposalId: tr.removedProposalId,
         sampleRate: plan.sourceSampleRate,
-        originalLeftSample: leftSeg.sourceEndSample,
-        originalRightSample: rightSeg.sourceStartSample,
+        originalLeftSample: curLeftEnd,
+        originalRightSample: curRightStart,
         leftWindow,
         rightWindow,
+        leftPostWindow,
+        rightPreWindow,
+        preserveTotalLength: true,
         maxAdjustmentSamples: tr.maxAdjustmentSamples,
-        maxLeftPullbackSamples: Math.max(0, Math.floor(leftSeg.sampleCount / 4)),
-        maxRightAdvanceSamples: Math.max(0, Math.floor(rightSeg.sampleCount / 4)),
+        maxLeftPullbackSamples: Math.max(0, Math.floor(curLeftLen / 4)),
+        maxRightAdvanceSamples: Math.max(0, Math.floor(curRightLen / 4)),
       });
-      boundaryChecks.push(check);
 
-      // Keep exact total output sample count invariant by NOT altering segment length when
-      // applying in-place crossfade over the junction edges, unless bounded shift is symmetric.
-      // We clamp crossfade length strictly within both segments' available samples.
-      const maxSafeFade = Math.min(
-        tr.requestedCrossfadeSamples,
-        Math.floor(leftSeg.sampleCount / 3),
-        Math.floor(rightSeg.sampleCount / 3),
+      let recordedCheck = check;
+      if (
+        check.adjustmentApplied &&
+        check.leftAdjustmentSamples === check.rightAdjustmentSamples &&
+        check.adjustedLeftSample > curLeftStart + 2 &&
+        check.adjustedRightSample < curRightEnd - 2 &&
+        check.adjustedLeftSample <= check.adjustedRightSample &&
+        check.adjustedLeftSample <= plan.totalSourceSamples &&
+        check.adjustedRightSample >= 0
+      ) {
+        effectiveEnds[leftIdx] = check.adjustedLeftSample;
+        effectiveStarts[rightIdx] = check.adjustedRightSample;
+      } else if (check.adjustmentApplied) {
+        recordedCheck = {
+          ...check,
+          adjustedLeftSample: curLeftEnd,
+          adjustedRightSample: curRightStart,
+          leftAdjustmentSamples: 0,
+          rightAdjustmentSamples: 0,
+          adjustmentApplied: false,
+          rejectedAdjustmentReason:
+            'Candidate boundary shift violated segment bounds; preserved original coordinates.',
+        };
+      }
+      boundaryChecks.push(recordedCheck);
+
+      // Compute half-fade length L so the centered 2*L crossfade stays strictly inside both
+      // adjacent segments and available source pre/post-roll, preserving exact sample count.
+      const effLeftEnd = effectiveEnds[leftIdx];
+      const effRightStart = effectiveStarts[rightIdx];
+      const effLeftLen = effLeftEnd - effectiveStarts[leftIdx];
+      const effRightLen = effectiveEnds[rightIdx] - effRightStart;
+      const requestedHalfFade = Math.floor(tr.requestedCrossfadeSamples / 2);
+      const maxSafeHalfFade = Math.min(
+        requestedHalfFade,
+        Math.floor(effLeftLen / 3),
+        Math.floor(effRightLen / 3),
+        Math.max(0, plan.totalSourceSamples - effLeftEnd),
+        Math.max(0, effRightStart),
       );
-      transitionFadeLengths.set(tr.leftSegmentIndex, Math.max(0, maxSafeFade));
+      transitionFadeLengths.set(leftIdx, Math.max(0, maxSafeHalfFade));
     }
 
     let startSegmentIndex = 0;
@@ -155,18 +207,50 @@ export class AudioSegmentAssembler {
     let processedSourceSamples = 0;
 
     if (resumeFromCheckpoint) {
-      startSegmentIndex = Math.max(0, resumeFromCheckpoint.completedSegmentIndex);
-      initialSegmentOffset = Math.max(0, resumeFromCheckpoint.nextSegmentSampleOffset);
-      totalEmittedOutputSamples = Math.max(0, resumeFromCheckpoint.writtenOutputSamples);
+      const safeCompletedSeg = Number.isFinite(resumeFromCheckpoint.completedSegmentIndex)
+        ? Math.trunc(resumeFromCheckpoint.completedSegmentIndex)
+        : 0;
+      const safeNextOffset = Number.isFinite(resumeFromCheckpoint.nextSegmentSampleOffset)
+        ? Math.trunc(resumeFromCheckpoint.nextSegmentSampleOffset)
+        : 0;
+      const safeWrittenOut = Number.isFinite(resumeFromCheckpoint.writtenOutputSamples)
+        ? Math.trunc(resumeFromCheckpoint.writtenOutputSamples)
+        : 0;
+      startSegmentIndex = Math.max(0, safeCompletedSeg);
+      initialSegmentOffset = Math.max(0, safeNextOffset);
+      totalEmittedOutputSamples = Math.max(0, safeWrittenOut);
       for (let i = 0; i < startSegmentIndex && i < plan.retainedSegments.length; i++) {
-        processedSourceSamples += plan.retainedSegments[i].sampleCount;
+        processedSourceSamples += effectiveEnds[i] - effectiveStarts[i];
       }
       processedSourceSamples += initialSegmentOffset;
     }
 
     let peakReservedBytes = budget.getSnapshot().accountedBytes;
-    let pendingLeftTail: Float32Array[] | null = null;
+    let lastYieldMs = Date.now();
+    let pendingLeftExt: Float32Array[] | null = null;
+    let pendingHalfFade = 0;
     let pendingTransitionForTail: (typeof plan.transitions)[number] | null = null;
+
+    // If resuming cleanly at offset 0 of a segment with an incoming crossfade,
+    // restore the held outgoing pre/post-roll window from the previous segment.
+    if (
+      resumeFromCheckpoint &&
+      startSegmentIndex > 0 &&
+      initialSegmentOffset === 0 &&
+      startSegmentIndex < plan.retainedSegments.length
+    ) {
+      const prevIdx = startSegmentIndex - 1;
+      const prevHalfFade = transitionFadeLengths.get(prevIdx) ?? 0;
+      const prevTr = transitionByLeftSeg.get(prevIdx) ?? null;
+      if (prevHalfFade > 0 && prevTr) {
+        pendingLeftExt = await reader.readRange(
+          effectiveEnds[prevIdx] - prevHalfFade,
+          prevHalfFade * 2,
+        );
+        pendingHalfFade = prevHalfFade;
+        pendingTransitionForTail = prevTr;
+      }
+    }
 
     const emitPlanarChunk = async (
       channels: Float32Array[],
@@ -213,55 +297,41 @@ export class AudioSegmentAssembler {
     };
 
     for (let segIdx = startSegmentIndex; segIdx < plan.retainedSegments.length; segIdx++) {
-      const seg = plan.retainedSegments[segIdx];
       const segStart = effectiveStarts[segIdx];
       const segEnd = effectiveEnds[segIdx];
       const segTotal = segEnd - segStart;
 
-      // Crossfade tail reserved at the END of this segment if there is an outgoing transition
-      const outgoingFadeSamples = transitionFadeLengths.get(segIdx) ?? 0;
-      const bodyEndOffset = Math.max(0, segTotal - outgoingFadeSamples);
+      // Half-fade tail reserved at the END of this segment if there is an outgoing transition
+      const outgoingHalfFade = transitionFadeLengths.get(segIdx) ?? 0;
+      const bodyEndOffset = Math.max(0, segTotal - outgoingHalfFade);
 
       let offset = segIdx === startSegmentIndex ? initialSegmentOffset : 0;
 
-      // If previous segment left a pending tail for an incoming transition, blend with head of this segment
-      if (pendingLeftTail && pendingTransitionForTail && offset === 0) {
-        const fadeLen = pendingLeftTail[0].length;
-        const rightHead = await reader.readRange(segStart, fadeLen);
+      // If previous segment left a pending centered-crossfade tail, blend continuously over 2*halfFade
+      // using real source post-roll (left) and real source pre-roll (right).
+      // Sample count emitted = 2*halfFade = outgoingHalfFade (left) + incomingHalfFade (right),
+      // preserving exact expectedOutputSamples with zero backward time jump and full limiter coverage.
+      if (pendingLeftExt && pendingTransitionForTail && pendingHalfFade > 0 && offset === 0) {
+        const halfFade = pendingHalfFade;
+        const fullFadeLen = halfFade * 2;
+        const rightExt = await reader.readRange(segStart - halfFade, fullFadeLen);
         const { blended, result } = AudioCrossfadeProcessor.blendTransition({
           transitionIndex: pendingTransitionForTail.transitionIndex,
           proposalId: pendingTransitionForTail.removedProposalId,
-          leftTail: pendingLeftTail,
-          rightHead,
+          leftTail: pendingLeftExt,
+          rightHead: rightExt,
           preferredCurve: pendingTransitionForTail.preferredCurve,
           enableLimiter: enableTransitionLimiter,
         });
         crossfadeResults.push(result);
-        // To preserve exact integer sample count equal to sum(retainedSegments.sampleCount),
-        // we emit the blended crossfade window over the outgoing tail's duration and also keep
-        // the incoming head's second half seamlessly so zero samples are lost:
-        // Specifically: left tail had length L, right head had length L.
-        // We emit a 2*L smooth junction (L samples transitioning left->mid, L samples mid->right)
-        // by fading leftTail out over its L samples and fading rightHead in over its L samples.
-        const outLeftHalf = Array.from({ length: plan.channelCount }, () => new Float32Array(fadeLen));
-        const outRightHalf = Array.from({ length: plan.channelCount }, () => new Float32Array(fadeLen));
-        const denom = Math.max(1, fadeLen - 1);
-        for (let i = 0; i < fadeLen; i++) {
-          const halfT = i / denom;
-          const wOut = 0.5 * (1 + Math.cos(Math.PI * 0.5 * halfT));
-          const wIn = 0.5 * (1 - Math.cos(Math.PI * 0.5 * halfT));
-          for (let c = 0; c < plan.channelCount; c++) {
-            outLeftHalf[c][i] = pendingLeftTail[c][i] * wOut + blended[c][i] * (1 - wOut);
-            outRightHalf[c][i] = blended[c][i] * (1 - wIn) + rightHead[c][i] * wIn;
-          }
-        }
-        processedSourceSamples += fadeLen;
-        offset = fadeLen;
-        pendingLeftTail = null;
+
+        processedSourceSamples += halfFade;
+        offset = halfFade;
+        pendingLeftExt = null;
+        pendingHalfFade = 0;
         pendingTransitionForTail = null;
 
-        await emitPlanarChunk(outLeftHalf, segIdx, offset);
-        await emitPlanarChunk(outRightHalf, segIdx, offset);
+        await emitPlanarChunk(blended, segIdx, offset);
       }
 
       // Stream the body of this segment up to bodyEndOffset in adaptive memory-bounded chunks
@@ -355,21 +425,28 @@ export class AudioSegmentAssembler {
           budget.release(reservation);
         }
 
-        await yieldCooperatively();
+        const nowYieldMs = Date.now();
+        if (nowYieldMs - lastYieldMs >= 8) {
+          await yieldCooperatively();
+          lastYieldMs = Date.now();
+        }
       }
 
-      // Hold the outgoing tail in a tiny bounded buffer strictly for the transition with segIdx + 1
-      if (outgoingFadeSamples > 0) {
+      // Hold the outgoing tail + source post-roll (2*outgoingHalfFade) for centered transition with segIdx + 1
+      if (outgoingHalfFade > 0) {
         const tailStart = segStart + bodyEndOffset;
-        pendingLeftTail = await reader.readRange(tailStart, outgoingFadeSamples);
+        pendingLeftExt = await reader.readRange(tailStart, outgoingHalfFade * 2);
+        pendingHalfFade = outgoingHalfFade;
         pendingTransitionForTail = transitionByLeftSeg.get(segIdx) ?? null;
-        processedSourceSamples += outgoingFadeSamples;
+        processedSourceSamples += outgoingHalfFade;
       }
 
-      // If no next segment exists (defensive guard), flush any held tail directly
-      if (segIdx === plan.retainedSegments.length - 1 && pendingLeftTail) {
-        await emitPlanarChunk(pendingLeftTail, segIdx, segTotal);
-        pendingLeftTail = null;
+      // If no next segment exists (defensive guard), flush only the retained outgoingHalfFade samples
+      if (segIdx === plan.retainedSegments.length - 1 && pendingLeftExt && pendingHalfFade > 0) {
+        const retainedOnly = pendingLeftExt.map((ch) => ch.subarray(0, pendingHalfFade));
+        await emitPlanarChunk(retainedOnly, segIdx, segTotal);
+        pendingLeftExt = null;
+        pendingHalfFade = 0;
         pendingTransitionForTail = null;
       }
     }

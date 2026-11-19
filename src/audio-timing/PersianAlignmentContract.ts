@@ -95,12 +95,32 @@ export function runPersianForcedAlignmentContract(params: {
   readonly modelVersion?: string | null;
   readonly allowApproximateFallback?: boolean;
 }): PersianForcedAlignmentOutput {
-  const { words, sourceSampleRate, totalSourceSamples } = params;
+  const { words } = params;
   if (words.length === 0) {
     return { tokens: [], alignedCount: 0, approximateCount: 0, unalignedCount: 0, ambiguousCount: 0 };
   }
 
-  const chunkOffsetSamples = params.chunkStartSourceSample ?? asSourceSamplePosition(0);
+  const sourceSampleRate =
+    Number.isSafeInteger(params.sourceSampleRate) && params.sourceSampleRate > 0
+      ? params.sourceSampleRate
+      : 48000;
+  const totalSourceSamples =
+    Number.isFinite(params.totalSourceSamples) && params.totalSourceSamples >= 0
+      ? Math.trunc(params.totalSourceSamples)
+      : 0;
+  const rawChunkStart = params.chunkStartSourceSample ?? 0;
+  const chunkOffsetSamples = asSourceSamplePosition(
+    Number.isFinite(rawChunkStart) && rawChunkStart >= 0
+      ? Math.min(totalSourceSamples, Math.trunc(rawChunkStart))
+      : 0,
+  );
+  const safeFrameDurationSec =
+    typeof params.frameDurationSec === 'number' &&
+    Number.isFinite(params.frameDurationSec) &&
+    params.frameDurationSec > 0
+      ? params.frameDurationSec
+      : 0.02;
+
   const hasGenuineAcousticEvidence =
     Array.isArray(params.logProbsPerFrame) &&
     params.logProbsPerFrame.length > 0 &&
@@ -127,7 +147,7 @@ export function runPersianForcedAlignmentContract(params: {
             params.logProbsPerFrame,
             params.charToVocabId,
             alignableInputs,
-            params.frameDurationSec ?? 0.02,
+            safeFrameDurationSec,
             0,
           )
         : [];
@@ -140,13 +160,21 @@ export function runPersianForcedAlignmentContract(params: {
 
     for (const { word, meta } of normalizedMeta) {
       const matched = byId.get(word.id);
-      if (matched && !meta.ambiguousMapping) {
+      if (
+        matched &&
+        !meta.ambiguousMapping &&
+        Number.isFinite(matched.alignedRange?.start) &&
+        Number.isFinite(matched.alignedRange?.end)
+      ) {
         const relStart = flicksToSourceSampleExact(matched.alignedRange.start, sourceSampleRate);
         const relEnd = flicksToSourceSampleExact(matched.alignedRange.end, sourceSampleRate);
         const absStart = asSourceSamplePosition(Math.min(totalSourceSamples, chunkOffsetSamples + relStart));
         const absEnd = asSourceSamplePosition(
           Math.min(totalSourceSamples, Math.max(absStart, chunkOffsetSamples + relEnd)),
         );
+        const safeAcousticScore = Number.isFinite(matched.acousticConfidence)
+          ? Number(Math.max(0, Math.min(1, matched.acousticConfidence)).toFixed(4))
+          : null;
         alignedCount += 1;
         tokens.push({
           tokenId: word.id,
@@ -162,7 +190,7 @@ export function runPersianForcedAlignmentContract(params: {
           alignmentMethod: 'CTC_VITERBI_FORCED_ALIGNMENT',
           modelId: params.modelId ?? 'ctc-viterbi-local',
           modelVersion: params.modelVersion ?? '1.0',
-          acousticScore: Number(matched.acousticConfidence.toFixed(4)),
+          acousticScore: safeAcousticScore,
           evidenceProvenance: 'Genuine CTC Viterbi acoustic log-prob trellis alignment.',
           warnings: [],
         });

@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { X, Download, CheckCircle2, AlertTriangle } from 'lucide-react';
 import { ExportValidationReport } from '../contracts/v1_2';
 import { RenderManifest } from '../processing-core/ExportValidator';
@@ -26,6 +26,18 @@ export const ExportModal: React.FC<ExportModalProps> = ({
   fileName,
   onClose,
 }) => {
+  useEffect(() => {
+    if (!isOpen) return;
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        onClose();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isOpen, onClose]);
+
   if (!isOpen) return null;
 
   return (
@@ -148,7 +160,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({
                 >
                   بستن
                 </button>
-                {downloadUrl && (
+                {downloadUrl && report.readable && validationErrors.length === 0 && (
                   <a
                     href={downloadUrl}
                     download={fileName}

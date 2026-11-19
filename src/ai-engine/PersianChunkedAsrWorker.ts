@@ -84,9 +84,14 @@ export class PersianChunkedAsrEngine {
     trackId = 'track-1',
     options?: ChunkedAsrExecutionOptions,
   ): Promise<TimedPersianToken[]> {
-    if (totalSamples16k <= 0) {
+    if (!Number.isFinite(totalSamples16k) || totalSamples16k <= 0) {
       return [...initialTokens];
     }
+    const safeTotalSamples16k = Math.floor(totalSamples16k);
+    const safeResumeWindowIdx =
+      Number.isFinite(resumeFromWindowIndex) && resumeFromWindowIndex >= 0
+        ? Math.floor(resumeFromWindowIndex)
+        : 0;
 
     const budgetManager =
       options?.memoryBudgetManager ??
@@ -100,12 +105,12 @@ export class PersianChunkedAsrEngine {
     const strideSamples = windowSamples - overlapSamples; // 22s stride
 
     const totalWindows =
-      totalSamples16k <= windowSamples
+      safeTotalSamples16k <= windowSamples
         ? 1
-        : Math.ceil((totalSamples16k - overlapSamples) / strideSamples);
+        : Math.ceil((safeTotalSamples16k - overlapSamples) / strideSamples);
 
     let accumulatedTokens: TimedPersianToken[] = [...initialTokens];
-    let lastCompletedWindowIndex = resumeFromWindowIndex - 1;
+    let lastCompletedWindowIndex = safeResumeWindowIdx - 1;
 
     const throwIfAborted = () => {
       if (signal?.aborted) {
@@ -117,11 +122,11 @@ export class PersianChunkedAsrEngine {
       }
     };
 
-    for (let wIdx = resumeFromWindowIndex; wIdx < totalWindows; wIdx++) {
+    for (let wIdx = safeResumeWindowIdx; wIdx < totalWindows; wIdx++) {
       throwIfAborted();
 
       const startSample = wIdx * strideSamples;
-      const count = Math.min(windowSamples, totalSamples16k - startSample);
+      const count = Math.min(windowSamples, safeTotalSamples16k - startSample);
       if (count <= 0) break;
 
       const pcmWindowBytes = count * Float32Array.BYTES_PER_ELEMENT;
@@ -165,7 +170,8 @@ export class PersianChunkedAsrEngine {
         const vad = await this.adapter.detectVoiceActivity(pcmChunk);
         throwIfAborted();
 
-        if (!vad.hasSpeech || vad.speechRatio < 0.005) {
+        const safeSpeechRatio = Number.isFinite(vad.speechRatio) ? vad.speechRatio : 0;
+        if (!vad.hasSpeech || safeSpeechRatio < 0.005) {
           pcmChunk = null;
           await onWindowCheckpoint(wIdx, accumulatedTokens);
           lastCompletedWindowIndex = wIdx;
@@ -181,9 +187,19 @@ export class PersianChunkedAsrEngine {
         // 3. Project window-relative offsets into exact canonical Flicks
         const windowTokens = PersianTextNormalizer.buildThreeLayerTranscript(
           rawPredictions.map((pred, idx) => {
-            const absStartSec = windowStartSec + pred.relativeStartSec;
-            const absEndSec =
-              windowStartSec + Math.max(pred.relativeEndSec, pred.relativeStartSec + 0.04);
+            const safeRelStart =
+              Number.isFinite(pred.relativeStartSec) && pred.relativeStartSec >= 0
+                ? pred.relativeStartSec
+                : 0;
+            const safeRelEnd =
+              Number.isFinite(pred.relativeEndSec) && pred.relativeEndSec > safeRelStart
+                ? pred.relativeEndSec
+                : safeRelStart + 0.04;
+            const safeProb = Number.isFinite(pred.probability)
+              ? Math.max(0, Math.min(1, pred.probability))
+              : 0.5;
+            const absStartSec = windowStartSec + safeRelStart;
+            const absEndSec = windowStartSec + Math.max(safeRelEnd, safeRelStart + 0.04);
             return {
               id: `tok_w${wIdx}_${idx}`,
               text: pred.word,
@@ -191,7 +207,7 @@ export class PersianChunkedAsrEngine {
                 start: TimeMath.secondsToFlicks(absStartSec),
                 end: TimeMath.secondsToFlicks(absEndSec),
               },
-              confidence: pred.probability,
+              confidence: safeProb,
             };
           }),
           trackId,

@@ -204,6 +204,8 @@ export const DspControlRack: React.FC<DspControlRackProps> = ({
                     })
                   }
                   onPointerUp={() => onCommitGesture(`dsp-${s.key}`, `تنظیم ${s.label}: ${val} ${s.unit}`)}
+                  onPointerCancel={() => onCommitGesture(`dsp-${s.key}`, `تنظیم ${s.label}: ${val} ${s.unit}`)}
+                  onBlur={() => onCommitGesture(`dsp-${s.key}`, `تنظیم ${s.label}: ${val} ${s.unit}`)}
                   onKeyUp={() => onCommitGesture(`dsp-${s.key}`, `تنظیم ${s.label}: ${val} ${s.unit}`)}
                   className="w-full accent-amber-400 cursor-pointer"
                 />

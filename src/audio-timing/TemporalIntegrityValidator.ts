@@ -131,7 +131,7 @@ export function validateTranscriptTemporalIntegrity(params: {
 
     if (tok.derivedStartSec !== null) {
       const expectedSec = sourceSampleToDisplaySec(tok.sourceStartSample, params.authoritativeSampleRate);
-      if (Math.abs(tok.derivedStartSec - expectedSec) > 0.002) {
+      if (!Number.isFinite(tok.derivedStartSec) || Math.abs(tok.derivedStartSec - expectedSec) > 0.002) {
         violations.push({
           code: 'TIME_SAMPLE_DISAGREEMENT',
           severity: 'ERROR',
@@ -273,7 +273,14 @@ export function evaluateRealAudioAlignmentBenchmark(params: {
   let omitted = 0;
 
   for (const r of refs) {
-    if (r.predStartMs === null || r.predEndMs === null) {
+    if (
+      r.predStartMs === null ||
+      r.predEndMs === null ||
+      !Number.isFinite(r.predStartMs) ||
+      !Number.isFinite(r.predEndMs) ||
+      !Number.isFinite(r.refStartMs) ||
+      !Number.isFinite(r.refEndMs)
+    ) {
       omitted += 1;
       continue;
     }

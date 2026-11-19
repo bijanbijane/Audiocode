@@ -85,26 +85,32 @@ export function normalizeTokensToSampleSpans(
       const startFlicks = Number(tok.range.start);
       const endFlicks = Number(tok.range.end);
       if (!Number.isFinite(startFlicks) || !Number.isFinite(endFlicks)) continue;
+      const safeConfidence = Number.isFinite(tok.confidence)
+        ? Math.max(0, Math.min(1, tok.confidence))
+        : 0.7;
       spans.push({
         tokenId: tok.tokenId,
         trackId: tok.trackId,
         text: tok.originalText,
         startSample: Math.round(startFlicks / flicksPerSample),
         endSample: Math.round(endFlicks / flicksPerSample),
-        confidence: tok.confidence,
+        confidence: safeConfidence,
         hasCharacterSpans: false,
       });
     } else {
       const startFlicks = Number(tok.range.startFlicks);
       const endFlicks = Number(tok.range.endFlicks);
       if (!Number.isFinite(startFlicks) || !Number.isFinite(endFlicks)) continue;
+      const safeConfidence = Number.isFinite(tok.confidence)
+        ? Math.max(0, Math.min(1, tok.confidence))
+        : 0.7;
       spans.push({
         tokenId: tok.id,
         trackId: tok.trackId,
         text: tok.originalText,
         startSample: Math.round(startFlicks / flicksPerSample),
         endSample: Math.round(endFlicks / flicksPerSample),
-        confidence: tok.confidence,
+        confidence: safeConfidence,
         alignmentPrecision: tok.alignmentPrecision,
         alignmentSource: tok.alignmentSource,
         hasTrailingEzafeRisk: tok.hasTrailingEzafeRisk,
@@ -348,7 +354,9 @@ export class EditBoundaryRefiner {
 
     if (operation === 'SHORTEN_SILENCE') {
       // Adaptive silence margin depends on noise floor and proximity to active speech/plosive onsets
-      const noiseFloorDb = event.acousticEvidence?.noiseFloorDbfs ?? -55;
+      const rawNoiseFloorDb = event.acousticEvidence?.noiseFloorDbfs;
+      const noiseFloorDb =
+        rawNoiseFloorDb !== undefined && Number.isFinite(rawNoiseFloorDb) ? rawNoiseFloorDb : -55;
       const noisyRoomExtraMs = noiseFloorDb > -42 ? 25 : 0;
       leftMarginMs = 55 + noisyRoomExtraMs;
       rightMarginMs = 65 + noisyRoomExtraMs;
@@ -490,9 +498,12 @@ export class EditBoundaryRefiner {
     } else if (measurementBasis === 'MEASURED_ACOUSTIC') {
       boundaryScore = hasVadSignal && !event.acousticEvidence?.vadActiveOverlap ? 0.84 : 0.75;
     } else if (measurementBasis === 'ESTIMATED_ASR_TOKEN') {
+      const finiteConfs = matchedTokens
+        .map((t) => t.confidence)
+        .filter((c) => Number.isFinite(c));
       const minTokConf =
-        matchedTokens.length > 0
-          ? Math.min(...matchedTokens.map((t) => t.confidence))
+        finiteConfs.length > 0
+          ? Math.max(0, Math.min(1, Math.min(...finiteConfs)))
           : 0.7;
       boundaryScore = Number(Math.min(0.76, 0.45 + minTokConf * 0.3).toFixed(3));
     } else if (measurementBasis === 'ESTIMATED_HEURISTIC') {

@@ -46,11 +46,11 @@ function downloadTextBlob(content: string, fileName: string, mime: string): void
 }
 
 function formatSrtTime(sec: number): string {
-  const clamped = Math.max(0, sec);
-  const h = Math.floor(clamped / 3600);
-  const m = Math.floor((clamped % 3600) / 60);
-  const s = Math.floor(clamped % 60);
-  const ms = Math.round((clamped - Math.floor(clamped)) * 1000);
+  const totalMs = Math.round(Math.max(0, Number.isFinite(sec) ? sec : 0) * 1000);
+  const h = Math.floor(totalMs / 3_600_000);
+  const m = Math.floor((totalMs % 3_600_000) / 60_000);
+  const s = Math.floor((totalMs % 60_000) / 1000);
+  const ms = totalMs % 1000;
   return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')},${String(ms).padStart(3, '0')}`;
 }
 
@@ -114,8 +114,11 @@ export const RenderExportModal: React.FC<RenderExportModalProps> = ({
 
   const handleDownloadAudio = () => {
     if (!canDownloadAudio || !result?.outputBytes) return;
-    const ext = format === 'RF64_PCM24' ? 'rf64.wav' : 'wav';
-    const fileName = sanitizeExportFilename(`${workflowState.projectId}-${format.toLowerCase()}.${ext}`);
+    const renderedContainer = result.plan?.container ?? result.postValidation?.verifiedContainer ?? 'wav';
+    const renderedEncoding = result.plan?.encoding ?? (format === 'WAV_FLOAT32' ? 'float32' : format === 'WAV_PCM16' ? 'pcm16' : 'pcm24');
+    const renderedPresetTag = `${renderedContainer}_${renderedEncoding}`.toLowerCase();
+    const ext = renderedContainer === 'rf64' ? 'rf64.wav' : 'wav';
+    const fileName = sanitizeExportFilename(`${workflowState.projectId}-${renderedPresetTag}.${ext}`);
     const blob = new Blob([new Uint8Array(result.outputBytes)], { type: 'audio/wav' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -129,14 +132,15 @@ export const RenderExportModal: React.FC<RenderExportModalProps> = ({
   };
 
   const handleExportTranscript = (kind: 'txt' | 'srt' | 'json') => {
+    const activeTokens = tokens.filter((t) => !t.isCrosstalkSuppressed);
     if (kind === 'txt') {
       downloadTextBlob(
-        tokens.map((t) => t.displayText).join(' '),
+        activeTokens.map((t) => t.displayText).join(' '),
         `${workflowState.projectId}-transcript.txt`,
         'text/plain;charset=utf-8',
       );
     } else if (kind === 'srt') {
-      const srt = tokens
+      const srt = activeTokens
         .map((t, i) => {
           const s = formatSrtTime(flicksToSeconds(t.range.startFlicks));
           const e = formatSrtTime(flicksToSeconds(t.range.endFlicks));

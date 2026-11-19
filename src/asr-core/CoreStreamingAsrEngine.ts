@@ -83,7 +83,10 @@ export class CoreStreamingAsrManager {
     private readonly ctcEngine: CoreAcousticCtcEngine = new CoreAcousticCtcEngine(),
     maxConcurrentSessions = 8,
   ) {
-    this.maxConcurrentSessions = maxConcurrentSessions;
+    this.maxConcurrentSessions =
+      Number.isFinite(maxConcurrentSessions) && maxConcurrentSessions >= 1
+        ? Math.floor(maxConcurrentSessions)
+        : 8;
   }
 
   public getActiveSessionCount(): number {
@@ -119,15 +122,40 @@ export class CoreStreamingAsrManager {
       return { accepted: false, sessionId, readyEvent: overloadEvent };
     }
 
+    const vadThreshold =
+      typeof config.vadEnergyThreshold === 'number' &&
+      Number.isFinite(config.vadEnergyThreshold) &&
+      config.vadEnergyThreshold >= 0
+        ? config.vadEnergyThreshold
+        : 0.012;
+    const silenceEndpointMs =
+      typeof config.silenceEndpointMs === 'number' &&
+      Number.isFinite(config.silenceEndpointMs) &&
+      config.silenceEndpointMs > 0
+        ? config.silenceEndpointMs
+        : 360;
+    const maxUtteranceSec =
+      typeof config.maxUtteranceSec === 'number' &&
+      Number.isFinite(config.maxUtteranceSec) &&
+      config.maxUtteranceSec > 0
+        ? config.maxUtteranceSec
+        : 12.0;
+    const maxQueuedSamples =
+      typeof config.maxQueuedSamples === 'number' &&
+      Number.isFinite(config.maxQueuedSamples) &&
+      config.maxQueuedSamples > 0
+        ? Math.floor(config.maxQueuedSamples)
+        : CORE_SAMPLE_RATE * 15;
+
     const session: InternalStreamingSession = {
       sessionId,
       tenantId: config.tenantId,
       streamingCategory: category,
       languageHint: config.languageHint ?? 'auto',
-      vadThreshold: config.vadEnergyThreshold ?? 0.012,
-      silenceEndpointSamples: Math.round(((config.silenceEndpointMs ?? 360) / 1000) * CORE_SAMPLE_RATE),
-      maxUtteranceSamples: Math.round((config.maxUtteranceSec ?? 12.0) * CORE_SAMPLE_RATE),
-      maxQueuedSamples: config.maxQueuedSamples ?? CORE_SAMPLE_RATE * 15,
+      vadThreshold,
+      silenceEndpointSamples: Math.max(160, Math.round((silenceEndpointMs / 1000) * CORE_SAMPLE_RATE)),
+      maxUtteranceSamples: Math.max(CORE_SAMPLE_RATE, Math.round(maxUtteranceSec * CORE_SAMPLE_RATE)),
+      maxQueuedSamples,
       seq: 0,
       cursorSamples: 0,
       segmentStartSample: 0,

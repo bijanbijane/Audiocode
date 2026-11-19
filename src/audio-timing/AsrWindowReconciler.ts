@@ -84,18 +84,39 @@ export function buildAsrWindowMappings(params: {
   if (!Number.isSafeInteger(params.totalSourceSamples) || params.totalSourceSamples <= 0) {
     throw new RangeError('totalSourceSamples must be a positive safe integer.');
   }
+  if (!Number.isFinite(params.sourceSampleRate) || params.sourceSampleRate <= 0) {
+    throw new RangeError('sourceSampleRate must be a positive finite number.');
+  }
   const windowRate = params.windowSampleRate ?? 16000;
+  if (!Number.isFinite(windowRate) || windowRate <= 0) {
+    throw new RangeError('windowSampleRate must be a positive finite number.');
+  }
   const winSec = params.windowDurationSec ?? DEFAULT_ASR_WINDOW_SEC;
   const ovSec = params.overlapDurationSec ?? DEFAULT_ASR_OVERLAP_SEC;
-  if (winSec <= 0 || ovSec < 0 || ovSec >= winSec) {
+  if (
+    !Number.isFinite(winSec) ||
+    !Number.isFinite(ovSec) ||
+    winSec <= 0 ||
+    ovSec < 0 ||
+    ovSec >= winSec
+  ) {
     throw new RangeError(`Invalid ASR window/overlap configuration: window=${winSec}s overlap=${ovSec}s`);
   }
 
-  const windowSourceSamples = winSec * params.sourceSampleRate;
-  const overlapSourceSamples = ovSec * params.sourceSampleRate;
-  const strideSourceSamples = windowSourceSamples - overlapSourceSamples;
-  const padBefore = Math.max(0, Math.trunc(params.padBeforeSamples ?? 0));
-  const padAfter = Math.max(0, Math.trunc(params.padAfterSamples ?? 0));
+  const windowSourceSamples = Math.max(1, Math.round(winSec * params.sourceSampleRate));
+  const overlapSourceSamples = Math.max(
+    0,
+    Math.min(windowSourceSamples - 1, Math.round(ovSec * params.sourceSampleRate)),
+  );
+  const strideSourceSamples = Math.max(1, windowSourceSamples - overlapSourceSamples);
+  const padBefore =
+    Number.isFinite(params.padBeforeSamples) && (params.padBeforeSamples as number) > 0
+      ? Math.trunc(params.padBeforeSamples as number)
+      : 0;
+  const padAfter =
+    Number.isFinite(params.padAfterSamples) && (params.padAfterSamples as number) > 0
+      ? Math.trunc(params.padAfterSamples as number)
+      : 0;
 
   const windows: AsrWindowMappingContract[] = [];
   let start = 0;
@@ -157,25 +178,51 @@ export function mapWindowTokenToSourceRange(
   readonly sourceStartSample: SourceSamplePosition;
   readonly sourceEndSample: SourceSamplePosition;
 } {
+  const fallbackSample =
+    Number.isSafeInteger(window.sourceStartSample) && window.sourceStartSample >= 0
+      ? window.sourceStartSample
+      : asSourceSamplePosition(0);
+  if (
+    !Number.isFinite(relativeStartSec) ||
+    !Number.isFinite(relativeEndSec) ||
+    relativeEndSec <= relativeStartSec ||
+    !Number.isSafeInteger(window.windowSampleRate) ||
+    window.windowSampleRate <= 0 ||
+    !Number.isSafeInteger(window.sourceSampleRate) ||
+    window.sourceSampleRate <= 0 ||
+    !Number.isFinite(window.actualInputSampleCount) ||
+    window.actualInputSampleCount <= 0
+  ) {
+    return {
+      valid: false,
+      insidePaddingOnly: false,
+      sourceStartSample: fallbackSample,
+      sourceEndSample: fallbackSample,
+    };
+  }
+  const padBefore =
+    Number.isFinite(window.padBeforeSamples) && window.padBeforeSamples > 0
+      ? Math.trunc(window.padBeforeSamples)
+      : 0;
   const startWindowFrame = Math.round(relativeStartSec * window.windowSampleRate);
   const endWindowFrame = Math.round(relativeEndSec * window.windowSampleRate);
 
   // Subtract leading padding frames so padding is never mistaken for real audio
-  const unpaddedStart = startWindowFrame - window.padBeforeSamples;
-  const unpaddedEnd = endWindowFrame - window.padBeforeSamples;
+  const unpaddedStart = startWindowFrame - padBefore;
+  const unpaddedEnd = endWindowFrame - padBefore;
 
   if (unpaddedEnd <= 0 || unpaddedStart >= window.actualInputSampleCount) {
     return {
       valid: false,
       insidePaddingOnly: true,
-      sourceStartSample: window.sourceStartSample,
-      sourceEndSample: window.sourceStartSample,
+      sourceStartSample: fallbackSample,
+      sourceEndSample: fallbackSample,
     };
   }
 
   const clampedStartFrame = asResampledFramePosition(Math.max(0, unpaddedStart));
   const clampedEndFrame = asResampledFramePosition(
-    Math.min(window.actualInputSampleCount, Math.max(clampedStartFrame, unpaddedEnd)),
+    Math.min(Math.trunc(window.actualInputSampleCount), Math.max(clampedStartFrame, unpaddedEnd)),
   );
 
   const deltaStartSource = resampledFrameToSourceSample(
@@ -190,10 +237,10 @@ export function mapWindowTokenToSourceRange(
   );
 
   const sourceStart = asSourceSamplePosition(
-    Math.min(window.sourceEndSample, window.sourceStartSample + deltaStartSource),
+    Math.min(window.sourceEndSample, fallbackSample + deltaStartSource),
   );
   const sourceEnd = asSourceSamplePosition(
-    Math.min(window.sourceEndSample, Math.max(sourceStart, window.sourceStartSample + deltaEndSource)),
+    Math.min(window.sourceEndSample, Math.max(sourceStart, fallbackSample + deltaEndSource)),
   );
 
   return {
@@ -227,6 +274,9 @@ export function reconcileOverlappingAsrWindows(params: {
     };
   }
 
+  const sanitizeConfidence = (c: number | null | undefined): number | null =>
+    typeof c === 'number' && Number.isFinite(c) ? Math.max(0, Math.min(1, c)) : null;
+
   const windowById = new Map(params.windows.map((w) => [w.windowId, w]));
   // Sort by authoritative windowIndex regardless of async completion order!
   const sortedBatches = [...params.predictionsByWindow].sort((a, b) => {
@@ -237,6 +287,7 @@ export function reconcileOverlappingAsrWindows(params: {
 
   const mappedCandidates: Array<{
     readonly raw: WindowPredictedToken;
+    readonly sanitizedConfidence: number | null;
     readonly window: AsrWindowMappingContract;
     readonly sourceStartSample: SourceSamplePosition;
     readonly sourceEndSample: SourceSamplePosition;
@@ -256,6 +307,7 @@ export function reconcileOverlappingAsrWindows(params: {
       }
       mappedCandidates.push({
         raw: tok,
+        sanitizedConfidence: sanitizeConfidence(tok.confidence),
         window: win,
         sourceStartSample: mapped.sourceStartSample,
         sourceEndSample: mapped.sourceEndSample,
@@ -290,7 +342,7 @@ export function reconcileOverlappingAsrWindows(params: {
         sampleRate: cand.window.sourceSampleRate,
         ownerWindowId: cand.window.windowId,
         ownerWindowIndex: cand.window.windowIndex,
-        confidence: cand.raw.confidence,
+        confidence: cand.sanitizedConfidence,
         reconciliationState: 'RECONCILED',
         alternativeCandidateTokenIds: [],
         provenanceNote: `Owned by ${cand.window.windowId}`,
@@ -312,7 +364,7 @@ export function reconcileOverlappingAsrWindows(params: {
       const candInValidZone =
         cand.midpointSample >= cand.window.validOutputStartSample &&
         cand.midpointSample <= cand.window.validOutputEndSample;
-      if (candInValidZone && (cand.raw.confidence ?? 0) >= (prev.confidence ?? 0)) {
+      if (candInValidZone && (cand.sanitizedConfidence ?? 0) >= (prev.confidence ?? 0)) {
         accepted[accepted.length - 1] = {
           tokenId: cand.raw.tokenId,
           text: cand.raw.text,
@@ -321,7 +373,7 @@ export function reconcileOverlappingAsrWindows(params: {
           sampleRate: cand.window.sourceSampleRate,
           ownerWindowId: cand.window.windowId,
           ownerWindowIndex: cand.window.windowIndex,
-          confidence: cand.raw.confidence,
+          confidence: cand.sanitizedConfidence,
           reconciliationState: 'RECONCILED',
           alternativeCandidateTokenIds: [...prev.alternativeCandidateTokenIds, prev.tokenId],
           provenanceNote: `Reconciled overlap duplicate from ${prev.ownerWindowId} -> ${cand.window.windowId}`,
@@ -341,7 +393,7 @@ export function reconcileOverlappingAsrWindows(params: {
         sampleRate: cand.window.sourceSampleRate,
         ownerWindowId: cand.window.windowId,
         ownerWindowIndex: cand.window.windowIndex,
-        confidence: cand.raw.confidence,
+        confidence: cand.sanitizedConfidence,
         reconciliationState: 'AMBIGUOUS',
         alternativeCandidateTokenIds: [prev.tokenId],
         provenanceNote: `Overlap disagreement with ${prev.ownerWindowId}; preserved without silent deletion.`,
@@ -362,7 +414,7 @@ export function reconcileOverlappingAsrWindows(params: {
       sampleRate: cand.window.sourceSampleRate,
       ownerWindowId: cand.window.windowId,
       ownerWindowIndex: cand.window.windowIndex,
-      confidence: cand.raw.confidence,
+      confidence: cand.sanitizedConfidence,
       reconciliationState: 'RECONCILED',
       alternativeCandidateTokenIds: [],
       provenanceNote: `Owned by ${cand.window.windowId}`,

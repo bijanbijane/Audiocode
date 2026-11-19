@@ -57,8 +57,10 @@ export class MultiresolutionWaveformCache {
     readonly bucketsPerTile?: number;
     readonly memoryBudget?: MemoryBudgetManager;
   }) {
-    this.maxBytes = Math.max(64 * 1024, options?.maxBytes ?? 8 * 1024 * 1024);
-    this.bucketsPerTile = Math.max(64, options?.bucketsPerTile ?? 512);
+    const rawMaxBytes = options?.maxBytes ?? 8 * 1024 * 1024;
+    this.maxBytes = Number.isFinite(rawMaxBytes) ? Math.max(64 * 1024, rawMaxBytes) : 8 * 1024 * 1024;
+    const rawBuckets = options?.bucketsPerTile ?? 512;
+    this.bucketsPerTile = Number.isFinite(rawBuckets) ? Math.max(64, Math.floor(rawBuckets)) : 512;
     this.memoryBudget = options?.memoryBudget ?? getSharedMemoryBudgetManager();
     this.unregisterEviction = this.memoryBudget.registerCacheEvictionCallback((ctx) => {
       this.evictToFreeBytes(Math.max(ctx.targetFreeBytes, Math.floor(this.totalBytes * 0.5)));
@@ -66,6 +68,7 @@ export class MultiresolutionWaveformCache {
   }
 
   public static selectBestLod(samplesPerPixel: number): WaveformLodLevel {
+    if (!Number.isFinite(samplesPerPixel)) return 1024;
     if (samplesPerPixel <= 128) return 64;
     if (samplesPerPixel <= 512) return 256;
     if (samplesPerPixel <= 2048) return 1024;
@@ -86,6 +89,7 @@ export class MultiresolutionWaveformCache {
     const { assetId, channelIndex, sourceChannelPcm, samplesPerBucket } = params;
     const totalSamples = sourceChannelPcm.length;
     if (totalSamples === 0) return [];
+    if (!Number.isFinite(params.startSample) || !Number.isFinite(params.endSample)) return [];
 
     const clampedStart = Math.max(0, Math.min(totalSamples, Math.floor(params.startSample)));
     const clampedEnd = Math.max(clampedStart, Math.min(totalSamples, Math.ceil(params.endSample)));
@@ -119,7 +123,8 @@ export class MultiresolutionWaveformCache {
         let minVal = 1.0;
         let maxVal = -1.0;
         for (let s = bStart; s < bEnd; s += 1) {
-          const v = sourceChannelPcm[s];
+          const rawV = sourceChannelPcm[s];
+          const v = Number.isFinite(rawV) ? rawV : 0;
           if (v < minVal) minVal = v;
           if (v > maxVal) maxVal = v;
         }
@@ -154,6 +159,7 @@ export class MultiresolutionWaveformCache {
 
   /** Invalidates ONLY tiles overlapping the modified source sample region */
   public invalidateSampleRange(assetId: string, startSample: number, endSample: number): number {
+    if (!Number.isFinite(startSample) || !Number.isFinite(endSample)) return 0;
     let removed = 0;
     for (const [key, tile] of Array.from(this.tiles.entries())) {
       if (

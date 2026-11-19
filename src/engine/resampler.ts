@@ -33,7 +33,29 @@ export function resampleTo16kMono(
   inputSampleRate: number,
   targetSampleRate = 16_000,
 ): ResampleResult {
-  if (channels.length === 0 || channels[0].length === 0) {
+  if (
+    channels.length === 0 ||
+    !Number.isFinite(inputSampleRate) ||
+    inputSampleRate <= 0 ||
+    !Number.isFinite(targetSampleRate) ||
+    targetSampleRate <= 0
+  ) {
+    return {
+      samples: new Float32Array(0),
+      outputSampleRate: Number.isFinite(targetSampleRate) && targetSampleRate > 0 ? targetSampleRate : 16_000,
+      cutoffHz: (Number.isFinite(targetSampleRate) && targetSampleRate > 0 ? targetSampleRate : 16_000) * 0.45,
+      filterTaps: 0,
+      aliasingAttenuationDb: 0,
+    };
+  }
+
+  let inputLength = channels[0].length;
+  for (let c = 1; c < channels.length; c++) {
+    if (channels[c].length < inputLength) {
+      inputLength = channels[c].length;
+    }
+  }
+  if (inputLength === 0) {
     return {
       samples: new Float32Array(0),
       outputSampleRate: targetSampleRate,
@@ -43,14 +65,16 @@ export function resampleTo16kMono(
     };
   }
 
-  const inputLength = channels[0].length;
-  // Mix down to mono first without overflow
+  // Mix down to mono first without overflow or NaN propagation
   const mono = new Float32Array(inputLength);
   const invCh = 1 / channels.length;
   for (let i = 0; i < inputLength; i++) {
     let sum = 0;
     for (let c = 0; c < channels.length; c++) {
-      sum += channels[c][i];
+      const sample = channels[c][i];
+      if (Number.isFinite(sample)) {
+        sum += sample;
+      }
     }
     mono[i] = sum * invCh;
   }
@@ -302,14 +326,19 @@ export async function resampleChunkedTo16kStream(params: {
     params.inputSampleRate,
     params.targetSampleRate ?? 16_000,
   );
+  const totalInput = Math.max(0, Math.floor(params.totalInputSamples));
+  const safeChunkSize =
+    Number.isFinite(params.chunkSizeSamples) && params.chunkSizeSamples >= 1
+      ? Math.floor(params.chunkSizeSamples)
+      : 4096;
   let cursor = 0;
   let outputOffset = 0;
 
-  while (cursor < params.totalInputSamples) {
+  while (cursor < totalInput) {
     if (params.abortSignal?.aborted) {
       throw new Error('RESAMPLE_ABORTED');
     }
-    const count = Math.min(params.chunkSizeSamples, params.totalInputSamples - cursor);
+    const count = Math.min(safeChunkSize, totalInput - cursor);
     const inChunk = await params.readInputChunkFn(cursor, count);
     const outChunk = resampler.pushChunk(inChunk);
     if (outChunk.length > 0) {
@@ -317,7 +346,7 @@ export async function resampleChunkedTo16kStream(params: {
       outputOffset += outChunk.length;
     }
     cursor += count;
-    params.onProgress?.(Math.min(99, Math.round((cursor / params.totalInputSamples) * 100)));
+    params.onProgress?.(Math.min(99, Math.round((cursor / totalInput) * 100)));
   }
 
   const tail = resampler.flush();

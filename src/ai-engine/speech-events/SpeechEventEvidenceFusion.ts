@@ -191,7 +191,9 @@ export function fuseSpeechEventEvidence(input: EvidenceFusionInput): EvidenceFus
     scores: {
       acousticScore: aScore !== null ? Number(aScore.toFixed(3)) : null,
       linguisticScore: lScore !== null ? Number(lScore.toFixed(3)) : null,
-      ruleEvidenceCount: Math.max(0, Math.trunc(input.ruleEvidenceCount)),
+      ruleEvidenceCount: Number.isFinite(input.ruleEvidenceCount)
+        ? Math.max(0, Math.trunc(input.ruleEvidenceCount))
+        : 0,
       modelTokenConfidence: mTokConf !== null ? Number(mTokConf.toFixed(3)) : null,
       combinedDecisionScore: finalDecisionScore,
       calibratedProbability,
@@ -245,8 +247,8 @@ export function applyPrecisionEligibilityAndThresholds(
 
   const score = event.confidence;
 
-  // Low confidence -> informational only
-  if (score <= config.lowConfidenceInformationalCeiling) {
+  // Low confidence or non-finite score -> informational only
+  if (!Number.isFinite(score) || score <= config.lowConfidenceInformationalCeiling) {
     return {
       ...event,
       detectionState: event.detectionState === 'DETECTED' ? 'POSSIBLE' : event.detectionState,
@@ -289,6 +291,14 @@ function computeTemporalIou(
   bStart: number,
   bEnd: number,
 ): number {
+  if (
+    !Number.isFinite(aStart) ||
+    !Number.isFinite(aEnd) ||
+    !Number.isFinite(bStart) ||
+    !Number.isFinite(bEnd)
+  ) {
+    return 0;
+  }
   const interStart = Math.max(aStart, bStart);
   const interEnd = Math.min(aEnd, bEnd);
   const inter = Math.max(0, interEnd - interStart);
@@ -333,9 +343,16 @@ export function evaluateDetectedSpeechEvents(params: {
   readonly allowCategoryAliasMatch?: boolean;
   readonly evidenceClassification?: 'SYNTHETIC_DIAGNOSTIC' | 'REAL_ANNOTATED_AUDIO';
 }): SpeechEventEvaluationReport {
-  const minTemporalIou = params.minTemporalIou ?? 0.3;
+  const minTemporalIou =
+    params.minTemporalIou !== undefined && Number.isFinite(params.minTemporalIou)
+      ? Math.max(0.01, Math.min(1, params.minTemporalIou))
+      : 0.3;
   const allowCategoryAliasMatch = params.allowCategoryAliasMatch ?? false;
-  const totalAudioMinutes = Math.max(1e-6, params.totalAudioDurationSec / 60);
+  const safeDurationSec =
+    Number.isFinite(params.totalAudioDurationSec) && params.totalAudioDurationSec > 0
+      ? params.totalAudioDurationSec
+      : 60;
+  const totalAudioMinutes = Math.max(1e-6, safeDurationSec / 60);
 
   // Filter out non-detections / unsupported placeholders from predicted detections
   const activePredictions = params.predicted.filter(

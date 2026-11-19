@@ -48,9 +48,30 @@ export class SmartSplicePreviewEngine {
       sampleRate,
     } = params;
 
-    const contextPaddingMs = Math.max(50, params.contextPaddingMs ?? 1500);
+    if (!Number.isFinite(sampleRate) || sampleRate <= 0) {
+      return {
+        pcm: new Float32Array(0),
+        mode,
+        sampleRate,
+        previewStartSample: 0,
+        spliceBoundaryOffsetSamples: 0,
+        actualPreRollFedSamples: 0,
+        durationMs: 0,
+        buildTimeMs: Number((performance.now() - startClock).toFixed(3)),
+      };
+    }
+
+    const rawContextPaddingMs =
+      params.contextPaddingMs !== undefined && Number.isFinite(params.contextPaddingMs)
+        ? params.contextPaddingMs
+        : 1500;
+    const contextPaddingMs = Math.max(50, rawContextPaddingMs);
     const contextSamples = Math.floor((sampleRate * contextPaddingMs) / 1000);
-    const requestedPreRoll = Math.max(0, Math.floor(params.dspPreRollSamples ?? 0));
+    const rawPreRoll =
+      params.dspPreRollSamples !== undefined && Number.isFinite(params.dspPreRollSamples)
+        ? params.dspPreRollSamples
+        : 0;
+    const requestedPreRoll = Math.max(0, Math.floor(rawPreRoll));
 
     const cutStartSample = Math.max(
       0,
@@ -88,14 +109,10 @@ export class SmartSplicePreviewEngine {
       );
       const rightSegment = fullTrackMonoPcm.slice(cutEndSample, previewEndSample);
 
-      const crossfadeMs = Math.max(
-        0,
-        TimeMath.flicksToSeconds(spliceDescriptor.fadeInDurationFlicks) * 1000,
-      );
-      const roomTonePadMs = Math.max(
-        0,
-        TimeMath.flicksToSeconds(spliceDescriptor.injectRoomToneFlicks) * 1000,
-      );
+      const rawFadeInMs = TimeMath.flicksToSeconds(spliceDescriptor.fadeInDurationFlicks) * 1000;
+      const crossfadeMs = Number.isFinite(rawFadeInMs) ? Math.max(0, rawFadeInMs) : 0;
+      const rawRoomToneMs = TimeMath.flicksToSeconds(spliceDescriptor.injectRoomToneFlicks) * 1000;
+      const roomTonePadMs = Number.isFinite(rawRoomToneMs) ? Math.max(0, rawRoomToneMs) : 0;
 
       rawPreviewWithPreRoll = PersianAcousticSnapper.applySeamlessSplice(
         leftSegmentWithPreRoll,

@@ -43,7 +43,8 @@ interface WaveformCanvasProps {
     range: FlickRange,
     targetTrackId: string,
     mode: RecommendationActionMode,
-  ) => void;
+    scope?: 'track' | 'all',
+  ) => boolean | void;
   detectedSyncOffsetMs?: number;
   detectedClockDriftPpm?: number;
   onAutoAlignSyncedTracks?: () => void;
@@ -86,6 +87,7 @@ export const WaveformCanvas: React.FC<WaveformCanvasProps> = ({
 
   const selectedRangeSec =
     controlledSelection !== undefined ? controlledSelection : internalSelection;
+  const effectiveSelectionScope = selectedRangeSec?.scope ?? selectionScope;
 
   const setSelectedRangeSec = (next: WaveformSelectionState | null) => {
     if (onSelectionChange) onSelectionChange(next);
@@ -93,10 +95,22 @@ export const WaveformCanvas: React.FC<WaveformCanvasProps> = ({
   };
 
   type DragMode =
-    | { kind: 'new'; sec: number; trackId: string }
-    | { kind: 'resize-start'; fixedEndSec: number; trackId: string }
-    | { kind: 'resize-end'; fixedStartSec: number; trackId: string };
+    | { kind: 'new'; sec: number; trackId: string; scope: 'track' | 'all' }
+    | { kind: 'resize-start'; fixedEndSec: number; trackId: string; scope: 'track' | 'all' }
+    | { kind: 'resize-end'; fixedStartSec: number; trackId: string; scope: 'track' | 'all' };
   const dragModeRef = useRef<DragMode | null>(null);
+
+  useEffect(() => {
+    const clearStuckDrag = () => {
+      dragModeRef.current = null;
+    };
+    window.addEventListener('mouseup', clearStuckDrag);
+    window.addEventListener('blur', clearStuckDrag);
+    return () => {
+      window.removeEventListener('mouseup', clearStuckDrag);
+      window.removeEventListener('blur', clearStuckDrag);
+    };
+  }, []);
 
   const totalClipsCount = tracks.reduce((acc, t) => acc + t.clips.length, 0);
 
@@ -281,16 +295,28 @@ export const WaveformCanvas: React.FC<WaveformCanvasProps> = ({
             }
           }
         } else {
+          const secPerPx = visibleSec / Math.max(1, width);
           for (let px = pxStart; px < pxEnd; px++) {
-            const pxSec = viewStartSec + (px / width) * visibleSec;
-            const srcSec = sourceStartSec + (pxSec - clipStartSec);
-            const samplePos = srcSec * sr;
-            const binIdx = Math.floor(samplePos / level.samplesPerBin);
-            if (binIdx < 0 || binIdx >= level.max.length) continue;
+            const pxSec0 = viewStartSec + (px / width) * visibleSec;
+            const pxSec1 = pxSec0 + secPerPx;
+            const srcSec0 = sourceStartSec + (pxSec0 - clipStartSec);
+            const srcSec1 = sourceStartSec + (pxSec1 - clipStartSec);
+            const binStart = Math.max(0, Math.floor((srcSec0 * sr) / level.samplesPerBin));
+            const binEnd = Math.min(
+              level.max.length - 1,
+              Math.max(binStart, Math.floor((srcSec1 * sr) / level.samplesPerBin)),
+            );
+            if (binStart >= level.max.length || binEnd < 0) continue;
 
-            const maxV = level.max[binIdx];
-            const minV = level.min[binIdx];
-            const rmsV = level.rms[binIdx];
+            let maxV = -Infinity;
+            let minV = Infinity;
+            let rmsV = 0;
+            for (let b = binStart; b <= binEnd; b++) {
+              if (level.max[b] > maxV) maxV = level.max[b];
+              if (level.min[b] < minV) minV = level.min[b];
+              if (level.rms[b] > rmsV) rmsV = level.rms[b];
+            }
+            if (!Number.isFinite(maxV) || !Number.isFinite(minV)) continue;
 
             const yTop = midY - maxV * amp;
             const yBot = midY - minV * amp;
@@ -400,6 +426,7 @@ export const WaveformCanvas: React.FC<WaveformCanvasProps> = ({
     const canvas = canvasRef.current;
     if (!canvas) return 0;
     const rect = canvas.getBoundingClientRect();
+    const safeWidth = Math.max(1, rect.width);
     const x = clientX - rect.left;
     const safeTotalSec = Math.max(0.5, totalDurationSec);
     const visibleSec = safeTotalSec / Math.max(1, zoom);
@@ -407,7 +434,7 @@ export const WaveformCanvas: React.FC<WaveformCanvasProps> = ({
       0,
       Math.min(safeTotalSec - visibleSec, playheadSec - visibleSec * 0.35),
     );
-    return Math.max(0, Math.min(safeTotalSec, viewStartSec + (x / rect.width) * visibleSec));
+    return Math.max(0, Math.min(safeTotalSec, viewStartSec + (x / safeWidth) * visibleSec));
   };
 
   const clientYToTrackId = (clientY: number): string => {
@@ -432,6 +459,7 @@ export const WaveformCanvas: React.FC<WaveformCanvasProps> = ({
           kind: 'resize-start',
           fixedEndSec: selectedRangeSec.endSec,
           trackId: selectedRangeSec.trackId,
+          scope: selectedRangeSec.scope,
         };
         return;
       }
@@ -440,17 +468,22 @@ export const WaveformCanvas: React.FC<WaveformCanvasProps> = ({
           kind: 'resize-end',
           fixedStartSec: selectedRangeSec.startSec,
           trackId: selectedRangeSec.trackId,
+          scope: selectedRangeSec.scope,
         };
         return;
       }
     }
 
-    dragModeRef.current = { kind: 'new', sec, trackId };
+    dragModeRef.current = { kind: 'new', sec, trackId, scope: effectiveSelectionScope };
   };
 
   const handleMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
     const mode = dragModeRef.current;
     if (!mode) return;
+    if ((e.buttons & 1) === 0) {
+      dragModeRef.current = null;
+      return;
+    }
     const curSec = clientXToTimelineSec(e.clientX);
 
     if (mode.kind === 'resize-start') {
@@ -459,7 +492,7 @@ export const WaveformCanvas: React.FC<WaveformCanvasProps> = ({
         startSec,
         endSec: mode.fixedEndSec,
         trackId: mode.trackId,
-        scope: selectionScope,
+        scope: mode.scope,
       });
       return;
     }
@@ -470,7 +503,7 @@ export const WaveformCanvas: React.FC<WaveformCanvasProps> = ({
         startSec: mode.fixedStartSec,
         endSec,
         trackId: mode.trackId,
-        scope: selectionScope,
+        scope: mode.scope,
       });
       return;
     }
@@ -481,7 +514,7 @@ export const WaveformCanvas: React.FC<WaveformCanvasProps> = ({
         startSec: Math.min(mode.sec, curSec),
         endSec: Math.max(mode.sec, curSec),
         trackId: mode.trackId,
-        scope: selectionScope,
+        scope: mode.scope,
       });
     }
   };
@@ -502,7 +535,7 @@ export const WaveformCanvas: React.FC<WaveformCanvasProps> = ({
         startSec: lo,
         endSec: hi,
         trackId: mode.trackId,
-        scope: selectionScope,
+        scope: mode.scope,
       });
       onSeekSec(lo);
       return;
@@ -560,15 +593,18 @@ export const WaveformCanvas: React.FC<WaveformCanvasProps> = ({
 
   const handleExecuteWaveformRangeCut = (mode: RecommendationActionMode) => {
     if (!selectedRangeSec || !onCutWaveformRange) return;
-    onCutWaveformRange(
+    const applied = onCutWaveformRange(
       {
         startFlicks: secondsToFlicks(selectedRangeSec.startSec),
         endFlicks: secondsToFlicks(selectedRangeSec.endSec),
       },
       selectedRangeSec.trackId,
       mode,
+      selectedRangeSec.scope,
     );
-    setSelectedRangeSec(null);
+    if (applied !== false) {
+      setSelectedRangeSec(null);
+    }
   };
 
   const handleZoomToSelection = () => {
@@ -627,7 +663,7 @@ export const WaveformCanvas: React.FC<WaveformCanvasProps> = ({
             type="button"
             data-testid="btn-toggle-selection-scope"
             onClick={() => {
-              const nextScope = selectionScope === 'all' ? 'track' : 'all';
+              const nextScope = effectiveSelectionScope === 'all' ? 'track' : 'all';
               setSelectionScope(nextScope);
               if (selectedRangeSec) {
                 setSelectedRangeSec({ ...selectedRangeSec, scope: nextScope });
@@ -635,7 +671,7 @@ export const WaveformCanvas: React.FC<WaveformCanvasProps> = ({
             }}
             className="px-2.5 py-1 rounded border border-[#2D323E] bg-[#14161B] hover:bg-[#232732] text-slate-200 font-medium whitespace-nowrap cursor-pointer"
           >
-            محدوده: {selectionScope === 'all' ? 'همه ترک‌ها' : 'فقط ترک فعال'}
+            محدوده: {effectiveSelectionScope === 'all' ? 'همه ترک‌ها' : 'فقط ترک فعال'}
           </button>
 
           {onSplitAtPlayhead && (

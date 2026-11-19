@@ -448,17 +448,20 @@ export class AudioRenderPlanner {
     const sourceToOutputMap: SourceToOutputMappingEntry[] = [];
     const derivedTimelineClips: TimelineClip[] = [];
 
+    const rawCrossfadeMs = config.defaultCrossfadeMs ?? 10;
     const defaultCrossfadeMs = Math.max(
       1,
-      Math.min(50, config.defaultCrossfadeMs ?? 10),
+      Math.min(50, Number.isFinite(rawCrossfadeMs) ? rawCrossfadeMs : 10),
     );
     const requestedCrossfadeSamples = Math.max(
       2,
       Math.round((defaultCrossfadeMs / 1000) * sourceSampleRate),
     );
+    const rawMaxAdjust =
+      config.maxBoundaryAdjustmentSamples ?? Math.round(sourceSampleRate * 0.005);
     const maxAdjustmentSamples = Math.max(
       0,
-      Math.trunc(config.maxBoundaryAdjustmentSamples ?? Math.round(sourceSampleRate * 0.005)),
+      Math.trunc(Number.isFinite(rawMaxAdjust) ? rawMaxAdjust : Math.round(sourceSampleRate * 0.005)),
     );
 
     let srcCursor = 0;

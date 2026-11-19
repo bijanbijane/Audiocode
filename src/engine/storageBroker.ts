@@ -909,8 +909,46 @@ export function encodeAndValidateWavExport(
   monoOrStereoChannels: Float32Array[],
   sampleRate: number,
 ): { blob: Blob; report: ExportValidationReport } {
-  const numChannels = Math.max(1, monoOrStereoChannels.length);
-  const totalSamples = monoOrStereoChannels[0]?.length ?? 0;
+  const validSampleRate = Number.isFinite(sampleRate) && sampleRate > 0;
+  const hasChannels = Array.isArray(monoOrStereoChannels) && monoOrStereoChannels.length > 0;
+  const firstLen = hasChannels && monoOrStereoChannels[0] instanceof Float32Array
+    ? monoOrStereoChannels[0].length
+    : 0;
+  const allChannelsValid =
+    hasChannels &&
+    firstLen > 0 &&
+    monoOrStereoChannels.every(
+      (ch) => ch instanceof Float32Array && ch.length === firstLen,
+    );
+  const structurallyValid = validSampleRate && allChannelsValid;
+
+  if (!structurallyValid) {
+    const safeChannels = hasChannels ? monoOrStereoChannels.length : 0;
+    const safeSampleRate = validSampleRate ? Math.round(sampleRate) : 0;
+    const emptyHeader = new ArrayBuffer(44);
+    return {
+      blob: new Blob([emptyHeader], { type: 'audio/wav' }),
+      report: {
+        readable: false,
+        structurallyValid: false,
+        invalidSampleCount: 0,
+        durationSeconds: 0,
+        channelCount: safeChannels,
+        sampleRate: safeSampleRate,
+        bitDepth: 16,
+        clippedSampleCount: 0,
+        truePeakDbfs: -120,
+        integratedLufs: -120,
+        headTailFadeValid: false,
+        passed: false,
+        fileSizeBytes: 0,
+      },
+    };
+  }
+
+  const numChannels = monoOrStereoChannels.length;
+  const totalSamples = firstLen;
+  const safeSampleRate = Math.round(sampleRate);
   const bytesPerSample = 2; // 16-bit PCM
   const dataSize = totalSamples * numChannels * bytesPerSample;
   const buffer = new ArrayBuffer(44 + dataSize);
@@ -929,8 +967,8 @@ export function encodeAndValidateWavExport(
   view.setUint32(16, 16, true); // PCM chunk size
   view.setUint16(20, 1, true); // PCM format
   view.setUint16(22, numChannels, true);
-  view.setUint32(24, sampleRate, true);
-  view.setUint32(28, sampleRate * numChannels * bytesPerSample, true);
+  view.setUint32(24, safeSampleRate, true);
+  view.setUint32(28, safeSampleRate * numChannels * bytesPerSample, true);
   view.setUint16(32, numChannels * bytesPerSample, true);
   view.setUint16(34, 16, true);
   writeStr(36, 'data');
@@ -938,12 +976,21 @@ export function encodeAndValidateWavExport(
 
   let peakLin = 0;
   let clippedSampleCount = 0;
+  let invalidSampleCount = 0;
+  let validSampleCount = 0;
   let sumSq = 0;
   let offset = 44;
 
   for (let i = 0; i < totalSamples; i++) {
     for (let c = 0; c < numChannels; c++) {
-      const raw = monoOrStereoChannels[c][i] ?? 0;
+      const raw = monoOrStereoChannels[c][i];
+      if (!Number.isFinite(raw)) {
+        invalidSampleCount++;
+        view.setInt16(offset, 0, true);
+        offset += 2;
+        continue;
+      }
+      validSampleCount++;
       const absRaw = Math.abs(raw);
       if (absRaw > peakLin) peakLin = absRaw;
       if (absRaw >= 0.999) clippedSampleCount++;
@@ -956,24 +1003,33 @@ export function encodeAndValidateWavExport(
     }
   }
 
-  const rms = totalSamples > 0 ? Math.sqrt(sumSq / (totalSamples * numChannels)) : 0;
+  const rms = validSampleCount > 0 ? Math.sqrt(sumSq / validSampleCount) : 0;
   const integratedLufs = Number((20 * Math.log10(Math.max(rms, 1e-6)) - 0.691).toFixed(1));
   const truePeakDbfs = Number((20 * Math.log10(Math.max(peakLin, 1e-6))).toFixed(2));
-  const headValid = totalSamples > 0 ? Math.abs(monoOrStereoChannels[0][0]) < 0.1 : true;
-  const tailValid =
-    totalSamples > 0 ? Math.abs(monoOrStereoChannels[0][totalSamples - 1]) < 0.1 : true;
+  const headValid = monoOrStereoChannels.every(
+    (ch) => Number.isFinite(ch[0]) && Math.abs(ch[0]) < 0.1,
+  );
+  const tailValid = monoOrStereoChannels.every(
+    (ch) =>
+      Number.isFinite(ch[totalSamples - 1]) && Math.abs(ch[totalSamples - 1]) < 0.1,
+  );
 
   const report: ExportValidationReport = {
-    readable: totalSamples > 0,
-    durationSeconds: Number((totalSamples / sampleRate).toFixed(3)),
+    readable: invalidSampleCount === 0,
+    structurallyValid: true,
+    invalidSampleCount,
+    durationSeconds: Number((totalSamples / safeSampleRate).toFixed(3)),
     channelCount: numChannels,
-    sampleRate,
+    sampleRate: safeSampleRate,
     bitDepth: 16,
     clippedSampleCount,
     truePeakDbfs,
     integratedLufs,
     headTailFadeValid: headValid && tailValid,
-    passed: totalSamples > 0 && clippedSampleCount === 0 && truePeakDbfs <= -0.1,
+    passed:
+      invalidSampleCount === 0 &&
+      clippedSampleCount === 0 &&
+      truePeakDbfs <= -0.1,
     fileSizeBytes: buffer.byteLength,
   };
 

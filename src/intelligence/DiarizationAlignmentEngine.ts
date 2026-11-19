@@ -111,11 +111,17 @@ export function runModularDiarizationCapability(params: {
       });
     }
   } else if (params.transcriptSegments && params.transcriptSegments.length > 0) {
-    const maxSpeakers = Math.max(1, Math.min(8, params.expectedSpeakerCount ?? 2));
+    const rawExpected = params.expectedSpeakerCount;
+    const maxSpeakers =
+      typeof rawExpected === 'number' && Number.isFinite(rawExpected) && rawExpected >= 1
+        ? Math.max(1, Math.min(8, Math.trunc(rawExpected)))
+        : 2;
     let prevEnd = 0;
     let activeSpeakerIdx = 0;
     params.transcriptSegments.forEach((seg, idx) => {
-      const gap = seg.startSec - prevEnd;
+      const safeStart = Number.isFinite(seg.startSec) ? Math.max(0, seg.startSec) : prevEnd;
+      const safeEnd = Number.isFinite(seg.endSec) ? Math.max(safeStart + 0.05, seg.endSec) : safeStart + 0.05;
+      const gap = safeStart - prevEnd;
       if (!seg.speakerHint && idx > 0 && (gap >= 0.45 || idx % 2 === 1)) {
         activeSpeakerIdx = (activeSpeakerIdx + 1) % maxSpeakers;
       }
@@ -123,11 +129,11 @@ export function runModularDiarizationCapability(params: {
         ? toAnonSpeaker(seg.speakerHint)
         : `speaker_${activeSpeakerIdx + 1}`;
       const isOverlapping = segments.some(
-        (prev) => seg.startSec < prev.endSec - 0.02 && seg.endSec > prev.startSec + 0.02
+        (prev) => safeStart < prev.endSec - 0.02 && safeEnd > prev.startSec + 0.02
       );
       if (isOverlapping) {
         for (const prev of segments) {
-          if (seg.startSec < prev.endSec - 0.02 && seg.endSec > prev.startSec + 0.02) {
+          if (safeStart < prev.endSec - 0.02 && safeEnd > prev.startSec + 0.02) {
             prev.overlap = true;
             if (!prev.competingSpeakerIds.includes(spkId) && prev.speakerId !== spkId) {
               prev.competingSpeakerIds.push(spkId);
@@ -137,17 +143,17 @@ export function runModularDiarizationCapability(params: {
       }
       segments.push({
         segmentId: `dseg_${idx + 1}`,
-        startSec: Number(Math.max(0, seg.startSec).toFixed(3)),
-        endSec: Number(Math.max(seg.startSec + 0.05, seg.endSec).toFixed(3)),
+        startSec: Number(safeStart.toFixed(3)),
+        endSec: Number(safeEnd.toFixed(3)),
         speakerId: spkId,
         confidence: 0.88,
         overlap: isOverlapping,
         competingSpeakerIds: [],
         uncertain: false,
       });
-      prevEnd = Math.max(prevEnd, seg.endSec);
+      prevEnd = Math.max(prevEnd, safeEnd);
     });
-  } else if (params.durationSec > 0) {
+  } else if (Number.isFinite(params.durationSec) && params.durationSec > 0) {
     // Unassigned acoustic fallback when neither multi-track PCM nor segment hints exist
     segments.push({
       segmentId: 'dseg_1',
@@ -227,6 +233,10 @@ export function evaluateDiarizationQualityPerLanguage(params: {
   includeOverlapScoring: boolean;
 }): DiarizationLanguageEvalReport[] {
   const stepSec = 0.05; // 50ms scoring frame grid
+  const safeCollarSec =
+    typeof params.collarSec === 'number' && Number.isFinite(params.collarSec) && params.collarSec >= 0
+      ? params.collarSec
+      : 0;
   const byLang = new Map<'fa' | 'en' | 'fa-en', DiarizationEvalSample[]>();
   for (const s of params.samples) {
     const arr = byLang.get(s.language) ?? [];
@@ -244,16 +254,22 @@ export function evaluateDiarizationQualityPerLanguage(params: {
     let jerCount = 0;
 
     for (const item of group) {
+      const validRefs = item.referenceSegments.filter(
+        (r) => Number.isFinite(r.startSec) && Number.isFinite(r.endSec) && r.endSec > r.startSec,
+      );
+      const validHyps = item.hypothesisSegments.filter(
+        (h) => Number.isFinite(h.startSec) && Number.isFinite(h.endSec) && h.endSec > h.startSec,
+      );
       const maxEnd = Math.max(
         0,
-        ...item.referenceSegments.map((r) => r.endSec),
-        ...item.hypothesisSegments.map((h) => h.endSec)
+        ...validRefs.map((r) => r.endSec),
+        ...validHyps.map((h) => h.endSec)
       );
 
       // Build greedy best global speaker alignment per recording (refSpeaker -> hypSpeaker)
       const overlapMatrix = new Map<string, number>();
-      for (const r of item.referenceSegments) {
-        for (const h of item.hypothesisSegments) {
+      for (const r of validRefs) {
+        for (const h of validHyps) {
           const ov = Math.max(0, Math.min(r.endSec, h.endSec) - Math.max(r.startSec, h.startSec));
           if (ov > 0) {
             const key = `${r.speakerId}::${h.speakerId}`;
@@ -278,17 +294,17 @@ export function evaluateDiarizationQualityPerLanguage(params: {
       for (let t = stepSec / 2; t < maxEnd; t += stepSec) {
         // Apply collar exclusion around reference boundaries
         const inCollar =
-          params.collarSec > 0 &&
-          item.referenceSegments.some(
-            (r) => Math.abs(t - r.startSec) < params.collarSec / 2 || Math.abs(t - r.endSec) < params.collarSec / 2
+          safeCollarSec > 0 &&
+          validRefs.some(
+            (r) => Math.abs(t - r.startSec) < safeCollarSec / 2 || Math.abs(t - r.endSec) < safeCollarSec / 2
           );
         if (inCollar) continue;
 
         const refSpks = Array.from(
-          new Set(item.referenceSegments.filter((r) => t >= r.startSec && t < r.endSec).map((r) => r.speakerId))
+          new Set(validRefs.filter((r) => t >= r.startSec && t < r.endSec).map((r) => r.speakerId))
         );
         const hypSpks = Array.from(
-          new Set(item.hypothesisSegments.filter((h) => t >= h.startSec && t < h.endSec).map((h) => h.speakerId))
+          new Set(validHyps.filter((h) => t >= h.startSec && t < h.endSec).map((h) => h.speakerId))
         );
 
         if (!params.includeOverlapScoring && refSpks.length > 1) continue;
@@ -334,7 +350,7 @@ export function evaluateDiarizationQualityPerLanguage(params: {
     reports.push({
       language,
       sampleCount: group.length,
-      collarSec: params.collarSec,
+      collarSec: safeCollarSec,
       includeOverlapScoring: params.includeOverlapScoring,
       derPercent: Number(derPct.toFixed(2)),
       jerPercent: Number((jerCount > 0 ? (jerSum / jerCount) * 100 : 0).toFixed(2)),
@@ -433,11 +449,16 @@ export function runModularForcedAlignmentCapability(params: {
     });
   } else {
     // Acoustic energy window detection over PCM when available, or strict unalignable check when audio is silent/zero
-    const hasUsableAudio = params.audioDurationSec > 0.05;
+    const safeAudioDur =
+      typeof params.audioDurationSec === 'number' && Number.isFinite(params.audioDurationSec) && params.audioDurationSec > 0
+        ? params.audioDurationSec
+        : 0;
+    const hasUsableAudio = safeAudioDur > 0.05;
     let energyFrames = 0;
     if (params.pcmMono && params.pcmMono.length > 0) {
       for (let i = 0; i < params.pcmMono.length; i++) {
-        if (Math.abs(params.pcmMono[i]) > 0.005) energyFrames++;
+        const v = params.pcmMono[i];
+        if (Number.isFinite(v) && Math.abs(v) > 0.005) energyFrames++;
       }
     }
     const audioSilent = params.pcmMono && params.pcmMono.length > 0 && energyFrames === 0;
@@ -445,7 +466,7 @@ export function runModularForcedAlignmentCapability(params: {
     // Distribute alignable lexical tokens across active acoustic duration; tokens exceeding acoustic capacity remain UNALIGNED
     const maxAlignablePerSec = 6.5;
     const alignableBudget = hasUsableAudio && !audioSilent
-      ? Math.max(1, Math.floor(params.audioDurationSec * maxAlignablePerSec))
+      ? Math.max(1, Math.floor(safeAudioDur * maxAlignablePerSec))
       : 0;
 
     const alignedSliceCount = Math.min(rawTokens.length, alignableBudget);
@@ -454,7 +475,7 @@ export function runModularForcedAlignmentCapability(params: {
       .reduce((acc, w) => acc + Math.max(2, w.replace(/[،.؟!]/g, '').length), 0);
 
     let cursorSec = 0.04;
-    const usableSpan = Math.max(0.1, params.audioDurationSec - 0.08);
+    const usableSpan = Math.max(0.1, safeAudioDur - 0.08);
 
     rawTokens.forEach((orig, idx) => {
       const norm = normalizedWords[idx] ?? PersianTextNormalizer.normalizeTokenText(orig);
@@ -481,7 +502,7 @@ export function runModularForcedAlignmentCapability(params: {
       const charWeight = Math.max(2, orig.replace(/[،.؟!]/g, '').length);
       const dur = Math.max(0.06, (charWeight / Math.max(1, totalWeights)) * usableSpan);
       const startSec = Number(cursorSec.toFixed(3));
-      const endSec = Number(Math.min(params.audioDurationSec, cursorSec + dur * 0.92).toFixed(3));
+      const endSec = Number(Math.min(safeAudioDur, cursorSec + dur * 0.92).toFixed(3));
       cursorSec += dur;
       words.push({
         wordId: `aln_${idx + 1}`,
@@ -531,8 +552,16 @@ export function evaluateAlignmentBoundaryMetrics(params: {
   let alignedMatched = 0;
 
   for (const ref of params.referenceWords) {
+    if (!Number.isFinite(ref.startSec) || !Number.isFinite(ref.endSec)) continue;
     const hyp = hypById.get(ref.wordId);
-    if (!hyp || hyp.alignmentStatus !== 'ALIGNED' || hyp.startSec === null || hyp.endSec === null) {
+    if (
+      !hyp ||
+      hyp.alignmentStatus !== 'ALIGNED' ||
+      hyp.startSec === null ||
+      hyp.endSec === null ||
+      !Number.isFinite(hyp.startSec) ||
+      !Number.isFinite(hyp.endSec)
+    ) {
       continue;
     }
     alignedMatched++;

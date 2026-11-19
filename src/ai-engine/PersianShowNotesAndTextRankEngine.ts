@@ -63,9 +63,13 @@ export class PersianShowNotesAndTextRankEngine {
     tokens: readonly TimedPersianToken[],
     topK = 5,
   ): KeyTakeawaySentence[] {
-    const sentences = this.splitIntoSentences(tokens);
+    const validTokens = tokens.filter(
+      (t) => Number.isFinite(t.range.start) && Number.isFinite(t.range.end),
+    );
+    const sentences = this.splitIntoSentences(validTokens);
     const n = sentences.length;
-    if (n === 0 || topK <= 0) return [];
+    if (n === 0 || !Number.isFinite(topK) || topK <= 0) return [];
+    const safeTopK = Math.floor(topK);
 
     const weights: Float64Array[] = Array.from({ length: n }, () => new Float64Array(n));
     const rowSums = new Float64Array(n);
@@ -111,7 +115,7 @@ export class PersianShowNotesAndTextRankEngine {
         score: scores[idx],
       }))
       .sort((a, b) => b.score - a.score)
-      .slice(0, topK)
+      .slice(0, safeTopK)
       .sort((a, b) => a.range.start - b.range.start)
       .map((item, rankIdx) => ({
         rank: rankIdx + 1,
@@ -130,6 +134,9 @@ export class PersianShowNotesAndTextRankEngine {
   public static extractNamedEntitiesWithTimestamps(
     tokens: readonly TimedPersianToken[],
   ): DetectedPersianNamedEntity[] {
+    const validTokens = tokens.filter(
+      (t) => Number.isFinite(t.range.start) && Number.isFinite(t.range.end),
+    );
     const entityMap = new Map<
       string,
       {
@@ -140,8 +147,8 @@ export class PersianShowNotesAndTextRankEngine {
       }
     >();
 
-    for (let i = 0; i < tokens.length - 1; i++) {
-      const prefix = tokens[i].normalizedText.replace(/[،؛.!؟]/g, '');
+    for (let i = 0; i < validTokens.length - 1; i++) {
+      const prefix = validTokens[i].normalizedText.replace(/[،؛.!؟]/g, '');
       let entityType: DetectedPersianNamedEntity['entityType'] | null = null;
 
       if (this.PERSON_PREFIXES.has(prefix)) {
@@ -158,18 +165,18 @@ export class PersianShowNotesAndTextRankEngine {
 
       const cleanDisplay = (s: string) => s.replace(/[،؛.!؟«»"]/g, '');
       const nameParts: string[] = [
-        cleanDisplay(tokens[i].displayText),
-        cleanDisplay(tokens[i + 1].displayText),
+        cleanDisplay(validTokens[i].displayText),
+        cleanDisplay(validTokens[i + 1].displayText),
       ];
-      let endRange = tokens[i + 1].range.end;
+      let endRange = validTokens[i + 1].range.end;
 
       if (
-        i + 2 < tokens.length &&
-        tokens[i + 2].normalizedText.length > 2 &&
-        TimeMath.flicksToSeconds(tokens[i + 2].range.start - tokens[i + 1].range.end) < 0.25
+        i + 2 < validTokens.length &&
+        validTokens[i + 2].normalizedText.length > 2 &&
+        TimeMath.flicksToSeconds(validTokens[i + 2].range.start - validTokens[i + 1].range.end) < 0.25
       ) {
-        nameParts.push(cleanDisplay(tokens[i + 2].displayText));
-        endRange = tokens[i + 2].range.end;
+        nameParts.push(cleanDisplay(validTokens[i + 2].displayText));
+        endRange = validTokens[i + 2].range.end;
       }
 
       const fullEntityName = nameParts.filter(Boolean).join(' ');
@@ -180,7 +187,7 @@ export class PersianShowNotesAndTextRankEngine {
         entityMap.set(fullEntityName, {
           type: entityType,
           name: fullEntityName,
-          firstRange: { start: tokens[i].range.start, end: endRange },
+          firstRange: { start: validTokens[i].range.start, end: endRange },
           count: 1,
         });
       }
@@ -248,7 +255,7 @@ export class PersianShowNotesAndTextRankEngine {
   }
 
   private static formatTimestamp(sec: number): string {
-    const safeSec = Math.max(0, sec);
+    const safeSec = Number.isFinite(sec) ? Math.max(0, sec) : 0;
     const hrs = Math.floor(safeSec / 3600);
     const mins = Math.floor((safeSec % 3600) / 60);
     const secs = Math.floor(safeSec % 60);

@@ -43,8 +43,18 @@ export class StreamingSecurityGuard {
     maxConcurrentPerKey?: number;
   }) {
     this.hmacSecret = options?.hmacSecret ?? 'avapardaz-phase14-ephemeral-stream-key';
-    this.maxConcurrentPerTenant = options?.maxConcurrentPerTenant ?? 8;
-    this.maxConcurrentPerKey = options?.maxConcurrentPerKey ?? 4;
+    this.maxConcurrentPerTenant =
+      typeof options?.maxConcurrentPerTenant === 'number' &&
+      Number.isFinite(options.maxConcurrentPerTenant) &&
+      options.maxConcurrentPerTenant >= 1
+        ? Math.floor(options.maxConcurrentPerTenant)
+        : 8;
+    this.maxConcurrentPerKey =
+      typeof options?.maxConcurrentPerKey === 'number' &&
+      Number.isFinite(options.maxConcurrentPerKey) &&
+      options.maxConcurrentPerKey >= 1
+        ? Math.floor(options.maxConcurrentPerKey)
+        : 4;
   }
 
   public issueSingleUseSessionToken(params: {
@@ -57,7 +67,24 @@ export class StreamingSecurityGuard {
     maxMessagesPerSecond?: number;
   }): StreamingSessionSecurityToken {
     const now = Date.now();
-    const ttlMs = Math.max(5, Math.min(300, params.ttlSeconds ?? 60)) * 1000;
+    const rawTtl = params.ttlSeconds;
+    const safeTtlSec =
+      typeof rawTtl === 'number' && Number.isFinite(rawTtl)
+        ? Math.max(5, Math.min(300, rawTtl))
+        : 60;
+    const ttlMs = safeTtlSec * 1000;
+    const safeMaxAudio =
+      typeof params.maxAudioSeconds === 'number' &&
+      Number.isFinite(params.maxAudioSeconds) &&
+      params.maxAudioSeconds > 0
+        ? params.maxAudioSeconds
+        : 600;
+    const safeMaxMsgPerSec =
+      typeof params.maxMessagesPerSecond === 'number' &&
+      Number.isFinite(params.maxMessagesPerSecond) &&
+      params.maxMessagesPerSecond >= 1
+        ? Math.floor(params.maxMessagesPerSecond)
+        : 35;
     const tokenBase = {
       tokenId: `stok_${crypto.randomUUID().slice(0, 12)}`,
       tenantId: params.tenantId,
@@ -66,8 +93,8 @@ export class StreamingSecurityGuard {
       modelScope: params.modelScope ?? 'avapardaz_streaming_v1',
       issuedAtMs: now,
       expiresAtMs: now + ttlMs,
-      maxAudioSeconds: params.maxAudioSeconds ?? 600,
-      maxMessagesPerSecond: params.maxMessagesPerSecond ?? 35,
+      maxAudioSeconds: safeMaxAudio,
+      maxMessagesPerSecond: safeMaxMsgPerSec,
       singleUseNonce: crypto.randomBytes(12).toString('hex'),
     };
     const hmacSignature = this.signToken(tokenBase);
@@ -106,7 +133,7 @@ export class StreamingSecurityGuard {
       };
     }
 
-    if (now > params.token.expiresAtMs) {
+    if (!Number.isFinite(params.token.expiresAtMs) || now > params.token.expiresAtMs) {
       return {
         admitted: false,
         sessionId: null,
@@ -156,15 +183,27 @@ export class StreamingSecurityGuard {
       projectId: params.token.projectId,
       principalId: params.token.principalId,
       apiKeyId: params.apiKeyId,
-      maxAudioSeconds: params.token.maxAudioSeconds,
-      maxMessagesPerSecond: params.token.maxMessagesPerSecond,
+      maxAudioSeconds:
+        Number.isFinite(params.token.maxAudioSeconds) && params.token.maxAudioSeconds > 0
+          ? params.token.maxAudioSeconds
+          : 600,
+      maxMessagesPerSecond:
+        Number.isFinite(params.token.maxMessagesPerSecond) &&
+        params.token.maxMessagesPerSecond >= 1
+          ? Math.floor(params.token.maxMessagesPerSecond)
+          : 35,
       lastSequence: 0,
       seenSequences: new Set<number>(),
       cumulativeAudioSeconds: 0,
       queuedFrames: 0,
-      maxQueueDepth: params.maxQueueDepth ?? 20,
+      maxQueueDepth:
+        typeof params.maxQueueDepth === 'number' &&
+        Number.isFinite(params.maxQueueDepth) &&
+        params.maxQueueDepth >= 1
+          ? Math.floor(params.maxQueueDepth)
+          : 20,
       messagesInCurrentWindow: 0,
-      windowStartMs: now,
+      windowStartMs: Number.isFinite(now) ? now : Date.now(),
     });
 
     return {
@@ -288,8 +327,8 @@ export class StreamingSecurityGuard {
 
   public drainQueuedFrames(sessionId: string, count = 1): void {
     const sess = this.activeSessions.get(sessionId);
-    if (!sess) return;
-    sess.queuedFrames = Math.max(0, sess.queuedFrames - count);
+    if (!sess || typeof count !== 'number' || !Number.isFinite(count) || count <= 0) return;
+    sess.queuedFrames = Math.max(0, sess.queuedFrames - Math.floor(count));
   }
 
   public closeSession(sessionId: string): void {

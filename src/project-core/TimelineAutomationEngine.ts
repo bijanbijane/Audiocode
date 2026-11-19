@@ -25,11 +25,15 @@ export class TimelineAutomationEngine {
    * 1. O(log N) binary-search sample-accurate evaluation at any Flicks timestamp.
    */
   public static evaluateAtFlicks(lane: AutomationLane, queryFlicks: Flicks): number {
+    const safeDefault = Number.isFinite(lane.defaultValue) ? lane.defaultValue : 0;
     const frames = lane.keyframes;
-    if (frames.length === 0) return lane.defaultValue;
-    if (queryFlicks <= frames[0].timeFlicks) return frames[0].value;
+    if (frames.length === 0 || !Number.isFinite(queryFlicks)) return safeDefault;
+    if (queryFlicks <= frames[0].timeFlicks) {
+      return Number.isFinite(frames[0].value) ? frames[0].value : safeDefault;
+    }
     if (queryFlicks >= frames[frames.length - 1].timeFlicks) {
-      return frames[frames.length - 1].value;
+      const lastVal = frames[frames.length - 1].value;
+      return Number.isFinite(lastVal) ? lastVal : safeDefault;
     }
 
     let low = 0;
@@ -50,20 +54,24 @@ export class TimelineAutomationEngine {
 
     const k0 = frames[idx];
     const k1 = frames[idx + 1];
+    const v0 = Number.isFinite(k0.value) ? k0.value : safeDefault;
+    const v1 = Number.isFinite(k1.value) ? k1.value : safeDefault;
     const span = k1.timeFlicks - k0.timeFlicks;
-    if (span <= 0) return k0.value;
+    if (span <= 0) return v0;
 
     const t = (queryFlicks - k0.timeFlicks) / span;
 
     switch (k0.curveToNext) {
       case 'STEP':
-        return k0.value;
+        return v0;
       case 'LINEAR':
-        return k0.value + (k1.value - k0.value) * t;
+        return v0 + (v1 - v0) * t;
       case 'S_CURVE_COSINE': {
         const smoothT = (1 - Math.cos(t * Math.PI)) * 0.5;
-        return k0.value + (k1.value - k0.value) * smoothT;
+        return v0 + (v1 - v0) * smoothT;
       }
+      default:
+        return v0 + (v1 - v0) * t;
     }
   }
 
@@ -80,16 +88,45 @@ export class TimelineAutomationEngine {
     releaseHoldMs?: number;
     releaseFadeMs?: number;
   }): AutomationLane {
-    const normalDb = params.normalMusicGainDb ?? 0.0;
-    const duckedDb = params.duckedMusicGainDb ?? -14.0;
-    const attackFlicks = TimeMath.secondsToFlicks((params.lookaheadAttackMs ?? 180) / 1000);
-    const holdFlicks = TimeMath.secondsToFlicks((params.releaseHoldMs ?? 600) / 1000);
-    const releaseFlicks = TimeMath.secondsToFlicks((params.releaseFadeMs ?? 800) / 1000);
+    const normalDb =
+      params.normalMusicGainDb !== undefined && Number.isFinite(params.normalMusicGainDb)
+        ? params.normalMusicGainDb
+        : 0.0;
+    const duckedDb =
+      params.duckedMusicGainDb !== undefined && Number.isFinite(params.duckedMusicGainDb)
+        ? params.duckedMusicGainDb
+        : -14.0;
+    const safeAttackMs =
+      params.lookaheadAttackMs !== undefined && Number.isFinite(params.lookaheadAttackMs)
+        ? Math.max(0, params.lookaheadAttackMs)
+        : 180;
+    const safeHoldMs =
+      params.releaseHoldMs !== undefined && Number.isFinite(params.releaseHoldMs)
+        ? Math.max(0, params.releaseHoldMs)
+        : 600;
+    const safeReleaseMs =
+      params.releaseFadeMs !== undefined && Number.isFinite(params.releaseFadeMs)
+        ? Math.max(0, params.releaseFadeMs)
+        : 800;
+
+    const attackFlicks = TimeMath.secondsToFlicks(safeAttackMs / 1000);
+    const holdFlicks = TimeMath.secondsToFlicks(safeHoldMs / 1000);
+    const releaseFlicks = TimeMath.secondsToFlicks(safeReleaseMs / 1000);
 
     const minGapForMusicRise = holdFlicks + releaseFlicks + attackFlicks;
     const mergedSpeechRanges: TimeRange[] = [];
 
-    const sorted = [...params.speechActiveRanges].sort((a, b) => a.start - b.start);
+    const sorted = params.speechActiveRanges
+      .filter(
+        (r) =>
+          Number.isFinite(r.start) &&
+          Number.isFinite(r.end) &&
+          r.end > r.start,
+      )
+      .map((r) => ({ start: Math.max(0, r.start), end: Math.max(0, r.end) }))
+      .filter((r) => r.end > r.start)
+      .sort((a, b) => a.start - b.start);
+
     for (const r of sorted) {
       if (mergedSpeechRanges.length === 0) {
         mergedSpeechRanges.push({ ...r });
@@ -112,8 +149,14 @@ export class TimelineAutomationEngine {
       const fadeUpStart = speech.end + holdFlicks;
       const fadeUpEnd = fadeUpStart + releaseFlicks;
 
+      if (fadeDownStart < speech.start) {
+        keyframes.push({
+          timeFlicks: fadeDownStart,
+          value: normalDb,
+          curveToNext: 'S_CURVE_COSINE',
+        });
+      }
       keyframes.push(
-        { timeFlicks: fadeDownStart, value: normalDb, curveToNext: 'S_CURVE_COSINE' },
         { timeFlicks: speech.start, value: duckedDb, curveToNext: 'LINEAR' },
         { timeFlicks: fadeUpStart, value: duckedDb, curveToNext: 'S_CURVE_COSINE' },
         { timeFlicks: fadeUpEnd, value: normalDb, curveToNext: 'LINEAR' },
@@ -139,10 +182,19 @@ export class TimelineAutomationEngine {
     chunkStartFlicks: Flicks,
     sampleRate: SampleRate,
   ): void {
-    if (lane.parameterName !== 'GAIN_DB' || lane.keyframes.length === 0 || channels.length === 0) {
+    if (
+      lane.parameterName !== 'GAIN_DB' ||
+      lane.keyframes.length === 0 ||
+      channels.length === 0 ||
+      !Number.isFinite(sampleRate) ||
+      sampleRate <= 0 ||
+      !Number.isFinite(chunkStartFlicks)
+    ) {
       return;
     }
     const frameCount = channels[0].length;
+    if (frameCount === 0) return;
+
     const flicksPerSample = TimeMath.samplesToFlicks(1, sampleRate);
 
     const stepSamples = 64;
@@ -153,15 +205,18 @@ export class TimelineAutomationEngine {
 
       const gainDb0 = this.evaluateAtFlicks(lane, f0);
       const gainDb1 = this.evaluateAtFlicks(lane, f1);
-      const lin0 = Math.pow(10, gainDb0 / 20.0);
-      const lin1 = Math.pow(10, gainDb1 / 20.0);
+      const lin0 = Number.isFinite(gainDb0) ? Math.pow(10, gainDb0 / 20.0) : 1.0;
+      const lin1 = Number.isFinite(gainDb1) ? Math.pow(10, gainDb1 / 20.0) : 1.0;
       const span = Math.max(1, subEnd - i);
 
       for (let s = i; s < subEnd; s++) {
         const alpha = (s - i) / span;
         const g = lin0 + (lin1 - lin0) * alpha;
         for (let c = 0; c < channels.length; c++) {
-          channels[c][s] *= g;
+          if (s < channels[c].length) {
+            const sample = channels[c][s];
+            channels[c][s] = Number.isFinite(sample) ? sample * g : 0;
+          }
         }
       }
     }

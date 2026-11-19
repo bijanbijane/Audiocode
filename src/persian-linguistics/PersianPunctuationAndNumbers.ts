@@ -71,6 +71,9 @@ export function analyzePersianPunctuationProposals(
       tok.sourceEndSample !== null &&
       next?.sourceStartSample !== null &&
       next?.sourceStartSample !== undefined &&
+      Number.isFinite(tok.sourceEndSample) &&
+      Number.isFinite(next.sourceStartSample) &&
+      Number.isFinite(tok.sampleRate) &&
       tok.sampleRate > 0
     ) {
       const gapSamples = next.sourceStartSample - tok.sourceEndSample;
@@ -175,10 +178,18 @@ function toPersianDigits(num: number): string {
     .replace(/[0-9]/g, (d) => String.fromCharCode(0x06f0 + Number(d)));
 }
 
+function getSubThousandMagnitudeClass(v: number): number {
+  if (v >= 100 && v < 1000) return 3; // hundreds
+  if (v >= 20 && v < 100) return 2; // tens
+  if (v >= 10 && v < 20) return 1.5; // teens (cannot combine with tens or units)
+  if (v >= 0 && v < 10) return 1; // units
+  return 4; // multiplier >= 1000
+}
+
 /**
  * Spoken Persian Number & Currency Expression Analyzer (AVP-P13-001 Section 8).
  * Keeps original spoken wording strictly intact; detects ambiguous digit sequences (e.g. phone-like
- * sequences «سه دو پنج چهار») and refuses automatic conversion.
+ * sequences «سه دو پنج چهار» or repeated/range numbers «پنج پنج» / «دو سه») and refuses automatic conversion.
  */
 export function analyzePersianSpokenNumbers(
   doc: PersianTranscriptDocument,
@@ -226,15 +237,35 @@ export function analyzePersianSpokenNumbers(
     const allTokens = runIndices.map((idx) => doc.tokens[idx]);
     const originalSpokenText = allTokens.map((t) => t.userCorrectedText ?? t.verbatimText).join(' ');
 
-    // Ambiguity detection: >= 3 small single-digit words spoken consecutively without conjunction or multiplier
-    // (e.g. telephone / code sequence «دو پنج هشت یک») -> NEVER auto-sum or silently convert!
+    // Ambiguity detection:
+    // 1) >= 2 single-digit words spoken consecutively without conjunction or multiplier (e.g. «پنج پنج», «دو سه», «سه دو پنج چهار»)
+    // 2) Consecutive sub-1000 words of the same or non-descending magnitude class without an intervening multiplier
+    //    (e.g. «بیست سی», «پنج و شش») -> NEVER auto-sum into a single fabricated number!
     const hasConjunctionOrMultiplier =
       numberTokens.some((t) => t.normalizedText === 'و') ||
       numericWords.some((v) => v >= 100);
+    let hasInvalidSubThousandOrder = false;
+    let prevSubClass: number | null = null;
+    for (const v of numericWords) {
+      if (v >= 1000) {
+        prevSubClass = null;
+      } else {
+        const cls = getSubThousandMagnitudeClass(v);
+        if (
+          prevSubClass !== null &&
+          (cls >= prevSubClass || (prevSubClass === 1.5 && cls === 1))
+        ) {
+          hasInvalidSubThousandOrder = true;
+          break;
+        }
+        prevSubClass = cls;
+      }
+    }
     const isAmbiguousDigitSequence =
-      numericWords.length >= 3 &&
-      !hasConjunctionOrMultiplier &&
-      numericWords.every((v) => v >= 0 && v <= 9);
+      hasInvalidSubThousandOrder ||
+      (numericWords.length >= 2 &&
+        !hasConjunctionOrMultiplier &&
+        numericWords.every((v) => v >= 0 && v <= 9));
 
     if (isAmbiguousDigitSequence) {
       proposals.push({

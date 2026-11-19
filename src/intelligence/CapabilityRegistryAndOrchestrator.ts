@@ -542,7 +542,10 @@ export class SpeechIntelligenceOrchestrator {
 
     const consent = params.consent ?? DEFAULT_FULL_SANDBOX_CONSENT;
     const lang = params.language ?? 'fa-en';
-    const audioDurSec = Math.max(0.5, params.durationSec);
+    const audioDurSec =
+      typeof params.durationSec === 'number' && Number.isFinite(params.durationSec) && params.durationSec > 0
+        ? Math.max(0.5, params.durationSec)
+        : 0.5;
     const nowIso = new Date().toISOString();
 
     const orderedRequests = this.buildExecutionDagOrder(params.capabilities);

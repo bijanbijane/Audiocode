@@ -124,11 +124,10 @@ export function checkProposalProvenanceStaleness(
   }
   if (
     current.alignmentVersion !== undefined &&
-    proposal.alignmentVersion !== undefined &&
     proposal.alignmentVersion !== current.alignmentVersion
   ) {
     reasons.push(
-      `Alignment version mismatch: proposal=${proposal.alignmentVersion}, active=${current.alignmentVersion}.`,
+      `Alignment version mismatch: proposal=${String(proposal.alignmentVersion ?? 'none')}, active=${current.alignmentVersion}.`,
     );
   }
   if (

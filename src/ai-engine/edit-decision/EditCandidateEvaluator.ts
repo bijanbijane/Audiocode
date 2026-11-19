@@ -78,6 +78,9 @@ export function classifyEventConfidence(event: SpeechEvent): EditConfidenceClass
   }
 
   const score = event.scores.calibratedProbability ?? event.confidence;
+  if (!Number.isFinite(score)) {
+    return 'INSUFFICIENT';
+  }
   const calStatus = event.scores.scoreCalibrationStatus;
 
   if (calStatus === 'CALIBRATED_EMPIRICAL') {
@@ -148,6 +151,7 @@ export class EditCandidateEvaluator {
     // Check insufficient or conflicting evidence upfront
     const hasConflicts = event.scores.conflicts.length > 0;
     const isInsufficient =
+      !Number.isFinite(event.confidence) ||
       event.detectionState === 'UNCERTAIN' ||
       event.uncertaintyState === 'INSUFFICIENT_EVIDENCE' ||
       event.uncertaintyState === 'CONFLICTING_EVIDENCE';
@@ -477,6 +481,9 @@ export class EditCandidateEvaluator {
         event.confidence >= 0.8 &&
         !event.requiresHumanReview &&
         (event.subtype === 'LONG_UNNECESSARY_SILENCE' || event.subtype === 'EDGE_SILENCE');
+      const safeDurationSec = Number.isFinite(event.durationSec)
+        ? Math.max(0, event.durationSec)
+        : Math.max(0, (Number.isFinite(event.endSec) ? event.endSec : 0) - (Number.isFinite(event.startSec) ? event.startSec : 0));
 
       return {
         operation: 'SHORTEN_SILENCE',
@@ -485,7 +492,7 @@ export class EditCandidateEvaluator {
         requiresHumanReview: !safeShortening,
         protectedEvent: false,
         reason: `Excessive silence (${event.subtype}) eligible for partial shortening while preserving natural spacing.`,
-        explanationFa: `سکوت طولانی (${event.durationSec.toFixed(2)}s) قابل کوتاه‌سازی با حفظ حاشیه تنفس طبیعی است.`,
+        explanationFa: `سکوت طولانی (${safeDurationSec.toFixed(2)}s) قابل کوتاه‌سازی با حفظ حاشیه تنفس طبیعی است.`,
         policyNotes: ['Prefer shortening excessive silence over full removal'],
       };
     }

@@ -199,6 +199,26 @@ export function planProcessingGraphPdc(
   };
 }
 
+export interface DspBypassFlags {
+  eq?: boolean;
+  gate?: boolean;
+  compressor?: boolean;
+  limiter?: boolean;
+}
+
+export function deriveDspBypassFlags(nodes: readonly ProcessingNodeDescriptor[]): DspBypassFlags {
+  const byKind = (kind: ProcessingNodeDescriptor['kind']) => {
+    const matching = nodes.filter((n) => n.kind === kind);
+    return matching.length > 0 && matching.every((n) => n.bypassed);
+  };
+  return {
+    eq: byKind('eq'),
+    gate: byKind('gate'),
+    compressor: byKind('compressor'),
+    limiter: byKind('limiter'),
+  };
+}
+
 /**
  * Applies stateful DSP chain (High-Pass Filter + Noise Gate + Compressor + Master Gain)
  * with mandatory Pre-Roll Priming: processes [0 .. preRollLen + mainLen) and slices out
@@ -209,15 +229,21 @@ export function processChunkWithPreRoll(
   preRollSamples: number,
   sampleRate: number,
   params: EphemeralDspParams,
+  bypassFlags?: DspBypassFlags,
 ): Float32Array {
   const totalLen = preRollAndChunk.length;
-  const outputLen = Math.max(0, totalLen - preRollSamples);
+  const safePreRoll = Number.isFinite(preRollSamples)
+    ? Math.max(0, Math.min(totalLen, Math.floor(preRollSamples)))
+    : 0;
+  const outputLen = Math.max(0, totalLen - safePreRoll);
   if (outputLen === 0) return new Float32Array(0);
+  const safeSampleRate =
+    Number.isFinite(sampleRate) && sampleRate > 0 ? sampleRate : 48_000;
 
   // 1-pole High-Pass Filter coefficients
   const fc = Math.max(20, Math.min(400, params.highPassHz));
   const rc = 1 / (2 * Math.PI * fc);
-  const dt = 1 / sampleRate;
+  const dt = 1 / safeSampleRate;
   const alphaHpf = rc / (rc + dt);
 
   let prevIn = 0;
@@ -225,8 +251,8 @@ export function processChunkWithPreRoll(
 
   // Envelope follower for Noise Gate + Compressor
   let env = 0;
-  const attackCoeff = Math.exp(-1 / (sampleRate * 0.005));
-  const releaseCoeff = Math.exp(-1 / (sampleRate * 0.08));
+  const attackCoeff = Math.exp(-1 / (safeSampleRate * 0.005));
+  const releaseCoeff = Math.exp(-1 / (safeSampleRate * 0.08));
 
   const gateThreshLin = Math.pow(10, params.noiseGateThresholdDb / 20);
   const compThreshDb = params.compressorThresholdDb;
@@ -235,10 +261,16 @@ export function processChunkWithPreRoll(
 
   const result = new Float32Array(outputLen);
 
+  const bypassEq = Boolean(bypassFlags?.eq);
+  const bypassGate = Boolean(bypassFlags?.gate);
+  const bypassComp = Boolean(bypassFlags?.compressor);
+  const bypassLimiter = Boolean(bypassFlags?.limiter);
+
   for (let i = 0; i < totalLen; i++) {
-    const x = preRollAndChunk[i];
-    // High-pass
-    const hpf = alphaHpf * (prevHpfOut + x - prevIn);
+    const raw = preRollAndChunk[i];
+    const x = Number.isFinite(raw) ? raw : 0;
+    // High-pass (bypassable via Processing Graph EQ node)
+    const hpf = bypassEq ? x : alphaHpf * (prevHpfOut + x - prevIn);
     prevIn = x;
     prevHpfOut = hpf;
 
@@ -248,30 +280,32 @@ export function processChunkWithPreRoll(
       ? attackCoeff * env + (1 - attackCoeff) * absX
       : releaseCoeff * env + (1 - releaseCoeff) * absX;
 
-    // Soft Noise Gate
+    // Soft Noise Gate (bypassable via Processing Graph Gate node)
     let gain = 1.0;
-    if (env < gateThreshLin) {
+    if (!bypassGate && env < gateThreshLin) {
       const ratioBelow = env / Math.max(gateThreshLin, 1e-6);
       gain *= Math.max(0.05, ratioBelow * ratioBelow);
     }
 
-    // Downward Compressor
-    const envDb = 20 * Math.log10(Math.max(env, 1e-6));
-    if (envDb > compThreshDb) {
-      const overDb = envDb - compThreshDb;
-      const compressedDb = compThreshDb + overDb / ratio;
-      const reductionDb = compressedDb - envDb;
-      gain *= Math.pow(10, reductionDb / 20);
+    // Downward Compressor (bypassable via Processing Graph Compressor node)
+    if (!bypassComp) {
+      const envDb = 20 * Math.log10(Math.max(env, 1e-6));
+      if (envDb > compThreshDb) {
+        const overDb = envDb - compThreshDb;
+        const compressedDb = compThreshDb + overDb / ratio;
+        const reductionDb = compressedDb - envDb;
+        gain *= Math.pow(10, reductionDb / 20);
+      }
     }
 
     // Apply master gain + soft ceiling limiter at -0.5 dBFS (~0.944)
     let y = hpf * gain * masterLin;
-    if (Math.abs(y) > 0.944) {
+    if (!bypassLimiter && Math.abs(y) > 0.944) {
       y = Math.sign(y) * (0.944 + 0.05 * Math.tanh((Math.abs(y) - 0.944) * 10));
     }
 
-    if (i >= preRollSamples) {
-      result[i - preRollSamples] = y;
+    if (i >= safePreRoll) {
+      result[i - safePreRoll] = y;
     }
   }
 

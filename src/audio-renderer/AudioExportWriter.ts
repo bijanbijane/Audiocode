@@ -367,6 +367,29 @@ export class AudioExportWriter {
     this.headerWritten = true;
   }
 
+  /**
+   * Restores writer progress & streaming hash state when resuming onto an existing
+   * persistent sink that already contains the placeholder header + previously written data bytes.
+   */
+  public resumeFromCheckpointState(params: {
+    readonly writtenSamples: number;
+    readonly writtenDataBytes: number;
+    readonly partialHashState: string;
+  }): void {
+    const expectedSinkBytes = this.headerSizeBytes + params.writtenDataBytes;
+    const actualSinkBytes = this.sink.getTotalBytesWritten();
+    if (actualSinkBytes !== expectedSinkBytes) {
+      throw new ExportWriteFailureError(
+        'WRITE_IO_FAILURE',
+        `CHECKPOINT_SINK_MISMATCH: Sink holds ${actualSinkBytes} B, expected ${expectedSinkBytes} B (header ${this.headerSizeBytes} + data ${params.writtenDataBytes}).`,
+      );
+    }
+    this.dataHasher.restoreState(params.partialHashState);
+    this.writtenSamples = params.writtenSamples;
+    this.writtenDataBytes = params.writtenDataBytes;
+    this.headerWritten = true;
+  }
+
   public async writePlanarChunk(
     planarChannels: readonly Float32Array[],
     sampleCount: number,
@@ -386,9 +409,11 @@ export class AudioExportWriter {
         `CHANNEL_MISMATCH: Writer expected ${this.channelCount} channels, got ${planarChannels.length}.`,
       );
     }
-    if (sampleCount <= 0) return;
+    if (!Number.isFinite(sampleCount) || sampleCount <= 0) return;
+    const safeSampleCount = Math.floor(sampleCount);
+    if (safeSampleCount <= 0) return;
 
-    const chunkBytes = sampleCount * this.channelCount * this.bytesPerSample;
+    const chunkBytes = safeSampleCount * this.channelCount * this.bytesPerSample;
     if (
       this.container === 'wav' &&
       this.writtenDataBytes + chunkBytes > RIFF_WAV_MAX_DATA_BYTES
@@ -403,9 +428,10 @@ export class AudioExportWriter {
     const view = new DataView(encoded.buffer);
     let byteOffset = 0;
 
-    for (let i = 0; i < sampleCount; i++) {
+    for (let i = 0; i < safeSampleCount; i++) {
       for (let c = 0; c < this.channelCount; c++) {
-        const raw = planarChannels[c][i];
+        const ch = planarChannels[c];
+        const raw = i < ch.length ? ch[i] : 0;
         if (!Number.isFinite(raw)) {
           this.nonFiniteSampleCount++;
           // Write zero for PCM integer safety; preserve NaN only if float32 so validator catches it
@@ -453,7 +479,7 @@ export class AudioExportWriter {
 
     await this.sink.append(encoded);
     this.dataHasher.update(encoded);
-    this.writtenSamples += sampleCount;
+    this.writtenSamples += safeSampleCount;
     this.writtenDataBytes += chunkBytes;
   }
 

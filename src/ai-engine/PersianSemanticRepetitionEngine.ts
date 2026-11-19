@@ -85,7 +85,9 @@ export class PersianSemanticRepetitionEngine {
     const results: WordRepetitionClassification[] = [];
     const pcm = options?.pcmMono;
     const sampleRate = options?.sampleRate;
-    const hasAudio = Boolean(pcm && pcm.length > 0 && sampleRate && sampleRate > 0);
+    const hasAudio = Boolean(
+      pcm && pcm.length > 0 && sampleRate && Number.isFinite(sampleRate) && sampleRate > 0,
+    );
 
     for (let i = 0; i < tokens.length - 1; i++) {
       const first = tokens[i];
@@ -96,10 +98,18 @@ export class PersianSemanticRepetitionEngine {
       const normB = second.normalizedText.replace(/[،؛.!؟«»()[\]\u200c\s]/g, '');
       if (!normA || normA !== normB) continue;
 
-      const gapMs = Math.max(
-        0,
-        TimeMath.flicksToSeconds(second.range.start - first.range.end) * 1000,
-      );
+      if (
+        !Number.isFinite(first.range.start) ||
+        !Number.isFinite(first.range.end) ||
+        !Number.isFinite(second.range.start) ||
+        !Number.isFinite(second.range.end)
+      ) {
+        continue;
+      }
+
+      const rawGapMs = TimeMath.flicksToSeconds(second.range.start - first.range.end) * 1000;
+      if (!Number.isFinite(rawGapMs)) continue;
+      const gapMs = Math.max(0, rawGapMs);
       if (gapMs > 2200) continue;
 
       // Measure acoustic RMS ratio if PCM is supplied
@@ -227,15 +237,27 @@ export class PersianSemanticRepetitionEngine {
     sampleRate: SampleRate,
     range: TimeRange,
   ): number {
+    if (
+      !Number.isFinite(range.start) ||
+      !Number.isFinite(range.end) ||
+      !Number.isFinite(sampleRate) ||
+      sampleRate <= 0
+    ) {
+      return 0;
+    }
     const startSample = Math.max(0, TimeMath.flicksToSamplesFloor(range.start, sampleRate));
     const endSample = Math.min(pcm.length, TimeMath.flicksToSamplesFloor(range.end, sampleRate));
     if (endSample <= startSample) return 0;
     let sumSq = 0;
+    let validCount = 0;
     for (let i = startSample; i < endSample; i++) {
       const s = pcm[i];
-      sumSq += s * s;
+      if (Number.isFinite(s)) {
+        sumSq += s * s;
+        validCount++;
+      }
     }
-    return Math.sqrt(sumSq / (endSample - startSample));
+    return validCount > 0 ? Math.sqrt(sumSq / validCount) : 0;
   }
 
   public static detectSemanticRetakes(
@@ -244,6 +266,14 @@ export class PersianSemanticRepetitionEngine {
     similarityThreshold = 0.54,
   ): SemanticRetakeCandidate[] {
     if (tokens.length < 2) return [];
+    const safeMaxWindowSec =
+      Number.isFinite(maxWindowSecondsBetweenTakes) && maxWindowSecondsBetweenTakes > 0
+        ? maxWindowSecondsBetweenTakes
+        : 18.0;
+    const safeSimilarityThreshold =
+      Number.isFinite(similarityThreshold) && similarityThreshold > 0 && similarityThreshold <= 1
+        ? similarityThreshold
+        : 0.54;
 
     const clauses = this.segmentTokensIntoClauses(tokens);
     const candidates: SemanticRetakeCandidate[] = [];
@@ -252,21 +282,21 @@ export class PersianSemanticRepetitionEngine {
       const take1 = clauses[i];
       if (take1.contentStems.length < 3) continue;
 
-      // Inspect up to 3 subsequent clauses on the same speaker track within maxWindowSecondsBetweenTakes
+      // Inspect up to 3 subsequent clauses on the same speaker track within safeMaxWindowSec
       for (let j = i + 1; j <= Math.min(clauses.length - 1, i + 3); j++) {
         const take2 = clauses[j];
         if (take2.trackId !== take1.trackId) continue;
         if (take2.contentStems.length < 3) continue;
 
         const gapSeconds = TimeMath.flicksToSeconds(take2.range.start - take1.range.end);
-        if (gapSeconds < 0) continue;
-        if (gapSeconds > maxWindowSecondsBetweenTakes) break;
+        if (!Number.isFinite(gapSeconds) || gapSeconds < 0) continue;
+        if (gapSeconds > safeMaxWindowSec) break;
 
         const stemSim = this.computeJaccardSimilarity(take1.contentStems, take2.contentStems);
         const trigramSim = this.computeCosineSimilarity(take1.charTrigrams, take2.charTrigrams);
         const combinedSimilarity = 0.55 * stemSim + 0.45 * trigramSim;
 
-        if (combinedSimilarity >= similarityThreshold) {
+        if (combinedSimilarity >= safeSimilarityThreshold) {
           candidates.push({
             retakeId: `retake_${take1.tokens[0].tokenId}_${take2.tokens[0].tokenId}`,
             trackId: take1.trackId,
@@ -297,7 +327,8 @@ export class PersianSemanticRepetitionEngine {
     for (let i = 1; i < tokens.length; i++) {
       const prev = tokens[i - 1];
       const curr = tokens[i];
-      const gapMs = TimeMath.flicksToSeconds(curr.range.start - prev.range.end) * 1000;
+      const rawGapMs = TimeMath.flicksToSeconds(curr.range.start - prev.range.end) * 1000;
+      const gapMs = Number.isFinite(rawGapMs) ? rawGapMs : 0;
 
       if (
         curr.trackId !== prev.trackId ||
@@ -335,8 +366,10 @@ export class PersianSemanticRepetitionEngine {
       trackId: group[0].trackId,
       tokens: group,
       range: {
-        start: group[0].range.start,
-        end: group[group.length - 1].range.end,
+        start: Number.isFinite(group[0].range.start) ? group[0].range.start : 0,
+        end: Number.isFinite(group[group.length - 1].range.end)
+          ? group[group.length - 1].range.end
+          : 0,
       },
       rawText,
       contentStems,

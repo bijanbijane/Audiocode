@@ -5,9 +5,11 @@ import {
   detectLongPauses,
   detectPitchPlateauSegments,
   extractAcousticProfile,
+  refinePersianCutBoundary,
   snapToZeroCrossing,
   synthesizeRoomToneFill,
 } from './dsp';
+import { secondsToFlicks } from './timebase';
 
 test('snapToZeroCrossing locks cut index to nearest zero crossing', () => {
   const sampleRate = 48_000;
@@ -72,4 +74,18 @@ test('extractAcousticProfile and detectLongPauses find room tone and pauses', ()
 
   const fill = synthesizeRoomToneFill(profile, 8000);
   assert.equal(fill.length, 8000);
+});
+
+test('refinePersianCutBoundary never produces negative startFlicks when cutting near t=0', () => {
+  const sampleRate = 48_000;
+  const buf = new Float32Array(sampleRate); // 1 second
+  for (let i = 0; i < buf.length; i++) {
+    buf[i] = 0.2 * Math.sin((2 * Math.PI * 180 * i) / sampleRate);
+  }
+  const detail = refinePersianCutBoundary(buf, sampleRate, {
+    startFlicks: secondsToFlicks(0.002),
+    endFlicks: secondsToFlicks(0.015),
+  });
+  assert.ok(detail.snappedRange.startFlicks >= 0, `startFlicks was negative: ${detail.snappedRange.startFlicks}`);
+  assert.ok(detail.snappedRange.endFlicks > detail.snappedRange.startFlicks);
 });

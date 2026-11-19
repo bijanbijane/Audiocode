@@ -59,7 +59,8 @@ export class PersianPhoneticTranscriptSearchEngine {
    * ZWNJ-joined/split variants, and prefix matches.
    */
   public searchPhrase(query: string, maxResults = 50): TranscriptSearchHit[] {
-    if (maxResults <= 0 || this.tokens.length === 0) return [];
+    const safeMaxResults = Number.isFinite(maxResults) ? Math.floor(maxResults) : 50;
+    if (safeMaxResults <= 0 || this.tokens.length === 0) return [];
 
     const normalizedQuery = PersianTextNormalizer.normalizeTokenText(query);
     const queryWords = normalizedQuery.split(/\s+/).filter(Boolean);
@@ -128,13 +129,15 @@ export class PersianPhoneticTranscriptSearchEngine {
             ? 0.92
             : 0.75;
 
+      const rawStart = matchedSlice[0].range.start;
+      const rawEnd = matchedSlice[matchedSlice.length - 1].range.end;
       hits.push({
         matchType,
         matchedTokenIds: matchedSlice.map((t) => t.tokenId),
         matchedDisplayText: matchedSlice.map((t) => t.displayText).join(' '),
         audioRange: {
-          start: matchedSlice[0].range.start,
-          end: matchedSlice[matchedSlice.length - 1].range.end,
+          start: Number.isFinite(rawStart) ? rawStart : 0,
+          end: Number.isFinite(rawEnd) ? rawEnd : 0,
         },
         relevanceScore,
       });
@@ -153,7 +156,10 @@ export class PersianPhoneticTranscriptSearchEngine {
             matchType: 'HOMOPHONE_PHONETIC',
             matchedTokenIds: pair.map((t) => t.tokenId),
             matchedDisplayText: pair.map((t) => t.displayText).join(' '),
-            audioRange: { start: pair[0].range.start, end: pair[1].range.end },
+            audioRange: {
+              start: Number.isFinite(pair[0].range.start) ? pair[0].range.start : 0,
+              end: Number.isFinite(pair[1].range.end) ? pair[1].range.end : 0,
+            },
             relevanceScore: 0.89,
           });
         }
@@ -169,7 +175,10 @@ export class PersianPhoneticTranscriptSearchEngine {
             matchType: 'HOMOPHONE_PHONETIC',
             matchedTokenIds: [tok.tokenId],
             matchedDisplayText: tok.displayText,
-            audioRange: { start: tok.range.start, end: tok.range.end },
+            audioRange: {
+              start: Number.isFinite(tok.range.start) ? tok.range.start : 0,
+              end: Number.isFinite(tok.range.end) ? tok.range.end : 0,
+            },
             relevanceScore: 0.89,
           });
         }
@@ -183,6 +192,6 @@ export class PersianPhoneticTranscriptSearchEngine {
         }
         return a.audioRange.start - b.audioRange.start;
       })
-      .slice(0, maxResults);
+      .slice(0, safeMaxResults);
   }
 }

@@ -56,15 +56,18 @@ export class OnnxPersianAsrAndVadAdapter implements AsrModelRunnerAdapter {
       totalFrames++;
       let sumSq = 0;
       let zcr = 0;
+      let prevSample = 0;
       for (let i = start; i < start + frameSize; i++) {
-        const s = pcm16kMono[i];
+        const raw = pcm16kMono[i];
+        const s = Number.isFinite(raw) ? raw : 0;
         sumSq += s * s;
         if (
           i > start &&
-          ((pcm16kMono[i - 1] >= 0 && s < 0) || (pcm16kMono[i - 1] < 0 && s >= 0))
+          ((prevSample >= 0 && s < 0) || (prevSample < 0 && s >= 0))
         ) {
           zcr++;
         }
+        prevSample = s;
       }
       const rmsDb = 10 * Math.log10(sumSq / frameSize + 1e-12);
       const zcrRatio = zcr / frameSize;
@@ -109,13 +112,16 @@ export class OnnxPersianAsrAndVadAdapter implements AsrModelRunnerAdapter {
       imag.fill(0);
 
       for (let i = 0; i < this.winLength; i++) {
-        real[i] = pcm16kMono[start + i] * this.hannWindow[i];
+        const raw = pcm16kMono[start + i];
+        const s = Number.isFinite(raw) ? raw : 0;
+        real[i] = s * this.hannWindow[i];
       }
 
       this.radix2FftInPlace(real, imag);
 
       for (let k = 0; k < nFreqBins; k++) {
-        powerSpectrum[k] = real[k] * real[k] + imag[k] * imag[k];
+        const p = real[k] * real[k] + imag[k] * imag[k];
+        powerSpectrum[k] = Number.isFinite(p) ? p : 0;
       }
 
       const frameOffset = f * this.nMels;
@@ -125,10 +131,15 @@ export class OnnxPersianAsrAndVadAdapter implements AsrModelRunnerAdapter {
         for (let k = 0; k < nFreqBins; k++) {
           melEnergy += powerSpectrum[k] * filterWeights[k];
         }
-        const logMel = Math.log10(Math.max(1e-10, melEnergy));
+        const safeMelEnergy = Number.isFinite(melEnergy) && melEnergy > 1e-10 ? melEnergy : 1e-10;
+        const logMel = Math.log10(safeMelEnergy);
         melTensor[frameOffset + m] = logMel;
         if (logMel > globalMaxLogMel) globalMaxLogMel = logMel;
       }
+    }
+
+    if (!Number.isFinite(globalMaxLogMel)) {
+      globalMaxLogMel = -10.0;
     }
 
     // Dynamic range clipping to 80 dB below peak (8.0 in log10 scale) and scaling to [-1, +1]
@@ -193,6 +204,8 @@ export class OnnxPersianAsrAndVadAdapter implements AsrModelRunnerAdapter {
     idToChar: ReadonlyMap<number, string>,
     frameStrideSec = 0.02,
   ): RawWordPrediction[] {
+    const safeStrideSec =
+      Number.isFinite(frameStrideSec) && frameStrideSec > 0 ? frameStrideSec : 0.02;
     let prevTok = 0;
     let currentWord = '';
     let wordStartFrame = -1;
@@ -205,10 +218,14 @@ export class OnnxPersianAsrAndVadAdapter implements AsrModelRunnerAdapter {
       let bestId = 0;
       let bestProb = -Infinity;
       for (let c = 0; c < probs.length; c++) {
-        if (probs[c] > bestProb) {
-          bestProb = probs[c];
+        const p = probs[c];
+        if (Number.isFinite(p) && p > bestProb) {
+          bestProb = p;
           bestId = c;
         }
+      }
+      if (!Number.isFinite(bestProb)) {
+        bestProb = 0;
       }
 
       if (bestId !== 0 && bestId !== prevTok) {
@@ -217,8 +234,8 @@ export class OnnxPersianAsrAndVadAdapter implements AsrModelRunnerAdapter {
           if (currentWord.length > 0) {
             words.push({
               word: currentWord,
-              relativeStartSec: Number((wordStartFrame * frameStrideSec).toFixed(3)),
-              relativeEndSec: Number((t * frameStrideSec).toFixed(3)),
+              relativeStartSec: Number((wordStartFrame * safeStrideSec).toFixed(3)),
+              relativeEndSec: Number((t * safeStrideSec).toFixed(3)),
               probability: Number((wordProbSum / Math.max(1, wordCharCount)).toFixed(3)),
             });
             currentWord = '';
@@ -239,8 +256,8 @@ export class OnnxPersianAsrAndVadAdapter implements AsrModelRunnerAdapter {
     if (currentWord.length > 0 && wordStartFrame >= 0) {
       words.push({
         word: currentWord,
-        relativeStartSec: Number((wordStartFrame * frameStrideSec).toFixed(3)),
-        relativeEndSec: Number((frameProbs.length * frameStrideSec).toFixed(3)),
+        relativeStartSec: Number((wordStartFrame * safeStrideSec).toFixed(3)),
+        relativeEndSec: Number((frameProbs.length * safeStrideSec).toFixed(3)),
         probability: Number((wordProbSum / Math.max(1, wordCharCount)).toFixed(3)),
       });
     }

@@ -55,6 +55,9 @@ export function createPlanarArrayPcmSource(params: {
     channelCount: params.channels.length,
     totalSamples,
     async readPlanarRange(startSample: number, sampleCount: number): Promise<Float32Array[]> {
+      if (!Number.isFinite(startSample) || !Number.isFinite(sampleCount) || sampleCount <= 0) {
+        return params.channels.map(() => new Float32Array(0));
+      }
       const start = Math.max(0, Math.min(totalSamples, Math.trunc(startSample)));
       const end = Math.max(start, Math.min(totalSamples, start + Math.trunc(sampleCount)));
       const len = end - start;
@@ -85,6 +88,9 @@ export function createStorageBrokerPcmSource(params: {
     channelCount: params.channelCount,
     totalSamples: params.totalSamples,
     async readPlanarRange(startSample: number, sampleCount: number): Promise<Float32Array[]> {
+      if (!Number.isFinite(startSample) || !Number.isFinite(sampleCount) || sampleCount <= 0) {
+        return Array.from({ length: params.channelCount }, () => new Float32Array(0));
+      }
       const start = Math.max(0, Math.min(params.totalSamples, Math.trunc(startSample)));
       const end = Math.max(start, Math.min(params.totalSamples, start + Math.trunc(sampleCount)));
       const len = end - start;
@@ -131,14 +137,21 @@ export class AudioSourceReader {
   constructor(source: ChunkedPcmSource, options: AudioSourceReaderOptions = {}) {
     this.source = source;
     this.budget = options.memoryBudgetManager ?? getSharedMemoryBudgetManager();
+    const rawBlockSamples = options.cacheBlockSamples ?? 16384;
     this.cacheBlockSamples = Math.max(
       1024,
-      Math.min(65536, Math.trunc(options.cacheBlockSamples ?? 16384)),
+      Math.min(
+        65536,
+        Math.trunc(Number.isFinite(rawBlockSamples) ? rawBlockSamples : 16384),
+      ),
     );
     const requestedMax = options.maxCacheBytes ?? 4 * 1024 * 1024; // 4 MiB default bounded window cache
     this.maxCacheBytes = Math.max(
       64 * 1024,
-      Math.min(AVAPARDAZ_MEMORY_POLICY.audioCacheBytes, Math.trunc(requestedMax)),
+      Math.min(
+        AVAPARDAZ_MEMORY_POLICY.audioCacheBytes,
+        Math.trunc(Number.isFinite(requestedMax) ? requestedMax : 4 * 1024 * 1024),
+      ),
     );
 
     this.unregisterEviction = this.budget.registerCacheEvictionCallback(() => {

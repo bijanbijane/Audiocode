@@ -44,11 +44,15 @@ export function findActiveTokenIdAtFlicks(
   tokens: readonly TimedPersianToken[],
   playheadFlicks: Flicks,
 ): string | null {
+  if (!Number.isFinite(playheadFlicks)) return null;
   let low = 0;
   let high = tokens.length - 1;
   while (low <= high) {
     const mid = (low + high) >>> 1;
     const tok = tokens[mid];
+    if (!Number.isFinite(tok.range.start) || !Number.isFinite(tok.range.end)) {
+      return null;
+    }
     if (playheadFlicks >= tok.range.start && playheadFlicks < tok.range.end) {
       return tok.tokenId;
     }
@@ -69,9 +73,16 @@ export function computeAutoScrollViewport(
   playheadFlicks: Flicks,
   isPlaying: boolean,
 ): TimeRange {
-  if (!isPlaying) return viewport;
+  if (
+    !isPlaying ||
+    !Number.isFinite(playheadFlicks) ||
+    !Number.isFinite(viewport.start) ||
+    !Number.isFinite(viewport.end)
+  ) {
+    return viewport;
+  }
   const span = viewport.end - viewport.start;
-  if (span <= 0) return viewport;
+  if (!Number.isFinite(span) || span <= 0) return viewport;
   if (playheadFlicks > viewport.end) {
     return {
       start: playheadFlicks,
@@ -190,7 +201,11 @@ export function dispatchStudioShortcutKeyDown(
     }
     case 'KeyL': {
       e.preventDefault();
-      const nextSpeed = ctx.currentShuttleSpeed >= 2.0 ? 1.0 : Number((ctx.currentShuttleSpeed + 0.5).toFixed(1));
+      const safeSpeed =
+        Number.isFinite(ctx.currentShuttleSpeed) && ctx.currentShuttleSpeed > 0
+          ? ctx.currentShuttleSpeed
+          : 1.0;
+      const nextSpeed = safeSpeed >= 2.0 ? 1.0 : Number((safeSpeed + 0.5).toFixed(1));
       ctx.onSetShuttleSpeed(nextSpeed);
       ctx.clockReader.setPlaybackRate(nextSpeed);
       if (!ctx.clockReader.isPlaying()) {
@@ -200,18 +215,27 @@ export function dispatchStudioShortcutKeyDown(
     }
     case 'KeyJ': {
       e.preventDefault();
-      const curSample = ctx.clockReader.readCurrentSampleFrameAtomically();
-      const backSample = Math.max(0, curSample - 3 * ctx.sampleRate);
+      const rawSample = ctx.clockReader.readCurrentSampleFrameAtomically();
+      const curSample = Number.isFinite(rawSample) ? Math.max(0, rawSample) : 0;
+      const safeRate =
+        Number.isFinite(ctx.sampleRate) && ctx.sampleRate > 0 ? ctx.sampleRate : 48000;
+      const backSample = Math.max(0, curSample - 3 * safeRate);
       ctx.clockReader.seekToSample(backSample);
       return true;
     }
     case 'KeyS': {
       if (ctx.onSplitAtPlayhead) {
         e.preventDefault();
-        const curSample = ctx.clockReader.readCurrentSampleFrameAtomically();
-        const curFlicks = TimeMath.samplesToFlicks(curSample, ctx.sampleRate);
-        ctx.onSplitAtPlayhead(curFlicks);
-        return true;
+        const rawSample = ctx.clockReader.readCurrentSampleFrameAtomically();
+        if (
+          Number.isFinite(rawSample) &&
+          Number.isFinite(ctx.sampleRate) &&
+          ctx.sampleRate > 0
+        ) {
+          const curFlicks = TimeMath.samplesToFlicks(Math.max(0, rawSample), ctx.sampleRate);
+          ctx.onSplitAtPlayhead(curFlicks);
+          return true;
+        }
       }
       return false;
     }
@@ -271,8 +295,11 @@ export function useAudioStudioController(params: {
     let rafId = 0;
 
     const renderLoop = () => {
-      const currentSample = clockReader.readCurrentSampleFrameAtomically();
-      const currentFlicks = TimeMath.samplesToFlicks(currentSample, sampleRate);
+      const rawSample = clockReader.readCurrentSampleFrameAtomically();
+      const currentSample = Number.isFinite(rawSample) ? Math.max(0, rawSample) : 0;
+      const safeRate =
+        Number.isFinite(sampleRate) && sampleRate > 0 ? sampleRate : 48000;
+      const currentFlicks = TimeMath.samplesToFlicks(currentSample, safeRate);
 
       const canvas = canvasRef.current;
       if (canvas && waveformLods.length > 0) {

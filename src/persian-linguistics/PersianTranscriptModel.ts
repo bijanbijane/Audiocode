@@ -164,6 +164,7 @@ export function renderTranscriptLayerText(
           return tok.userCorrectedText ?? tok.verbatimText;
       }
     })
+    .filter((part) => part.length > 0)
     .join(' ')
     .replace(/\s+([،؛؟.!:,;])/g, '$1');
 }
@@ -183,6 +184,7 @@ export function mergeNewAsrPreservingUserCorrections(
       return {
         ...inc,
         rawAsrText: prev.rawAsrText,
+        readableText: prev.userCorrectedText ?? prev.readableText,
         userCorrectedText: prev.userCorrectedText,
         userConfirmed: prev.userConfirmed,
         epistemicSource: 'HUMAN_CORRECTION' as const,

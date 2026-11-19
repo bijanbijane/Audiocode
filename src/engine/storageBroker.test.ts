@@ -133,6 +133,17 @@ test('StorageBrokerClient rejects pending requests on disposal, worker failure, 
             },
           },
         } as MessageEvent);
+      } else if (req.type === 'RECOVER_STARTUP_ASSETS') {
+        this.onmessage?.({
+          data: {
+            id: req.id,
+            ok: true,
+            payload: {
+              cleanedAssetIds: [],
+              readyAssetIds: [],
+            },
+          },
+        } as MessageEvent);
       }
       // Deliberately hang WRITE_BLOCK so disposal / error must reject pending promise
     }

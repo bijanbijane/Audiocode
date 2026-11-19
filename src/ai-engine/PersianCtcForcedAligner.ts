@@ -59,9 +59,16 @@ export class PersianCtcForcedAligner {
     chunkStartOffsetFlicks: Flicks = 0,
   ): ForcedAlignmentResult {
     const numFrames = logProbsPerFrame.length;
-    if (numFrames === 0 || words.length === 0 || frameDurationSec <= 0) {
+    if (
+      numFrames === 0 ||
+      words.length === 0 ||
+      !Number.isFinite(frameDurationSec) ||
+      frameDurationSec <= 0
+    ) {
       return { words: [], characterSpans: [] };
     }
+    const safeOffsetFlicks: Flicks =
+      Number.isFinite(chunkStartOffsetFlicks) ? Math.round(chunkStartOffsetFlicks) : 0;
 
     // 1. Flatten characters while tracking owning wordIndex
     const flatChars: { char: string; vocabId: number; wordIndex: number }[] = [];
@@ -89,14 +96,20 @@ export class PersianCtcForcedAligner {
     }
 
     const NEG_INF = -1e30;
+    const readSafeLogProb = (frameProbs: Float32Array | undefined, vocabId: number): number => {
+      if (!frameProbs || vocabId < 0 || vocabId >= frameProbs.length) return NEG_INF;
+      const v = frameProbs[vocabId];
+      return Number.isFinite(v) ? Math.max(NEG_INF, v) : NEG_INF;
+    };
+
     let prevScore = new Float64Array(numStates).fill(NEG_INF);
     let currScore = new Float64Array(numStates).fill(NEG_INF);
     const backPointers = new Int32Array(numFrames * numStates);
 
     // Frame t = 0: only initial Blank (s=0) or first character (s=1) are legal CTC entry states
-    prevScore[0] = logProbsPerFrame[0][stateVocabIds[0]] ?? NEG_INF;
+    prevScore[0] = readSafeLogProb(logProbsPerFrame[0], stateVocabIds[0]);
     if (numStates > 1) {
-      prevScore[1] = logProbsPerFrame[0][stateVocabIds[1]] ?? NEG_INF;
+      prevScore[1] = readSafeLogProb(logProbsPerFrame[0], stateVocabIds[1]);
     }
 
     // 3. Forward Viterbi Trellis Pass
@@ -126,7 +139,7 @@ export class PersianCtcForcedAligner {
           bestPrevState = s - 2;
         }
 
-        const emissionLogProb = frameProbs[stateVocabIds[s]] ?? NEG_INF;
+        const emissionLogProb = readSafeLogProb(frameProbs, stateVocabIds[s]);
         currScore[s] = bestPrevScore <= NEG_INF / 2 ? NEG_INF : bestPrevScore + emissionLogProb;
         backPointers[rowOffset + s] = bestPrevState;
       }
@@ -175,8 +188,9 @@ export class PersianCtcForcedAligner {
       if (s % 2 === 1) {
         const charIdx = (s - 1) >> 1;
         const wIdx = flatChars[charIdx].wordIndex;
-        const logP = logProbsPerFrame[t][stateVocabIds[s]] ?? -20;
-        const prob = Math.exp(Math.max(-20, logP));
+        const rawLogP = logProbsPerFrame[t]?.[stateVocabIds[s]];
+        const logP = Number.isFinite(rawLogP) ? (rawLogP as number) : -20;
+        const prob = Math.exp(Math.max(-20, Math.min(0, logP)));
 
         if (t < charStartFrame[charIdx]) charStartFrame[charIdx] = t;
         if (t + 1 > charEndFrame[charIdx]) charEndFrame[charIdx] = t + 1;
@@ -211,9 +225,9 @@ export class PersianCtcForcedAligner {
       lastResolvedEndFrame = eFrame;
 
       const startFlicks =
-        chunkStartOffsetFlicks + TimeMath.secondsToFlicks(sFrame * frameDurationSec);
+        safeOffsetFlicks + TimeMath.secondsToFlicks(sFrame * frameDurationSec);
       const endFlicks =
-        chunkStartOffsetFlicks + TimeMath.secondsToFlicks(eFrame * frameDurationSec);
+        safeOffsetFlicks + TimeMath.secondsToFlicks(eFrame * frameDurationSec);
 
       const count = wordFrameCounts[idx];
       const confidence = count > 0 ? Math.min(0.99, wordProbSum[idx] / count) : 0.5;

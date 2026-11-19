@@ -315,6 +315,12 @@ export class TranscriptTransformationEngine {
     readonly previousReadable: string;
     readonly previousUserCorrected: string | null;
     readonly previousUserConfirmed: boolean;
+    readonly absorbedSnapshots?: ReadonlyArray<{
+      readonly tokenId: string;
+      readonly previousReadable: string;
+      readonly previousUserCorrected: string | null;
+      readonly previousUserConfirmed: boolean;
+    }>;
   }> = [];
 
   public applyAcceptedCandidate(params: {
@@ -331,6 +337,25 @@ export class TranscriptTransformationEngine {
         document,
         updatedCandidate: { ...candidate, status: 'STALE' },
         rejectionReason: `Stale suggestion (created for v${candidate.sourceTranscriptVersion}, current is v${document.version}).`,
+      };
+    }
+
+    if (!candidate.tokenIds || candidate.tokenIds.length === 0) {
+      return {
+        applied: false,
+        document,
+        updatedCandidate: candidate,
+        rejectionReason: 'Candidate has no target tokenIds.',
+      };
+    }
+
+    const firstTargetId = candidate.tokenIds[0];
+    if (!document.tokens.some((t) => t.tokenId === firstTargetId)) {
+      return {
+        applied: false,
+        document,
+        updatedCandidate: candidate,
+        rejectionReason: `Target token ${firstTargetId} not found in transcript document.`,
       };
     }
 
@@ -362,8 +387,26 @@ export class TranscriptTransformationEngine {
       }
     }
 
-    const firstTargetId = candidate.tokenIds[0];
+    const absorbedIds =
+      candidate.category !== 'PUNCTUATION_ONLY' && candidate.tokenIds.length > 1
+        ? new Set(candidate.tokenIds.slice(1))
+        : new Set<string>();
+    const absorbedSnapshots = document.tokens
+      .filter((t) => absorbedIds.has(t.tokenId))
+      .map((t) => ({
+        tokenId: t.tokenId,
+        previousReadable: t.readableText,
+        previousUserCorrected: t.userCorrectedText,
+        previousUserConfirmed: t.userConfirmed,
+      }));
+
     const updatedTokens: PersianTranscriptTokenRecord[] = document.tokens.map((tok) => {
+      if (absorbedIds.has(tok.tokenId)) {
+        return {
+          ...tok,
+          readableText: '',
+        };
+      }
       if (tok.tokenId !== firstTargetId) return tok;
       this.appliedHistory.push({
         candidateId: candidate.candidateId,
@@ -371,6 +414,7 @@ export class TranscriptTransformationEngine {
         previousReadable: tok.readableText,
         previousUserCorrected: tok.userCorrectedText,
         previousUserConfirmed: tok.userConfirmed,
+        absorbedSnapshots,
       });
 
       if (candidate.category === 'ORTHOGRAPHY_READABLE' || candidate.category === 'NUMBER_FORMAT') {
@@ -421,23 +465,112 @@ export class TranscriptTransformationEngine {
     };
   }
 
+  public clearHistory(): void {
+    this.appliedHistory.length = 0;
+  }
+
+  public revertCandidateById(
+    document: PersianTranscriptDocument,
+    candidateId: string,
+  ): {
+    readonly reverted: boolean;
+    readonly document: PersianTranscriptDocument;
+    readonly revertedTokenId: string | null;
+    readonly restoredReadableText: string | null;
+  } {
+    let matchIdx = -1;
+    for (let i = this.appliedHistory.length - 1; i >= 0; i--) {
+      if (this.appliedHistory[i].candidateId === candidateId) {
+        matchIdx = i;
+        break;
+      }
+    }
+    if (matchIdx === -1) {
+      return {
+        reverted: false,
+        document,
+        revertedTokenId: null,
+        restoredReadableText: null,
+      };
+    }
+
+    const [entry] = this.appliedHistory.splice(matchIdx, 1);
+    const absorbedMap = new Map((entry.absorbedSnapshots ?? []).map((s) => [s.tokenId, s]));
+    const updatedTokens = document.tokens.map((tok) => {
+      if (tok.tokenId === entry.tokenId) {
+        return {
+          ...tok,
+          readableText: entry.previousReadable,
+          userCorrectedText: entry.previousUserCorrected,
+          userConfirmed: entry.previousUserConfirmed,
+        };
+      }
+      const absorbed = absorbedMap.get(tok.tokenId);
+      if (absorbed) {
+        return {
+          ...tok,
+          readableText: absorbed.previousReadable,
+          userCorrectedText: absorbed.previousUserCorrected,
+          userConfirmed: absorbed.previousUserConfirmed,
+        };
+      }
+      return tok;
+    });
+
+    const affectedTokenIds = [entry.tokenId, ...(entry.absorbedSnapshots ?? []).map((s) => s.tokenId)];
+    const nextVersion = document.version + 1;
+    return {
+      reverted: true,
+      revertedTokenId: entry.tokenId,
+      restoredReadableText: entry.previousReadable,
+      document: {
+        ...document,
+        version: nextVersion,
+        tokens: updatedTokens,
+        revisions: [
+          ...document.revisions,
+          {
+            revisionId: `rev_${nextVersion}`,
+            version: nextVersion,
+            createdAtIso: new Date().toISOString(),
+            author: 'REVERT',
+            summary: `Reverted transformation ${entry.candidateId}`,
+            affectedTokenIds,
+          },
+        ],
+      },
+    };
+  }
+
   public revertLastTransformation(
     document: PersianTranscriptDocument,
   ): { readonly reverted: boolean; readonly document: PersianTranscriptDocument } {
     const last = this.appliedHistory.pop();
     if (!last) return { reverted: false, document };
 
-    const updatedTokens = document.tokens.map((tok) =>
-      tok.tokenId === last.tokenId
-        ? {
-            ...tok,
-            readableText: last.previousReadable,
-            userCorrectedText: last.previousUserCorrected,
-            userConfirmed: last.previousUserConfirmed,
-          }
-        : tok,
-    );
+    const absorbedMap = new Map((last.absorbedSnapshots ?? []).map((s) => [s.tokenId, s]));
+    const updatedTokens = document.tokens.map((tok) => {
+      if (tok.tokenId === last.tokenId) {
+        return {
+          ...tok,
+          readableText: last.previousReadable,
+          userCorrectedText: last.previousUserCorrected,
+          userConfirmed: last.previousUserConfirmed,
+        };
+      }
+      const absorbed = absorbedMap.get(tok.tokenId);
+      if (absorbed) {
+        return {
+          ...tok,
+          readableText: absorbed.previousReadable,
+          userCorrectedText: absorbed.previousUserCorrected,
+          userConfirmed: absorbed.previousUserConfirmed,
+        };
+      }
+      return tok;
+    });
 
+    const affectedTokenIds = [last.tokenId, ...(last.absorbedSnapshots ?? []).map((s) => s.tokenId)];
     const nextVersion = document.version + 1;
     return {
       reverted: true,
@@ -453,7 +586,7 @@ export class TranscriptTransformationEngine {
             createdAtIso: new Date().toISOString(),
             author: 'REVERT',
             summary: `Reverted transformation ${last.candidateId}`,
-            affectedTokenIds: [last.tokenId],
+            affectedTokenIds,
           },
         ],
       },

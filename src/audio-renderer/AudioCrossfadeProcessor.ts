@@ -13,8 +13,10 @@ function computeOverlapCorrelation(
   let sumL = 0;
   let sumR = 0;
   for (let i = 0; i < length; i++) {
-    sumL += leftTail[i];
-    sumR += rightHead[i];
+    const l = Number.isFinite(leftTail[i]) ? leftTail[i] : 0;
+    const r = Number.isFinite(rightHead[i]) ? rightHead[i] : 0;
+    sumL += l;
+    sumR += r;
   }
   const meanL = sumL / length;
   const meanR = sumR / length;
@@ -22,18 +24,21 @@ function computeOverlapCorrelation(
   let varL = 0;
   let varR = 0;
   for (let i = 0; i < length; i++) {
-    const dl = leftTail[i] - meanL;
-    const dr = rightHead[i] - meanR;
+    const l = Number.isFinite(leftTail[i]) ? leftTail[i] : 0;
+    const r = Number.isFinite(rightHead[i]) ? rightHead[i] : 0;
+    const dl = l - meanL;
+    const dr = r - meanR;
     cov += dl * dr;
     varL += dl * dl;
     varR += dr * dr;
   }
   const denom = Math.sqrt(varL * varR);
-  if (denom < 1e-10) return 0;
+  if (!Number.isFinite(denom) || denom < 1e-10) return 0;
   return Number((cov / denom).toFixed(4));
 }
 
 function softLimitSample(v: number, ceiling = 0.999): number {
+  if (!Number.isFinite(v)) return 0;
   if (Math.abs(v) <= ceiling) return v;
   const sign = v < 0 ? -1 : 1;
   const excess = Math.abs(v) - ceiling;
@@ -54,7 +59,8 @@ export class AudioCrossfadeProcessor {
     curve: CrossfadeCurve,
     progress01: number,
   ): { readonly fadeOutGain: number; readonly fadeInGain: number } {
-    const t = Math.max(0, Math.min(1, progress01));
+    const safeProgress = Number.isFinite(progress01) ? progress01 : 0;
+    const t = Math.max(0, Math.min(1, safeProgress));
     switch (curve) {
       case 'linear':
         return {
@@ -81,12 +87,13 @@ export class AudioCrossfadeProcessor {
     correlation: number,
   ): CrossfadeCurve {
     if (preferred !== 'auto') return preferred;
+    const safeCorr = Number.isFinite(correlation) ? correlation : 0;
     // Highly correlated / coherent periodic signals -> smooth-cosine prevents +3dB equal-power bump
-    if (correlation > 0.35) {
+    if (safeCorr > 0.35) {
       return 'smooth-cosine';
     }
     // Strongly anti-correlated signals -> linear avoids mid-fade phase dip amplification
-    if (correlation < -0.35) {
+    if (safeCorr < -0.35) {
       return 'linear';
     }
     // Uncorrelated speech/ambient room tone -> equal-power maintains perceived loudness
@@ -136,7 +143,14 @@ export class AudioCrossfadeProcessor {
     if (length < 2) {
       // Fallback: no crossfade possible; preserve exact rightHead samples
       return {
-        blended: rightHead.map((ch) => new Float32Array(ch.subarray(0, length))),
+        blended: rightHead.map((ch) => {
+          const out = new Float32Array(length);
+          for (let i = 0; i < length; i++) {
+            const v = ch[i];
+            out[i] = Number.isFinite(v) ? v : 0;
+          }
+          return out;
+        }),
         result: {
           transitionIndex,
           proposalId,
@@ -179,8 +193,10 @@ export class AudioCrossfadeProcessor {
       const { fadeOutGain, fadeInGain } = this.computeGainPair(curve, progress);
 
       for (let c = 0; c < channelCount; c++) {
-        const lSample = leftTail[c][i];
-        const rSample = rightHead[c][i];
+        const rawL = leftTail[c][i];
+        const rawR = rightHead[c][i];
+        const lSample = Number.isFinite(rawL) ? rawL : 0;
+        const rSample = Number.isFinite(rawR) ? rawR : 0;
         let mixed = lSample * fadeOutGain + rSample * fadeInGain;
         const absRaw = Math.abs(mixed);
         if (absRaw > peakBeforeLimit) peakBeforeLimit = absRaw;

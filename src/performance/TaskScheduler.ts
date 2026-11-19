@@ -87,10 +87,15 @@ export class TaskScheduler {
     readonly limits?: Partial<TaskConcurrencyLimits>;
     readonly memoryBudget?: MemoryBudgetManager;
   }) {
+    const rawMaxConc = options?.limits?.maxTotalConcurrent ?? DEFAULT_TASK_CONCURRENCY_LIMITS.maxTotalConcurrent;
+    const rawMaxQueue = options?.limits?.maxQueueSize ?? DEFAULT_TASK_CONCURRENCY_LIMITS.maxQueueSize;
     this.limits = {
-      maxTotalConcurrent:
-        options?.limits?.maxTotalConcurrent ?? DEFAULT_TASK_CONCURRENCY_LIMITS.maxTotalConcurrent,
-      maxQueueSize: options?.limits?.maxQueueSize ?? DEFAULT_TASK_CONCURRENCY_LIMITS.maxQueueSize,
+      maxTotalConcurrent: Number.isFinite(rawMaxConc)
+        ? Math.max(1, Math.floor(rawMaxConc))
+        : DEFAULT_TASK_CONCURRENCY_LIMITS.maxTotalConcurrent,
+      maxQueueSize: Number.isFinite(rawMaxQueue)
+        ? Math.max(1, Math.floor(rawMaxQueue))
+        : DEFAULT_TASK_CONCURRENCY_LIMITS.maxQueueSize,
       perSubsystemMax: {
         ...DEFAULT_TASK_CONCURRENCY_LIMITS.perSubsystemMax,
         ...(options?.limits?.perSubsystemMax ?? {}),
@@ -123,10 +128,16 @@ export class TaskScheduler {
     const duplicate = dedupeKey !== null && this.activeOrQueuedDedupe.has(dedupeKey);
     const snap = this.getSnapshot();
 
+    const safeEstimatedMemBytes =
+      typeof request.estimatedMemoryBytes === 'number' &&
+      Number.isFinite(request.estimatedMemoryBytes) &&
+      request.estimatedMemoryBytes > 0
+        ? request.estimatedMemoryBytes
+        : 0;
     const decision = this.admission.evaluateEnqueue({
       priority: request.priority,
       subsystem: request.subsystem,
-      estimatedMemoryBytes: request.estimatedMemoryBytes ?? 0,
+      estimatedMemoryBytes: safeEstimatedMemBytes,
       currentQueueLength: this.queue.length,
       activeHeavyCount: snap.activeHeavyCount,
       duplicateActiveOrQueued: duplicate,
@@ -165,10 +176,12 @@ export class TaskScheduler {
       subsystem: request.subsystem,
       idempotent: request.idempotent,
       dedupeKey,
-      estimatedMemoryBytes: request.estimatedMemoryBytes ?? 0,
+      estimatedMemoryBytes: safeEstimatedMemBytes,
       enqueuedOrder: ++this.orderSeq,
       deadlineAtMs:
-        typeof request.deadlineMs === 'number' && request.deadlineMs > 0
+        typeof request.deadlineMs === 'number' &&
+        Number.isFinite(request.deadlineMs) &&
+        request.deadlineMs > 0
           ? Date.now() + request.deadlineMs
           : null,
       abortController,

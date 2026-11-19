@@ -25,6 +25,11 @@ export function scaleIntegerRational(
   if (!Number.isSafeInteger(value) || value < 0) {
     throw new RangeError(`scaleIntegerRational requires non-negative safe integer, got ${value}`);
   }
+  if (numerator < 0n || denominator <= 0n) {
+    throw new RangeError(
+      `scaleIntegerRational requires numerator >= 0 and denominator > 0, got ${numerator}/${denominator}`,
+    );
+  }
   const bigVal = BigInt(value);
   const product = bigVal * numerator;
   let result: bigint;
@@ -108,6 +113,9 @@ export function flicksToSourceSampleExact(
   sourceRate: number,
 ): SourceSamplePosition {
   assertValidSampleRate(sourceRate);
+  if (!Number.isFinite(flicks)) {
+    throw new RangeError(`flicksToSourceSampleExact requires finite flicks, got ${flicks}`);
+  }
   return asSourceSamplePosition(
     scaleIntegerRational(
       Math.max(0, Math.round(flicks)),

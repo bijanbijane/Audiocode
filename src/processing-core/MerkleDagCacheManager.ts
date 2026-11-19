@@ -49,15 +49,18 @@ export class MerkleDagCacheManager<TData = Float32Array[]> {
       const node = nodeMap.get(nodeId);
       if (!node) continue;
 
-      const parentIds = (incomingParents.get(nodeId) ?? []).sort();
+      const parentIds = [...(incomingParents.get(nodeId) ?? [])].sort();
       const parentMerkleSignatures = parentIds.map(
         (pid) => `${pid}:${merkleHashes.get(pid) ?? 'root'}`,
       );
 
-      // If a single-input node is bypassed, it inherits its parent's Merkle hash directly
+      // If a single-input node is bypassed and its parent hash exists, inherit it directly
       if (!node.enabled && parentIds.length === 1) {
-        merkleHashes.set(nodeId, merkleHashes.get(parentIds[0])!);
-        continue;
+        const parentHash = merkleHashes.get(parentIds[0]);
+        if (parentHash !== undefined) {
+          merkleHashes.set(nodeId, parentHash);
+          continue;
+        }
       }
 
       const canonicalNodePayload = JSON.stringify({

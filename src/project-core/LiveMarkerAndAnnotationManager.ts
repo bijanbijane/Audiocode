@@ -30,10 +30,15 @@ export class LiveMarkerAndAnnotationManager {
     noteFa: string;
     humanReactionLookbackMs?: number; // پیش‌فرض ۵۵۰ میلی‌ثانیه جبران زمان واکنش انسان
   }): TimelineAnnotationMarker {
-    const lookbackFlicks = TimeMath.secondsToFlicks(
-      (params.humanReactionLookbackMs ?? 550) / 1000,
-    );
-    const compensatedFlicks = Math.max(0, params.rawTriggerFlicks - lookbackFlicks);
+    const safeTriggerFlicks =
+      Number.isFinite(params.rawTriggerFlicks) && params.rawTriggerFlicks > 0
+        ? Math.floor(params.rawTriggerFlicks)
+        : 0;
+    const rawLookbackMs = params.humanReactionLookbackMs ?? 550;
+    const safeLookbackMs =
+      Number.isFinite(rawLookbackMs) && rawLookbackMs >= 0 ? rawLookbackMs : 550;
+    const lookbackFlicks = TimeMath.secondsToFlicks(safeLookbackMs / 1000);
+    const compensatedFlicks = Math.max(0, safeTriggerFlicks - lookbackFlicks);
 
     const marker: TimelineAnnotationMarker = {
       markerId: `mk_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
@@ -56,8 +61,20 @@ export class LiveMarkerAndAnnotationManager {
     deletedTimelineRange: TimeRange,
     injectedRoomToneFlicks: Flicks = 0,
   ): TimelineAnnotationMarker[] {
-    const netShiftLeft =
-      deletedTimelineRange.end - deletedTimelineRange.start - injectedRoomToneFlicks;
+    if (
+      !Number.isFinite(deletedTimelineRange.start) ||
+      !Number.isFinite(deletedTimelineRange.end) ||
+      deletedTimelineRange.end <= deletedTimelineRange.start
+    ) {
+      return [...this.markers];
+    }
+
+    const cutDuration = deletedTimelineRange.end - deletedTimelineRange.start;
+    const safeRoomTone =
+      Number.isFinite(injectedRoomToneFlicks) && injectedRoomToneFlicks > 0
+        ? Math.min(cutDuration, Math.floor(injectedRoomToneFlicks))
+        : 0;
+    const netShiftLeft = Math.max(0, cutDuration - safeRoomTone);
 
     this.markers = this.markers
       // حذف نشانگرهایی که دقیقاً داخل بازه حذف‌شده قرار داشته‌اند

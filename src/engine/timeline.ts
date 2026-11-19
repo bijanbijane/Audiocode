@@ -7,7 +7,7 @@ import {
   TimelineClip,
   Track,
 } from '../contracts/v1_2';
-import { msToFlicks, rangeDurationFlicks, rangesOverlap } from './timebase';
+import { flicksToSamples, msToFlicks, rangeDurationFlicks, rangesOverlap } from './timebase';
 
 /**
  * Multi-Track Sync-Locked Non-Destructive Timeline Engine (v1.2 Spec Sections 24 & 25)
@@ -46,6 +46,68 @@ export function cloneRecommendations(recs: SmartRecommendation[]): SmartRecommen
 }
 
 /**
+ * Measures peak RMS energy (dBFS) on a track within `range` using raw PCM sources when available.
+ * Used as an acoustic fallback when a peer track has active speech without ASR tokens.
+ */
+function measureTrackAcousticRmsDbfs(
+  track: Track,
+  range: FlickRange,
+  pcmSources: Record<string, Float32Array>,
+  sampleRate: number,
+): number {
+  let sumSq = 0;
+  let totalSamples = 0;
+
+  for (const clip of track.clips) {
+    if (clip.muted || clip.kind === 'room-tone-fill') continue;
+    const src = pcmSources[clip.assetId];
+    if (!src || src.length === 0) continue;
+
+    const overlapStart = Math.max(clip.timelineRange.startFlicks, range.startFlicks);
+    const overlapEnd = Math.min(clip.timelineRange.endFlicks, range.endFlicks);
+    if (overlapEnd <= overlapStart) continue;
+
+    const clipStartSample = flicksToSamples(clip.timelineRange.startFlicks, sampleRate);
+    const srcBase = flicksToSamples(clip.sourceStartFlicks, sampleRate);
+    const sStart = Math.max(0, srcBase + (flicksToSamples(overlapStart, sampleRate) - clipStartSample));
+    const sEnd = Math.min(
+      src.length,
+      srcBase + (flicksToSamples(overlapEnd, sampleRate) - clipStartSample),
+    );
+
+    const step = sEnd - sStart > 4096 ? 4 : 1;
+    for (let i = sStart; i < sEnd; i += step) {
+      const v = src[i];
+      if (Number.isFinite(v)) {
+        sumSq += v * v;
+        totalSamples++;
+      }
+    }
+  }
+
+  if (totalSamples === 0) return -96;
+  const rms = Math.sqrt(sumSq / totalSamples);
+  if (rms <= 1e-6) return -96;
+  return 20 * Math.log10(rms);
+}
+
+/**
+ * Generates a bounded deterministic clip ID when splitting/cutting so repeated edits
+ * never produce unbounded "-L-R-L-R..." identifier growth.
+ */
+function makeSplitPieceClipId(
+  originalId: string,
+  side: 'L' | 'R',
+  startFlicks: number,
+  endFlicks: number,
+): string {
+  const rootId = originalId.replace(/(?:-[LR])+$/, '').replace(/-s\d+e\d+$/, '');
+  const candidate = `${originalId}-${side}`;
+  if (candidate.length <= 48) return candidate;
+  return `${rootId.slice(0, 24)}-${side}-s${Math.trunc(startFlicks / 705600)}e${Math.trunc(endFlicks / 705600)}`;
+}
+
+/**
  * Determines whether a cut on `targetTrackId` in `cutRange` can safely Ripple Delete
  * or must use In-Place Room Tone Suppression to protect multi-track sync.
  */
@@ -54,6 +116,8 @@ export function determineSyncSafeEditMode(
   targetTrackId: string,
   cutRange: FlickRange,
   tokens: PersianWordToken[],
+  pcmSources?: Record<string, Float32Array>,
+  sampleRate?: number,
 ): { mode: RecommendationActionMode; reasonFa: string } {
   const targetTrack = tracks.find((t) => t.id === targetTrackId);
   if (!targetTrack || !targetTrack.syncGroupId) {
@@ -68,6 +132,7 @@ export function determineSyncSafeEditMode(
   );
 
   for (const peer of peerTracks) {
+    if (peer.muted) continue;
     // Check if peer track has active non-disfluency/non-crosstalk speech tokens overlapping cutRange
     const peerActiveToken = tokens.find(
       (tok) =>
@@ -80,6 +145,17 @@ export function determineSyncSafeEditMode(
         mode: 'in-place-room-tone-suppression',
         reasonFa: `حفاظت سینک چندترک: در این بازه «${peer.speakerLabel}» در حال صحبت است («${peerActiveToken.displayText}»)؛ جایگزینی درجا با Room Tone اعمال می‌شود تا همگام‌سازی ترک‌ها به هم نخورد.`,
       };
+    }
+
+    // Acoustic fallback: if peer has no ASR tokens in this window, still protect active audio energy (> -34 dBFS)
+    if (pcmSources && sampleRate && sampleRate > 0) {
+      const peerRmsDb = measureTrackAcousticRmsDbfs(peer, cutRange, pcmSources, sampleRate);
+      if (peerRmsDb > -34) {
+        return {
+          mode: 'in-place-room-tone-suppression',
+          reasonFa: `حفاظت آکوستیک سینک چندترک: در این بازه روی ترک «${peer.speakerLabel}» انرژی صوتی فعال (${peerRmsDb.toFixed(1)} dBFS) تشخیص داده شد؛ جایگزینی درجا با Room Tone اعمال می‌شود.`,
+        };
+      }
     }
   }
 
@@ -98,6 +174,9 @@ function cutRangeFromClipList(
   trackId?: string,
 ): TimelineClip[] {
   const cutDur = rangeDurationFlicks(cutRange);
+  if (cutDur <= 0) {
+    return clips.map((c) => ({ ...c, timelineRange: { ...c.timelineRange } }));
+  }
   const nextClips: TimelineClip[] = [];
 
   for (const clip of clips) {
@@ -122,15 +201,21 @@ function cutRangeFromClipList(
       continue;
     }
 
-    // Case 3: Overlaps cutRange -> split into left/right pieces
+    // Case 3: Overlaps cutRange -> split into left/right pieces with protective 10ms micro-fades
     if (r.startFlicks < cutRange.startFlicks) {
+      const leftDurMs = (cutRange.startFlicks - r.startFlicks) / 705_600;
+      const maxFadeMs = Math.max(0, leftDurMs * 0.45);
+      const safeFadeInMs = Math.min(clip.fadeInMs, maxFadeMs);
+      const safeFadeOutMs = Math.min(Math.max(clip.fadeOutMs, 10), maxFadeMs);
       nextClips.push({
         ...clip,
-        id: `${clip.id}-L`,
+        id: makeSplitPieceClipId(clip.id, 'L', r.startFlicks, cutRange.startFlicks),
         timelineRange: {
           startFlicks: r.startFlicks,
           endFlicks: cutRange.startFlicks,
         },
+        fadeInMs: safeFadeInMs,
+        fadeOutMs: safeFadeOutMs,
       });
     }
 
@@ -138,15 +223,17 @@ function cutRangeFromClipList(
       const fillStart = Math.max(r.startFlicks, cutRange.startFlicks);
       const fillEnd = Math.min(r.endFlicks, cutRange.endFlicks);
       if (fillEnd > fillStart) {
+        const fillDurMs = (fillEnd - fillStart) / 705_600;
+        const safeFillFadeMs = Math.min(10, Math.max(0, fillDurMs * 0.45));
         nextClips.push({
-          id: `rt-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+          id: `rt-${trackId}-${fillStart}-${fillEnd}`,
           assetId: replaceWithRoomToneAssetId,
           trackId,
           kind: 'room-tone-fill',
           timelineRange: { startFlicks: fillStart, endFlicks: fillEnd },
           sourceStartFlicks: 0,
-          fadeInMs: 10,
-          fadeOutMs: 10,
+          fadeInMs: safeFillFadeMs,
+          fadeOutMs: safeFillFadeMs,
           gainDb: 0,
           muted: false,
         });
@@ -155,19 +242,22 @@ function cutRangeFromClipList(
 
     if (r.endFlicks > cutRange.endFlicks) {
       const consumedFromClipStart = cutRange.endFlicks - r.startFlicks;
+      const rightStart = shiftFollowingClips ? cutRange.endFlicks - cutDur : cutRange.endFlicks;
+      const rightEnd = shiftFollowingClips ? r.endFlicks - cutDur : r.endFlicks;
+      const rightDurMs = (rightEnd - rightStart) / 705_600;
+      const maxFadeMs = Math.max(0, rightDurMs * 0.45);
+      const safeFadeInMs = Math.min(Math.max(clip.fadeInMs, 10), maxFadeMs);
+      const safeFadeOutMs = Math.min(clip.fadeOutMs, maxFadeMs);
       nextClips.push({
         ...clip,
-        id: `${clip.id}-R`,
-        timelineRange: shiftFollowingClips
-          ? {
-              startFlicks: cutRange.endFlicks - cutDur,
-              endFlicks: r.endFlicks - cutDur,
-            }
-          : {
-              startFlicks: cutRange.endFlicks,
-              endFlicks: r.endFlicks,
-            },
+        id: makeSplitPieceClipId(clip.id, 'R', rightStart, rightEnd),
+        timelineRange: {
+          startFlicks: rightStart,
+          endFlicks: rightEnd,
+        },
         sourceStartFlicks: clip.sourceStartFlicks + consumedFromClipStart,
+        fadeInMs: safeFadeInMs,
+        fadeOutMs: safeFadeOutMs,
       });
     }
   }
@@ -199,7 +289,8 @@ export function applySyncSafeCut(
   // In-Place Room Tone Suppression: only affects targetTrackId, preserves timeline length & sync!
   return tracks.map((t) => {
     if (t.id !== targetTrackId) return t;
-    const primaryAssetId = t.clips[0]?.assetId ?? 'asset-1';
+    const primaryAssetId =
+      t.clips.find((c) => c.kind === 'speech')?.assetId ?? t.clips[0]?.assetId ?? 'asset-1';
     return {
       ...t,
       clips: cutRangeFromClipList(t.clips, cutRange, false, primaryAssetId, t.id),
@@ -306,6 +397,15 @@ export function projectTokensAfterCut(
           endFlicks: Math.max(cutRange.startFlicks + 1, r.endFlicks - cutDur),
         },
       });
+    } else if (r.startFlicks < cutRange.startFlicks && r.endFlicks > cutRange.endFlicks) {
+      // Strictly interior cut removing < 45% of the token: preserve token with reduced duration
+      projected.push({
+        ...tok,
+        range: {
+          startFlicks: r.startFlicks,
+          endFlicks: Math.max(r.startFlicks + 1, r.endFlicks - cutDur),
+        },
+      });
     }
   }
 
@@ -333,10 +433,13 @@ export function projectRecommendationsAfterCut(
       .map((t) => t.id),
   );
 
-  const shiftFlickRange = (r: FlickRange, delta: number): FlickRange => ({
-    startFlicks: Math.max(0, r.startFlicks - delta),
-    endFlicks: Math.max(1, r.endFlicks - delta),
-  });
+  const shiftFlickRange = (r: FlickRange, delta: number): FlickRange => {
+    const startFlicks = Math.max(0, r.startFlicks - delta);
+    return {
+      startFlicks,
+      endFlicks: Math.max(startFlicks + 1, r.endFlicks - delta),
+    };
+  };
 
   return recommendations.map((rec) => {
     const cloned = cloneRecommendations([rec])[0];
@@ -414,25 +517,30 @@ export function splitTrackClipsAtPlayhead(
       ) {
         splitCount++;
         const leftDuration = playheadFlicks - r.startFlicks;
+        const rightDuration = r.endFlicks - playheadFlicks;
+        const leftMaxFadeMs = Math.max(0, (leftDuration / 705_600) * 0.45);
+        const rightMaxFadeMs = Math.max(0, (rightDuration / 705_600) * 0.45);
         nextClips.push({
           ...clip,
-          id: `${clip.id}-sL`,
+          id: makeSplitPieceClipId(clip.id, 'L', r.startFlicks, playheadFlicks),
           timelineRange: {
             startFlicks: r.startFlicks,
             endFlicks: playheadFlicks,
           },
-          fadeOutMs: 10,
+          fadeInMs: Math.min(clip.fadeInMs, leftMaxFadeMs),
+          fadeOutMs: Math.min(Math.max(clip.fadeOutMs, 10), leftMaxFadeMs),
         });
         nextClips.push({
           ...clip,
-          id: `${clip.id}-sR`,
+          id: makeSplitPieceClipId(clip.id, 'R', playheadFlicks, r.endFlicks),
           timelineRange: {
             startFlicks: playheadFlicks,
             endFlicks: r.endFlicks,
           },
           sourceStartFlicks:
             clip.kind === 'speech' ? clip.sourceStartFlicks + leftDuration : 0,
-          fadeInMs: 10,
+          fadeInMs: Math.min(Math.max(clip.fadeInMs, 10), rightMaxFadeMs),
+          fadeOutMs: Math.min(clip.fadeOutMs, rightMaxFadeMs),
         });
       } else {
         nextClips.push({ ...clip, timelineRange: { ...r } });
@@ -517,6 +625,8 @@ export function applyBatchRecommendationsAtomically(params: {
   tokens: PersianWordToken[];
   recommendations: SmartRecommendation[];
   targetRecIds?: readonly string[];
+  pcmSources?: Record<string, Float32Array>;
+  sampleRate?: number;
 }): {
   tracks: Track[];
   tokens: PersianWordToken[];
@@ -565,6 +675,8 @@ export function applyBatchRecommendationsAtomically(params: {
       rec.trackId,
       cutRange,
       currentTokens,
+      params.pcmSources,
+      params.sampleRate,
     );
     const effectiveMode: RecommendationActionMode =
       rec.recommendedMode === 'in-place-room-tone-suppression'
@@ -616,6 +728,11 @@ export class TimelineHistoryManager {
   private undoStack: EditTransaction[] = [];
   private redoStack: EditTransaction[] = [];
   private projectVersion = 1;
+  private readonly maxDepth: number;
+
+  constructor(maxDepth = 100) {
+    this.maxDepth = Math.max(10, Math.trunc(maxDepth));
+  }
 
   commitTransaction(
     params: Omit<EditTransaction, 'operationId' | 'projectVersion' | 'commitStatus' | 'timestamp'>,
@@ -634,6 +751,9 @@ export class TimelineHistoryManager {
       if (params.afterRecommendations) {
         prev.afterRecommendations = cloneRecommendations(params.afterRecommendations);
       }
+      if (params.afterDsp) prev.afterDsp = { ...params.afterDsp };
+      if (params.afterPcmSources) prev.afterPcmSources = { ...params.afterPcmSources };
+      if (params.afterAssets) prev.afterAssets = { ...params.afterAssets };
       prev.description = params.description;
       prev.timestamp = now;
       this.redoStack = [];
@@ -655,10 +775,19 @@ export class TimelineHistoryManager {
       afterRecommendations: params.afterRecommendations
         ? cloneRecommendations(params.afterRecommendations)
         : undefined,
+      beforeDsp: params.beforeDsp ? { ...params.beforeDsp } : undefined,
+      afterDsp: params.afterDsp ? { ...params.afterDsp } : undefined,
+      beforePcmSources: params.beforePcmSources ? { ...params.beforePcmSources } : undefined,
+      afterPcmSources: params.afterPcmSources ? { ...params.afterPcmSources } : undefined,
+      beforeAssets: params.beforeAssets ? { ...params.beforeAssets } : undefined,
+      afterAssets: params.afterAssets ? { ...params.afterAssets } : undefined,
       commitStatus: 'committed',
     };
 
     this.undoStack.push(tx);
+    if (this.undoStack.length > this.maxDepth) {
+      this.undoStack.splice(0, this.undoStack.length - this.maxDepth);
+    }
     this.redoStack = [];
     return tx;
   }

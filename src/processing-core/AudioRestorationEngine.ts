@@ -363,13 +363,28 @@ export class AudioRestorationEngine {
     config: DeClickConfig,
   ): { clicksDetected: number; clickSamplesRepaired: number } {
     const n = samples.length;
-    if (n < 32) return { clicksDetected: 0, clickSamplesRepaired: 0 };
+    if (n < 32 || !Number.isFinite(sampleRate) || sampleRate <= 0) {
+      return { clicksDetected: 0, clickSamplesRepaired: 0 };
+    }
 
-    const sensitivity = Math.max(2.5, config.sensitivity ?? 6.5);
+    const rawSens =
+      config.sensitivity !== undefined && Number.isFinite(config.sensitivity)
+        ? config.sensitivity
+        : 6.5;
+    const rawMaxMs =
+      config.maxClickWidthMs !== undefined && Number.isFinite(config.maxClickWidthMs)
+        ? config.maxClickWidthMs
+        : 2.5;
+    const sensitivity = Math.max(2.5, rawSens);
     const maxClickSamples = Math.max(
       4,
-      Math.round(((config.maxClickWidthMs ?? 2.5) / 1000) * sampleRate),
+      Math.round((Math.max(0.1, rawMaxMs) / 1000) * sampleRate),
     );
+
+    // Sanitize any non-finite samples so prefix sums and Catmull-Rom anchors stay finite
+    for (let i = 0; i < n; i++) {
+      if (!Number.isFinite(samples[i])) samples[i] = 0;
+    }
 
     // 2nd-order difference highlights abrupt discontinuities (mouth clicks) while ignoring slow vowels
     const hp = new Float32Array(n);
@@ -474,16 +489,30 @@ export class AudioRestorationEngine {
     const n = samples.length;
     if (n < 8) return { clippedSegmentsRepaired: 0, preNormalizationPeak: 0 };
 
-    const threshold = Math.fround(Math.max(0.8, Math.min(0.9999, config.clipThreshold ?? 0.992))) - 1e-5;
+    for (let k = 0; k < n; k++) {
+      if (!Number.isFinite(samples[k])) samples[k] = 0;
+    }
+
+    const rawThresh =
+      config.clipThreshold !== undefined && Number.isFinite(config.clipThreshold)
+        ? config.clipThreshold
+        : 0.992;
+    const threshold = Math.fround(Math.max(0.8, Math.min(0.9999, rawThresh))) - 1e-5;
     const normalizeHeadroom = config.normalizeReconstructedHeadroom ?? true;
 
     let clippedSegmentsRepaired = 0;
-    let maxPeak = 0;
+    let maxPeak = Math.max(
+      Math.abs(samples[0]),
+      Math.abs(samples[1]),
+      Math.abs(samples[n - 2]),
+      Math.abs(samples[n - 1]),
+    );
     let i = 2;
 
     while (i < n - 2) {
-      if (Math.abs(samples[i]) < threshold) {
-        if (Math.abs(samples[i]) > maxPeak) maxPeak = Math.abs(samples[i]);
+      const absI = Math.abs(samples[i]);
+      if (absI < threshold) {
+        if (absI > maxPeak) maxPeak = absI;
         i++;
         continue;
       }
@@ -525,9 +554,11 @@ export class AudioRestorationEngine {
           if (absR > maxPeak) maxPeak = absR;
         }
         clippedSegmentsRepaired++;
+        i = end + 2;
+      } else {
+        if (absI > maxPeak) maxPeak = absI;
+        i = end + 1;
       }
-
-      i = end + 2;
     }
 
     if (normalizeHeadroom && maxPeak > 0.96) {
@@ -552,13 +583,25 @@ export class AudioRestorationEngine {
     const n = samples.length;
     const fftSize = AudioRestorationEngine.STFT_FFT_SIZE;
     const hopSize = AudioRestorationEngine.STFT_HOP_SIZE;
-    if (n < fftSize) return;
+    if (n < fftSize || !Number.isFinite(sampleRate) || sampleRate <= 0) return;
 
-    const reduction = Math.max(0, Math.min(1, config.reductionAmount ?? 0.55));
+    const rawReduction =
+      config.reductionAmount !== undefined && Number.isFinite(config.reductionAmount)
+        ? config.reductionAmount
+        : 0.55;
+    const reduction = Math.max(0, Math.min(1, rawReduction));
     if (reduction === 0) return;
 
-    const rt60Sec = Math.max(0.15, Math.min(3.0, config.estimatedRt60Seconds ?? 0.65));
-    const minGain = Math.max(0.05, Math.min(0.8, config.spectralFloor ?? 0.16));
+    const rawRt60 =
+      config.estimatedRt60Seconds !== undefined && Number.isFinite(config.estimatedRt60Seconds)
+        ? config.estimatedRt60Seconds
+        : 0.65;
+    const rawFloor =
+      config.spectralFloor !== undefined && Number.isFinite(config.spectralFloor)
+        ? config.spectralFloor
+        : 0.16;
+    const rt60Sec = Math.max(0.15, Math.min(3.0, rawRt60));
+    const minGain = Math.max(0.05, Math.min(0.8, rawFloor));
 
     // Periodic Hann window for exact COLA reconstruction at 75% overlap (hop = fftSize / 4)
     const window = new Float64Array(fftSize);
@@ -576,7 +619,7 @@ export class AudioRestorationEngine {
     const decayFactor = Math.exp((-13.8155 * hopSec) / rt60Sec);
 
     // Delay past frames by ~16ms so direct speech onsets and early reflections stay untouched
-    const delayFrames = Math.max(2, Math.round(0.016 / hopSec));
+    const delayFrames = Math.max(2, Math.min(64, Math.round(0.016 / hopSec)));
     const powerRing: Float64Array[] = Array.from(
       { length: delayFrames },
       () => new Float64Array(numBins),
@@ -592,7 +635,8 @@ export class AudioRestorationEngine {
 
     for (let pos = 0; pos + fftSize <= paddedLen; pos += hopSize) {
       for (let i = 0; i < fftSize; i++) {
-        const s = pos + i < n ? samples[pos + i] : 0;
+        const raw = pos + i < n ? samples[pos + i] : 0;
+        const s = Number.isFinite(raw) ? raw : 0;
         re[i] = s * window[i];
         im[i] = 0;
       }
@@ -671,7 +715,16 @@ export class AudioRestorationEngine {
     sensitivityThreshold = 14.0,
   ): number {
     const len = pcm.length;
-    if (len < 64) return 0;
+    if (len < 64 || !Number.isFinite(sampleRate) || sampleRate <= 0) return 0;
+
+    const safeSens =
+      Number.isFinite(sensitivityThreshold) && sensitivityThreshold > 0
+        ? sensitivityThreshold
+        : 14.0;
+
+    for (let i = 0; i < len; i++) {
+      if (!Number.isFinite(pcm[i])) pcm[i] = 0;
+    }
 
     const maxClickSamples = Math.max(4, Math.floor((sampleRate * 2.5) / 1000));
     const windowSize = Math.max(64, Math.floor((sampleRate * 20) / 1000));
@@ -693,7 +746,7 @@ export class AudioRestorationEngine {
         sumTkeo += tkeo[i];
       }
       const meanTkeo = sumTkeo / winLen + 1e-9;
-      const threshold = meanTkeo * sensitivityThreshold;
+      const threshold = meanTkeo * safeSens;
 
       let i = winStart;
       while (i < winEnd) {
@@ -736,7 +789,17 @@ export class AudioRestorationEngine {
       return { repairedClippedPeaksCount: 0, maxReconstructedPeakLinear: 0 };
     }
 
-    const thresh = Math.fround(clipThreshold) - 1e-5;
+    for (let k = 0; k < len; k++) {
+      if (!Number.isFinite(pcm[k])) pcm[k] = 0;
+    }
+
+    const safeClipThreshold = Number.isFinite(clipThreshold)
+      ? Math.max(0.5, Math.min(0.9999, clipThreshold))
+      : 0.992;
+    const safeHeadroomScale =
+      Number.isFinite(headroomScale) && headroomScale > 0 ? headroomScale : 0.75;
+
+    const thresh = Math.fround(safeClipThreshold) - 1e-5;
     let repairedCount = 0;
     let maxPeak = 0;
 
@@ -759,15 +822,17 @@ export class AudioRestorationEngine {
         if (runLength >= 2 && runLength <= 96) {
           this.interpolateHermiteSpanInPlace(pcm, clipStart, clipEnd + 1);
           repairedCount++;
+          i = clipEnd + 2;
+        } else {
+          i = clipEnd + 1;
         }
-        i = clipEnd + 2;
       } else {
         i++;
       }
     }
 
     for (let k = 0; k < len; k++) {
-      const scaled = pcm[k] * headroomScale;
+      const scaled = pcm[k] * safeHeadroomScale;
       pcm[k] = scaled;
       const abs = Math.abs(scaled);
       if (abs > maxPeak) maxPeak = abs;
@@ -787,6 +852,12 @@ export class AudioRestorationEngine {
     sampleRate: SampleRate,
     reductionAmount = 0.55,
   ): void {
+    if (!Number.isFinite(sampleRate) || sampleRate <= 0 || pcm.length === 0) return;
+
+    const safeReduction = Number.isFinite(reductionAmount)
+      ? Math.max(0, Math.min(1, reductionAmount))
+      : 0.55;
+
     const fastAttack = Math.exp(-1.0 / (0.003 * sampleRate));
     const fastRelease = Math.exp(-1.0 / (0.025 * sampleRate));
     const slowDecay = Math.exp(-1.0 / (0.18 * sampleRate));
@@ -795,7 +866,9 @@ export class AudioRestorationEngine {
     let reverbTailEnv = 0;
 
     for (let i = 0; i < pcm.length; i++) {
-      const abs = Math.abs(pcm[i]);
+      const raw = pcm[i];
+      const s = Number.isFinite(raw) ? raw : 0;
+      const abs = Math.abs(s);
 
       if (abs > fastEnv) {
         fastEnv = fastAttack * fastEnv + (1.0 - fastAttack) * abs;
@@ -810,8 +883,8 @@ export class AudioRestorationEngine {
       }
 
       const directToReverbRatio = Math.min(1.0, fastEnv / (reverbTailEnv + 1e-8));
-      const gain = 1.0 - reductionAmount * (1.0 - directToReverbRatio * directToReverbRatio);
-      pcm[i] *= Math.max(0.18, gain);
+      const gain = 1.0 - safeReduction * (1.0 - directToReverbRatio * directToReverbRatio);
+      pcm[i] = s * Math.max(0.18, gain);
     }
   }
 

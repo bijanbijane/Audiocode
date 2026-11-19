@@ -67,7 +67,12 @@ export class CloudExecutionAdapter implements UnifiedExecutionAdapter {
   constructor(options: CloudExecutionAdapterOptions) {
     this.config = Object.freeze({ ...options.config });
     this.transport = options.transport ?? null;
-    this.backoffBaseMs = options.backoffBaseMs ?? 5;
+    this.backoffBaseMs =
+      typeof options.backoffBaseMs === 'number' &&
+      Number.isFinite(options.backoffBaseMs) &&
+      options.backoffBaseMs >= 0
+        ? options.backoffBaseMs
+        : 5;
   }
 
   public async discoverCapabilities(): Promise<readonly ProviderCapabilityDescriptor[]> {
@@ -181,11 +186,16 @@ export class CloudExecutionAdapter implements UnifiedExecutionAdapter {
       });
     }
 
-    const timeoutMs = request.constraints?.timeoutMs ?? this.config.defaultTimeoutMs ?? 30_000;
-    const maxRetries = Math.max(
-      0,
-      Math.min(3, request.constraints?.maxRetries ?? this.config.maxRetries ?? 1),
-    );
+    const rawTimeoutMs = request.constraints?.timeoutMs ?? this.config.defaultTimeoutMs;
+    const timeoutMs =
+      typeof rawTimeoutMs === 'number' && Number.isFinite(rawTimeoutMs) && rawTimeoutMs > 0
+        ? Math.floor(rawTimeoutMs)
+        : 30_000;
+    const rawMaxRetries = request.constraints?.maxRetries ?? this.config.maxRetries;
+    const maxRetries =
+      typeof rawMaxRetries === 'number' && Number.isFinite(rawMaxRetries)
+        ? Math.max(0, Math.min(3, Math.floor(rawMaxRetries)))
+        : 1;
     const idempotencyKey = request.constraints?.idempotencyKey ?? request.jobId;
     const capabilities = await this.discoverCapabilities();
 
@@ -403,7 +413,8 @@ export class DeterministicMockCloudTransport implements CloudProviderTransport {
   ): CloudTransportResponse {
     const langInfo = detectTextLanguageTag(rawText);
     const normalizedByProfile = buildAllNormalizationProfiles(rawText);
-    const dur = req.payload.audio.metadata.durationSecEstimate ?? 1.0;
+    const rawDur = req.payload.audio.metadata.durationSecEstimate;
+    const dur = typeof rawDur === 'number' && Number.isFinite(rawDur) && rawDur >= 0 ? rawDur : 1.0;
     const nowIso = new Date().toISOString();
 
     const envelope: UnifiedProcessingResultEnvelope = {

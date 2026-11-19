@@ -75,10 +75,11 @@ export class SpeechReconstructionAndWatermarkEngine {
         bands.presence[i] * gPresLin +
         bands.air[i] * gAirLin;
 
-      const roomToneSample =
+      const roomToneRaw =
         studioRoomToneBuffer.length > 0
-          ? studioRoomToneBuffer[i % studioRoomToneBuffer.length] * 0.35
+          ? studioRoomToneBuffer[i % studioRoomToneBuffer.length]
           : 0;
+      const roomToneSample = Number.isFinite(roomToneRaw) ? roomToneRaw * 0.35 : 0;
 
       matchedClipPcm[i] = Math.max(-0.99, Math.min(0.99, reconstructedVoice + roomToneSample));
     }
@@ -102,7 +103,7 @@ export class SpeechReconstructionAndWatermarkEngine {
     sampleRate: SampleRate,
     provenanceSeed = 0x5a3c9f11,
   ): void {
-    if (sampleRate < 44100 || pcm.length < 256) return;
+    if (!Number.isFinite(sampleRate) || sampleRate < 44100 || pcm.length < 256) return;
 
     const carrierHz = 19000.0;
     const amplitude = Math.pow(10, -66.0 / 20.0); // -66 dBFS
@@ -116,7 +117,8 @@ export class SpeechReconstructionAndWatermarkEngine {
       }
       const chipSign = (lfsr & 1) === 1 ? 1.0 : -1.0;
       const carrier = Math.sin((2.0 * Math.PI * carrierHz * i) / sampleRate);
-      pcm[i] = Math.max(-1.0, Math.min(1.0, pcm[i] + chipSign * carrier * amplitude));
+      const baseSample = Number.isFinite(pcm[i]) ? pcm[i] : 0;
+      pcm[i] = Math.max(-1.0, Math.min(1.0, baseSample + chipSign * carrier * amplitude));
     }
   }
 
@@ -130,7 +132,7 @@ export class SpeechReconstructionAndWatermarkEngine {
     sampleRate: SampleRate,
     provenanceSeed = 0x5a3c9f11,
   ): { isWatermarked: boolean; correlationConfidence: number } {
-    if (sampleRate < 44100 || pcm.length < 256) {
+    if (!Number.isFinite(sampleRate) || sampleRate < 44100 || pcm.length < 256) {
       return { isWatermarked: false, correlationConfidence: 0 };
     }
 
@@ -165,7 +167,7 @@ export class SpeechReconstructionAndWatermarkEngine {
       }
       const chipSign = (lfsr & 1) === 1 ? 1.0 : -1.0;
       const rawTemplate = chipSign * Math.sin((2.0 * Math.PI * carrierHz * i) / sampleRate);
-      const rawPcm = pcm[i];
+      const rawPcm = Number.isFinite(pcm[i]) ? pcm[i] : 0;
 
       // Stage 1 + Stage 2 HPF on PCM
       const hp1Pcm = b0 * rawPcm + b1 * px1_1 + b2 * px1_2 - a1 * py1_1 - a2 * py1_2;
@@ -203,7 +205,10 @@ export class SpeechReconstructionAndWatermarkEngine {
     const rms = (arr: Float32Array): number => {
       if (arr.length === 0) return 0;
       let s = 0;
-      for (let i = 0; i < arr.length; i++) s += arr[i] * arr[i];
+      for (let i = 0; i < arr.length; i++) {
+        const v = Number.isFinite(arr[i]) ? arr[i] : 0;
+        s += v * v;
+      }
       return Math.sqrt(s / arr.length);
     };
 
@@ -231,16 +236,17 @@ export class SpeechReconstructionAndWatermarkEngine {
     const presence = new Float32Array(len);
     const air = new Float32Array(len);
 
-    const a280 = Math.exp((-2.0 * Math.PI * 280.0) / sampleRate);
-    const a1000 = Math.exp((-2.0 * Math.PI * 1000.0) / sampleRate);
-    const a4000 = Math.exp((-2.0 * Math.PI * 4000.0) / sampleRate);
+    const safeRate = Number.isFinite(sampleRate) && sampleRate > 0 ? sampleRate : 48000;
+    const a280 = Math.exp((-2.0 * Math.PI * 280.0) / safeRate);
+    const a1000 = Math.exp((-2.0 * Math.PI * 1000.0) / safeRate);
+    const a4000 = Math.exp((-2.0 * Math.PI * 4000.0) / safeRate);
 
     let lp280 = 0;
     let lp1000 = 0;
     let lp4000 = 0;
 
     for (let i = 0; i < len; i++) {
-      const x = pcm[i];
+      const x = Number.isFinite(pcm[i]) ? pcm[i] : 0;
       lp280 = (1.0 - a280) * x + a280 * lp280;
       lp1000 = (1.0 - a1000) * x + a1000 * lp1000;
       lp4000 = (1.0 - a4000) * x + a4000 * lp4000;

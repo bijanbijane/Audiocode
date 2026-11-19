@@ -173,6 +173,7 @@ export async function parseWavHeaderStreaming(file: {
       if (
         (audioFormat !== 1 && audioFormat !== 3) ||
         numChannels <= 0 ||
+        numChannels > 32 ||
         sampleRate <= 0 ||
         blockAlign <= 0
       ) {
@@ -188,6 +189,10 @@ export async function parseWavHeaderStreaming(file: {
         return null;
       }
       if (audioFormat === 3 && bitsPerSample !== 32) {
+        return null;
+      }
+      const minBlockAlign = numChannels * (bitsPerSample / 8);
+      if (blockAlign < minBlockAlign) {
         return null;
       }
       const availableBytes = Math.max(0, Math.min(chunkSize, file.size - payloadStart));
@@ -226,6 +231,7 @@ function decodeWavChunkToMonoFloat32(
     let sum = 0;
     for (let c = 0; c < layout.numChannels; c++) {
       const off = frameOffset + c * bytesPerSample;
+      if (off + bytesPerSample > bytes.byteLength) break;
       let sample = 0;
       if (layout.audioFormat === 3) {
         sample = view.getFloat32(off, true);
@@ -255,6 +261,8 @@ class StreamingAcousticProfileAccumulator {
   private readonly quietFrames: { rms: number; samples: Float32Array }[] = [];
   private readonly maxCollectedQuiet = 32;
   private readonly frameLen: number;
+  private totalFramesCount = 0;
+  private silentFramesCount = 0;
 
   constructor(
     private readonly assetId: string,
@@ -271,7 +279,11 @@ class StreamingAcousticProfileAccumulator {
         sumSq += s * s;
       }
       const rms = Math.sqrt(sumSq / this.frameLen);
-      if (rms <= 1e-6) continue;
+      this.totalFramesCount++;
+      if (rms <= 1e-6) {
+        this.silentFramesCount++;
+        continue;
+      }
 
       if (this.quietFrames.length < this.maxCollectedQuiet) {
         this.quietFrames.push({ rms, samples: chunk.slice(i, i + this.frameLen) });
@@ -290,12 +302,16 @@ class StreamingAcousticProfileAccumulator {
 
   public finalize(): AcousticProfile {
     this.quietFrames.sort((a, b) => a.rms - b.rms);
-    if (this.quietFrames.length === 0) {
+    const silentRatio =
+      this.totalFramesCount > 0 ? this.silentFramesCount / this.totalFramesCount : 0;
+
+    if (this.quietFrames.length === 0 || silentRatio >= 0.1) {
+      const desiredLen = Math.round(this.sampleRate * 0.5);
       return {
         assetId: this.assetId,
-        noiseFloorDbfs: -60,
-        roomToneRms: 0.001,
-        roomToneSample: new Float32Array(Math.round(this.sampleRate * 0.5)),
+        noiseFloorDbfs: -66.02,
+        roomToneRms: 0.0005,
+        roomToneSample: new Float32Array(desiredLen),
         sampleRate: this.sampleRate,
       };
     }
@@ -306,14 +322,19 @@ class StreamingAcousticProfileAccumulator {
 
     const desiredLen = Math.round(this.sampleRate * 0.5);
     const roomToneSample = new Float32Array(desiredLen);
-    let writeOffset = 0;
-    let cursor = 0;
-    while (writeOffset < desiredLen) {
-      const frame = this.quietFrames[cursor % this.quietFrames.length].samples;
-      const copyLen = Math.min(frame.length, desiredLen - writeOffset);
-      roomToneSample.set(frame.subarray(0, copyLen), writeOffset);
-      writeOffset += copyLen;
-      cursor++;
+    const quietPool = this.quietFrames.filter(
+      (f) => f.rms <= Math.max(roomToneRms * 3, 0.015),
+    );
+    if (quietPool.length > 0) {
+      let writeOffset = 0;
+      let cursor = 0;
+      while (writeOffset < desiredLen) {
+        const frame = quietPool[cursor % quietPool.length].samples;
+        const copyLen = Math.min(frame.length, desiredLen - writeOffset);
+        roomToneSample.set(frame.subarray(0, copyLen), writeOffset);
+        writeOffset += copyLen;
+        cursor++;
+      }
     }
 
     return {
@@ -520,15 +541,21 @@ export async function ingestAudioFileStreaming(
             monoChunk = decodeWavChunkToMonoFloat32(rawSlice, wavLayout);
           } else if (decodedAudioBuffer) {
             monoChunk = new Float32Array(count);
-            const numCh = decodedAudioBuffer.numberOfChannels;
+            const numCh = Math.max(1, decodedAudioBuffer.numberOfChannels);
             const invCh = 1 / numCh;
             for (let c = 0; c < numCh; c++) {
               const channelView = decodedAudioBuffer
                 .getChannelData(c)
                 .subarray(startSample, startSample + count);
-              for (let i = 0; i < count; i++) {
-                monoChunk[i] += channelView[i] * invCh;
+              for (let i = 0; i < channelView.length; i++) {
+                const s = channelView[i];
+                if (Number.isFinite(s)) {
+                  monoChunk[i] += s * invCh;
+                }
               }
+            }
+            for (let i = 0; i < count; i++) {
+              monoChunk[i] = Math.max(-1, Math.min(1, monoChunk[i]));
             }
           } else {
             monoChunk = new Float32Array(count);
@@ -672,8 +699,10 @@ export async function ingestAudioFileStreaming(
       const assembled = new Float32Array(totalSamples);
       let off = 0;
       for (const c of fallbackChunks) {
-        assembled.set(c, off);
-        off += c.length;
+        if (off >= assembled.length) break;
+        const copyLen = Math.min(c.length, assembled.length - off);
+        assembled.set(c.subarray(0, copyLen), off);
+        off += copyLen;
       }
       pcmSources = { [assetId]: assembled };
     }

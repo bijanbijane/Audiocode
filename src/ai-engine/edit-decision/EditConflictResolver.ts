@@ -25,6 +25,9 @@ function isDestructive(proposal: EditProposal): boolean {
 function getEffectiveInterval(proposal: EditProposal): { start: number; end: number } | null {
   const interval = proposal.proposedRange ?? proposal.originalRange;
   if (!interval) return null;
+  if (!Number.isFinite(interval.startSample) || !Number.isFinite(interval.endSample)) {
+    return null;
+  }
   return { start: interval.startSample, end: interval.endSample };
 }
 
@@ -44,6 +47,10 @@ function makeConflictId(type: EditConflictType, ids: readonly string[]): string 
   return `conf_${deterministicHexHash(`${type}|${sorted}`)}`;
 }
 
+function safeSample(val: number | undefined, fallback: number): number {
+  return val !== undefined && Number.isFinite(val) ? val : fallback;
+}
+
 /**
  * Deterministic Overlap & Conflict Resolver (AVP-P05-001 Section 8)
  * Reconciles duplicates, identical/overlapping/nested/adjacent intervals,
@@ -59,14 +66,26 @@ export class EditConflictResolver {
     const conflicts: EditConflictRecord[] = [];
     const conflictMap = new Map<string, string[]>(); // proposalId -> conflictIds
 
-    // Sort deterministically by trackId, startSample, endSample, proposalId
+    // Sort deterministically by trackId, earliest of (originalRange, proposedRange) startSample, endSample, proposalId
     const working: EditProposal[] = [...params.proposals].sort((a, b) => {
       if (a.trackId !== b.trackId) return a.trackId.localeCompare(b.trackId);
-      const aStart = a.originalRange?.startSample ?? Number.MAX_SAFE_INTEGER;
-      const bStart = b.originalRange?.startSample ?? Number.MAX_SAFE_INTEGER;
+      const aStart = Math.min(
+        safeSample(a.originalRange?.startSample, Number.MAX_SAFE_INTEGER),
+        safeSample(a.proposedRange?.startSample, Number.MAX_SAFE_INTEGER),
+      );
+      const bStart = Math.min(
+        safeSample(b.originalRange?.startSample, Number.MAX_SAFE_INTEGER),
+        safeSample(b.proposedRange?.startSample, Number.MAX_SAFE_INTEGER),
+      );
       if (aStart !== bStart) return aStart - bStart;
-      const aEnd = a.originalRange?.endSample ?? Number.MAX_SAFE_INTEGER;
-      const bEnd = b.originalRange?.endSample ?? Number.MAX_SAFE_INTEGER;
+      const aEnd = Math.max(
+        safeSample(a.originalRange?.endSample, 0),
+        safeSample(a.proposedRange?.endSample, 0),
+      );
+      const bEnd = Math.max(
+        safeSample(b.originalRange?.endSample, 0),
+        safeSample(b.proposedRange?.endSample, 0),
+      );
       if (aEnd !== bEnd) return aEnd - bEnd;
       return a.proposalId.localeCompare(b.proposalId);
     });
@@ -413,8 +432,10 @@ export class EditConflictResolver {
   }
 
   private static pickHigherConfidenceWinner(a: EditProposal, b: EditProposal): EditProposal {
-    const scoreA = a.eventConfidenceScore ?? 0;
-    const scoreB = b.eventConfidenceScore ?? 0;
+    const rawA = a.eventConfidenceScore;
+    const rawB = b.eventConfidenceScore;
+    const scoreA = rawA !== null && rawA !== undefined && Number.isFinite(rawA) ? rawA : 0;
+    const scoreB = rawB !== null && rawB !== undefined && Number.isFinite(rawB) ? rawB : 0;
     if (scoreA !== scoreB) return scoreA > scoreB ? a : b;
     return a.proposalId.localeCompare(b.proposalId) <= 0 ? a : b;
   }

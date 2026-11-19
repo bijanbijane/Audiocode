@@ -71,18 +71,39 @@ export class LongSessionMonitor {
   }
 
   public updateCounters(patch: LongSessionCounterPatch): void {
-    if (patch.loadedAudioAssets !== undefined) this.loadedAudioAssets = Math.max(0, patch.loadedAudioAssets);
-    if (patch.transcriptTokenCount !== undefined) this.transcriptTokenCount = Math.max(0, patch.transcriptTokenCount);
-    if (patch.timelineEventCount !== undefined) this.timelineEventCount = Math.max(0, patch.timelineEventCount);
-    if (patch.activeBackgroundJobs !== undefined) this.activeBackgroundJobs = Math.max(0, patch.activeBackgroundJobs);
-    if (patch.workerCount !== undefined) this.workerCount = Math.max(0, patch.workerCount);
-    if (patch.audioCacheBytes !== undefined) this.audioCacheBytes = Math.max(0, patch.audioCacheBytes);
+    const sanitizeCounter = (val: number | undefined, current: number) =>
+      typeof val === 'number' && Number.isFinite(val) ? Math.max(0, Math.floor(val)) : current;
+
+    if (patch.loadedAudioAssets !== undefined) {
+      this.loadedAudioAssets = sanitizeCounter(patch.loadedAudioAssets, this.loadedAudioAssets);
+    }
+    if (patch.transcriptTokenCount !== undefined) {
+      this.transcriptTokenCount = sanitizeCounter(patch.transcriptTokenCount, this.transcriptTokenCount);
+    }
+    if (patch.timelineEventCount !== undefined) {
+      this.timelineEventCount = sanitizeCounter(patch.timelineEventCount, this.timelineEventCount);
+    }
+    if (patch.activeBackgroundJobs !== undefined) {
+      this.activeBackgroundJobs = sanitizeCounter(patch.activeBackgroundJobs, this.activeBackgroundJobs);
+    }
+    if (patch.workerCount !== undefined) {
+      this.workerCount = sanitizeCounter(patch.workerCount, this.workerCount);
+    }
+    if (patch.audioCacheBytes !== undefined) {
+      this.audioCacheBytes = sanitizeCounter(patch.audioCacheBytes, this.audioCacheBytes);
+    }
     if (patch.repeatedOperationFailureCount !== undefined) {
-      this.repeatedOperationFailureCount = Math.max(0, patch.repeatedOperationFailureCount);
+      this.repeatedOperationFailureCount = sanitizeCounter(
+        patch.repeatedOperationFailureCount,
+        this.repeatedOperationFailureCount,
+      );
     }
   }
 
   public recordMetric(metric: PerformanceMetricName, durationOrValue: number): void {
+    if (!Number.isFinite(durationOrValue) || durationOrValue < 0) {
+      return;
+    }
     if (this.isPausedForMemoryEmergency()) {
       return;
     }

@@ -108,26 +108,40 @@ export function buildTimelineSuggestionsFromSpeechEvents(
     }
 
     const originalRangeFlicks: FlickRange = {
-      startFlicks: Number(ev.startFlicks),
-      endFlicks: Number(ev.endFlicks),
+      startFlicks: Number.isFinite(Number(ev.startFlicks))
+        ? Number(ev.startFlicks)
+        : Number(TimeMath.secondsToFlicks(ev.startSec)),
+      endFlicks: Number.isFinite(Number(ev.endFlicks))
+        ? Number(ev.endFlicks)
+        : Number(TimeMath.secondsToFlicks(ev.endSec)),
     };
     const proposedRangeFlicks: FlickRange = {
       startFlicks: Number(TimeMath.secondsToFlicks(proposedStartSec)),
       endFlicks: Number(TimeMath.secondsToFlicks(proposedEndSec)),
     };
 
+    const safeConf = Number.isFinite(ev.confidence) ? Math.max(0, Math.min(1, ev.confidence)) : 0;
+    const safeCalProb =
+      ev.scores.calibratedProbability !== null && Number.isFinite(ev.scores.calibratedProbability)
+        ? Math.max(0, Math.min(1, ev.scores.calibratedProbability))
+        : 0;
+
     const scoreNote =
       ev.scores.scoreCalibrationStatus === 'CALIBRATED_EMPIRICAL'
-        ? `احتمال کالیبره‌شده: ${Math.round((ev.scores.calibratedProbability ?? 0) * 100)}٪`
+        ? `احتمال کالیبره‌شده: ${Math.round(safeCalProb * 100)}٪`
         : ev.scores.scoreCalibrationStatus === 'MODEL_RAW_CONFIDENCE'
-          ? `اطمینان خام مدل: ${Math.round(ev.confidence * 100)}٪`
-          : `امتیاز هیوریستیک (غیرکالیبره): ${Math.round(ev.confidence * 100)}٪`;
+          ? `اطمینان خام مدل: ${Math.round(safeConf * 100)}٪`
+          : `امتیاز هیوریستیک (غیرکالیبره): ${Math.round(safeConf * 100)}٪`;
 
     const evidenceSummary = [
       `روش: ${ev.provenance.capabilityMode === 'model-based' ? 'مدل عصبی' : 'هیوریستیک سیگنال/زبانی'}`,
       scoreNote,
-      ev.scores.acousticScore !== null ? `آکوستیک=${ev.scores.acousticScore.toFixed(2)}` : 'آکوستیک=ندارد',
-      ev.scores.linguisticScore !== null ? `زبانی=${ev.scores.linguisticScore.toFixed(2)}` : 'زبانی=ندارد',
+      ev.scores.acousticScore !== null && Number.isFinite(ev.scores.acousticScore)
+        ? `آکوستیک=${ev.scores.acousticScore.toFixed(2)}`
+        : 'آکوستیک=ندارد',
+      ev.scores.linguisticScore !== null && Number.isFinite(ev.scores.linguisticScore)
+        ? `زبانی=${ev.scores.linguisticScore.toFixed(2)}`
+        : 'زبانی=ندارد',
       ev.scores.conflicts.length > 0 ? `تعارض=${ev.scores.conflicts.length}` : 'بدون تعارض شواهد',
     ].join(' | ');
 
@@ -146,7 +160,7 @@ export function buildTimelineSuggestionsFromSpeechEvents(
       reason: mapped.reasonEn,
       reasonFa: ev.explanationFa,
       evidenceSummary,
-      confidence: ev.confidence,
+      confidence: safeConf,
       scoreCalibrationStatus: ev.scores.scoreCalibrationStatus,
       riskClassification: mapped.riskClassification,
       requiresHumanReview: ev.requiresHumanReview || mapped.riskClassification !== 'LOW',

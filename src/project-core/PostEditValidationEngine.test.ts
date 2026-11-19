@@ -172,3 +172,76 @@ test('PostEditValidationEngine flags SYNC_GROUP_DURATION_DRIFT when sibling sync
   assert.equal(res.issues[0].trackId, 'track-guest');
   assert.equal(res.issues[0].autoHealable, false);
 });
+
+test('PostEditValidationEngine autoHealTimelineIssues clamps oversized fades on trimmed clips and detects track[0] sync drift', () => {
+  const s = (sec: number) => TimeMath.secondsToFlicks(sec);
+  // Clip 1 is 100ms [0..0.1s) with huge 80ms fadeIn & 80ms fadeOut, trimmed to 50ms by overlapping Clip 2 at 0.05s
+  const doc = makeBaseDoc([
+    {
+      id: 'track-short-fade',
+      name: 'Host',
+      syncGroupId: 'sg-1',
+      speakerId: 'host',
+      muted: false,
+      solo: false,
+      clips: [
+        {
+          id: 'c1',
+          trackId: 'track-short-fade',
+          kind: 'AUDIO_ASSET',
+          assetId: 'a1',
+          sourceRange: { start: 0, end: s(0.1) },
+          timelineRange: { start: 0, end: s(0.1) },
+          fadeInFlicks: s(0.08),
+          fadeOutFlicks: s(0.08),
+          gainDb: 0,
+        },
+        {
+          id: 'c2',
+          trackId: 'track-short-fade',
+          kind: 'AUDIO_ASSET',
+          assetId: 'a1',
+          sourceRange: { start: s(0.1), end: s(1.05) },
+          timelineRange: { start: s(0.05), end: s(1.0) },
+          fadeInFlicks: s(0.01),
+          fadeOutFlicks: s(0.01),
+          gainDb: 0,
+        },
+      ],
+    },
+    {
+      id: 'track-longer-peer',
+      name: 'Guest',
+      syncGroupId: 'sg-1',
+      speakerId: 'guest',
+      muted: false,
+      solo: false,
+      clips: [
+        {
+          id: 'g1',
+          trackId: 'track-longer-peer',
+          kind: 'AUDIO_ASSET',
+          assetId: 'a2',
+          sourceRange: { start: 0, end: s(1.5) },
+          timelineRange: { start: 0, end: s(1.5) },
+          fadeInFlicks: s(0.01),
+          fadeOutFlicks: s(0.01),
+          gainDb: 0,
+        },
+      ],
+    },
+  ]);
+
+  const healed = PostEditValidationEngine.autoHealTimelineIssues(doc);
+  const healedC1 = healed.tracks[0].clips[0];
+  const c1Len = healedC1.timelineRange.end - healedC1.timelineRange.start;
+  assert.ok(healedC1.fadeInFlicks + healedC1.fadeOutFlicks <= c1Len);
+
+  // Sync drift must flag track[0] (1.0s) against track[1] (1.5s)
+  const report = PostEditValidationEngine.validateProjectTimeline(healed);
+  assert.equal(report.isValid, false);
+  const drift = report.issues.find((i) => i.issueCode === 'SYNC_GROUP_DURATION_DRIFT');
+  assert.ok(drift);
+  assert.equal(drift.trackId, 'track-short-fade');
+});
+

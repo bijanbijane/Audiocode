@@ -48,19 +48,29 @@ export class PersianPodcastTeaserGeneratorEngine {
     sampleRate: SampleRate,
     maxHooksCount = 3,
   ): PodcastTeaserHookSegment[] {
-    if (tokens.length < 15 || pcmMono.length === 0) return [];
+    const validTokens = tokens.filter(
+      (t) => Number.isFinite(t.range.start) && Number.isFinite(t.range.end),
+    );
+    if (validTokens.length < 15 || pcmMono.length === 0) return [];
+    const safeRate: SampleRate =
+      Number.isFinite(sampleRate) && sampleRate > 0 ? sampleRate : 48000;
+    const safeMaxHooks =
+      Number.isFinite(maxHooksCount) && maxHooksCount > 0 ? Math.floor(maxHooksCount) : 3;
 
-    const candidateSegments = this.buildCandidateHookSegments(tokens, 10.0, 18.0);
+    const candidateSegments = this.buildCandidateHookSegments(validTokens, 10.0, 18.0);
     if (candidateSegments.length === 0) return [];
 
     const globalRms = this.computeSliceRms(pcmMono, 0, pcmMono.length);
 
     const scoredHooks: PodcastTeaserHookSegment[] = candidateSegments.map(
       (seg, idx) => {
-        const startSample = TimeMath.flicksToSamplesFloor(seg.range.start, sampleRate);
-        const endSample = Math.min(
-          pcmMono.length,
-          TimeMath.flicksToSamplesFloor(seg.range.end, sampleRate),
+        const startSample = Math.max(
+          0,
+          Math.min(pcmMono.length, TimeMath.flicksToSamplesFloor(seg.range.start, safeRate)),
+        );
+        const endSample = Math.max(
+          startSample,
+          Math.min(pcmMono.length, TimeMath.flicksToSamplesFloor(seg.range.end, safeRate)),
         );
 
         const segRms = this.computeSliceRms(pcmMono, startSample, endSample);
@@ -68,7 +78,7 @@ export class PersianPodcastTeaserGeneratorEngine {
           pcmMono,
           startSample,
           endSample,
-          sampleRate,
+          safeRate,
         );
         const acousticScore = Math.min(
           1.0,
@@ -100,7 +110,7 @@ export class PersianPodcastTeaserGeneratorEngine {
     const minSeparationFlicks = TimeMath.secondsToFlicks(60.0);
 
     for (const cand of sortedByScore) {
-      if (chosen.length >= maxHooksCount) break;
+      if (chosen.length >= safeMaxHooks) break;
       const tooClose = chosen.some(
         (existing) =>
           Math.abs(existing.audioRange.start - cand.audioRange.start) <
@@ -176,10 +186,13 @@ export class PersianPodcastTeaserGeneratorEngine {
     start: number,
     end: number,
   ): number {
-    const count = Math.max(1, end - start);
+    const s = Math.max(0, Math.min(pcm.length, start));
+    const e = Math.max(s, Math.min(pcm.length, end));
+    const count = Math.max(1, e - s);
     let sumSq = 0;
-    for (let i = start; i < end; i++) {
-      sumSq += pcm[i] * pcm[i];
+    for (let i = s; i < e; i++) {
+      const v = pcm[i];
+      if (Number.isFinite(v)) sumSq += v * v;
     }
     return Math.sqrt(sumSq / count);
   }
@@ -190,7 +203,8 @@ export class PersianPodcastTeaserGeneratorEngine {
     end: number,
     sampleRate: SampleRate,
   ): number {
-    const step = Math.floor(sampleRate * 0.1);
+    const safeRate = Number.isFinite(sampleRate) && sampleRate > 0 ? sampleRate : 48000;
+    const step = Math.max(1, Math.floor(safeRate * 0.1));
     const envValues: number[] = [];
     for (let pos = start; pos + step <= end; pos += step) {
       envValues.push(this.computeSliceRms(pcm, pos, pos + step));

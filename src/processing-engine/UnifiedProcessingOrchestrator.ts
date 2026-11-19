@@ -62,7 +62,11 @@ export class UnifiedProcessingOrchestrator {
         },
         transport: null,
       });
-    this.maxTraceEntries = Math.max(10, Math.min(500, options?.maxTraceEntries ?? 200));
+    const rawMaxTrace = options?.maxTraceEntries;
+    this.maxTraceEntries =
+      typeof rawMaxTrace === 'number' && Number.isFinite(rawMaxTrace)
+        ? Math.max(10, Math.min(500, Math.floor(rawMaxTrace)))
+        : 200;
   }
 
   public async discoverCapabilities(): Promise<UnifiedCapabilityReport> {
@@ -84,7 +88,12 @@ export class UnifiedProcessingOrchestrator {
   }
 
   public getExecutionTrace(limit = 50): readonly ExecutionTraceEntry[] {
-    return Object.freeze(this.traceHistory.slice(-Math.max(1, limit)));
+    if (typeof limit === 'number' && Number.isFinite(limit)) {
+      const safeLimit = Math.floor(limit);
+      if (safeLimit <= 0) return Object.freeze([]);
+      return Object.freeze(this.traceHistory.slice(-safeLimit));
+    }
+    return Object.freeze(this.traceHistory.slice(-50));
   }
 
   private recordTrace(entry: ExecutionTraceEntry): void {

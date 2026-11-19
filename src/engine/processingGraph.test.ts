@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   createDefaultStudioGraph,
+  deriveDspBypassFlags,
   planProcessingGraphPdc,
   processChunkWithPreRoll,
 } from './processingGraph';
@@ -61,3 +62,34 @@ test('Pre-Roll priming prevents initial gain transient jump compared to zero-sta
   const peakUnprimedStart = Math.max(...Array.from(unprimedOut.slice(0, 100)).map(Math.abs));
   assert.ok(peakPrimedStart < peakUnprimedStart);
 });
+
+test('deriveDspBypassFlags and processChunkWithPreRoll honor bypassed Processing Graph nodes', () => {
+  const sampleRate = 48_000;
+  const { nodes } = createDefaultStudioGraph();
+  // Bypass EQ, Gate, Compressor, and Limiter -> signal should pass cleanly with only master gain (0 dB = unity)
+  const allBypassedNodes = nodes.map((n) => ({ ...n, bypassed: n.kind !== 'source' }));
+  const flags = deriveDspBypassFlags(allBypassedNodes);
+  assert.deepEqual(flags, { eq: true, gate: true, compressor: true, limiter: true });
+
+  const input = new Float32Array(2048);
+  for (let i = 0; i < input.length; i++) {
+    // Low-frequency DC-like 15Hz wave at amplitude 1.2 (would normally be attenuated by HPF, compressed, and limited)
+    input[i] = 1.2 * Math.sin((2 * Math.PI * 15 * i) / sampleRate);
+  }
+  const params: EphemeralDspParams = {
+    highPassHz: 180,
+    compressorThresholdDb: -24,
+    compressorRatio: 6,
+    noiseGateThresholdDb: -20,
+    masterGainDb: 0,
+  };
+
+  const processed = processChunkWithPreRoll(input, 0, sampleRate, params);
+  const bypassed = processChunkWithPreRoll(input, 0, sampleRate, params, flags);
+
+  const peakProcessed = Math.max(...Array.from(processed).map(Math.abs));
+  const peakBypassed = Math.max(...Array.from(bypassed).map(Math.abs));
+  assert.ok(peakProcessed < 0.96, `Expected active chain to attenuate/limit signal, got ${peakProcessed}`);
+  assert.ok(Math.abs(peakBypassed - 1.2) < 1e-4, `Expected full bypass to preserve unity gain (1.2), got ${peakBypassed}`);
+});
+

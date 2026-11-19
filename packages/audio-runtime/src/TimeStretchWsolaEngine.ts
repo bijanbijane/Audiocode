@@ -17,13 +17,22 @@ export class TimeStretchWsolaEngine {
     sampleRate: SampleRate,
     tempoRatio: number,
   ): Float32Array {
-    const clampedTempo = Math.max(0.5, Math.min(2.5, tempoRatio));
-    if (Math.abs(clampedTempo - 1.0) < 0.005 || inputPcm.length < 2048) {
+    if (
+      !Number.isFinite(sampleRate) ||
+      sampleRate <= 0 ||
+      !Number.isFinite(tempoRatio) ||
+      tempoRatio <= 0
+    ) {
       return new Float32Array(inputPcm);
     }
 
-    // 25ms synthesis window (1200 samples @ 48kHz), even-aligned, 50% synthesis hop (12.5ms)
+    // 25ms synthesis window (1200 samples @ 48kHz, 2400 @ 96kHz), even-aligned, 50% synthesis hop
     const winLength = Math.max(128, Math.floor((sampleRate * 25) / 1000) & ~1);
+    const clampedTempo = Math.max(0.5, Math.min(2.5, tempoRatio));
+    if (Math.abs(clampedTempo - 1.0) < 0.005 || inputPcm.length < Math.max(2048, winLength)) {
+      return new Float32Array(inputPcm);
+    }
+
     const synthHop = winLength >> 1;
     // ±8ms phase-correlation search radius (covers down to ~62Hz fundamental period)
     const searchDelta = Math.max(16, Math.floor((sampleRate * 8) / 1000));
@@ -37,7 +46,8 @@ export class TimeStretchWsolaEngine {
 
     // Seed first frame
     for (let i = 0; i < winLength && i < inputPcm.length && i < outputLength; i++) {
-      outputPcm[i] = inputPcm[i] * hannWin[i];
+      const s = inputPcm[i];
+      outputPcm[i] = (Number.isFinite(s) ? s : 0) * hannWin[i];
     }
     synthPos += synthHop;
 
@@ -65,9 +75,14 @@ export class TimeStretchWsolaEngine {
         Math.min(inputPcm.length - winLength, targetAnalysisPos + bestOffset),
       );
 
-      const copyLimit = Math.min(winLength, outputLength - synthPos);
+      const copyLimit = Math.min(
+        winLength,
+        outputLength - synthPos,
+        inputPcm.length - chosenAnalysisPos,
+      );
       for (let i = 0; i < copyLimit; i++) {
-        outputPcm[synthPos + i] += inputPcm[chosenAnalysisPos + i] * hannWin[i];
+        const s = inputPcm[chosenAnalysisPos + i];
+        outputPcm[synthPos + i] += (Number.isFinite(s) ? s : 0) * hannWin[i];
       }
 
       prevChosenAnalysisPos = chosenAnalysisPos;

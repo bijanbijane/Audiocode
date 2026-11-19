@@ -26,6 +26,7 @@ export const ProcessingGraphView: React.FC<ProcessingGraphViewProps> = ({
   onToggleNodeBypass,
 }) => {
   const pdcPlan = planProcessingGraphPdc(nodes, edges);
+  const safeSampleRate = Number.isFinite(sampleRate) && sampleRate > 0 ? sampleRate : 48_000;
 
   return (
     <div className="space-y-6">
@@ -53,7 +54,7 @@ export const ProcessingGraphView: React.FC<ProcessingGraphViewProps> = ({
           <div dir="ltr" className="mt-1.5 text-base font-semibold font-mono text-slate-100 text-right">
             {pdcPlan.totalGraphLatencySamples} samples{' '}
             <span className="text-xs text-slate-400">
-              ({((pdcPlan.totalGraphLatencySamples / sampleRate) * 1000).toFixed(2)} ms)
+              ({((pdcPlan.totalGraphLatencySamples / safeSampleRate) * 1000).toFixed(2)} ms)
             </span>
           </div>
         </div>
@@ -63,7 +64,7 @@ export const ProcessingGraphView: React.FC<ProcessingGraphViewProps> = ({
           <div dir="ltr" className="mt-1.5 text-base font-semibold font-mono text-amber-400 text-right">
             {pdcPlan.totalPreRollSamples} samples{' '}
             <span className="text-xs text-slate-400">
-              ({((pdcPlan.totalPreRollSamples / sampleRate) * 1000).toFixed(0)} ms)
+              ({((pdcPlan.totalPreRollSamples / safeSampleRate) * 1000).toFixed(0)} ms)
             </span>
           </div>
         </div>
@@ -156,9 +157,9 @@ export const ProcessingGraphView: React.FC<ProcessingGraphViewProps> = ({
             خطوط تأخیر خودکارِ درج‌شده پیش از Master Bus (جلوگیری از خطای فاز Comb Filtering):
           </h3>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-            {pdcPlan.branchCompensations.map((bc) => (
+            {pdcPlan.branchCompensations.map((bc, idx) => (
               <div
-                key={bc.branchRootNodeId}
+                key={`${bc.branchRootNodeId}-${idx}`}
                 className="p-3 rounded border border-[#252F42] bg-[#131924] flex items-center justify-between text-xs"
               >
                 <div>

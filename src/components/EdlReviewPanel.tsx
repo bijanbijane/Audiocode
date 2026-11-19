@@ -21,7 +21,7 @@ import {
 import { EditDecisionListSnapshot, EditProposal } from '../ai-engine/edit-decision';
 import { SpeechEventAnalysisResult } from '../ai-engine/speech-events';
 import { PersianWordToken } from '../contracts/v1_2';
-import { flicksToSeconds } from '../engine/timebase';
+import { flicksToSamples, flicksToSeconds } from '../engine/timebase';
 import {
   analyzePersianOrthography,
   analyzePersianPunctuationProposals,
@@ -120,17 +120,48 @@ export const EdlReviewPanel: React.FC<EdlReviewPanelProps> = ({
   // P13 Persian Linguistic Refinement interactive state (non-destructive, versioned)
   const [lingLayer, setLingLayer] = useState<TranscriptLayerKind>('READABLE');
   const [lingDoc, setLingDoc] = useState<PersianTranscriptDocument | null>(null);
+  const [lingTokenIdMap, setLingTokenIdMap] = useState<Record<string, string>>({});
   const [lingCandidates, setLingCandidates] = useState<PersianAsrCorrectionCandidate[]>([]);
   const [lingStatusMsg, setLingStatusMsg] = useState<string | null>(null);
   const transformEngine = useMemo(() => new TranscriptTransformationEngine(), []);
 
   const handleRunPersianLinguistics = () => {
-    const rawAsrText = tokens.map((t) => t.originalText).join(' ');
+    transformEngine.clearHistory();
+    const activeTokens = tokens.filter((t) => !t.isCrosstalkSuppressed);
+    const studioSpans: Array<{ tokenId: string; startChar: number; endChar: number }> = [];
+    let cursor = 0;
+    const rawParts: string[] = [];
+    for (const tok of activeTokens) {
+      const word = tok.originalText;
+      if (rawParts.length > 0) cursor += 1;
+      const startChar = cursor;
+      const endChar = startChar + word.length;
+      studioSpans.push({ tokenId: tok.id, startChar, endChar });
+      rawParts.push(word);
+      cursor = endChar;
+    }
+    const rawAsrText = rawParts.join(' ');
     const doc = createPersianTranscriptDocument({
       documentId: `ling_${Date.now()}`,
       rawAsrText,
       sampleRate,
+      tokenSampleSpans: activeTokens.map((t) => ({
+        sourceStartSample: flicksToSamples(t.range.startFlicks, sampleRate),
+        sourceEndSample: flicksToSamples(t.range.endFlicks, sampleRate),
+      })),
     });
+
+    // Map each linguistic document tokenId back to its originating studio PersianWordToken.id
+    const nextTokenIdMap: Record<string, string> = {};
+    for (const lingTok of doc.tokens) {
+      const matchedSpan = studioSpans.find(
+        (s) => lingTok.startCharOffset < s.endChar && lingTok.endCharOffset > s.startChar,
+      );
+      if (matchedSpan) {
+        nextTokenIdMap[lingTok.tokenId] = matchedSpan.tokenId;
+      }
+    }
+    setLingTokenIdMap(nextTokenIdMap);
 
     const candidates: PersianAsrCorrectionCandidate[] = [];
     const orthoProposals = analyzePersianOrthography(doc);
@@ -243,8 +274,9 @@ export const EdlReviewPanel: React.FC<EdlReviewPanelProps> = ({
       prev.map((c) => (c.candidateId === candidate.candidateId ? res.updatedCandidate : c)),
     );
     const updatedTok = res.document.tokens.find((t) => t.tokenId === candidate.tokenIds[0]);
-    if (updatedTok && onApplyLinguisticReadableText) {
-      onApplyLinguisticReadableText(updatedTok.tokenId, updatedTok.readableText);
+    const studioTokenId = updatedTok ? lingTokenIdMap[updatedTok.tokenId] : undefined;
+    if (updatedTok && studioTokenId && onApplyLinguisticReadableText) {
+      onApplyLinguisticReadableText(studioTokenId, updatedTok.readableText);
     }
   };
 
@@ -256,12 +288,16 @@ export const EdlReviewPanel: React.FC<EdlReviewPanelProps> = ({
 
   const handleRevertLingCandidate = (candidateId: string) => {
     if (!lingDoc) return;
-    const res = transformEngine.revertLastTransformation(lingDoc);
+    const res = transformEngine.revertCandidateById(lingDoc, candidateId);
     if (!res.reverted) return;
     setLingDoc(res.document);
     setLingCandidates((prev) =>
       prev.map((c) => (c.candidateId === candidateId ? { ...c, status: 'REVERTED' } : c)),
     );
+    const studioTokenId = res.revertedTokenId ? lingTokenIdMap[res.revertedTokenId] : undefined;
+    if (studioTokenId && res.restoredReadableText !== null && onApplyLinguisticReadableText) {
+      onApplyLinguisticReadableText(studioTokenId, res.restoredReadableText);
+    }
   };
 
   const proposals = edlSnapshot?.proposals ?? [];

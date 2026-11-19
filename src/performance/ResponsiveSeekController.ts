@@ -26,7 +26,9 @@ export class ResponsiveSeekController {
     executor: (sample: number, signal: AbortSignal) => Promise<void> | void,
   ): Promise<SeekRequestResult> {
     const start = typeof performance !== 'undefined' ? performance.now() : Date.now();
-    const clampedSample = Math.max(0, Math.trunc(targetSample));
+    const clampedSample = Number.isFinite(targetSample)
+      ? Math.max(0, Math.trunc(targetSample))
+      : this.lastAppliedSample;
     this.totalRequests += 1;
 
     // Immediately cancel any previous in-flight seek so stale buffers/callbacks never accumulate

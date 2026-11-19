@@ -53,25 +53,35 @@ export class PostEditValidationEngine {
 
       for (let i = 0; i < sortedClips.length; i++) {
         const clip = sortedClips[i];
-        const durationFlicks = clip.timelineRange.end - clip.timelineRange.start;
+        const startFinite = Number.isFinite(clip.timelineRange.start);
+        const endFinite = Number.isFinite(clip.timelineRange.end);
+        const durationFlicks =
+          startFinite && endFinite ? clip.timelineRange.end - clip.timelineRange.start : Number.NaN;
+        const safeStartSec = startFinite
+          ? Number(TimeMath.flicksToSeconds(clip.timelineRange.start).toFixed(3))
+          : 0;
 
-        // 1. Orphan micro-sliver clips (< 15ms)
-        if (durationFlicks < minValidClipFlicks) {
+        // 1. Orphan micro-sliver clips (< 15ms) or non-finite corrupted timeline range
+        if (!Number.isFinite(durationFlicks) || durationFlicks < minValidClipFlicks) {
+          const msLabel = Number.isFinite(durationFlicks)
+            ? Math.round(TimeMath.flicksToSeconds(durationFlicks) * 1000)
+            : 0;
           issues.push({
             issueCode: 'ORPHAN_MICRO_SLIVER_CLIP',
             trackId: track.id,
             clipId: clip.id,
-            timeSeconds: Number(TimeMath.flicksToSeconds(clip.timelineRange.start).toFixed(3)),
+            timeSeconds: safeStartSec,
             autoHealable: true,
-            messageFa: `خردهکلیپ بسیار کوتاه (${Math.round(TimeMath.flicksToSeconds(durationFlicks) * 1000)}ms) شناسایی شد که ممکن است صدای تقه ایجاد کند.`,
+            messageFa: `خردهکلیپ بسیار کوتاه (${msLabel}ms) شناسایی شد که ممکن است صدای تقه ایجاد کند.`,
           });
         }
 
         if (i < sortedClips.length - 1) {
           const nextClip = sortedClips[i + 1];
+          const nextStartFinite = Number.isFinite(nextClip.timelineRange.start);
 
           // 2. Overlapping timeline clips
-          if (clip.timelineRange.end > nextClip.timelineRange.start) {
+          if (endFinite && nextStartFinite && clip.timelineRange.end > nextClip.timelineRange.start) {
             issues.push({
               issueCode: 'OVERLAPPING_TIMELINE_CLIPS',
               trackId: track.id,
@@ -82,13 +92,14 @@ export class PostEditValidationEngine {
             });
           }
 
-          // 3. Butt-cut boundary missing protective micro-fade
-          const isButtCut = clip.timelineRange.end === nextClip.timelineRange.start;
-          if (
-            isButtCut &&
-            (clip.fadeOutFlicks < minMicroFadeFlicks ||
-              nextClip.fadeInFlicks < minMicroFadeFlicks)
-          ) {
+          // 3. Butt-cut boundary missing protective micro-fade (also catches NaN/negative fade values)
+          const isButtCut =
+            endFinite && nextStartFinite && clip.timelineRange.end === nextClip.timelineRange.start;
+          const fadeOutOk =
+            Number.isFinite(clip.fadeOutFlicks) && clip.fadeOutFlicks >= minMicroFadeFlicks;
+          const fadeInOk =
+            Number.isFinite(nextClip.fadeInFlicks) && nextClip.fadeInFlicks >= minMicroFadeFlicks;
+          if (isButtCut && (!fadeOutOk || !fadeInOk)) {
             issues.push({
               issueCode: 'MISSING_BOUNDARY_MICRO_FADE',
               trackId: track.id,
@@ -100,11 +111,16 @@ export class PostEditValidationEngine {
           }
 
           // 4. Abrupt gain discontinuity at closely adjoining cut
-          const gapFlicks = nextClip.timelineRange.start - clip.timelineRange.end;
+          const gapFlicks =
+            endFinite && nextStartFinite
+              ? nextClip.timelineRange.start - clip.timelineRange.end
+              : Number.POSITIVE_INFINITY;
+          const gainDeltaDb = Math.abs(clip.gainDb - nextClip.gainDb);
           if (
             gapFlicks <= minValidClipFlicks &&
-            Math.abs(clip.gainDb - nextClip.gainDb) > MAX_SAFE_ADJACENT_GAIN_JUMP_DB
+            (!Number.isFinite(gainDeltaDb) || gainDeltaDb > MAX_SAFE_ADJACENT_GAIN_JUMP_DB)
           ) {
+            const deltaText = Number.isFinite(gainDeltaDb) ? gainDeltaDb.toFixed(1) : 'نامعتبر';
             issues.push({
               issueCode: 'LOUDNESS_GAIN_DISCONTINUITY',
               trackId: track.id,
@@ -113,7 +129,7 @@ export class PostEditValidationEngine {
                 TimeMath.flicksToSeconds(nextClip.timelineRange.start).toFixed(3),
               ),
               autoHealable: false,
-              messageFa: `پرش ناگهانی بلندی صدا (${Math.abs(clip.gainDb - nextClip.gainDb).toFixed(1)} dB) بین دو کلیپ مجاور شناسایی شد.`,
+              messageFa: `پرش ناگهانی بلندی صدا (${deltaText} dB) بین دو کلیپ مجاور شناسایی شد.`,
             });
           }
         }
@@ -121,7 +137,8 @@ export class PostEditValidationEngine {
 
       if (track.syncGroupId && sortedClips.length > 0) {
         const trackMaxEnd = sortedClips.reduce(
-          (maxEnd, c) => Math.max(maxEnd, c.timelineRange.end),
+          (maxEnd, c) =>
+            Number.isFinite(c.timelineRange.end) ? Math.max(maxEnd, c.timelineRange.end) : maxEnd,
           0,
         );
         const list = syncGroupMaxEnd.get(track.syncGroupId) ?? [];
@@ -130,17 +147,23 @@ export class PostEditValidationEngine {
       }
     }
 
-    // 5. Multi-track Sync-Lock duration drift check
+    // 5. Multi-track Sync-Lock duration drift check (compare against group max so track[0] drift is never masked)
     for (const entries of syncGroupMaxEnd.values()) {
       if (entries.length <= 1) continue;
-      const refEnd = entries[0].endFlicks;
-      for (let k = 1; k < entries.length; k++) {
-        const diffFlicks = Math.abs(entries[k].endFlicks - refEnd);
-        if (diffFlicks > maxSyncDriftFlicks) {
+      let maxEnd = entries[0].endFlicks;
+      let minEnd = entries[0].endFlicks;
+      for (const entry of entries) {
+        if (entry.endFlicks > maxEnd) maxEnd = entry.endFlicks;
+        if (entry.endFlicks < minEnd) minEnd = entry.endFlicks;
+      }
+      if (maxEnd - minEnd <= maxSyncDriftFlicks) continue;
+
+      for (const entry of entries) {
+        if (maxEnd - entry.endFlicks > maxSyncDriftFlicks) {
           issues.push({
             issueCode: 'SYNC_GROUP_DURATION_DRIFT',
-            trackId: entries[k].trackId,
-            timeSeconds: Number(TimeMath.flicksToSeconds(entries[k].endFlicks).toFixed(3)),
+            trackId: entry.trackId,
+            timeSeconds: Number(TimeMath.flicksToSeconds(entry.endFlicks).toFixed(3)),
             autoHealable: false,
             messageFa: 'اختلاف طول زمانی بین ترک‌های هم‌گروه شناسایی شد (خطر به‌هم‌ریختن سینک گویندگان).',
           });
@@ -156,9 +179,9 @@ export class PostEditValidationEngine {
 
   /**
    * Non-destructively heals boundary errors:
-   * - Removes orphan <15ms sliver clips
+   * - Removes orphan <15ms sliver clips and corrupted non-finite ranges
    * - Resolves clip overlaps by trimming earlier clip's end to next clip's start
-   * - Enforces protective >= 8ms micro-fades clamped within clip length
+   * - Enforces protective >= 8ms micro-fades clamped within clip length and sanitizes NaN fades/gain
    */
   public static autoHealTimelineIssues(doc: ProjectDocument): ProjectDocument {
     const minValidClipFlicks = TimeMath.secondsToFlicks(MIN_VALID_CLIP_SECONDS);
@@ -166,7 +189,12 @@ export class PostEditValidationEngine {
 
     const healedTracks: TimelineTrack[] = doc.tracks.map((track) => {
       const sorted = [...track.clips]
-        .filter((c) => c.timelineRange.end - c.timelineRange.start >= minValidClipFlicks)
+        .filter(
+          (c) =>
+            Number.isFinite(c.timelineRange.start) &&
+            Number.isFinite(c.timelineRange.end) &&
+            c.timelineRange.end - c.timelineRange.start >= minValidClipFlicks,
+        )
         .sort((a, b) => a.timelineRange.start - b.timelineRange.start);
 
       const nonOverlapping: TimelineClip[] = [];
@@ -197,11 +225,18 @@ export class PostEditValidationEngine {
 
       const fadeProtectedClips: TimelineClip[] = nonOverlapping.map((clip) => {
         const clipLen = clip.timelineRange.end - clip.timelineRange.start;
-        const safeFadeCap = Math.min(defaultMicroFadeFlicks, Math.floor(clipLen / 2));
+        const maxHalfFade = Math.floor(clipLen / 2);
+        const safeFadeFloor = Math.min(defaultMicroFadeFlicks, maxHalfFade);
+        const safeFadeIn =
+          Number.isFinite(clip.fadeInFlicks) && clip.fadeInFlicks > 0 ? clip.fadeInFlicks : 0;
+        const safeFadeOut =
+          Number.isFinite(clip.fadeOutFlicks) && clip.fadeOutFlicks > 0 ? clip.fadeOutFlicks : 0;
+        const safeGainDb = Number.isFinite(clip.gainDb) ? clip.gainDb : 0;
         return {
           ...clip,
-          fadeInFlicks: Math.max(clip.fadeInFlicks, safeFadeCap),
-          fadeOutFlicks: Math.max(clip.fadeOutFlicks, safeFadeCap),
+          gainDb: safeGainDb,
+          fadeInFlicks: Math.min(Math.max(safeFadeIn, safeFadeFloor), maxHalfFade),
+          fadeOutFlicks: Math.min(Math.max(safeFadeOut, safeFadeFloor), maxHalfFade),
         };
       });
 

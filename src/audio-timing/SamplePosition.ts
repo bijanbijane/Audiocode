@@ -89,6 +89,9 @@ export function createSourceSampleRange(
   endSample: number,
   sampleRate: number,
 ): SourceSampleRange {
+  if (!Number.isSafeInteger(sampleRate) || sampleRate <= 0) {
+    throw new RangeError(`SourceSampleRange sampleRate must be a positive safe integer, got ${sampleRate}`);
+  }
   const s = asSourceSamplePosition(startSample);
   const e = asSourceSamplePosition(endSample);
   if (e < s) {

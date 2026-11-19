@@ -26,6 +26,17 @@ jobs:
       - name: Install Dependencies Reproducibly
         run: npm ci --no-audit --no-fund
 
+      - name: Audit Rust Licenses & Supply Chain (cargo-deny)
+        uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          manifest-path: wasm-audio-core/Cargo.toml
+
+      - name: Verify Zero Circular TypeScript Dependencies
+        run: npx madge --circular --extensions ts,tsx src/ packages/
+
+      - name: Generate CycloneDX NPM SBOM
+        run: npx @cyclonedx/cyclonedx-npm --output-file sbom-npm.cdx.json
+
       - name: Verify TypeScript Compilation (Lint Gate)
         run: npm run lint
 
@@ -33,7 +44,7 @@ jobs:
         run: npx vitest run
 
       - name: Run Unit, Reliability & Fault-Injection Tests
-        run: npm run test:unit
+        run: npx tsx --test src/engine/*.test.ts src/audio-engine/*.test.ts src/processing-core/*.test.ts src/project-core/*.test.ts src/runtime/*.test.ts src/security/*.test.ts src/quality-gate/*.test.ts
 
       - name: Run End-to-End Quality Gates
         run: npm run test:quality-gates

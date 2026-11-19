@@ -37,7 +37,12 @@ export class DawTimelineInterchangeExporter {
     doc: ProjectDocument,
     assetFileNamesMap: AssetFileNameLookup,
   ): string {
-    const sr = doc.canonicalSampleRate;
+    const sr =
+      Number.isFinite(doc.canonicalSampleRate) && doc.canonicalSampleRate > 0
+        ? Math.floor(doc.canonicalSampleRate)
+        : 48000;
+    const safeFlicks = (val: number): number =>
+      Number.isFinite(val) && val > 0 ? val : 0;
     const lines: string[] = [
       `<?xml version="1.0" encoding="UTF-8" standalone="no" ?>`,
       `<sesx version="1.9">`,
@@ -51,24 +56,29 @@ export class DawTimelineInterchangeExporter {
         `      <audioTrack automationLaneOpenState="false" id="${trackIdx + 1}" index="${trackIdx + 1}">`,
         `        <trackParameters>`,
         `          <name>${this.escapeXml(track.name)}</name>`,
-        `          <mute>${track.muted}</mute>`,
-        `          <solo>${track.solo}</solo>`,
+        `          <mute>${Boolean(track.muted)}</mute>`,
+        `          <solo>${Boolean(track.solo)}</solo>`,
         `        </trackParameters>`,
       );
 
       track.clips.forEach((clip, clipIdx) => {
-        const tlStartSample = TimeMath.flicksToSamplesFloor(clip.timelineRange.start, sr);
-        const tlEndSample = TimeMath.flicksToSamplesFloor(clip.timelineRange.end, sr);
-        const srcStartSample = TimeMath.flicksToSamplesFloor(clip.sourceRange.start, sr);
-        const srcEndSample = TimeMath.flicksToSamplesFloor(clip.sourceRange.end, sr);
+        const tlStartFlicks = safeFlicks(clip.timelineRange.start);
+        const tlEndFlicks = Math.max(tlStartFlicks, safeFlicks(clip.timelineRange.end));
+        const srcStartFlicks = safeFlicks(clip.sourceRange.start);
+        const srcEndFlicks = Math.max(srcStartFlicks, safeFlicks(clip.sourceRange.end));
+
+        const tlStartSample = TimeMath.flicksToSamplesFloor(tlStartFlicks, sr as 48000);
+        const tlEndSample = TimeMath.flicksToSamplesFloor(tlEndFlicks, sr as 48000);
+        const srcStartSample = TimeMath.flicksToSamplesFloor(srcStartFlicks, sr as 48000);
+        const srcEndSample = TimeMath.flicksToSamplesFloor(srcEndFlicks, sr as 48000);
         const clipLenSamples = Math.max(0, tlEndSample - tlStartSample);
         const fadeInSamples = Math.min(
           clipLenSamples,
-          Math.max(0, TimeMath.flicksToSamplesFloor(clip.fadeInFlicks, sr)),
+          Math.max(0, TimeMath.flicksToSamplesFloor(safeFlicks(clip.fadeInFlicks), sr as 48000)),
         );
         const fadeOutSamples = Math.min(
           clipLenSamples,
-          Math.max(0, TimeMath.flicksToSamplesFloor(clip.fadeOutFlicks, sr)),
+          Math.max(0, TimeMath.flicksToSamplesFloor(safeFlicks(clip.fadeOutFlicks), sr as 48000)),
         );
 
         lines.push(
@@ -106,9 +116,17 @@ export class DawTimelineInterchangeExporter {
     assetFileNamesMap: AssetFileNameLookup,
     timestampSec = Math.floor(Date.now() / 1000),
   ): string {
+    const sr =
+      Number.isFinite(doc.canonicalSampleRate) && doc.canonicalSampleRate > 0
+        ? Math.floor(doc.canonicalSampleRate)
+        : 48000;
+    const safeTimestamp = Number.isFinite(timestampSec) ? Math.max(0, Math.floor(timestampSec)) : 0;
+    const safeFlicks = (val: number): number =>
+      Number.isFinite(val) && val > 0 ? val : 0;
+
     const lines: string[] = [
-      `<REAPER_PROJECT 0.1 "7.0" ${Math.floor(timestampSec)}`,
-      `  SAMPLERATE ${doc.canonicalSampleRate} 0 0`,
+      `<REAPER_PROJECT 0.1 "7.0" ${safeTimestamp}`,
+      `  SAMPLERATE ${sr} 0 0`,
     ];
 
     for (const track of doc.tracks) {
@@ -122,15 +140,19 @@ export class DawTimelineInterchangeExporter {
       );
 
       for (const clip of track.clips) {
-        const posSec = TimeMath.flicksToSeconds(clip.timelineRange.start).toFixed(6);
-        const lenSec = Math.max(
-          0,
-          TimeMath.flicksToSeconds(clip.timelineRange.end - clip.timelineRange.start),
-        ).toFixed(6);
-        const soffsSec = TimeMath.flicksToSeconds(clip.sourceRange.start).toFixed(6);
-        const fadeInSec = Math.max(0, TimeMath.flicksToSeconds(clip.fadeInFlicks)).toFixed(6);
-        const fadeOutSec = Math.max(0, TimeMath.flicksToSeconds(clip.fadeOutFlicks)).toFixed(6);
-        const linearGain = Math.pow(10, clip.gainDb / 20).toFixed(6);
+        const tlStart = safeFlicks(clip.timelineRange.start);
+        const tlEnd = Math.max(tlStart, safeFlicks(clip.timelineRange.end));
+        const srcStart = safeFlicks(clip.sourceRange.start);
+        const safeGainDb = Number.isFinite(clip.gainDb)
+          ? Math.max(-120, Math.min(48, clip.gainDb))
+          : 0;
+
+        const posSec = TimeMath.flicksToSeconds(tlStart).toFixed(6);
+        const lenSec = Math.max(0, TimeMath.flicksToSeconds(tlEnd - tlStart)).toFixed(6);
+        const soffsSec = TimeMath.flicksToSeconds(srcStart).toFixed(6);
+        const fadeInSec = Math.max(0, TimeMath.flicksToSeconds(safeFlicks(clip.fadeInFlicks))).toFixed(6);
+        const fadeOutSec = Math.max(0, TimeMath.flicksToSeconds(safeFlicks(clip.fadeOutFlicks))).toFixed(6);
+        const linearGain = Math.pow(10, safeGainDb / 20).toFixed(6);
         const fileName = resolveAssetFileName(clip.assetId, assetFileNamesMap);
 
         lines.push(

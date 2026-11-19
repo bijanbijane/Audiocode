@@ -58,7 +58,11 @@ export class AudioIngestionAndUrlGuard {
     const sanitizedFilename = sanitizeAudioFilename(params.filename);
     const sha256 = crypto.createHash('sha256').update(params.bytes).digest('hex');
 
-    if (params.bytes.byteLength > limits.maxUploadBytes) {
+    if (
+      !Number.isFinite(limits.maxUploadBytes) ||
+      limits.maxUploadBytes < 0 ||
+      params.bytes.byteLength > limits.maxUploadBytes
+    ) {
       return {
         accepted: false,
         detectedContainer: null,
@@ -169,7 +173,12 @@ export class AudioIngestionAndUrlGuard {
       };
     }
 
-    if (params.declaredDurationSeconds > limits.maxDurationSeconds || params.declaredDurationSeconds <= 0) {
+    if (
+      !Number.isFinite(params.declaredDurationSeconds) ||
+      !Number.isFinite(limits.maxDurationSeconds) ||
+      params.declaredDurationSeconds > limits.maxDurationSeconds ||
+      params.declaredDurationSeconds <= 0
+    ) {
       return {
         accepted: false,
         detectedContainer: container,
@@ -188,7 +197,11 @@ export class AudioIngestionAndUrlGuard {
     const decodedSampleCount = Math.round(
       params.declaredDurationSeconds * params.declaredSampleRateHz * params.declaredChannels
     );
-    if (decodedSampleCount > limits.maxDecodedSamples) {
+    if (
+      !Number.isFinite(decodedSampleCount) ||
+      !Number.isFinite(limits.maxDecodedSamples) ||
+      decodedSampleCount > limits.maxDecodedSamples
+    ) {
       return {
         accepted: false,
         detectedContainer: container,

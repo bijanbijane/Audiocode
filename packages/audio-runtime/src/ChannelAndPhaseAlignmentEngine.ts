@@ -62,7 +62,7 @@ export class ChannelAndPhaseAlignmentEngine {
     maxSearchLagMs = 20,
   ): StereoPhaseDiagnostic {
     const len = Math.min(leftChannel.length, rightChannel.length);
-    if (len === 0) {
+    if (len === 0 || !Number.isFinite(sampleRate) || sampleRate <= 0) {
       return {
         zeroLagPhaseCorrelation: 1,
         peakAlignedCorrelation: 1,
@@ -81,8 +81,8 @@ export class ChannelAndPhaseAlignmentEngine {
     let sumMono2 = 0;
 
     for (let i = 0; i < len; i++) {
-      const l = leftChannel[i];
-      const r = rightChannel[i];
+      const l = Number.isFinite(leftChannel[i]) ? leftChannel[i] : 0;
+      const r = Number.isFinite(rightChannel[i]) ? rightChannel[i] : 0;
       sumL2 += l * l;
       sumR2 += r * r;
       sumLR += l * r;
@@ -101,7 +101,12 @@ export class ChannelAndPhaseAlignmentEngine {
     const channelBalanceDb = 20 * Math.log10((rmsL + 1e-9) / (rmsR + 1e-9));
     const monoFoldDownLossDb = 20 * Math.log10((rmsMono + 1e-9) / (rmsAvg + 1e-9));
 
-    const maxLag = Math.min(Math.floor(len / 3), Math.max(1, Math.floor((sampleRate * maxSearchLagMs) / 1000)));
+    const safeMaxLagMs = Number.isFinite(maxSearchLagMs) && maxSearchLagMs > 0 ? maxSearchLagMs : 20;
+    const maxLag = Math.min(
+      Math.floor(len / 3),
+      Math.max(1, Math.floor((sampleRate * safeMaxLagMs) / 1000)),
+    );
+    const lagNormDenom = Math.max(1, maxLag);
     const lagCorrs = new Float64Array(2 * maxLag + 1);
 
     let bestAbsIdx = maxLag;
@@ -115,8 +120,8 @@ export class ChannelAndPhaseAlignmentEngine {
       let sDot = 0;
 
       for (let i = start; i < end; i++) {
-        const l = leftChannel[i];
-        const r = rightChannel[i + lag];
+        const l = Number.isFinite(leftChannel[i]) ? leftChannel[i] : 0;
+        const r = Number.isFinite(rightChannel[i + lag]) ? rightChannel[i + lag] : 0;
         sL2 += l * l;
         sR2 += r * r;
         sDot += l * r;
@@ -127,7 +132,7 @@ export class ChannelAndPhaseAlignmentEngine {
       lagCorrs[idx] = corr;
 
       // Slight preference for smaller |lag| breaks ties on periodic signals (e.g. R = -L stays at lag=0)
-      const weightedScore = Math.abs(corr) - 0.005 * (Math.abs(lag) / maxLag);
+      const weightedScore = Math.abs(corr) - 0.005 * (Math.abs(lag) / lagNormDenom);
       if (weightedScore > bestWeightedScore) {
         bestWeightedScore = weightedScore;
         bestAbsIdx = idx;
@@ -184,7 +189,7 @@ export class ChannelAndPhaseAlignmentEngine {
     sampleRate: SampleRate,
   ): PhaseAlignmentDiagnosticReport {
     const len = Math.min(leftOrMicA.length, rightOrMicB.length);
-    if (len === 0) {
+    if (len === 0 || !Number.isFinite(sampleRate) || sampleRate <= 0) {
       return {
         phaseCorrelation: 1.0,
         optimalDelayLagSamples: 0,
@@ -201,8 +206,8 @@ export class ChannelAndPhaseAlignmentEngine {
     let sumSqMono = 0;
 
     for (let i = 0; i < len; i++) {
-      const l = leftOrMicA[i];
-      const r = rightOrMicB[i];
+      const l = Number.isFinite(leftOrMicA[i]) ? leftOrMicA[i] : 0;
+      const r = Number.isFinite(rightOrMicB[i]) ? rightOrMicB[i] : 0;
       dotZero += l * r;
       sumSqL += l * l;
       sumSqR += r * r;
@@ -235,8 +240,10 @@ export class ChannelAndPhaseAlignmentEngine {
         let magA = 0;
         let magB = 0;
         for (let i = 0; i < searchLen; i += 2) {
-          const a = leftOrMicA[startOffset + i];
-          const b = rightOrMicB[startOffset + i + lag];
+          const a = Number.isFinite(leftOrMicA[startOffset + i]) ? leftOrMicA[startOffset + i] : 0;
+          const b = Number.isFinite(rightOrMicB[startOffset + i + lag])
+            ? rightOrMicB[startOffset + i + lag]
+            : 0;
           dot += a * b;
           magA += a * a;
           magB += b * b;
@@ -285,11 +292,13 @@ export class ChannelAndPhaseAlignmentEngine {
     const len = targetChannel.length;
     const aligned = new Float32Array(len);
     const polaritySign = invertPolarity ? -1.0 : 1.0;
+    const intLag = Number.isFinite(lagSamplesToCorrect) ? Math.round(lagSamplesToCorrect) : 0;
 
     for (let i = 0; i < len; i++) {
-      const srcIdx = i + lagSamplesToCorrect;
+      const srcIdx = i + intLag;
       if (srcIdx >= 0 && srcIdx < len) {
-        aligned[i] = targetChannel[srcIdx] * polaritySign;
+        const s = targetChannel[srcIdx];
+        aligned[i] = Number.isFinite(s) ? s * polaritySign : 0.0;
       } else {
         aligned[i] = 0.0;
       }
@@ -365,18 +374,25 @@ export class ChannelAndPhaseAlignmentEngine {
     );
 
     const len = Math.min(leftChannel.length, rightChannel.length);
-    const outLeft = leftChannel.slice(0, len);
+    const outLeft = new Float32Array(len);
+    for (let i = 0; i < len; i++) {
+      outLeft[i] = Number.isFinite(leftChannel[i]) ? leftChannel[i] : 0;
+    }
     const outRight = new Float32Array(len);
 
     const sign = diagnosticBefore.isPolarityInverted ? -1.0 : 1.0;
-    const lag = diagnosticBefore.estimatedRightLagSamples;
+    const lag = Number.isFinite(diagnosticBefore.estimatedRightLagSamples)
+      ? diagnosticBefore.estimatedRightLagSamples
+      : 0;
 
     for (let i = 0; i < len; i++) {
       const srcPos = i + lag;
       const idx0 = Math.floor(srcPos);
       const frac = srcPos - idx0;
-      const s0 = idx0 >= 0 && idx0 < len ? rightChannel[idx0] : 0;
-      const s1 = idx0 + 1 >= 0 && idx0 + 1 < len ? rightChannel[idx0 + 1] : 0;
+      const raw0 = idx0 >= 0 && idx0 < len ? rightChannel[idx0] : 0;
+      const raw1 = idx0 + 1 >= 0 && idx0 + 1 < len ? rightChannel[idx0 + 1] : 0;
+      const s0 = Number.isFinite(raw0) ? raw0 : 0;
+      const s1 = Number.isFinite(raw1) ? raw1 : 0;
       outRight[i] = sign * (s0 + frac * (s1 - s0));
     }
 
@@ -398,9 +414,11 @@ export class ChannelAndPhaseAlignmentEngine {
     let sR2 = 0;
     let sDot = 0;
     for (let i = 0; i < len; i++) {
-      sL2 += left[i] * left[i];
-      sR2 += right[i] * right[i];
-      sDot += left[i] * right[i];
+      const l = Number.isFinite(left[i]) ? left[i] : 0;
+      const r = Number.isFinite(right[i]) ? right[i] : 0;
+      sL2 += l * l;
+      sR2 += r * r;
+      sDot += l * r;
     }
     return sL2 > 1e-12 && sR2 > 1e-12 ? sDot / Math.sqrt(sL2 * sR2) : 0;
   }

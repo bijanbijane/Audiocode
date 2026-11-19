@@ -65,14 +65,23 @@ export class HardwareBenchmarkProfiler {
     exceedsDeviceSafeDuration: boolean;
     humanReadableEstimateFa: string;
   } {
-    const audioMinutes = audioDurationSeconds / 60;
-    const exceedsDeviceSafeDuration = audioMinutes > profile.maxSafeFileDurationMinutes;
+    const safeDurationSec =
+      Number.isFinite(audioDurationSeconds) && audioDurationSeconds > 0 ? audioDurationSeconds : 0;
+    const safeMaxMinutes =
+      Number.isFinite(profile.maxSafeFileDurationMinutes) && profile.maxSafeFileDurationMinutes > 0
+        ? profile.maxSafeFileDurationMinutes
+        : 35;
+    const audioMinutes = safeDurationSec / 60;
+    const exceedsDeviceSafeDuration = audioMinutes > safeMaxMinutes;
 
-    let factor = profile.estimatedAsrRealTimeFactor;
+    let factor =
+      Number.isFinite(profile.estimatedAsrRealTimeFactor) && profile.estimatedAsrRealTimeFactor > 0
+        ? profile.estimatedAsrRealTimeFactor
+        : 0.5;
     if (taskKind === 'GROUP_A_VAD_DSP') factor *= 0.08;
     if (taskKind === 'EXPORT_RENDER') factor *= 0.12;
 
-    const estimatedSeconds = Math.max(1, Math.ceil(audioDurationSeconds * factor));
+    const estimatedSeconds = Math.max(1, Math.ceil(safeDurationSec * factor));
     const mins = Math.floor(estimatedSeconds / 60);
     const secs = estimatedSeconds % 60;
 

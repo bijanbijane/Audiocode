@@ -58,7 +58,12 @@ export class ProcessingGraphEngine {
     inputAssetHashes: string[],
   ): CompiledRenderPlan {
     const nodeMap = new Map<NodeId, ProcessingNodeSpec>();
-    for (const n of nodes) nodeMap.set(n.id, n);
+    for (const n of nodes) {
+      if (nodeMap.has(n.id)) {
+        throw new Error(`DUPLICATE_GRAPH_NODE_ID: ${n.id}`);
+      }
+      nodeMap.set(n.id, n);
+    }
 
     const inDegree = new Map<NodeId, number>();
     const adj = new Map<NodeId, NodeId[]>();
@@ -102,6 +107,9 @@ export class ProcessingGraphEngine {
       );
     }
 
+    const safeNonNegativeSamples = (val: number): SampleIndex =>
+      Number.isFinite(val) && val > 0 ? Math.floor(val) : 0;
+
     const cumulativeArrivalLatency = new Map<NodeId, SampleIndex>();
     const cumulativeDepartureLatency = new Map<NodeId, SampleIndex>();
     const pdcInsertions: DelayCompensationInsertion[] = [];
@@ -133,12 +141,13 @@ export class ProcessingGraphEngine {
       }
 
       cumulativeArrivalLatency.set(nodeId, maxIncomingLatency);
-      const selfLatency = node.enabled ? node.latencySamples : 0;
+      const selfLatency = node.enabled ? safeNonNegativeSamples(node.latencySamples) : 0;
       cumulativeDepartureLatency.set(nodeId, maxIncomingLatency + selfLatency);
 
       if (node.enabled) {
-        totalPreRoll += node.preRollSamples;
-        if (node.tailSamples > maxTail) maxTail = node.tailSamples;
+        totalPreRoll += safeNonNegativeSamples(node.preRollSamples);
+        const tail = safeNonNegativeSamples(node.tailSamples);
+        if (tail > maxTail) maxTail = tail;
       }
     }
 
@@ -173,13 +182,30 @@ export class ProcessingGraphEngine {
     diskReadEndSample: SampleIndex;
     discardOutputPrefixSamples: SampleIndex;
   } {
-    const diskReadStartSample = Math.max(0, targetChunkStartSample - plan.requiredPreRollSamples);
-    const actualPreRollFed = targetChunkStartSample - diskReadStartSample;
+    const safeStart =
+      Number.isFinite(targetChunkStartSample) && targetChunkStartSample > 0
+        ? Math.floor(targetChunkStartSample)
+        : 0;
+    const safeEnd =
+      Number.isFinite(targetChunkEndSample) && targetChunkEndSample >= safeStart
+        ? Math.floor(targetChunkEndSample)
+        : safeStart;
+    const safePreRoll =
+      Number.isFinite(plan.requiredPreRollSamples) && plan.requiredPreRollSamples > 0
+        ? Math.floor(plan.requiredPreRollSamples)
+        : 0;
+    const safeLatency =
+      Number.isFinite(plan.totalGraphLatencySamples) && plan.totalGraphLatencySamples > 0
+        ? Math.floor(plan.totalGraphLatencySamples)
+        : 0;
+
+    const diskReadStartSample = Math.max(0, safeStart - safePreRoll);
+    const actualPreRollFed = safeStart - diskReadStartSample;
 
     return {
       diskReadStartSample,
-      diskReadEndSample: targetChunkEndSample,
-      discardOutputPrefixSamples: actualPreRollFed + plan.totalGraphLatencySamples,
+      diskReadEndSample: safeEnd,
+      discardOutputPrefixSamples: actualPreRollFed + safeLatency,
     };
   }
 
@@ -189,6 +215,21 @@ export class ProcessingGraphEngine {
     sampleRate: SampleRate,
     inputAssetHashes: string[],
   ): string {
+    const canonicalEdges = [...edges].sort((a, b) =>
+      a.fromNodeId !== b.fromNodeId
+        ? a.fromNodeId.localeCompare(b.fromNodeId)
+        : a.toNodeId.localeCompare(b.toNodeId),
+    );
+    const canonicalParams = (
+      params: Record<string, number | string | boolean>,
+    ): Record<string, number | string | boolean> => {
+      const out: Record<string, number | string | boolean> = {};
+      for (const key of Object.keys(params).sort()) {
+        out[key] = params[key];
+      }
+      return out;
+    };
+
     const payload = JSON.stringify({
       assets: inputAssetHashes,
       rate: sampleRate,
@@ -197,9 +238,9 @@ export class ProcessingGraphEngine {
         type: n.type,
         v: n.version,
         en: n.enabled,
-        p: n.committedParameters,
+        p: canonicalParams(n.committedParameters),
       })),
-      edges,
+      edges: canonicalEdges,
     });
 
     let hash = 0x811c9dc5;

@@ -24,23 +24,70 @@ export class MultiSpeakerTurnLevelerEngine {
     maxBoostDb?: number;  // Default +12.0 dB
     maxCutDb?: number;    // Default -12.0 dB
   }): AutomationLane {
-    const targetDb = params.targetRmsDb ?? -18.0;
-    const maxBoost = params.maxBoostDb ?? 12.0;
-    const maxCut = params.maxCutDb ?? -12.0;
+    const targetDb =
+      params.targetRmsDb !== undefined && Number.isFinite(params.targetRmsDb)
+        ? params.targetRmsDb
+        : -18.0;
+    const maxBoost =
+      params.maxBoostDb !== undefined && Number.isFinite(params.maxBoostDb)
+        ? params.maxBoostDb
+        : 12.0;
+    const maxCut =
+      params.maxCutDb !== undefined && Number.isFinite(params.maxCutDb)
+        ? params.maxCutDb
+        : -12.0;
+    const loGain = Math.min(maxCut, maxBoost);
+    const hiGain = Math.max(maxCut, maxBoost);
     const transitionFlicks = TimeMath.secondsToFlicks(0.08); // 80ms S-Curve transition
 
-    const keyframes: AutomationKeyframe[] = [];
+    if (
+      !Number.isFinite(params.sampleRate) ||
+      params.sampleRate <= 0 ||
+      params.pcmMono.length === 0
+    ) {
+      return {
+        laneId: `speaker_leveler_${params.trackId}`,
+        targetNodeOrTrackId: params.trackId,
+        parameterName: 'GAIN_DB',
+        defaultValue: 0.0,
+        keyframes: [],
+      };
+    }
 
-    for (const seg of params.speakerSegments) {
-      if (seg.classification !== 'PRIMARY_SPEECH') continue;
+    const sortedSegments = [...params.speakerSegments]
+      .filter(
+        (seg) =>
+          seg.classification === 'PRIMARY_SPEECH' &&
+          Number.isFinite(seg.range.start) &&
+          Number.isFinite(seg.range.end) &&
+          seg.range.end > seg.range.start,
+      )
+      .sort((a, b) => a.range.start - b.range.start);
 
-      const startSample = TimeMath.flicksToSamplesFloor(
-        seg.range.start,
-        params.sampleRate,
+    const turns: Array<{ start: number; end: number; gainDb: number }> = [];
+
+    for (const seg of sortedSegments) {
+      const clampedStartFlicks = Math.max(0, seg.range.start);
+      const effectiveStartFlicks =
+        turns.length > 0
+          ? Math.max(clampedStartFlicks, turns[turns.length - 1].end)
+          : clampedStartFlicks;
+      const effectiveEndFlicks = seg.range.end;
+      if (effectiveEndFlicks <= effectiveStartFlicks) continue;
+
+      const startSample = Math.max(
+        0,
+        Math.min(
+          params.pcmMono.length,
+          TimeMath.flicksToSamplesFloor(effectiveStartFlicks, params.sampleRate),
+        ),
       );
-      const endSample = Math.min(
-        params.pcmMono.length,
-        TimeMath.flicksToSamplesFloor(seg.range.end, params.sampleRate),
+      const endSample = Math.max(
+        startSample,
+        Math.min(
+          params.pcmMono.length,
+          TimeMath.flicksToSamplesFloor(effectiveEndFlicks, params.sampleRate),
+        ),
       );
       if (endSample - startSample < params.sampleRate * 0.25) continue;
 
@@ -53,18 +100,96 @@ export class MultiSpeakerTurnLevelerEngine {
 
       const rawCorrectionDb = targetDb - segRmsDb;
       const clampedGainDb = Number(
-        Math.max(maxCut, Math.min(maxBoost, rawCorrectionDb)).toFixed(2),
+        Math.max(loGain, Math.min(hiGain, rawCorrectionDb)).toFixed(2),
       );
 
-      const rampInStart = Math.max(0, seg.range.start - transitionFlicks);
-      const rampOutEnd = seg.range.end + transitionFlicks;
+      turns.push({
+        start: effectiveStartFlicks,
+        end: effectiveEndFlicks,
+        gainDb: clampedGainDb,
+      });
+    }
 
-      keyframes.push(
-        { timeFlicks: rampInStart, value: 0.0, curveToNext: 'S_CURVE_COSINE' },
-        { timeFlicks: seg.range.start, value: clampedGainDb, curveToNext: 'LINEAR' },
-        { timeFlicks: seg.range.end, value: clampedGainDb, curveToNext: 'S_CURVE_COSINE' },
-        { timeFlicks: rampOutEnd, value: 0.0, curveToNext: 'LINEAR' },
-      );
+    const keyframes: AutomationKeyframe[] = [];
+
+    for (let i = 0; i < turns.length; i++) {
+      const turn = turns[i];
+      const prev = i > 0 ? turns[i - 1] : null;
+      const next = i + 1 < turns.length ? turns[i + 1] : null;
+
+      if (!prev) {
+        const rampInStart = Math.max(0, turn.start - transitionFlicks);
+        if (rampInStart < turn.start) {
+          keyframes.push({
+            timeFlicks: rampInStart,
+            value: 0.0,
+            curveToNext: 'S_CURVE_COSINE',
+          });
+        }
+        keyframes.push({
+          timeFlicks: turn.start,
+          value: turn.gainDb,
+          curveToNext: 'LINEAR',
+        });
+      } else {
+        const gapFromPrev = turn.start - prev.end;
+        if (gapFromPrev >= 2 * transitionFlicks) {
+          keyframes.push(
+            {
+              timeFlicks: turn.start - transitionFlicks,
+              value: 0.0,
+              curveToNext: 'S_CURVE_COSINE',
+            },
+            {
+              timeFlicks: turn.start,
+              value: turn.gainDb,
+              curveToNext: 'LINEAR',
+            },
+          );
+        } else if (gapFromPrev > 0) {
+          // Direct smooth S-Curve handoff from prev.gainDb at prev.end to turn.gainDb at turn.start
+          keyframes.push({
+            timeFlicks: turn.start,
+            value: turn.gainDb,
+            curveToNext: 'LINEAR',
+          });
+        } else {
+          // Back-to-back turns (gap === 0): smooth handoff without duplicate timestamp or 0 dB dip
+          const handoff = Math.min(
+            transitionFlicks,
+            Math.max(1, Math.floor((turn.end - turn.start) / 2)),
+          );
+          if (turn.start + handoff < turn.end) {
+            keyframes.push({
+              timeFlicks: turn.start + handoff,
+              value: turn.gainDb,
+              curveToNext: 'LINEAR',
+            });
+          }
+        }
+      }
+
+      const gapToNext = next ? next.start - turn.end : Infinity;
+      if (!next || gapToNext >= 2 * transitionFlicks) {
+        keyframes.push(
+          {
+            timeFlicks: turn.end,
+            value: turn.gainDb,
+            curveToNext: 'S_CURVE_COSINE',
+          },
+          {
+            timeFlicks: turn.end + transitionFlicks,
+            value: 0.0,
+            curveToNext: 'LINEAR',
+          },
+        );
+      } else {
+        keyframes.push({
+          timeFlicks: turn.end,
+          value: turn.gainDb,
+          curveToNext: 'S_CURVE_COSINE',
+        });
+      }
     }
 
     return {
@@ -72,7 +197,7 @@ export class MultiSpeakerTurnLevelerEngine {
       targetNodeOrTrackId: params.trackId,
       parameterName: 'GAIN_DB',
       defaultValue: 0.0,
-      keyframes: keyframes.sort((a, b) => a.timeFlicks - b.timeFlicks),
+      keyframes,
     };
   }
 
@@ -83,9 +208,11 @@ export class MultiSpeakerTurnLevelerEngine {
   ): number {
     let sumSq = 0;
     let count = 0;
-    for (let i = start; i < end; i++) {
+    const safeStart = Math.max(0, start);
+    const safeEnd = Math.min(pcm.length, end);
+    for (let i = safeStart; i < safeEnd; i++) {
       const s = pcm[i];
-      if (Math.abs(s) > 0.005) {
+      if (Number.isFinite(s) && Math.abs(s) > 0.005) {
         sumSq += s * s;
         count++;
       }

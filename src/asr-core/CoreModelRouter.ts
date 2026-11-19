@@ -95,6 +95,8 @@ export class CoreModelRouter {
   }
 
   public listRecentRoutingAudit(limit = 20): RoutingAuditRecord[] {
-    return this.auditTrail.slice(-limit);
+    if (typeof limit === 'number' && limit <= 0) return [];
+    const safeLimit = typeof limit === 'number' && Number.isFinite(limit) ? Math.floor(limit) : 20;
+    return this.auditTrail.slice(-safeLimit);
   }
 }

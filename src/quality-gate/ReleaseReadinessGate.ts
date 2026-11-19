@@ -129,8 +129,13 @@ export function evaluateRenderedAudioSignalQuality(params: {
   if (parsed.channelCount !== params.expectedChannelCount) {
     issues.push(`Channel count mismatch: actual=${parsed.channelCount}, expected=${params.expectedChannelCount}.`);
   }
-  const tol = params.sampleTolerance ?? 0;
-  if (Math.abs(parsed.sampleCountPerChannel - params.expectedSamplesPerChannel) > tol) {
+  const rawTol = params.sampleTolerance;
+  const tol =
+    typeof rawTol === 'number' && Number.isFinite(rawTol) && rawTol >= 0 ? rawTol : 0;
+  if (
+    !Number.isFinite(params.expectedSamplesPerChannel) ||
+    Math.abs(parsed.sampleCountPerChannel - params.expectedSamplesPerChannel) > tol
+  ) {
     issues.push(
       `Sample count mismatch: actual=${parsed.sampleCountPerChannel}, expected=${params.expectedSamplesPerChannel}.`,
     );
@@ -147,6 +152,7 @@ export function evaluateRenderedAudioSignalQuality(params: {
   let peakAmplitude = 0;
   let sumCh0 = 0;
   let prevCh0 = 0;
+  let hasPrevCh0 = false;
   let maxSampleDelta = 0;
   let abruptDiscontinuityCount = 0;
   let clippedSampleCount = 0;
@@ -181,12 +187,13 @@ export function evaluateRenderedAudioSignalQuality(params: {
 
       if (ch === 0) {
         sumCh0 += sample;
-        if (frame > 0) {
+        if (hasPrevCh0) {
           const delta = Math.abs(sample - prevCh0);
           if (delta > maxSampleDelta) maxSampleDelta = delta;
           if (delta > 0.75) abruptDiscontinuityCount++;
         }
         prevCh0 = sample;
+        hasPrevCh0 = true;
       }
     }
   }

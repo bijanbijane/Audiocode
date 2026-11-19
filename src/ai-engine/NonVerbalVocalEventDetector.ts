@@ -94,20 +94,27 @@ export class NonVerbalVocalEventDetector {
     const events: DetectedNonVerbalEvent[] = [];
     if (pcmMono.length === 0 || tokens.length === 0) return events;
 
-    const frameSize = Math.floor(sampleRate * 0.025); // 25ms hop windows
+    const safeRate: SampleRate =
+      Number.isFinite(sampleRate) && sampleRate > 0 ? sampleRate : 16000;
+    const frameSize = Math.max(1, Math.floor(safeRate * 0.025)); // 25ms hop windows
 
     for (let tIdx = 0; tIdx < tokens.length; tIdx++) {
-      const prevEndSample =
+      const rawPrevEnd =
         tIdx === 0
           ? 0
-          : TimeMath.flicksToSamplesFloor(tokens[tIdx - 1].range.end, sampleRate);
-      const nextStartSample = TimeMath.flicksToSamplesFloor(
-        tokens[tIdx].range.start,
-        sampleRate,
+          : TimeMath.flicksToSamplesFloor(
+              Number.isFinite(tokens[tIdx - 1].range.end) ? tokens[tIdx - 1].range.end : 0,
+              safeRate,
+            );
+      const rawNextStart = TimeMath.flicksToSamplesFloor(
+        Number.isFinite(tokens[tIdx].range.start) ? tokens[tIdx].range.start : 0,
+        safeRate,
       );
+      const prevEndSample = Math.max(0, Math.min(pcmMono.length, rawPrevEnd));
+      const nextStartSample = Math.max(prevEndSample, Math.min(pcmMono.length, rawNextStart));
 
       const gapSamples = nextStartSample - prevEndSample;
-      const gapMs = (gapSamples / sampleRate) * 1000;
+      const gapMs = (gapSamples / safeRate) * 1000;
       if (gapMs < 70) continue; // Gaps under 70ms are too short for coughs or inhale breaths
 
       for (
@@ -119,18 +126,21 @@ export class NonVerbalVocalEventDetector {
         let sumSq = 0;
         let peak = 0;
         let zcr = 0;
+        let prevVal = 0;
 
         for (let i = pos; i < pos + winLen; i++) {
-          const val = pcmMono[i];
+          const rawVal = pcmMono[i];
+          const val = Number.isFinite(rawVal) ? rawVal : 0;
           const abs = Math.abs(val);
           sumSq += val * val;
           if (abs > peak) peak = abs;
           if (
             i > pos &&
-            ((pcmMono[i - 1] >= 0 && val < 0) || (pcmMono[i - 1] < 0 && val >= 0))
+            ((prevVal >= 0 && val < 0) || (prevVal < 0 && val >= 0))
           ) {
             zcr++;
           }
+          prevVal = val;
         }
 
         const rms = Math.sqrt(sumSq / winLen);
@@ -142,8 +152,8 @@ export class NonVerbalVocalEventDetector {
         if (rmsDb < -44.0) continue;
 
         const eventRange: TimeRange = {
-          start: TimeMath.samplesToFlicks(pos, sampleRate),
-          end: TimeMath.samplesToFlicks(pos + winLen, sampleRate),
+          start: TimeMath.samplesToFlicks(pos, safeRate),
+          end: TimeMath.samplesToFlicks(pos + winLen, safeRate),
         };
 
         // 1. Cough / throat clear: high impulsive peak (> -14dB), high crest factor (> 4.2), noisy ZCR
@@ -162,7 +172,7 @@ export class NonVerbalVocalEventDetector {
         }
 
         // 2. Sharp inhale breath immediately preceding the next word (<= 280ms before word onset)
-        const distToNextWordMs = ((nextStartSample - (pos + winLen)) / sampleRate) * 1000;
+        const distToNextWordMs = ((nextStartSample - (pos + winLen)) / safeRate) * 1000;
         if (
           distToNextWordMs <= 280 &&
           rmsDb >= -36.0 &&
@@ -204,14 +214,35 @@ export class NonVerbalVocalEventDetector {
     readonly noiseFloorRms?: number;
   }): Promise<DetailedNonVerbalScanResult> {
     const {
-      pcmMono,
+      pcmMono: rawPcmMono,
       tokens,
-      sampleRate,
+      sampleRate: rawSampleRate,
       trackId = tokens[0]?.trackId ?? 'track-1',
-      offsetSeconds = 0,
+      offsetSeconds: rawOffsetSeconds = 0,
       detectionMode = 'auto',
       modelAdapter = null,
     } = params;
+
+    const sampleRate: SampleRate =
+      Number.isFinite(rawSampleRate) && rawSampleRate > 0 ? rawSampleRate : 16000;
+    const offsetSeconds = Number.isFinite(rawOffsetSeconds) ? rawOffsetSeconds : 0;
+    let hasNonFinite = false;
+    for (let i = 0; i < rawPcmMono.length; i++) {
+      if (!Number.isFinite(rawPcmMono[i])) {
+        hasNonFinite = true;
+        break;
+      }
+    }
+    const pcmMono = hasNonFinite
+      ? (() => {
+          const clean = new Float32Array(rawPcmMono.length);
+          for (let i = 0; i < rawPcmMono.length; i++) {
+            const v = rawPcmMono[i];
+            clean[i] = Number.isFinite(v) ? v : 0;
+          }
+          return clean;
+        })()
+      : rawPcmMono;
 
     if (detectionMode === 'model-based' && !modelAdapter) {
       const endSec = offsetSeconds + pcmMono.length / sampleRate;
@@ -259,7 +290,10 @@ export class NonVerbalVocalEventDetector {
       };
     }
 
-    const noiseFloorRms = params.noiseFloorRms ?? this.estimateNoiseFloorRms(pcmMono, sampleRate);
+    const noiseFloorRms =
+      params.noiseFloorRms !== undefined && Number.isFinite(params.noiseFloorRms) && params.noiseFloorRms > 0
+        ? params.noiseFloorRms
+        : this.estimateNoiseFloorRms(pcmMono, sampleRate);
     const gaps = this.collectAnalysisGaps(pcmMono.length, tokens, sampleRate, offsetSeconds);
     const events: DetailedNonVerbalDetection[] = [];
     const rejectedCandidates: RejectedNonVocalCandidate[] = [];
@@ -709,11 +743,14 @@ export class NonVerbalVocalEventDetector {
     sampleRate: SampleRate,
     offsetSeconds: number,
   ): Array<{ startSample: number; endSample: number; distToNextWordMs: number; distFromPrevWordMs: number }> {
-    if (tokens.length === 0) {
+    const validTokens = tokens.filter(
+      (t) => Number.isFinite(t.range.start) && Number.isFinite(t.range.end),
+    );
+    if (validTokens.length === 0) {
       return [{ startSample: 0, endSample: pcmLength, distToNextWordMs: 1000, distFromPrevWordMs: 1000 }];
     }
 
-    const sorted = [...tokens].sort((a, b) => a.range.start - b.range.start);
+    const sorted = [...validTokens].sort((a, b) => a.range.start - b.range.start);
     const offsetFlicks = TimeMath.secondsToFlicks(offsetSeconds);
     const gaps: Array<{ startSample: number; endSample: number; distToNextWordMs: number; distFromPrevWordMs: number }> = [];
 

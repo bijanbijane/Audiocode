@@ -96,7 +96,8 @@ function rmsDbOfFloat32(samples: Float32Array): number {
   if (samples.length === 0) return -120;
   let sumSq = 0;
   for (let i = 0; i < samples.length; i++) {
-    sumSq += samples[i] * samples[i];
+    const s = Number.isFinite(samples[i]) ? samples[i] : 0;
+    sumSq += s * s;
   }
   const rms = Math.sqrt(sumSq / samples.length);
   return rms > 1e-6 ? 20 * Math.log10(rms) : -120;
@@ -127,9 +128,23 @@ export function inspectAndDownmixChannels(channels: Float32Array[]): {
   }
 
   if (channels.length === 1) {
-    const leftDb = rmsDbOfFloat32(channels[0]);
+    const src = channels[0];
+    let hasNonFinite = false;
+    for (let i = 0; i < src.length; i++) {
+      if (!Number.isFinite(src[i])) {
+        hasNonFinite = true;
+        break;
+      }
+    }
+    const cleanMono = hasNonFinite ? new Float32Array(src.length) : src;
+    if (hasNonFinite) {
+      for (let i = 0; i < src.length; i++) {
+        cleanMono[i] = Number.isFinite(src[i]) ? src[i] : 0;
+      }
+    }
+    const leftDb = rmsDbOfFloat32(cleanMono);
     return {
-      monoFloat32: channels[0],
+      monoFloat32: cleanMono,
       inspection: {
         originalChannels: 1,
         policyApplied: 'MONO_PASSTHROUGH',
@@ -153,9 +168,11 @@ export function inspectAndDownmixChannels(channels: Float32Array[]): {
   let magL = 0;
   let magR = 0;
   for (let i = 0; i < n; i++) {
-    dot += left[i] * right[i];
-    magL += left[i] * left[i];
-    magR += right[i] * right[i];
+    const l = Number.isFinite(left[i]) ? left[i] : 0;
+    const r = Number.isFinite(right[i]) ? right[i] : 0;
+    dot += l * r;
+    magL += l * l;
+    magR += r * r;
   }
   const denom = Math.sqrt(magL * magR);
   const corr = denom > 1e-12 ? dot / denom : 0;
@@ -166,7 +183,10 @@ export function inspectAndDownmixChannels(channels: Float32Array[]): {
 
   const mono = new Float32Array(n);
   if (phaseInversionRisk) {
-    for (let i = 0; i < n; i++) mono[i] = leftDb >= rightDb ? left[i] : right[i];
+    for (let i = 0; i < n; i++) {
+      const raw = leftDb >= rightDb ? left[i] : right[i];
+      mono[i] = Number.isFinite(raw) ? raw : 0;
+    }
     return {
       monoFloat32: mono,
       inspection: {
@@ -184,7 +204,9 @@ export function inspectAndDownmixChannels(channels: Float32Array[]): {
 
   if (silentLeft || silentRight) {
     const active = leftDb >= rightDb ? left : right;
-    mono.set(active.subarray(0, n));
+    for (let i = 0; i < n; i++) {
+      mono[i] = Number.isFinite(active[i]) ? active[i] : 0;
+    }
     return {
       monoFloat32: mono,
       inspection: {
@@ -201,7 +223,9 @@ export function inspectAndDownmixChannels(channels: Float32Array[]): {
   }
 
   for (let i = 0; i < n; i++) {
-    mono[i] = (left[i] + right[i]) * 0.5;
+    const l = Number.isFinite(left[i]) ? left[i] : 0;
+    const r = Number.isFinite(right[i]) ? right[i] : 0;
+    mono[i] = (l + r) * 0.5;
   }
   return {
     monoFloat32: mono,
@@ -221,7 +245,8 @@ export function inspectAndDownmixChannels(channels: Float32Array[]): {
 export function float32ToPcm16Buffer(samples: Float32Array): Buffer {
   const buf = Buffer.allocUnsafe(samples.length * 2);
   for (let i = 0; i < samples.length; i++) {
-    const clamped = Math.max(-1, Math.min(1, samples[i]));
+    const s = Number.isFinite(samples[i]) ? samples[i] : 0;
+    const clamped = Math.max(-1, Math.min(1, s));
     buf.writeInt16LE(Math.round(clamped * 32767), i * 2);
   }
   return buf;
@@ -261,7 +286,7 @@ export function computeSignalHealth(samples: Float32Array): CoreAudioIngestResul
     const end = Math.min(samples.length, start + winLen);
     let wSq = 0;
     for (let i = start; i < end; i++) {
-      const s = samples[i];
+      const s = Number.isFinite(samples[i]) ? samples[i] : 0;
       sum += s;
       const sq = s * s;
       sumSq += sq;

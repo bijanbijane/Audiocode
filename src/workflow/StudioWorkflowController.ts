@@ -160,8 +160,11 @@ export function buildTranscriptSegmentsFromTokens(
   tokens: readonly PersianWordToken[],
   speakerByTrackId: Readonly<Record<string, string>>,
 ): TranscriptSegmentRecord[] {
-  if (tokens.length === 0) return [];
-  const sorted = [...tokens].sort((a, b) => a.range.startFlicks - b.range.startFlicks);
+  const validTokens = tokens.filter(
+    (t) => Number.isFinite(t.range?.startFlicks) && Number.isFinite(t.range?.endFlicks),
+  );
+  if (validTokens.length === 0) return [];
+  const sorted = [...validTokens].sort((a, b) => a.range.startFlicks - b.range.startFlicks);
   const segments: TranscriptSegmentRecord[] = [];
   let bucket: PersianWordToken[] = [];
 
@@ -252,11 +255,11 @@ export function computeOfflineReadiness(params: {
 }
 
 function formatSrtTimestamp(sec: number): string {
-  const safe = Math.max(0, sec);
-  const hours = Math.floor(safe / 3600);
-  const mins = Math.floor((safe % 3600) / 60);
-  const secs = Math.floor(safe % 60);
-  const ms = Math.round((safe - Math.floor(safe)) * 1000);
+  const totalMs = Math.round(Math.max(0, Number.isFinite(sec) ? sec : 0) * 1000);
+  const hours = Math.floor(totalMs / 3_600_000);
+  const mins = Math.floor((totalMs % 3_600_000) / 60_000);
+  const secs = Math.floor((totalMs % 60_000) / 1000);
+  const ms = totalMs % 1000;
   return `${String(hours).padStart(2, '0')}:${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')},${String(ms).padStart(3, '0')}`;
 }
 
@@ -273,9 +276,11 @@ export function exportTranscriptContent(params: {
   };
 
   if (params.format === 'txt') {
-    const lines = params.version.segments.map(
-      (s) => `[${s.startSec.toFixed(2)}s - ${s.endSec.toFixed(2)}s] ${s.speakerLabel}: ${pickText(s)}`,
-    );
+    const lines = params.version.segments.map((s) => {
+      const st = Number.isFinite(s.startSec) ? Math.max(0, s.startSec) : 0;
+      const en = Number.isFinite(s.endSec) ? Math.max(st, s.endSec) : st;
+      return `[${st.toFixed(2)}s - ${en.toFixed(2)}s] ${s.speakerLabel}: ${pickText(s)}`;
+    });
     return {
       fileName: sanitizeExportFilename(`${params.projectName}-transcript-${params.version.versionId}`, 'txt'),
       mimeType: 'text/plain;charset=utf-8',
@@ -346,7 +351,8 @@ export function createBrowserLocalProjectStore(
             typeof p === 'object' &&
             typeof p.projectId === 'string' &&
             typeof p.projectName === 'string' &&
-            typeof p.updatedAtMs === 'number',
+            typeof p.updatedAtMs === 'number' &&
+            Number.isFinite(p.updatedAtMs),
         );
       } catch {
         return [];
@@ -488,7 +494,10 @@ export class StudioWorkflowController {
   }): void {
     this.cancelAllInFlightOperations();
     const nextGen = this.state.sessionGeneration + 1;
-    const nowMs = params.nowMs ?? Date.now();
+    const nowMs =
+      typeof params.nowMs === 'number' && Number.isFinite(params.nowMs) && params.nowMs >= 0
+        ? Math.trunc(params.nowMs)
+        : Date.now();
 
     const rawVersion: TranscriptVersionRecord | null =
       params.initialSegments && params.initialSegments.length > 0
@@ -565,12 +574,16 @@ export class StudioWorkflowController {
     readonly currentSegment?: string | null;
     readonly message: string;
   }): void {
+    const safeProgressPct =
+      typeof params.progressPct === 'number' && Number.isFinite(params.progressPct)
+        ? Math.max(0, Math.min(100, params.progressPct))
+        : null;
     this.setState({
       asrState: params.state,
       asrModelId: params.modelId !== undefined ? params.modelId : this.state.asrModelId,
       asrModelVersion:
         params.modelVersion !== undefined ? params.modelVersion : this.state.asrModelVersion,
-      asrProgressPct: params.progressPct ?? null,
+      asrProgressPct: safeProgressPct,
       asrCurrentSegment: params.currentSegment ?? null,
       asrStatusMessage: params.message,
     });
@@ -603,7 +616,10 @@ export class StudioWorkflowController {
     const idx = active.segments.findIndex((s) => s.segmentId === params.segmentId);
     if (idx < 0) return { ok: false, newVersion: null };
 
-    const nowMs = params.nowMs ?? Date.now();
+    const nowMs =
+      typeof params.nowMs === 'number' && Number.isFinite(params.nowMs) && params.nowMs >= 0
+        ? Math.trunc(params.nowMs)
+        : Date.now();
     const nextVersionNumber = this.state.transcriptVersions.length;
     const nextSegments = active.segments.map((seg) =>
       seg.segmentId === params.segmentId
@@ -774,7 +790,7 @@ export class StudioWorkflowController {
 
     this.setState({
       edlSnapshot: result.snapshot,
-      edlUndoStack: [...this.state.edlUndoStack, edl],
+      edlUndoStack: [...this.state.edlUndoStack, edl].slice(-50),
       edlRedoStack: [],
     });
     return { ok: true, failure: null };
@@ -813,7 +829,7 @@ export class StudioWorkflowController {
 
     this.setState({
       edlSnapshot: result.snapshot,
-      edlUndoStack: [...this.state.edlUndoStack, edl],
+      edlUndoStack: [...this.state.edlUndoStack, edl].slice(-50),
       edlRedoStack: [],
     });
     return { ok: true, updatedProposal: result.updatedProposal, failure: null };
@@ -853,6 +869,7 @@ export class StudioWorkflowController {
     readonly nowMs?: number;
   }): Promise<AudioRenderResult | null> {
     if (
+      this.state.renderState === 'QUEUED' ||
       this.state.renderState === 'RENDERING' ||
       this.state.renderState === 'VALIDATING' ||
       this.state.renderState === 'PLANNING' ||
@@ -890,6 +907,10 @@ export class StudioWorkflowController {
       exportSavedFileName: null,
     });
 
+    let lastProgressEmitState: RenderLifecycleState | null = null;
+    let lastProgressEmitPct: number | null = null;
+    let lastProgressEmitWallMs = 0;
+
     const request = {
       edl,
       source,
@@ -902,6 +923,19 @@ export class StudioWorkflowController {
       nowMs: params.nowMs,
       onProgress: (snap: RenderProgressSnapshot) => {
         if (gen !== this.state.sessionGeneration) return;
+        const nowWall = Date.now();
+        const isSameRenderingState =
+          snap.state === 'RENDERING' && lastProgressEmitState === 'RENDERING';
+        const pctDelta =
+          snap.progressPercent !== null && lastProgressEmitPct !== null
+            ? Math.abs(snap.progressPercent - lastProgressEmitPct)
+            : 100;
+        if (isSameRenderingState && pctDelta < 2 && nowWall - lastProgressEmitWallMs < 50) {
+          return;
+        }
+        lastProgressEmitState = snap.state;
+        lastProgressEmitPct = snap.progressPercent;
+        lastProgressEmitWallMs = nowWall;
         this.setState({
           renderState: snap.state,
           renderProgress: snap,
@@ -994,5 +1028,14 @@ export function getSpeechEventsForSegment(
   startSec: number,
   endSec: number,
 ): SpeechEvent[] {
-  return events.filter((ev) => ev.endSec > startSec && ev.startSec < endSec);
+  if (!Number.isFinite(startSec) || !Number.isFinite(endSec) || endSec <= startSec) {
+    return [];
+  }
+  return events.filter(
+    (ev) =>
+      Number.isFinite(ev.startSec) &&
+      Number.isFinite(ev.endSec) &&
+      ev.endSec > startSec &&
+      ev.startSec < endSec,
+  );
 }

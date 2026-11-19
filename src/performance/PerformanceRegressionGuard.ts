@@ -29,6 +29,27 @@ export function evaluatePerformanceRegressionInvariants(
 ): PerformanceInvariantReport {
   const violations: string[] = [];
 
+  const numericEntries: Array<[keyof PerformanceInvariantInput, number]> = [
+    ['queueDepth', input.queueDepth],
+    ['maxQueueDepth', input.maxQueueDepth],
+    ['diagnosticSampleCount', input.diagnosticSampleCount],
+    ['maxDiagnosticSamples', input.maxDiagnosticSamples],
+    ['workerCountBeforeCycles', input.workerCountBeforeCycles],
+    ['workerCountAfterCycles', input.workerCountAfterCycles],
+    ['listenerCountBeforeCycles', input.listenerCountBeforeCycles],
+    ['listenerCountAfterCycles', input.listenerCountAfterCycles],
+    ['memoryAccountedBytesAfterRelease', input.memoryAccountedBytesAfterRelease],
+    ['waveformCacheBytes', input.waveformCacheBytes],
+    ['maxWaveformCacheBytes', input.maxWaveformCacheBytes],
+    ['transcriptFullClonesDuringLocalEdits', input.transcriptFullClonesDuringLocalEdits],
+    ['staleAsyncResultsApplied', input.staleAsyncResultsApplied],
+  ];
+  for (const [field, val] of numericEntries) {
+    if (!Number.isFinite(val)) {
+      violations.push(`Non-finite invariant metric "${field}": ${String(val)}`);
+    }
+  }
+
   if (input.queueDepth > input.maxQueueDepth) {
     violations.push(`Unbounded queue growth: ${input.queueDepth} > ${input.maxQueueDepth}`);
   }

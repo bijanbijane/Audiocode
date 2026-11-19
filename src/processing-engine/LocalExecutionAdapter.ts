@@ -168,9 +168,27 @@ export class LocalExecutionAdapter implements UnifiedExecutionAdapter {
     }
 
     // Check memory policy before decoding audio bytes
-    const estimatedWorkingBytes = Math.max(64 * 1024, request.audio.metadata.byteLength * 4);
+    const rawByteLength = request.audio.metadata.byteLength;
+    if (
+      typeof rawByteLength !== 'number' ||
+      !Number.isFinite(rawByteLength) ||
+      rawByteLength <= 0
+    ) {
+      throw new UnifiedProcessingError({
+        code: 'UNSUPPORTED_AUDIO_FORMAT',
+        executionMode: 'LOCAL',
+        providerId: 'LOCAL_CPU_ACOUSTIC_CTC_ADAPTER',
+        detailEn: 'Audio input metadata byteLength must be a positive finite number.',
+      });
+    }
+    const estimatedWorkingBytes = Math.max(64 * 1024, Math.floor(rawByteLength * 4));
+    const rawMaxMem = request.constraints?.maxMemoryBytes;
     const maxAllowedBytes =
-      request.constraints?.maxMemoryBytes ?? this.memoryBudget.getSnapshot().hardLimitBytes;
+      rawMaxMem !== undefined
+        ? typeof rawMaxMem === 'number' && Number.isFinite(rawMaxMem) && rawMaxMem >= 0
+          ? rawMaxMem
+          : 0
+        : this.memoryBudget.getSnapshot().hardLimitBytes;
     if (estimatedWorkingBytes > maxAllowedBytes) {
       throw new UnifiedProcessingError({
         code: 'PROCESSING_RESOURCE_LIMIT_EXCEEDED',
@@ -258,13 +276,27 @@ export class LocalExecutionAdapter implements UnifiedExecutionAdapter {
 
           const segments: UnifiedTranscriptSegment[] = finals.map((e, idx) => {
             const segRaw = e.rawModelOutput ?? '';
+            const safeStartSec =
+              typeof e.startSec === 'number' && Number.isFinite(e.startSec) && e.startSec >= 0
+                ? e.startSec
+                : 0;
+            const fallbackEndSec =
+              typeof finalized.metrics.totalAudioSec === 'number' &&
+              Number.isFinite(finalized.metrics.totalAudioSec) &&
+              finalized.metrics.totalAudioSec >= safeStartSec
+                ? finalized.metrics.totalAudioSec
+                : safeStartSec;
+            const safeEndSec =
+              typeof e.endSec === 'number' && Number.isFinite(e.endSec) && e.endSec >= safeStartSec
+                ? e.endSec
+                : fallbackEndSec;
             return {
               segmentId: `seg_${idx}`,
               segmentIndex: idx,
-              startSec: e.startSec ?? 0,
-              endSec: e.endSec ?? finalized.metrics.totalAudioSec,
-              startSample: Math.round((e.startSec ?? 0) * 16_000),
-              endSample: Math.round((e.endSec ?? finalized.metrics.totalAudioSec) * 16_000),
+              startSec: safeStartSec,
+              endSec: safeEndSec,
+              startSample: Math.round(safeStartSec * 16_000),
+              endSample: Math.round(safeEndSec * 16_000),
               language: e.language ?? langInfo.language,
               languageConfidence: null,
               rawModelOutput: segRaw,

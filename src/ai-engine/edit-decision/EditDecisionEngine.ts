@@ -71,8 +71,13 @@ export class EditDecisionEngine {
     memoryBudgetManager?: MemoryBudgetManager,
   ): Promise<EditDecisionListSnapshot> {
     const { context, events } = request;
-    const nowMs = request.nowMs ?? Date.now();
-    const batchSize = Math.max(1, Math.min(256, Math.trunc(request.batchSize ?? 64)));
+    const rawNowMs = request.nowMs ?? Date.now();
+    const nowMs = Number.isFinite(rawNowMs) ? Math.trunc(rawNowMs) : Date.now();
+    const rawBatchSize = request.batchSize ?? 64;
+    const batchSize =
+      Number.isFinite(rawBatchSize) && rawBatchSize > 0
+        ? Math.max(1, Math.min(256, Math.trunc(rawBatchSize)))
+        : 64;
     const budget = memoryBudgetManager ?? getSharedMemoryBudgetManager();
 
     const contextFailures = EditDecisionValidator.validateSourceContext(context);
@@ -697,7 +702,15 @@ export class EditDecisionEngine {
       supersededByProposalId: successorId,
     };
 
-    const successorProposal: EditProposal = {
+    const origStart = target.originalRange?.startSample ?? startSample;
+    const origEnd = target.originalRange?.endSample ?? endSample;
+    const origDur = Math.max(1, origEnd - origStart);
+    const revisedDur = endSample - startSample;
+    const shiftSamples = Math.max(Math.abs(startSample - origStart), Math.abs(endSample - origEnd));
+    const significantExpansion =
+      revisedDur > origDur * 1.5 || shiftSamples > Math.round(target.sampleRate * 0.25);
+
+    const draftSuccessor: EditProposal = {
       ...target,
       proposalId: successorId,
       proposalVersion: nextVersion,
@@ -709,8 +722,8 @@ export class EditDecisionEngine {
         valid: true,
         proposedInterval: revisedInterval,
         refinementMethod: 'human-revised-sample-boundaries',
-        boundaryConfidence: 'HIGH',
-        boundaryConfidenceScore: 0.9,
+        boundaryConfidence: significantExpansion ? 'MEDIUM' : 'HIGH',
+        boundaryConfidenceScore: significantExpansion ? 0.72 : 0.9,
         boundaryScoreCalibrationStatus: 'UNCALIBRATED_HEURISTIC',
         appliedEvidence: [
           ...target.boundary.appliedEvidence,
@@ -720,6 +733,7 @@ export class EditDecisionEngine {
       status: 'NEEDS_REVIEW',
       validationStatus: 'VALID',
       validationIssues: [],
+      requiresHumanReview: true,
       supersedesProposalId: target.proposalId,
       supersededByProposalId: undefined,
       conflictIds: [],
@@ -728,7 +742,7 @@ export class EditDecisionEngine {
 
     const nextProposals = edl.proposals
       .map((p) => (p.proposalId === target.proposalId ? supersededOld : p))
-      .concat(successorProposal);
+      .concat(draftSuccessor);
 
     const historyEntries: EditDecisionHistoryEntry[] = [
       {
@@ -768,10 +782,42 @@ export class EditDecisionEngine {
       expectedTranscriptVersion: edl.transcriptVersion,
     });
 
+    // Re-validate the revised successor proposal against source bounds, provenance, and newly detected conflicts
+    const validatedProposals = rechecked.proposals.map((p) => {
+      if (p.proposalId !== successorId) return p;
+      const issues = EditDecisionValidator.validateProposal(
+        p,
+        edl.totalSourceSamples,
+        rechecked.conflicts,
+      );
+      const hasErrors = issues.some((i) => i.severity === 'ERROR');
+      const hasNonConflictErrors = issues.some(
+        (i) =>
+          i.severity === 'ERROR' &&
+          i.code !== 'UNRESOLVED_CONFLICT' &&
+          i.code !== 'PROTECTED_EVENT_OVERLAP',
+      );
+      const hasWarnings = issues.some((i) => i.severity === 'WARNING') || p.conflictIds.length > 0;
+      const validationStatus: EditProposal['validationStatus'] = hasErrors
+        ? 'INVALID'
+        : hasWarnings
+          ? 'WARNING'
+          : 'VALID';
+      const nextStatus: EditProposal['status'] =
+        !p.boundary.valid || hasNonConflictErrors ? 'INVALID' : p.status;
+      return {
+        ...p,
+        status: nextStatus,
+        validationStatus,
+        validationIssues: issues,
+        requiresHumanReview: true,
+      };
+    });
+
     const draft: EditDecisionListSnapshot = {
       ...edl,
       edlVersion: edl.edlVersion + 1,
-      proposals: rechecked.proposals,
+      proposals: validatedProposals,
       conflicts: rechecked.conflicts,
       decisionHistory: [...edl.decisionHistory, ...historyEntries],
       modifiedAtMs: nowMs,
@@ -1092,7 +1138,9 @@ export class EditDecisionEngine {
       evidenceReferences: evidenceRefs,
       confidenceClassification: evalRes.confidenceClassification,
       eventConfidenceScore:
-        event.detectionState === 'UNSUPPORTED' ? null : event.confidence,
+        event.detectionState === 'UNSUPPORTED' || !Number.isFinite(event.confidence)
+          ? null
+          : event.confidence,
       scoreCalibrationStatus: event.scores.scoreCalibrationStatus,
       calibratedProbability: event.scores.calibratedProbability,
       boundary,

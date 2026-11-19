@@ -88,7 +88,7 @@ export class SilenceAndPauseAnalyzer {
       vadProvider = null,
     } = params;
 
-    if (pcmMono.length === 0 || sampleRate <= 0) {
+    if (!pcmMono || pcmMono.length === 0 || !Number.isFinite(sampleRate) || sampleRate <= 0) {
       return {
         noiseFloorDbfs: -96,
         noiseFloorRms: 0,
@@ -98,8 +98,15 @@ export class SilenceAndPauseAnalyzer {
       };
     }
 
+    const safeOffsetSeconds =
+      Number.isFinite(offsetSeconds) && offsetSeconds >= 0 ? offsetSeconds : 0;
     const windowDurationSec = pcmMono.length / sampleRate;
-    const totalDurationSec = params.totalRecordingDurationSec ?? offsetSeconds + windowDurationSec;
+    const totalDurationSec =
+      params.totalRecordingDurationSec !== undefined &&
+      Number.isFinite(params.totalRecordingDurationSec) &&
+      params.totalRecordingDurationSec > 0
+        ? params.totalRecordingDurationSec
+        : safeOffsetSeconds + windowDurationSec;
     const frameSamples = Math.max(32, Math.floor((sampleRate * config.silenceFrameMs) / 1000));
     const hopSamples = Math.max(16, Math.floor((sampleRate * config.silenceHopMs) / 1000));
 
@@ -131,17 +138,19 @@ export class SilenceAndPauseAnalyzer {
       let peak = 0;
       let zcrCount = 0;
       let zeroSamples = 0;
+      let prevSample = 0;
 
       for (let i = 0; i < frameSamples; i++) {
-        const s = pcmMono[start + i];
+        const raw = pcmMono[start + i];
+        const s = Number.isFinite(raw) ? raw : 0;
         const abs = Math.abs(s);
         sumSq += s * s;
         if (abs > peak) peak = abs;
         if (abs <= config.digitalZeroPeakCeiling) zeroSamples++;
         if (i > 0) {
-          const prev = pcmMono[start + i - 1];
-          if ((prev >= 0 && s < 0) || (prev < 0 && s >= 0)) zcrCount++;
+          if ((prevSample >= 0 && s < 0) || (prevSample < 0 && s >= 0)) zcrCount++;
         }
+        prevSample = s;
       }
 
       const rms = Math.sqrt(sumSq / frameSamples);
@@ -231,7 +240,9 @@ export class SilenceAndPauseAnalyzer {
       rawRuns.push({ startFrame: runStart, endFrame: numFrames });
     }
 
-    const sortedTokens = [...tokens].sort((a, b) => a.range.start - b.range.start);
+    const sortedTokens = [...tokens]
+      .filter((t) => Number.isFinite(t.range?.start) && Number.isFinite(t.range?.end))
+      .sort((a, b) => a.range.start - b.range.start);
     const detections: SilencePauseDetection[] = [];
     let vadChecked = false;
 
@@ -241,8 +252,8 @@ export class SilenceAndPauseAnalyzer {
         windowDurationSec,
         (run.endFrame * hopSamples + frameSamples) / sampleRate,
       );
-      const startSec = Number((offsetSeconds + relStartSec).toFixed(4));
-      const endSec = Number((offsetSeconds + relEndSec).toFixed(4));
+      const startSec = Number((safeOffsetSeconds + relStartSec).toFixed(4));
+      const endSec = Number((safeOffsetSeconds + relEndSec).toFixed(4));
       const durationSec = Number((endSec - startSec).toFixed(4));
       const durationMs = durationSec * 1000;
 
@@ -301,7 +312,10 @@ export class SilenceAndPauseAnalyzer {
       }
 
       const overlapsBreath = breathRangesSec.some(
-        (b) => Math.min(b.endSec, endSec) > Math.max(b.startSec, startSec) - 0.08,
+        (b) =>
+          Number.isFinite(b.startSec) &&
+          Number.isFinite(b.endSec) &&
+          Math.min(b.endSec, endSec) > Math.max(b.startSec, startSec) - 0.08,
       );
       const isEdgeSilence =
         startSec <= 0.05 || Math.abs(totalDurationSec - endSec) <= 0.08;
@@ -478,6 +492,7 @@ export class SilenceAndPauseAnalyzer {
 
     for (const tok of sortedTokens) {
       if (tok.trackId !== trackId) continue;
+      if (!Number.isFinite(tok.range?.start) || !Number.isFinite(tok.range?.end)) continue;
       const tStart = TimeMath.flicksToSeconds(tok.range.start);
       const tEnd = TimeMath.flicksToSeconds(tok.range.end);
 
@@ -520,8 +535,10 @@ export class SilenceAndPauseAnalyzer {
       let e2 = 0;
       const lim = len - lag;
       for (let i = 0; i < lim; i += 2) {
-        const a = pcm[start + i];
-        const b = pcm[start + i + lag];
+        const rawA = pcm[start + i];
+        const rawB = pcm[start + i + lag];
+        const a = Number.isFinite(rawA) ? rawA : 0;
+        const b = Number.isFinite(rawB) ? rawB : 0;
         dot += a * b;
         e1 += a * a;
         e2 += b * b;
@@ -542,7 +559,8 @@ export class SilenceAndPauseAnalyzer {
     const out = new Float32Array(outLen);
     for (let i = 0; i < outLen; i++) {
       const srcIdx = Math.min(input.length - 1, Math.floor(i * ratio));
-      out[i] = input[srcIdx];
+      const raw = input[srcIdx];
+      out[i] = Number.isFinite(raw) ? raw : 0;
     }
     return out;
   }

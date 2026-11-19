@@ -119,14 +119,19 @@ function writeUint32LE(val: number): Uint8Array {
 function normalizeChapters(chapters: readonly ExtractedTopicChapter[]): ExtractedTopicChapter[] {
   return chapters
     .map((ch) => {
-      const startMs =
-        typeof ch.startFlicks === 'number'
+      const rawStartMs =
+        typeof ch.startFlicks === 'number' && Number.isFinite(ch.startFlicks)
           ? Math.round(TimeMath.flicksToSeconds(ch.startFlicks) * 1000)
-          : Math.max(0, Math.round(ch.startMs));
+          : Number.isFinite(ch.startMs)
+            ? Math.round(ch.startMs)
+            : 0;
+      const startMs = Math.max(0, rawStartMs);
       const rawEndMs =
-        typeof ch.endFlicks === 'number'
+        typeof ch.endFlicks === 'number' && Number.isFinite(ch.endFlicks)
           ? Math.round(TimeMath.flicksToSeconds(ch.endFlicks) * 1000)
-          : Math.max(startMs, Math.round(ch.endMs));
+          : Number.isFinite(ch.endMs)
+            ? Math.round(ch.endMs)
+            : startMs;
       return {
         ...ch,
         startMs,
@@ -313,6 +318,8 @@ function getFlacSampleRateCode(sampleRate: SampleRate): number {
       return 0xa;
     case 96000:
       return 0xb;
+    default:
+      return 0x0; // 0 = get from STREAMINFO header per RFC 9639
   }
 }
 
@@ -415,12 +422,20 @@ export class StreamingExportEncoderEngine {
   private id3ChapterCount = 0;
 
   constructor(config: StreamingExportConfig, metadata: PodcastExportMetadata) {
-    if (config.channels < 1 || config.channels > 8) {
+    if (!Number.isFinite(config.channels) || config.channels < 1 || config.channels > 8) {
       throw new Error(`Unsupported channel count: ${config.channels}`);
     }
-    this.config = config;
+    const safeSampleRate =
+      Number.isFinite(config.sampleRate) && config.sampleRate > 0
+        ? (Math.floor(config.sampleRate) as SampleRate)
+        : 48000;
+    this.config = { ...config, sampleRate: safeSampleRate };
     this.metadata = metadata;
-    this.flacBlockSize = config.flacBlockSize ?? 4096;
+    const rawBlockSize = config.flacBlockSize ?? 4096;
+    this.flacBlockSize =
+      Number.isFinite(rawBlockSize) && rawBlockSize >= 16
+        ? Math.min(65535, Math.floor(rawBlockSize))
+        : 4096;
   }
 
   public async start(): Promise<Uint8Array[]> {
@@ -875,8 +890,10 @@ export async function exportPcmToCompleteBuffer(
   parts.push(...(await engine.start()));
 
   const totalFrames = channels[0]?.length ?? 0;
-  for (let start = 0; start < totalFrames; start += chunkFrames) {
-    const end = Math.min(totalFrames, start + chunkFrames);
+  const safeChunkFrames =
+    Number.isFinite(chunkFrames) && chunkFrames > 0 ? Math.floor(chunkFrames) : 8192;
+  for (let start = 0; start < totalFrames; start += safeChunkFrames) {
+    const end = Math.min(totalFrames, start + safeChunkFrames);
     const slice = channels.map((ch) => ch.subarray(start, end));
     parts.push(...(await engine.pushPcmChunk(slice)));
   }

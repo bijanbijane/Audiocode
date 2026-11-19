@@ -56,7 +56,11 @@ export class ResampleCoordinateMapper {
     assertValidSampleRate(target);
     this.sourceSampleRate = params.sourceSampleRate;
     this.targetSampleRate = target;
-    this.filterTaps = params.filterTaps ?? 63;
+    const rawTaps =
+      typeof params.filterTaps === 'number' && Number.isFinite(params.filterTaps) && params.filterTaps >= 3
+        ? Math.trunc(params.filterTaps)
+        : 63;
+    this.filterTaps = rawTaps % 2 === 1 ? rawTaps : rawTaps + 1;
     this.roundingPolicy = params.roundingPolicy ?? 'HALF_UP';
     this.resampler = new AntiAliasedResampler(this.sourceSampleRate, this.targetSampleRate, this.filterTaps);
   }
@@ -122,14 +126,22 @@ export class ResampleCoordinateMapper {
     readonly expectedTargetStartFrame: ResampledFramePosition;
     readonly expectedTargetEndFrame: ResampledFramePosition;
   } {
+    const safeStart =
+      Number.isSafeInteger(params.sourceStartSample) && params.sourceStartSample >= 0
+        ? params.sourceStartSample
+        : asSourceSamplePosition(0);
+    const safeEnd =
+      Number.isSafeInteger(params.sourceEndSample) && params.sourceEndSample >= safeStart
+        ? params.sourceEndSample
+        : safeStart;
     const targetStart = sourceSampleToResampledFrame(
-      params.sourceStartSample,
+      safeStart,
       this.sourceSampleRate,
       this.targetSampleRate,
       'FLOOR',
     );
     const targetEnd = sourceSampleToResampledFrame(
-      params.sourceEndSample,
+      safeEnd,
       this.sourceSampleRate,
       this.targetSampleRate,
       'FLOOR',
@@ -146,13 +158,13 @@ export class ResampleCoordinateMapper {
 
     const totalIn = params.fullChannels[0].length;
     const wing = this.sourceSampleRate === this.targetSampleRate ? 0 : Math.floor(this.filterTaps / 2) + 4;
-    const readStart = Math.max(0, params.sourceStartSample - wing);
-    const readEnd = Math.min(totalIn, params.sourceEndSample + wing);
+    const readStart = Math.max(0, safeStart - wing);
+    const readEnd = Math.min(totalIn, safeEnd + wing);
 
     const sliced = params.fullChannels.map((ch) => ch.subarray(readStart, readEnd));
     const resampledWithContext = this.resampler.processToMono16k(sliced);
     const trimFront = sourceSampleToResampledFrame(
-      asSourceSamplePosition(params.sourceStartSample - readStart),
+      asSourceSamplePosition(Math.max(0, safeStart - readStart)),
       this.sourceSampleRate,
       this.targetSampleRate,
       'FLOOR',

@@ -33,18 +33,27 @@ export function extractAcousticProfile(
     };
   }
 
-  // Noise floor is estimated from the 10th percentile quietest non-digital-zero frames
+  // Noise floor is estimated from the 10th percentile quietest frames across the full signal
+  // (including digital-zero pauses so gated/synthetic silence is not ignored in favor of speech).
   const sorted = [...frameRmsList].sort((a, b) => a.rms - b.rms);
+  const p10All = sorted[Math.floor(sorted.length * 0.1)];
   const nonZero = sorted.filter((f) => f.rms > 1e-6);
-  const targetPool = nonZero.length > 0 ? nonZero : sorted;
-  const p10 = targetPool[Math.floor(targetPool.length * 0.1)];
-  const roomToneRms = Math.max(p10.rms, 0.0005);
+
+  let roomToneRms: number;
+  if (p10All.rms <= 1e-6) {
+    roomToneRms = 0.0005;
+  } else {
+    const targetPool = nonZero.length > 0 ? nonZero : sorted;
+    const p10 = targetPool[Math.floor(targetPool.length * 0.1)];
+    roomToneRms = Math.max(p10.rms, 0.0005);
+  }
   const noiseFloorDbfs = 20 * Math.log10(Math.max(roomToneRms, 1e-6));
 
-  // Extract up to 0.5 seconds of quiet room tone around p10 frame
+  // Extract up to 0.5 seconds of quiet room tone without leaking active speech into roomToneSample
   const desiredLen = Math.round(sampleRate * 0.5);
   const roomToneSample = new Float32Array(desiredLen);
-  const quietFrames = targetPool.slice(0, Math.min(25, targetPool.length));
+  const quietPool = nonZero.filter((f) => f.rms <= Math.max(roomToneRms * 3, 0.015));
+  const quietFrames = quietPool.slice(0, Math.min(25, quietPool.length));
 
   let writeOffset = 0;
   let frameCursor = 0;
@@ -67,19 +76,21 @@ export function extractAcousticProfile(
   };
 }
 
-/** Synthesizes natural Room Tone fill of targetLength samples with subtle overlap fade */
+/** Synthesizes natural Room Tone fill of targetLength samples with phase-continuous ping-pong wrapping */
 export function synthesizeRoomToneFill(
   profile: AcousticProfile,
   targetLength: number,
+  startOffsetSamples = 0,
 ): Float32Array {
   const out = new Float32Array(targetLength);
   const src = profile.roomToneSample;
   if (src.length === 0) return out;
 
+  const cycle = src.length * 2;
+  const baseOffset = ((Math.trunc(startOffsetSamples) % cycle) + cycle) % cycle;
   for (let i = 0; i < targetLength; i++) {
     // Ping-pong wrap prevents discontinuity clicks when looping short room-tone samples
-    const cycle = src.length * 2;
-    const pos = i % cycle;
+    const pos = (baseOffset + i) % cycle;
     const idx = pos < src.length ? pos : cycle - pos - 1;
     out[i] = src[idx];
   }
@@ -128,7 +139,16 @@ export function snapToZeroCrossing(
   sampleIdx: number,
   maxShiftSamples = 240, // ±5ms at 48kHz
 ): { index: number; adjusted: boolean } {
-  const clamped = Math.max(1, Math.min(samples.length - 2, sampleIdx));
+  if (samples.length === 0) {
+    return { index: 0, adjusted: false };
+  }
+  if (samples.length < 3) {
+    return {
+      index: Math.max(0, Math.min(samples.length - 1, Math.round(sampleIdx))),
+      adjusted: false,
+    };
+  }
+  const clamped = Math.max(1, Math.min(samples.length - 2, Math.round(sampleIdx)));
   if (Math.abs(samples[clamped]) < 1e-5) {
     return { index: clamped, adjusted: false };
   }
@@ -186,10 +206,13 @@ export function detectPitchPlateauSegments(
   sampleRate: number,
   minDurationMs = 260,
 ): { startSample: number; endSample: number; confidence: number; f0Hz: number }[] {
-  const frameLen = Math.round(sampleRate * 0.03); // 30ms
-  const hopLen = Math.round(sampleRate * 0.015); // 15ms
-  const minLag = Math.floor(sampleRate / 320); // max 320Hz F0
-  const maxLag = Math.floor(sampleRate / 75); // min 75Hz F0
+  if (samples.length === 0 || !Number.isFinite(sampleRate) || sampleRate <= 0) {
+    return [];
+  }
+  const frameLen = Math.max(2, Math.round(sampleRate * 0.03)); // 30ms
+  const hopLen = Math.max(1, Math.round(sampleRate * 0.015)); // 15ms
+  const minLag = Math.max(1, Math.floor(sampleRate / 320)); // max 320Hz F0
+  const maxLag = Math.max(minLag, Math.floor(sampleRate / 75)); // min 75Hz F0
 
   interface FrameFeature {
     start: number;
@@ -295,7 +318,10 @@ export function detectLongPauses(
   profile: AcousticProfile,
   minPauseMs = 650,
 ): { startSample: number; endSample: number; durationMs: number }[] {
-  const frameLen = Math.round(sampleRate * 0.025); // 25ms
+  if (samples.length === 0 || !Number.isFinite(sampleRate) || sampleRate <= 0) {
+    return [];
+  }
+  const frameLen = Math.max(1, Math.round(sampleRate * 0.025)); // 25ms
   const threshold = Math.max(profile.roomToneRms * 2.2, 0.008);
   const pauses: { startSample: number; endSample: number; durationMs: number }[] = [];
 
@@ -346,6 +372,23 @@ export function refinePersianCutBoundary(
     microCrossfadeMs?: number;
   } = {},
 ): ProsodicBoundaryDetail {
+  const microCrossfadeMs = options.microCrossfadeMs ?? 10;
+  if (samples.length === 0 || !Number.isFinite(sampleRate) || sampleRate <= 0) {
+    const safeStart = Math.max(0, rawRange.startFlicks);
+    const safeEnd = Math.max(safeStart, rawRange.endFlicks);
+    return {
+      rawRange,
+      snappedRange: { startFlicks: safeStart, endFlicks: safeEnd },
+      rmsValleyShiftMs: 0,
+      zeroCrossingAdjusted: false,
+      microCrossfadeMs,
+      pitchPlateauDetected: Boolean(options.pitchPlateauDetected),
+      trailingEzafeRisk: Boolean(options.trailingEzafeRisk),
+      trailingEzafeWord: options.trailingEzafeWord,
+      reasonFa: 'تراز شده با مرز خام (بافر صوتی در دسترس نبود)',
+    };
+  }
+
   const rawStartSample = flicksToSamples(rawRange.startFlicks, sampleRate);
   const rawEndSample = flicksToSamples(rawRange.endFlicks, sampleRate);
 
@@ -357,11 +400,14 @@ export function refinePersianCutBoundary(
   const zcStart = snapToZeroCrossing(samples, valleyStart);
   const zcEnd = snapToZeroCrossing(samples, valleyEnd);
 
-  const snappedStart = Math.min(zcStart.index, zcEnd.index - Math.round(sampleRate * 0.04));
-  const snappedEnd = Math.max(zcEnd.index, snappedStart + Math.round(sampleRate * 0.04));
+  const minSpanSamples = Math.min(samples.length, Math.round(sampleRate * 0.04));
+  const snappedStart = Math.max(0, Math.min(zcStart.index, zcEnd.index - minSpanSamples));
+  const snappedEnd = Math.min(
+    samples.length,
+    Math.max(zcEnd.index, snappedStart + minSpanSamples),
+  );
 
   const shiftMs = Math.round(((snappedStart - rawStartSample) * 1000) / sampleRate);
-  const microCrossfadeMs = options.microCrossfadeMs ?? 10;
 
   let reasonFa = 'تراز شده با دره انرژی (Minimum RMS) و عبور از صفر (Zero-Crossing)';
   if (options.pitchPlateauDetected) {

@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   AlertTriangle,
   BookOpenCheck,
@@ -44,17 +44,37 @@ import { AudioRedactionMaskMode } from '../../packages/audio-runtime/src/Sensiti
 
 type TranscriptLayer = 'display' | 'normalized' | 'original';
 
+export interface AsrInlineFeedbackState {
+  readonly kind:
+    | 'MODEL_NOT_INSTALLED'
+    | 'CLOUD_UNCONFIGURED'
+    | 'NO_SPEECH'
+    | 'READ_ONLY'
+    | 'AUDIO_MISSING'
+    | 'SUCCESS';
+  readonly titleFa: string;
+  readonly messageFa: string;
+}
+
 interface TranscriptPanelProps {
   tokens: PersianWordToken[];
   tracks: Track[];
+  pcmSources?: Record<string, Float32Array>;
+  sampleRate?: number;
   playheadSec: number;
   totalDurationSec?: number;
   isTranscribingAsr?: boolean;
+  projectSessionNonce?: number;
+  asrInlineFeedback?: AsrInlineFeedbackState | null;
+  onDismissAsrInlineFeedback?: () => void;
+  onRunAcousticSegmentation?: () => void;
+  onOpenLocalModelInstaller?: () => void;
+  onSwitchToLocalExecutionMode?: () => void;
   onSeekSec: (sec: number) => void;
   onCutSelectedWords: (
     selectedTokenIds: string[],
     explicitMode?: RecommendationActionMode,
-  ) => void;
+  ) => boolean | void;
   onUpdateTokenDisplayText: (tokenId: string, newDisplayText: string) => void;
   onRunPersianAsr: () => void;
   onRunForcedAlignment: (customPersianScript: string, targetTrackId: string) => void;
@@ -64,14 +84,14 @@ interface TranscriptPanelProps {
   onRedactSelectedWords?: (
     selectedTokenIds: string[],
     mode: AudioRedactionMaskMode,
-  ) => void;
+  ) => boolean | void;
   prosodyAndChaptersReport?: ProsodyAndChaptersReport | null;
   onApplyCustomLexicon?: (customVocabularyCsv: string) => void;
   onWsolaTimeStretchSelectedWords?: (
     selectedTokenIds: string[],
     tempoRatio: number,
-  ) => void;
-  onPunchInSpectralMatchSelectedWords?: (selectedTokenIds: string[]) => void;
+  ) => boolean | void;
+  onPunchInSpectralMatchSelectedWords?: (selectedTokenIds: string[]) => boolean | void;
   onOptimizeTrilingualAsr?: (mode: EnglishScriptRenderMode) => void;
   englishRenderMode?: EnglishScriptRenderMode;
 }
@@ -79,9 +99,17 @@ interface TranscriptPanelProps {
 export const TranscriptPanel: React.FC<TranscriptPanelProps> = ({
   tokens,
   tracks,
+  pcmSources,
+  sampleRate,
   playheadSec,
   totalDurationSec = 12,
   isTranscribingAsr = false,
+  projectSessionNonce = 0,
+  asrInlineFeedback = null,
+  onDismissAsrInlineFeedback,
+  onRunAcousticSegmentation,
+  onOpenLocalModelInstaller,
+  onSwitchToLocalExecutionMode,
   onSeekSec,
   onCutSelectedWords,
   onUpdateTokenDisplayText,
@@ -103,6 +131,8 @@ export const TranscriptPanel: React.FC<TranscriptPanelProps> = ({
   const [editingTokenId, setEditingTokenId] = useState<string | null>(null);
   const [editingTextValue, setEditingTextValue] = useState<string>('');
   const [showForcedAlignDrawer, setShowForcedAlignDrawer] = useState<boolean>(false);
+  const [forcedAlignError, setForcedAlignError] = useState<string | null>(null);
+  const forcedAlignInputRef = useRef<HTMLTextAreaElement | null>(null);
   const [forcedAlignTrackId, setForcedAlignTrackId] = useState<string>(
     () => tracks[0]?.id ?? 'track-host',
   );
@@ -124,6 +154,25 @@ export const TranscriptPanel: React.FC<TranscriptPanelProps> = ({
   const [customLexiconInput, setCustomLexiconInput] = useState<string>(
     'طالقانی، تایپ‌اسکریپت، آواپرداز، صحبت، پادکست، هوش مصنوعی',
   );
+
+  useEffect(() => {
+    const firstTrackId = tracks[0]?.id ?? 'track-host';
+    setForcedAlignTrackId(firstTrackId);
+    const nextTrackText = tokens
+      .filter((t) => t.trackId === firstTrackId)
+      .map((t) => t.displayText)
+      .join(' ');
+    setCustomScriptText(nextTrackText);
+    setSelectedTokenIds([]);
+    setEditingTokenId(null);
+    setForcedAlignError(null);
+  }, [projectSessionNonce]);
+
+  useEffect(() => {
+    if (tracks.length > 0 && !tracks.some((t) => t.id === forcedAlignTrackId)) {
+      setForcedAlignTrackId(tracks[0].id);
+    }
+  }, [tracks, forcedAlignTrackId]);
 
   const playheadFlicks = secondsToFlicks(playheadSec);
 
@@ -183,8 +232,10 @@ export const TranscriptPanel: React.FC<TranscriptPanelProps> = ({
       multiWordCutSpec.trackId,
       multiWordCutSpec.range,
       tokens,
+      pcmSources,
+      sampleRate,
     );
-  }, [tracks, multiWordCutSpec, tokens]);
+  }, [tracks, multiWordCutSpec, tokens, pcmSources, sampleRate]);
 
   const subtitlePreviewContent = useMemo(() => {
     if (subtitlePreviewMode === 'srt') return exportTranscriptToSrt(tokens);
@@ -286,30 +337,38 @@ export const TranscriptPanel: React.FC<TranscriptPanelProps> = ({
 
   const handleApplyCut = (explicitMode?: RecommendationActionMode) => {
     if (activeSelectedIds.length === 0) return;
-    onCutSelectedWords(activeSelectedIds, explicitMode);
-    setSelectedTokenIds([]);
-    setEditingTokenId(null);
+    const applied = onCutSelectedWords(activeSelectedIds, explicitMode);
+    if (applied !== false) {
+      setSelectedTokenIds([]);
+      setEditingTokenId(null);
+    }
   };
 
   const handleApplyRedaction = (mode: AudioRedactionMaskMode) => {
     if (!onRedactSelectedWords || activeSelectedIds.length === 0) return;
-    onRedactSelectedWords(activeSelectedIds, mode);
-    setSelectedTokenIds([]);
-    setEditingTokenId(null);
+    const applied = onRedactSelectedWords(activeSelectedIds, mode);
+    if (applied !== false) {
+      setSelectedTokenIds([]);
+      setEditingTokenId(null);
+    }
   };
 
   const handleApplyWsolaStretch = (tempoRatio: number) => {
     if (!onWsolaTimeStretchSelectedWords || activeSelectedIds.length === 0) return;
-    onWsolaTimeStretchSelectedWords(activeSelectedIds, tempoRatio);
-    setSelectedTokenIds([]);
-    setEditingTokenId(null);
+    const applied = onWsolaTimeStretchSelectedWords(activeSelectedIds, tempoRatio);
+    if (applied !== false) {
+      setSelectedTokenIds([]);
+      setEditingTokenId(null);
+    }
   };
 
   const handleApplyPunchInMatch = () => {
     if (!onPunchInSpectralMatchSelectedWords || activeSelectedIds.length === 0) return;
-    onPunchInSpectralMatchSelectedWords(activeSelectedIds);
-    setSelectedTokenIds([]);
-    setEditingTokenId(null);
+    const applied = onPunchInSpectralMatchSelectedWords(activeSelectedIds);
+    if (applied !== false) {
+      setSelectedTokenIds([]);
+      setEditingTokenId(null);
+    }
   };
 
   const handleSelectBestTeaserTokens = () => {
@@ -324,25 +383,39 @@ export const TranscriptPanel: React.FC<TranscriptPanelProps> = ({
     }
   };
 
+  const openForcedAlignDrawer = () => {
+    setShowForcedAlignDrawer(true);
+    setForcedAlignError(null);
+    const targetId = tracks.some((t) => t.id === forcedAlignTrackId)
+      ? forcedAlignTrackId
+      : (tracks[0]?.id ?? 'track-host');
+    setForcedAlignTrackId(targetId);
+    const currentTrackText = tokens
+      .filter((t) => t.trackId === targetId)
+      .map((t) => t.displayText)
+      .join(' ');
+    setCustomScriptText(currentTrackText);
+    setTimeout(() => forcedAlignInputRef.current?.focus(), 0);
+  };
+
   const handleOpenForcedAlign = () => {
     const nextOpen = !showForcedAlignDrawer;
-    setShowForcedAlignDrawer(nextOpen);
     if (nextOpen) {
-      const targetId = tracks[0]?.id ?? 'track-host';
-      setForcedAlignTrackId(targetId);
-      const currentTrackText = tokens
-        .filter((t) => t.trackId === targetId)
-        .map((t) => t.displayText)
-        .join(' ');
-      if (currentTrackText.trim().length > 0) {
-        setCustomScriptText(currentTrackText);
-      }
+      openForcedAlignDrawer();
+    } else {
+      setShowForcedAlignDrawer(false);
+      setForcedAlignError(null);
     }
   };
 
   const handleExecuteForcedAlign = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!customScriptText.trim()) return;
+    if (!customScriptText.trim()) {
+      setForcedAlignError('لطفاً ابتدا متن گفتار فارسی را در کادر بالا وارد کنید.');
+      forcedAlignInputRef.current?.focus();
+      return;
+    }
+    setForcedAlignError(null);
     onRunForcedAlignment(customScriptText.trim(), forcedAlignTrackId);
     setShowForcedAlignDrawer(false);
     setSelectedTokenIds([]);
@@ -433,7 +506,7 @@ export const TranscriptPanel: React.FC<TranscriptPanelProps> = ({
       {/* Phonetic & Homophone Search + Non-Destructive Prosodic/Colloquial Enhancements Bar */}
       <div className="px-4 py-2 border-b border-[#252F42] bg-[#0E131D]/80 flex flex-wrap items-center justify-between gap-2">
         <div className="flex flex-wrap items-center gap-2 flex-1 min-w-[230px]">
-          <div className="relative flex-1 max-w-xs">
+          <div className="relative flex-1 max-w-sm">
             <Search
               className="w-3.5 h-3.5 text-slate-400 absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none"
               aria-hidden="true"
@@ -443,7 +516,7 @@ export const TranscriptPanel: React.FC<TranscriptPanelProps> = ({
               data-testid="input-phonetic-search"
               value={phoneticQuery}
               onChange={(e) => setPhoneticQuery(e.target.value)}
-              placeholder="جستجوی آوایی سه‌زبانه (فارسی/انگلیسی/عربی: TypeScript، سهبط، دقیقاً)..."
+              placeholder="جستجوی آوایی سه‌زبانه (فارسی / EN / عربی)..."
               aria-label="جستجوی آوایی در متن"
               className="w-full pr-8 pl-6 py-1 rounded bg-[#131924] border border-[#252F42] text-xs text-slate-100 placeholder:text-slate-500 focus:outline-none focus:border-sky-400"
             />
@@ -838,19 +911,32 @@ export const TranscriptPanel: React.FC<TranscriptPanelProps> = ({
           </div>
 
           <textarea
+            ref={forcedAlignInputRef}
             id="forced-align-script-input"
             data-testid="input-forced-align-script"
             rows={2}
             value={customScriptText}
-            onChange={(e) => setCustomScriptText(e.target.value)}
+            onChange={(e) => {
+              setCustomScriptText(e.target.value);
+              if (forcedAlignError) setForcedAlignError(null);
+            }}
             placeholder="متن گفتار فارسی را وارد کنید..."
             className="w-full px-3 py-2 rounded-md bg-[#131924] border border-[#252F42] text-xs text-slate-100 focus:outline-none focus:border-amber-400 leading-6"
           />
 
+          {forcedAlignError && (
+            <p role="alert" className="text-[11px] text-rose-300">
+              {forcedAlignError}
+            </p>
+          )}
+
           <div className="flex items-center justify-end gap-2">
             <button
               type="button"
-              onClick={() => setShowForcedAlignDrawer(false)}
+              onClick={() => {
+                setShowForcedAlignDrawer(false);
+                setForcedAlignError(null);
+              }}
               className="px-2.5 py-1 text-xs rounded border border-[#252F42] text-slate-300 hover:bg-[#1E2738] cursor-pointer"
             >
               انصراف
@@ -1129,21 +1215,148 @@ export const TranscriptPanel: React.FC<TranscriptPanelProps> = ({
         </div>
       )}
 
+      {/* Inline ASR & Acoustic Alignment Status / Action Feedback */}
+      {asrInlineFeedback && (
+        <div
+          role={asrInlineFeedback.kind === 'SUCCESS' ? 'status' : 'alert'}
+          data-testid="transcript-asr-inline-panel"
+          className={`px-4 py-3 border-b text-xs space-y-2 ${
+            asrInlineFeedback.kind === 'SUCCESS'
+              ? 'border-emerald-500/35 bg-emerald-500/10 text-emerald-100'
+              : 'border-amber-500/40 bg-amber-500/10 text-amber-100'
+          }`}
+        >
+          <div className="flex items-start justify-between gap-2">
+            <div className="space-y-1">
+              <div className="font-semibold flex items-center gap-1.5">
+                {asrInlineFeedback.kind === 'SUCCESS' ? (
+                  <Check className="w-3.5 h-3.5 shrink-0 text-emerald-300" aria-hidden="true" />
+                ) : (
+                  <AlertTriangle className="w-3.5 h-3.5 shrink-0 text-amber-300" aria-hidden="true" />
+                )}
+                <span>{asrInlineFeedback.titleFa}</span>
+              </div>
+              <p className="text-[11px] text-slate-200 leading-relaxed">
+                {asrInlineFeedback.messageFa}
+              </p>
+            </div>
+            {onDismissAsrInlineFeedback && (
+              <button
+                type="button"
+                onClick={onDismissAsrInlineFeedback}
+                aria-label="بستن پیام هم‌ترازی و ASR"
+                className="p-1 rounded text-slate-300 hover:text-white cursor-pointer"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            )}
+          </div>
+
+          {asrInlineFeedback.kind !== 'SUCCESS' && (
+            <div className="flex flex-wrap items-center gap-2 pt-0.5">
+              {asrInlineFeedback.kind === 'CLOUD_UNCONFIGURED' && onSwitchToLocalExecutionMode && (
+                <button
+                  type="button"
+                  data-testid="btn-inline-switch-local"
+                  onClick={onSwitchToLocalExecutionMode}
+                  className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded bg-emerald-500 text-slate-950 font-semibold text-xs hover:bg-emerald-400 cursor-pointer"
+                >
+                  <span>تغییر به حالت محلی (LOCAL)</span>
+                </button>
+              )}
+
+              {onRunAcousticSegmentation &&
+                asrInlineFeedback.kind !== 'READ_ONLY' &&
+                asrInlineFeedback.kind !== 'AUDIO_MISSING' && (
+                  <button
+                    type="button"
+                    data-testid="btn-run-acoustic-segmentation"
+                    disabled={isTranscribingAsr}
+                    onClick={onRunAcousticSegmentation}
+                    className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded bg-sky-500 text-slate-950 font-semibold text-xs hover:bg-sky-400 disabled:opacity-50 cursor-pointer"
+                  >
+                    <Wand2 className="w-3.5 h-3.5" aria-hidden="true" />
+                    <span>بخش‌بندی و هم‌ترازی آوایی موج صوت (بدون مدل ONNX)</span>
+                  </button>
+                )}
+
+              {asrInlineFeedback.kind !== 'READ_ONLY' && asrInlineFeedback.kind !== 'AUDIO_MISSING' && (
+                <button
+                  type="button"
+                  data-testid="btn-inline-open-forced-align"
+                  onClick={openForcedAlignDrawer}
+                  className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded border border-amber-400/50 bg-[#0E131D] text-amber-200 hover:bg-[#1E2738] text-xs cursor-pointer"
+                >
+                  <Sparkles className="w-3.5 h-3.5 text-amber-400" aria-hidden="true" />
+                  <span>هم‌ترازی با متن دلخواه (Forced Align)</span>
+                </button>
+              )}
+
+              {asrInlineFeedback.kind === 'MODEL_NOT_INSTALLED' && onOpenLocalModelInstaller && (
+                <button
+                  type="button"
+                  data-testid="btn-inline-open-model-modal"
+                  onClick={onOpenLocalModelInstaller}
+                  className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded border border-[#252F42] bg-[#0E131D] text-slate-200 hover:bg-[#1E2738] text-xs cursor-pointer"
+                >
+                  <span>نصب یا انتخاب فایل مدل محلی (.onnx)</span>
+                </button>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Word Token Stream */}
       <div className="p-4 min-h-[210px] max-h-[340px] overflow-y-auto">
         {tokens.length === 0 ? (
-          <div className="py-10 text-center text-xs text-slate-400 space-y-3">
+          <div className="py-8 text-center text-xs text-slate-400 space-y-3">
             <p className="text-slate-200 font-medium">
               هنوز هیچ واژه‌ای در تایم‌لاین باقی نمانده یا استخراج نشده است.
             </p>
-            <button
-              type="button"
-              onClick={onRunPersianAsr}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-sky-500 text-slate-950 font-semibold text-xs hover:bg-sky-400 cursor-pointer"
-            >
-              <Mic className="w-3.5 h-3.5" aria-hidden="true" />
-              <span>اجرای تبدیل صوت به متن و هم‌ترازی آوایی</span>
-            </button>
+            <div className="flex flex-wrap items-center justify-center gap-2">
+              <button
+                type="button"
+                data-testid="btn-empty-run-persian-asr"
+                disabled={isTranscribingAsr}
+                onClick={onRunPersianAsr}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-sky-500 text-slate-950 font-semibold text-xs hover:bg-sky-400 disabled:opacity-50 cursor-pointer"
+              >
+                {isTranscribingAsr ? (
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" aria-hidden="true" />
+                ) : (
+                  <Mic className="w-3.5 h-3.5" aria-hidden="true" />
+                )}
+                <span>
+                  {isTranscribingAsr
+                    ? 'در حال استخراج متن و هم‌ترازی آوایی...'
+                    : 'اجرای تبدیل صوت به متن و هم‌ترازی آوایی'}
+                </span>
+              </button>
+
+              {onRunAcousticSegmentation && (
+                <button
+                  type="button"
+                  data-testid="btn-empty-acoustic-segment"
+                  disabled={isTranscribingAsr}
+                  onClick={onRunAcousticSegmentation}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-sky-500/40 bg-sky-500/15 text-sky-200 hover:bg-sky-500/25 disabled:opacity-50 text-xs font-medium cursor-pointer"
+                >
+                  <Wand2 className="w-3.5 h-3.5 text-sky-400" aria-hidden="true" />
+                  <span>بخش‌بندی آوایی خودکار (بدون مدل)</span>
+                </button>
+              )}
+
+              <button
+                type="button"
+                data-testid="btn-empty-forced-align"
+                onClick={openForcedAlignDrawer}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-[#252F42] bg-[#0E131D] text-slate-200 hover:bg-[#1E2738] text-xs font-medium cursor-pointer"
+              >
+                <Sparkles className="w-3.5 h-3.5 text-amber-400" aria-hidden="true" />
+                <span>هم‌ترازی متن دلخواه</span>
+              </button>
+            </div>
           </div>
         ) : (
           <div className="flex flex-wrap items-baseline gap-x-2 gap-y-3 leading-8">

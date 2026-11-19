@@ -108,18 +108,41 @@ export class SensitiveContentAndPiiRedactorEngine {
   ): Float32Array {
     const len = originalSegmentPcm.length;
     const out = new Float32Array(len);
+    if (len === 0) return out;
     const fadeSamples = Math.min(
       Math.floor(len / 3),
       Math.floor((sampleRate * 15) / 1000),
     );
 
-    if (mode === 'ROOM_TONE_SILENT_MASK') {
-      for (let i = 0; i < len; i++) {
-        out[i] =
-          roomToneBuffer.length > 0
-            ? roomToneBuffer[i % roomToneBuffer.length]
-            : 0;
+    const blendWithOriginalEdges = (masked: Float32Array) => {
+      if (fadeSamples <= 0) return;
+      for (let i = 0; i < fadeSamples; i++) {
+        const alpha = 0.5 * (1.0 - Math.cos((Math.PI * i) / fadeSamples));
+        const origHead = Number.isFinite(originalSegmentPcm[i]) ? originalSegmentPcm[i] : 0;
+        masked[i] = origHead * (1.0 - alpha) + masked[i] * alpha;
+
+        const tailIdx = len - 1 - i;
+        const origTail = Number.isFinite(originalSegmentPcm[tailIdx])
+          ? originalSegmentPcm[tailIdx]
+          : 0;
+        masked[tailIdx] = origTail * (1.0 - alpha) + masked[tailIdx] * alpha;
       }
+    };
+
+    if (mode === 'ROOM_TONE_SILENT_MASK') {
+      const rtLen = roomToneBuffer.length;
+      const cycle = rtLen * 2;
+      for (let i = 0; i < len; i++) {
+        if (rtLen > 0) {
+          const pos = i % cycle;
+          const idx = pos < rtLen ? pos : cycle - pos - 1;
+          const rtSample = roomToneBuffer[idx];
+          out[i] = Number.isFinite(rtSample) ? rtSample : 0;
+        } else {
+          out[i] = 0;
+        }
+      }
+      blendWithOriginalEdges(out);
       return out;
     }
 
@@ -128,10 +151,13 @@ export class SensitiveContentAndPiiRedactorEngine {
       let s1 = 0;
       let s2 = 0;
       for (let i = 0; i < len; i++) {
-        s1 = (1.0 - alpha) * originalSegmentPcm[i] + alpha * s1;
+        const raw = originalSegmentPcm[i];
+        const x = Number.isFinite(raw) ? raw : 0;
+        s1 = (1.0 - alpha) * x + alpha * s1;
         s2 = (1.0 - alpha) * s1 + alpha * s2;
         out[i] = s2 * 0.6;
       }
+      blendWithOriginalEdges(out);
       return out;
     }
 
@@ -139,9 +165,9 @@ export class SensitiveContentAndPiiRedactorEngine {
     const bleepAmp = Math.pow(10, -18.0 / 20.0);
     for (let i = 0; i < len; i++) {
       let env = 1.0;
-      if (i < fadeSamples) {
+      if (fadeSamples > 0 && i < fadeSamples) {
         env = 0.5 * (1.0 - Math.cos((Math.PI * i) / fadeSamples));
-      } else if (i >= len - fadeSamples) {
+      } else if (fadeSamples > 0 && i >= len - fadeSamples) {
         const rem = len - 1 - i;
         env = 0.5 * (1.0 - Math.cos((Math.PI * rem) / fadeSamples));
       }

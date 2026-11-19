@@ -29,15 +29,21 @@ export class PersianChapterAndTopicSegmenter {
     tokens: readonly TimedPersianToken[],
     targetBlockDurationSec = 90.0,
   ): PodcastChapterMarker[] {
-    if (tokens.length === 0) return [];
-    const safeBlockDurationSec = Math.max(5.0, targetBlockDurationSec);
+    const validTokens = tokens.filter(
+      (t) => Number.isFinite(t.range.start) && Number.isFinite(t.range.end),
+    );
+    if (validTokens.length === 0) return [];
+    const safeBlockDurationSec =
+      Number.isFinite(targetBlockDurationSec) && targetBlockDurationSec > 0
+        ? Math.max(5.0, targetBlockDurationSec)
+        : 90.0;
 
     // 1. Partition tokens into temporal blocks with content-word frequency maps
     const blocks: { tokens: TimedPersianToken[]; termFreq: Map<string, number> }[] = [];
     let currentBlock: TimedPersianToken[] = [];
-    let blockStartFlicks = tokens[0].range.start;
+    let blockStartFlicks = validTokens[0].range.start;
 
-    for (const tok of tokens) {
+    for (const tok of validTokens) {
       const elapsedFromBlockStartSec = TimeMath.flicksToSeconds(tok.range.start - blockStartFlicks);
       if (currentBlock.length > 0 && elapsedFromBlockStartSec >= safeBlockDurationSec) {
         blocks.push({
@@ -180,7 +186,7 @@ export class PersianChapterAndTopicSegmenter {
   }
 
   private static formatHhMmSs(totalSeconds: number): string {
-    const safeSec = Math.max(0, totalSeconds);
+    const safeSec = Number.isFinite(totalSeconds) ? Math.max(0, totalSeconds) : 0;
     const hrs = Math.floor(safeSec / 3600);
     const mins = Math.floor((safeSec % 3600) / 60);
     const secs = Math.floor(safeSec % 60);

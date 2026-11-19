@@ -668,75 +668,112 @@ export class EditDecisionValidator {
     doc: ProjectDocument,
     items: readonly ApplicationReadyEditItem[],
   ): ProjectDocument {
-    // Sort cuts descending by startFlicks per track so earlier cuts don't shift later dry-run coordinates
+    // Sort cuts descending by startFlicks so earlier cuts never invalidate later dry-run coordinates
     const clonedTracks: TimelineTrack[] = structuredClone(doc.tracks);
+    const sortedDesc = [...items].sort(
+      (a, b) => b.proposedRange.startFlicks - a.proposedRange.startFlicks,
+    );
 
-    const itemsByTrack = new Map<string, ApplicationReadyEditItem[]>();
-    for (const item of items) {
-      const list = itemsByTrack.get(item.trackId) ?? [];
-      list.push(item);
-      itemsByTrack.set(item.trackId, list);
-    }
+    const applyCutToClips = (
+      clips: TimelineClip[],
+      trackId: string,
+      item: ApplicationReadyEditItem,
+    ): TimelineClip[] => {
+      const cutStart = item.proposedRange.startFlicks;
+      const cutEnd = item.proposedRange.endFlicks;
+      const cutDur = cutEnd - cutStart;
+      const isInPlaceRoomTone = item.undoMetadata.cutStrategy === 'IN_PLACE_ROOM_TONE';
+      const fade = item.undoMetadata.fadeInDurationFlicks;
+      const nextClips: TimelineClip[] = [];
+      let roomToneInserted = false;
 
-    for (let tIdx = 0; tIdx < clonedTracks.length; tIdx++) {
-      const track = clonedTracks[tIdx];
-      const trackItems = itemsByTrack.get(track.id);
-      if (!trackItems || trackItems.length === 0) continue;
-
-      const sortedDesc = [...trackItems].sort(
-        (a, b) => b.proposedRange.startFlicks - a.proposedRange.startFlicks,
-      );
-
-      let currentClips: TimelineClip[] = [...track.clips];
-      for (const item of sortedDesc) {
-        const cutStart = item.proposedRange.startFlicks;
-        const cutEnd = item.proposedRange.endFlicks;
-        const fade = item.undoMetadata.fadeInDurationFlicks;
-        const nextClips: TimelineClip[] = [];
-
-        for (const clip of currentClips) {
-          if (clip.timelineRange.end <= cutStart || clip.timelineRange.start >= cutEnd) {
-            nextClips.push(clip);
-            continue;
-          }
-          if (clip.timelineRange.start < cutStart) {
-            const leftDur = cutStart - clip.timelineRange.start;
-            nextClips.push({
-              ...clip,
-              id: `${clip.id}_simL`,
-              sourceRange: {
-                start: clip.sourceRange.start,
-                end: clip.sourceRange.start + leftDur,
-              },
-              timelineRange: { start: clip.timelineRange.start, end: cutStart },
-              fadeOutFlicks: fade,
-            });
-          }
-          if (clip.timelineRange.end > cutEnd) {
-            const rightDur = clip.timelineRange.end - cutEnd;
-            nextClips.push({
-              ...clip,
-              id: `${clip.id}_simR`,
-              sourceRange: {
-                start: clip.sourceRange.end - rightDur,
-                end: clip.sourceRange.end,
-              },
-              timelineRange: {
-                start:
-                  item.undoMetadata.cutStrategy === 'IN_PLACE_ROOM_TONE' ? cutEnd : cutStart,
-                end:
-                  item.undoMetadata.cutStrategy === 'IN_PLACE_ROOM_TONE'
-                    ? clip.timelineRange.end
-                    : cutStart + rightDur,
-              },
-              fadeInFlicks: fade,
-            });
-          }
+      for (const clip of clips) {
+        if (clip.timelineRange.end <= cutStart) {
+          nextClips.push(clip);
+          continue;
         }
-        currentClips = nextClips;
+        if (clip.timelineRange.start >= cutEnd) {
+          nextClips.push(
+            isInPlaceRoomTone
+              ? clip
+              : {
+                  ...clip,
+                  timelineRange: {
+                    start: clip.timelineRange.start - cutDur,
+                    end: clip.timelineRange.end - cutDur,
+                  },
+                },
+          );
+          continue;
+        }
+        if (clip.timelineRange.start < cutStart) {
+          const leftDur = cutStart - clip.timelineRange.start;
+          const safeFadeOut = Math.min(fade, Math.floor(leftDur / 2));
+          nextClips.push({
+            ...clip,
+            id: `${clip.id}_simL`,
+            sourceRange: {
+              start: clip.sourceRange.start,
+              end: clip.sourceRange.start + leftDur,
+            },
+            timelineRange: { start: clip.timelineRange.start, end: cutStart },
+            fadeOutFlicks: safeFadeOut,
+          });
+        }
+        if (isInPlaceRoomTone && !roomToneInserted && cutDur > 0) {
+          roomToneInserted = true;
+          const safeRtFade = Math.min(fade, Math.floor(cutDur / 2));
+          nextClips.push({
+            id: `sim_rt_${trackId}_${cutStart}`,
+            trackId,
+            kind: 'ROOM_TONE_FILL',
+            assetId: clip.assetId,
+            sourceRange: { start: 0, end: cutDur },
+            timelineRange: { start: cutStart, end: cutEnd },
+            fadeInFlicks: safeRtFade,
+            fadeOutFlicks: safeRtFade,
+            gainDb: 0,
+          });
+        }
+        if (clip.timelineRange.end > cutEnd) {
+          const rightDur = clip.timelineRange.end - cutEnd;
+          const safeFadeIn = Math.min(fade, Math.floor(rightDur / 2));
+          nextClips.push({
+            ...clip,
+            id: `${clip.id}_simR`,
+            sourceRange: {
+              start: clip.sourceRange.end - rightDur,
+              end: clip.sourceRange.end,
+            },
+            timelineRange: {
+              start: isInPlaceRoomTone ? cutEnd : cutStart,
+              end: isInPlaceRoomTone ? clip.timelineRange.end : cutStart + rightDur,
+            },
+            fadeInFlicks: safeFadeIn,
+          });
+        }
       }
 
-      clonedTracks[tIdx] = { ...track, clips: currentClips };
+      return nextClips;
+    };
+
+    for (const item of sortedDesc) {
+      const targetTrack = clonedTracks.find((t) => t.id === item.trackId);
+      if (!targetTrack) continue;
+      const syncGroupId =
+        item.undoMetadata.cutStrategy === 'GLOBAL_SYNC_RIPPLE' ? targetTrack.syncGroupId : null;
+
+      for (let tIdx = 0; tIdx < clonedTracks.length; tIdx++) {
+        const track = clonedTracks[tIdx];
+        const affected =
+          track.id === targetTrack.id ||
+          (syncGroupId !== null && track.syncGroupId === syncGroupId);
+        if (!affected) continue;
+        clonedTracks[tIdx] = {
+          ...track,
+          clips: applyCutToClips(track.clips, track.id, item),
+        };
+      }
     }
 
     return {

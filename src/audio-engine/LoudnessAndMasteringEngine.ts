@@ -25,8 +25,14 @@ export class LoudnessAndMasteringEngine {
     sampleRate: SampleRate,
   ): LoudnessMeasurementReport {
     const chCount = channels.length;
-    const frameCount = channels[0]?.length ?? 0;
-    if (chCount === 0 || frameCount === 0) {
+    const frameCount =
+      chCount > 0 ? Math.min(...channels.map((c) => c?.length ?? 0)) : 0;
+    if (
+      chCount === 0 ||
+      frameCount === 0 ||
+      !Number.isFinite(sampleRate) ||
+      sampleRate <= 0
+    ) {
       return {
         integratedLufs: -70.0,
         maxShortTermLufs: -70.0,
@@ -36,11 +42,11 @@ export class LoudnessAndMasteringEngine {
     }
 
     const kWeightedChannels = channels.map((ch) =>
-      this.applyKWeightingFilter(ch, sampleRate),
+      this.applyKWeightingFilter(ch.subarray(0, frameCount), sampleRate),
     );
 
-    const blockSamples = Math.floor(sampleRate * 0.4);
-    const stepSamples = Math.floor(sampleRate * 0.1);
+    const blockSamples = Math.max(1, Math.floor(sampleRate * 0.4));
+    const stepSamples = Math.max(1, Math.floor(sampleRate * 0.1));
     const blockEnergies: number[] = [];
 
     if (frameCount < blockSamples) {
@@ -124,18 +130,40 @@ export class LoudnessAndMasteringEngine {
     targetLufs = -16.0,
     ceilingDbtp = -1.0,
   ): { normalizedChannels: Float32Array[]; appliedGainDb: number } {
-    const report = this.measureLoudnessAndTruePeak(channels, sampleRate);
-    if (report.integratedLufs <= -68.0) {
+    const chCount = channels.length;
+    const frameCount =
+      chCount > 0 ? Math.min(...channels.map((c) => c?.length ?? 0)) : 0;
+    if (
+      chCount === 0 ||
+      frameCount === 0 ||
+      !Number.isFinite(sampleRate) ||
+      sampleRate <= 0
+    ) {
       return { normalizedChannels: channels.map((c) => new Float32Array(c)), appliedGainDb: 0 };
     }
 
-    const rawGainDb = Math.min(18.0, Math.max(-24.0, targetLufs - report.integratedLufs));
-    const linearMakeup = Math.pow(10, rawGainDb / 20.0);
-    const ceilingLin = Math.pow(10, ceilingDbtp / 20.0);
+    const report = this.measureLoudnessAndTruePeak(channels, sampleRate);
+    if (report.integratedLufs <= -68.0) {
+      return {
+        normalizedChannels: channels.map((c) => {
+          const out = new Float32Array(frameCount);
+          for (let i = 0; i < frameCount; i++) {
+            out[i] = Number.isFinite(c[i]) ? c[i] : 0;
+          }
+          return out;
+        }),
+        appliedGainDb: 0,
+      };
+    }
 
-    const frameCount = channels[0].length;
-    const chCount = channels.length;
-    const outChannels = channels.map((ch) => new Float32Array(ch.length));
+    const safeTargetLufs = Number.isFinite(targetLufs) ? targetLufs : -16.0;
+    const safeCeilingDbtp = Number.isFinite(ceilingDbtp) ? ceilingDbtp : -1.0;
+
+    const rawGainDb = Math.min(18.0, Math.max(-24.0, safeTargetLufs - report.integratedLufs));
+    const linearMakeup = Math.pow(10, rawGainDb / 20.0);
+    const ceilingLin = Math.pow(10, safeCeilingDbtp / 20.0);
+
+    const outChannels = channels.map(() => new Float32Array(frameCount));
 
     const releaseCoeff = Math.exp(-1.0 / (0.06 * sampleRate));
     let gainReductionEnv = 1.0;
@@ -143,7 +171,8 @@ export class LoudnessAndMasteringEngine {
     for (let i = 0; i < frameCount; i++) {
       let maxSampleInFrame = 0;
       for (let c = 0; c < chCount; c++) {
-        const amplified = Math.abs(channels[c][i] * linearMakeup);
+        const s = Number.isFinite(channels[c][i]) ? channels[c][i] : 0;
+        const amplified = Math.abs(s * linearMakeup);
         if (amplified > maxSampleInFrame) maxSampleInFrame = amplified;
       }
 
@@ -159,7 +188,8 @@ export class LoudnessAndMasteringEngine {
 
       const totalFrameGain = linearMakeup * gainReductionEnv;
       for (let c = 0; c < chCount; c++) {
-        outChannels[c][i] = channels[c][i] * totalFrameGain;
+        const s = Number.isFinite(channels[c][i]) ? channels[c][i] : 0;
+        outChannels[c][i] = s * totalFrameGain;
       }
     }
 
@@ -184,7 +214,8 @@ export class LoudnessAndMasteringEngine {
     monoInput: Float32Array,
     panPosition: number,
   ): [Float32Array, Float32Array] {
-    const clampedPan = Math.max(-1.0, Math.min(1.0, panPosition));
+    const safePan = Number.isFinite(panPosition) ? panPosition : 0.0;
+    const clampedPan = Math.max(-1.0, Math.min(1.0, safePan));
     const angle = ((clampedPan + 1.0) * Math.PI) / 4.0;
     const gainL = Math.cos(angle);
     const gainR = Math.sin(angle);
@@ -192,8 +223,9 @@ export class LoudnessAndMasteringEngine {
     const left = new Float32Array(monoInput.length);
     const right = new Float32Array(monoInput.length);
     for (let i = 0; i < monoInput.length; i++) {
-      left[i] = monoInput[i] * gainL;
-      right[i] = monoInput[i] * gainR;
+      const s = Number.isFinite(monoInput[i]) ? monoInput[i] : 0;
+      left[i] = s * gainL;
+      right[i] = s * gainR;
     }
     return [left, right];
   }
@@ -267,8 +299,9 @@ export class LoudnessAndMasteringEngine {
       y1 = 0,
       y2 = 0;
     for (let i = 0; i < input.length; i++) {
-      const x0 = input[i];
-      const y0 = c.b0 * x0 + c.b1 * x1 + c.b2 * x2 - c.a1 * y1 - c.a2 * y2;
+      const x0 = Number.isFinite(input[i]) ? input[i] : 0;
+      const rawY = c.b0 * x0 + c.b1 * x1 + c.b2 * x2 - c.a1 * y1 - c.a2 * y2;
+      const y0 = Number.isFinite(rawY) ? rawY : 0;
       x2 = x1;
       x1 = x0;
       y2 = y1;
@@ -283,14 +316,15 @@ export class LoudnessAndMasteringEngine {
     let maxPeak = 0;
     for (const ch of channels) {
       for (let i = 0; i < ch.length; i++) {
-        const abs = Math.abs(ch[i]);
+        const s = Number.isFinite(ch[i]) ? ch[i] : 0;
+        const abs = Math.abs(s);
         if (abs > maxPeak) maxPeak = abs;
       }
       for (let i = 1; i < ch.length - 2; i++) {
-        const y0 = ch[i - 1];
-        const y1 = ch[i];
-        const y2 = ch[i + 1];
-        const y3 = ch[i + 2];
+        const y0 = Number.isFinite(ch[i - 1]) ? ch[i - 1] : 0;
+        const y1 = Number.isFinite(ch[i]) ? ch[i] : 0;
+        const y2 = Number.isFinite(ch[i + 1]) ? ch[i + 1] : 0;
+        const y3 = Number.isFinite(ch[i + 2]) ? ch[i + 2] : 0;
 
         if (Math.max(Math.abs(y1), Math.abs(y2)) > 0.1) {
           for (const t of [0.25, 0.5, 0.75]) {

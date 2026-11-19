@@ -96,7 +96,11 @@ export class TimelineTransactionEngine {
     }
 
     const cutRange = rec.spliceDescriptor.snappedAcousticRange;
-    if (cutRange.end <= cutRange.start) {
+    if (
+      !Number.isFinite(cutRange.start) ||
+      !Number.isFinite(cutRange.end) ||
+      cutRange.end <= cutRange.start
+    ) {
       throw new Error(`INVALID_CUT_RANGE: ${recommendationId}`);
     }
 
@@ -151,15 +155,19 @@ export class TimelineTransactionEngine {
       useGlobalRipple ? null : targetTrack.id,
     );
 
-    const tx = this.recordTransaction(
-      `اعمال اصلاح هوشمند: ${rec.associatedText}`,
-      beforeTracks,
-      afterTracks,
-      invalidatedIds,
-      undefined,
-      rec.id,
+    const cutDuration = cutRange.end - cutRange.start;
+    const rawInjectFlicks = rec.spliceDescriptor.injectRoomToneFlicks;
+    const safeInjectFlicks =
+      Number.isFinite(rawInjectFlicks) && rawInjectFlicks > 0 ? rawInjectFlicks : 0;
+    const roomToneDur = Math.min(safeInjectFlicks, cutDuration);
+    const netShiftLeft = useGlobalRipple ? Math.max(0, cutDuration - roomToneDur) : 0;
+    const affectedTrackIds = new Set(
+      this.committedDoc.tracks
+        .filter((t) => (syncGroupId ? t.syncGroupId === syncGroupId : t.id === targetTrack.id))
+        .map((t) => t.id),
     );
 
+    const beforeRecommendations = structuredClone(this.committedDoc.recommendations);
     const updatedRecommendations: AIRecommendationRecord[] = this.committedDoc.recommendations.map(
       (r) => {
         if (r.id === rec.id) {
@@ -168,8 +176,47 @@ export class TimelineTransactionEngine {
         if (invalidatedIds.includes(r.id)) {
           return { ...r, status: 'INVALIDATED' };
         }
+        if (
+          useGlobalRipple &&
+          netShiftLeft > 0 &&
+          r.status === 'PENDING' &&
+          affectedTrackIds.has(r.targetTrackId) &&
+          r.spliceDescriptor.snappedAcousticRange.start >= cutRange.end
+        ) {
+          const snapped = r.spliceDescriptor.snappedAcousticRange;
+          const raw = r.spliceDescriptor.rawAiRange;
+          const nextSnappedStart = Math.max(0, snapped.start - netShiftLeft);
+          const nextSnappedEnd = Math.max(nextSnappedStart + 1, snapped.end - netShiftLeft);
+          const nextRawStart = Math.max(0, raw.start - netShiftLeft);
+          const nextRawEnd = Math.max(nextRawStart + 1, raw.end - netShiftLeft);
+          return {
+            ...r,
+            spliceDescriptor: {
+              ...r.spliceDescriptor,
+              snappedAcousticRange: {
+                start: nextSnappedStart,
+                end: nextSnappedEnd,
+              },
+              rawAiRange: {
+                start: nextRawStart,
+                end: nextRawEnd,
+              },
+            },
+          };
+        }
         return r;
       },
+    );
+
+    const tx = this.recordTransaction(
+      `اعمال اصلاح هوشمند: ${rec.associatedText}`,
+      beforeTracks,
+      afterTracks,
+      invalidatedIds,
+      undefined,
+      rec.id,
+      beforeRecommendations,
+      updatedRecommendations,
     );
 
     this.committedDoc = {
@@ -178,6 +225,8 @@ export class TimelineTransactionEngine {
       tracks: afterTracks,
       recommendations: updatedRecommendations,
     };
+    this.ephemeralDoc = null;
+    this.activeGestureKey = null;
 
     return tx;
   }
@@ -189,8 +238,20 @@ export class TimelineTransactionEngine {
     roomToneSourceRange: TimeRange,
   ): TimelineTrack {
     const cutDuration = cutRange.end - cutRange.start;
-    const roomToneDur = Math.min(descriptor.injectRoomToneFlicks, cutDuration);
-    const netShiftLeft = cutDuration - roomToneDur;
+    const safeInject =
+      Number.isFinite(descriptor.injectRoomToneFlicks) && descriptor.injectRoomToneFlicks > 0
+        ? descriptor.injectRoomToneFlicks
+        : 0;
+    const roomToneDur = Math.min(safeInject, cutDuration);
+    const netShiftLeft = Math.max(0, cutDuration - roomToneDur);
+    const safeFadeIn =
+      Number.isFinite(descriptor.fadeInDurationFlicks) && descriptor.fadeInDurationFlicks > 0
+        ? descriptor.fadeInDurationFlicks
+        : 0;
+    const safeFadeOut =
+      Number.isFinite(descriptor.fadeOutDurationFlicks) && descriptor.fadeOutDurationFlicks > 0
+        ? descriptor.fadeOutDurationFlicks
+        : 0;
 
     const newClips: TimelineClip[] = [];
     let roomToneInserted = false;
@@ -228,14 +289,14 @@ export class TimelineTransactionEngine {
             start: clip.timelineRange.start,
             end: cutRange.start,
           },
-          fadeOutFlicks: descriptor.fadeOutDurationFlicks,
+          fadeOutFlicks: safeFadeOut,
         });
       }
 
       if (roomToneDur > 0 && !roomToneInserted) {
         roomToneInserted = true;
         newClips.push({
-          id: `rt_${track.id}_${cutRange.start}`,
+          id: `rt_${track.id}_${cutRange.start}_r${this.committedDoc.revision + 1}`,
           trackId: track.id,
           kind: 'ROOM_TONE_FILL',
           assetId: clip.assetId,
@@ -247,8 +308,8 @@ export class TimelineTransactionEngine {
             start: cutRange.start,
             end: cutRange.start + roomToneDur,
           },
-          fadeInFlicks: descriptor.fadeInDurationFlicks,
-          fadeOutFlicks: descriptor.fadeOutDurationFlicks,
+          fadeInFlicks: safeFadeIn,
+          fadeOutFlicks: safeFadeOut,
           gainDb: 0,
         });
       }
@@ -266,7 +327,7 @@ export class TimelineTransactionEngine {
             start: cutRange.start + roomToneDur,
             end: clip.timelineRange.end - netShiftLeft,
           },
-          fadeInFlicks: descriptor.fadeInDurationFlicks,
+          fadeInFlicks: safeFadeIn,
         });
       }
     }
@@ -341,6 +402,8 @@ export class TimelineTransactionEngine {
     invalidatedIds: RecommendationId[],
     coalescingKey?: string,
     acceptedRecommendationId?: RecommendationId,
+    beforeRecommendations?: AIRecommendationRecord[],
+    afterRecommendations?: AIRecommendationRecord[],
   ): EditTransaction {
     const nextRev = this.committedDoc.revision + 1;
     const tx: EditTransaction = {
@@ -352,6 +415,12 @@ export class TimelineTransactionEngine {
       description,
       beforeTracksSnapshot: structuredClone(beforeTracks),
       afterTracksSnapshot: structuredClone(afterTracks),
+      beforeRecommendationsSnapshot: beforeRecommendations
+        ? structuredClone(beforeRecommendations)
+        : undefined,
+      afterRecommendationsSnapshot: afterRecommendations
+        ? structuredClone(afterRecommendations)
+        : undefined,
       acceptedRecommendationId,
       invalidatedRecommendationIds: invalidatedIds,
     };
@@ -364,20 +433,24 @@ export class TimelineTransactionEngine {
     const tx = this.undoStack.pop();
     if (!tx) return null;
     this.redoStack.push(tx);
+    this.ephemeralDoc = null;
+    this.activeGestureKey = null;
 
     this.committedDoc = {
       ...this.committedDoc,
       revision: tx.projectRevisionBefore,
       tracks: structuredClone(tx.beforeTracksSnapshot),
-      recommendations: this.committedDoc.recommendations.map((r) => {
-        if (r.id === tx.acceptedRecommendationId) {
-          return { ...r, status: 'PENDING', userDecisionTimestamp: undefined };
-        }
-        if (tx.invalidatedRecommendationIds.includes(r.id)) {
-          return { ...r, status: 'PENDING' };
-        }
-        return r;
-      }),
+      recommendations: tx.beforeRecommendationsSnapshot
+        ? structuredClone(tx.beforeRecommendationsSnapshot)
+        : this.committedDoc.recommendations.map((r) => {
+            if (r.id === tx.acceptedRecommendationId) {
+              return { ...r, status: 'PENDING', userDecisionTimestamp: undefined };
+            }
+            if (tx.invalidatedRecommendationIds.includes(r.id)) {
+              return { ...r, status: 'PENDING' };
+            }
+            return r;
+          }),
     };
     return this.committedDoc;
   }
@@ -386,20 +459,24 @@ export class TimelineTransactionEngine {
     const tx = this.redoStack.pop();
     if (!tx) return null;
     this.undoStack.push(tx);
+    this.ephemeralDoc = null;
+    this.activeGestureKey = null;
 
     this.committedDoc = {
       ...this.committedDoc,
       revision: tx.projectRevisionAfter,
       tracks: structuredClone(tx.afterTracksSnapshot),
-      recommendations: this.committedDoc.recommendations.map((r) => {
-        if (r.id === tx.acceptedRecommendationId) {
-          return { ...r, status: 'ACCEPTED', userDecisionTimestamp: Date.now() };
-        }
-        if (tx.invalidatedRecommendationIds.includes(r.id)) {
-          return { ...r, status: 'INVALIDATED' };
-        }
-        return r;
-      }),
+      recommendations: tx.afterRecommendationsSnapshot
+        ? structuredClone(tx.afterRecommendationsSnapshot)
+        : this.committedDoc.recommendations.map((r) => {
+            if (r.id === tx.acceptedRecommendationId) {
+              return { ...r, status: 'ACCEPTED', userDecisionTimestamp: Date.now() };
+            }
+            if (tx.invalidatedRecommendationIds.includes(r.id)) {
+              return { ...r, status: 'INVALIDATED' };
+            }
+            return r;
+          }),
     };
     return this.committedDoc;
   }

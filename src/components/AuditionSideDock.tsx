@@ -97,10 +97,19 @@ export const AuditionSideDock: React.FC<AuditionSideDockProps> = ({
             </div>
 
             {tracks.map((track) => {
-              const firstClip = track.clips[0];
-              const asset = firstClip ? assets[firstClip.assetId] : undefined;
-              const startSec = firstClip ? firstClip.timelineRange.startFlicks / 705_600_000 : 0;
-              const endSec = firstClip ? firstClip.timelineRange.endFlicks / 705_600_000 : 0;
+              const primaryClip =
+                track.clips.find((c) => c.kind === 'speech') ?? track.clips[0];
+              const asset = primaryClip ? assets[primaryClip.assetId] : undefined;
+              const startFlicks =
+                track.clips.length > 0
+                  ? Math.min(...track.clips.map((c) => c.timelineRange.startFlicks))
+                  : 0;
+              const endFlicks =
+                track.clips.length > 0
+                  ? Math.max(...track.clips.map((c) => c.timelineRange.endFlicks))
+                  : 0;
+              const startSec = startFlicks / 705_600_000;
+              const endSec = endFlicks / 705_600_000;
 
               return (
                 <div

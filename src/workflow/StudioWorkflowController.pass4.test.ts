@@ -1,0 +1,211 @@
+import assert from 'node:assert/strict';
+import test from 'node:test';
+import {
+  exportTranscriptContent,
+  StudioWorkflowController,
+  TranscriptVersionRecord,
+} from './StudioWorkflowController';
+import {
+  assessSemanticChangeRisk,
+  createPersianTranscriptDocument,
+  PersianAsrCorrectionCandidate,
+  TranscriptTransformationEngine,
+} from '../persian-linguistics';
+import { AudioRenderEngine } from '../audio-renderer';
+
+test('exportTranscriptContent formats SRT timestamps with safe millisecond rollover (never emits ,1000)', () => {
+  const version: TranscriptVersionRecord = {
+    versionId: 'tr_v1_test',
+    versionNumber: 1,
+    kind: 'USER_CORRECTED',
+    createdAtMs: 1_700_000_000_000,
+    changeSummary: 'test',
+    segments: [
+      {
+        segmentId: 'seg_1',
+        trackId: 'track-host',
+        speakerLabel: 'میزبان',
+        startSec: 1.9996,
+        endSec: 59.9997,
+        rawText: 'سلام دنیا',
+        editedText: 'سلام دنیا',
+        normalizedText: 'سلام دنیا',
+        tokenIds: ['tok-1'],
+        alignmentQuality: 'FORCED_ALIGNED',
+        alignmentConfidence: 0.98,
+      },
+    ],
+  };
+
+  const exported = exportTranscriptContent({
+    version,
+    layer: 'user_corrected',
+    format: 'srt',
+    projectName: 'test-podcast',
+  });
+
+  assert.match(exported.content, /00:00:02,000 --> 00:01:00,000/);
+  assert.doesNotMatch(exported.content, /,1000/);
+});
+
+test('StudioWorkflowController.startRender rejects concurrent duplicate calls while QUEUED', async () => {
+  let resolveRender!: () => void;
+  const renderGate = new Promise<void>((resolve) => {
+    resolveRender = resolve;
+  });
+
+  const fakeEngine = {
+    render: async () => {
+      await renderGate;
+      return {
+        renderId: 'rnd_test',
+        state: 'COMPLETED' as const,
+        ok: true,
+        plan: null,
+        output: null,
+        outputBytes: new Uint8Array([1, 2, 3, 4]),
+        preValidation: {
+          phase: 'PRE_RENDER' as const,
+          passed: true,
+          errorCount: 0,
+          warningCount: 0,
+          failures: [],
+        },
+        postValidation: {
+          phase: 'POST_RENDER' as const,
+          passed: true,
+          errorCount: 0,
+          warningCount: 0,
+          failures: [],
+        },
+        boundaryChecks: [],
+        crossfadeResults: [],
+        checkpoint: null,
+        sourceDurationSec: 1,
+        outputDurationSec: 1,
+        removedDurationSec: 0,
+        wallClockMs: 5,
+        realTimeFactor: 0.01,
+        peakReservedBytes: 1024,
+        sourceImmutableVerified: true,
+        edlImmutableVerified: true,
+        appliedProposalIds: [],
+        failureReason: null,
+      };
+    },
+    resumeFromCheckpoint: async () => {
+      throw new Error('not used');
+    },
+  } as unknown as AudioRenderEngine;
+
+  const ctrl = new StudioWorkflowController({ renderEngine: fakeEngine });
+  const pcm = new Float32Array(48_000);
+  ctrl.openProject({
+    projectId: 'proj_dup_guard',
+    projectName: 'Dup Guard Test',
+    sourceAudio: {
+      sourceAudioId: 'src_1',
+      sourceAudioHash: 'hash_12345678',
+      fileName: 'test.wav',
+      format: 'wav',
+      sampleRate: 48000,
+      channelCount: 1,
+      bitDepth: 32,
+      totalSamples: pcm.length,
+      durationSec: 1,
+      fileSizeBytes: pcm.byteLength,
+      importStatus: 'VALIDATED',
+      isDemoFixture: false,
+    },
+  });
+
+  await ctrl.analyzeSpeechEventsAndBuildEdl({
+    trackId: 'track-host',
+    pcmMono: pcm,
+    sampleRate: 48000,
+    wordTokens: [],
+  });
+
+  const config = {
+    encoding: 'pcm16' as const,
+    container: 'wav' as const,
+    targetSampleRate: 48000 as const,
+    chunkSizeSamples: 8192,
+    defaultCrossfadeMs: 10,
+  };
+
+  // Start first render -> synchronously transitions to QUEUED
+  const firstPromise = ctrl.startRender({ pcmChannels: [pcm], config });
+  assert.equal(ctrl.getState().renderState, 'QUEUED');
+
+  // Second concurrent call while still QUEUED MUST be rejected with null
+  const duplicateResult = await ctrl.startRender({ pcmChannels: [pcm], config });
+  assert.equal(duplicateResult, null);
+
+  resolveRender();
+  const firstResult = await firstPromise;
+  assert.equal(firstResult?.ok, true);
+});
+
+test('TranscriptTransformationEngine.revertCandidateById reverts only the targeted accepted candidate', () => {
+  const engine = new TranscriptTransformationEngine();
+  const doc0 = createPersianTranscriptDocument({
+    documentId: 'doc_revert_target',
+    rawAsrText: 'می روم به خانه ها',
+    sampleRate: 48000,
+  });
+
+  const tok0 = doc0.tokens[0];
+  const tok3 = doc0.tokens[3];
+  assert.ok(tok0 && tok3);
+
+  const candA: PersianAsrCorrectionCandidate = {
+    candidateId: 'cand_A',
+    sourceTranscriptVersion: doc0.version,
+    tokenIds: [tok0.tokenId],
+    originalText: tok0.readableText,
+    proposedText: 'می‌روم',
+    category: 'ORTHOGRAPHY_READABLE',
+    evidenceStrength: 'STRONG_EVIDENCE',
+    acousticEvidenceAvailable: false,
+    acousticConfidence: null,
+    linguisticEvidence: 'ZWNJ normalization',
+    semanticRisk: assessSemanticChangeRisk({
+      originalText: tok0.readableText,
+      proposedText: 'می‌روم',
+      category: 'ORTHOGRAPHY_READABLE',
+    }),
+    alignmentImpact: 'NONE',
+    epistemicSource: 'DETERMINISTIC_NORMALIZATION',
+    provenanceModule: 'test',
+    sourceStartSample: null,
+    sourceEndSample: null,
+    status: 'PROPOSED',
+  };
+
+  const applyA = engine.applyAcceptedCandidate({ document: doc0, candidate: candA });
+  assert.equal(applyA.applied, true);
+
+  const candB: PersianAsrCorrectionCandidate = {
+    ...candA,
+    candidateId: 'cand_B',
+    sourceTranscriptVersion: applyA.document.version,
+    tokenIds: [tok3.tokenId],
+    originalText: tok3.readableText,
+    proposedText: 'خانه‌ها',
+  };
+
+  const applyB = engine.applyAcceptedCandidate({ document: applyA.document, candidate: candB });
+  assert.equal(applyB.applied, true);
+
+  // Revert cand_A specifically (NOT cand_B, which was applied last)
+  const revertA = engine.revertCandidateById(applyB.document, 'cand_A');
+  assert.equal(revertA.reverted, true);
+  assert.equal(revertA.revertedTokenId, tok0.tokenId);
+  assert.equal(revertA.restoredReadableText, tok0.readableText);
+
+  const afterTok0 = revertA.document.tokens.find((t) => t.tokenId === tok0.tokenId);
+  const afterTok3 = revertA.document.tokens.find((t) => t.tokenId === tok3.tokenId);
+  assert.equal(afterTok0?.readableText, tok0.readableText, 'Targeted cand_A must be reverted');
+  assert.equal(afterTok3?.readableText, 'خانه‌ها', 'Unrelated cand_B must stay intact');
+});

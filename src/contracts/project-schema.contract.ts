@@ -75,6 +75,8 @@ export interface EditTransaction {
   readonly description: string;
   readonly beforeTracksSnapshot: TimelineTrack[];
   readonly afterTracksSnapshot: TimelineTrack[];
+  readonly beforeRecommendationsSnapshot?: AIRecommendationRecord[];
+  readonly afterRecommendationsSnapshot?: AIRecommendationRecord[];
   readonly acceptedRecommendationId?: RecommendationId;
   readonly invalidatedRecommendationIds: RecommendationId[];
 }

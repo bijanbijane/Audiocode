@@ -164,6 +164,12 @@ export interface EditTransaction {
   afterTokens?: PersianWordToken[];
   beforeRecommendations?: SmartRecommendation[];
   afterRecommendations?: SmartRecommendation[];
+  beforeDsp?: EphemeralDspParams;
+  afterDsp?: EphemeralDspParams;
+  beforePcmSources?: Record<string, Float32Array>;
+  afterPcmSources?: Record<string, Float32Array>;
+  beforeAssets?: Record<string, AudioAsset>;
+  afterAssets?: Record<string, AudioAsset>;
   affectedRecommendationId?: string;
   commitStatus: 'committed' | 'reverted';
 }
@@ -359,6 +365,8 @@ export interface RuntimeCapabilities {
 
 export interface ExportValidationReport {
   readable: boolean;
+  structurallyValid?: boolean;
+  invalidSampleCount?: number;
   durationSeconds: number;
   channelCount: number;
   sampleRate: number;

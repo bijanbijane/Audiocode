@@ -198,3 +198,29 @@ test('TimelineTransactionEngine falls back to IN_PLACE_ROOM_TONE when sibling tr
   assert.equal(t1End, s(10));
   assert.equal(t2End, s(10));
 });
+
+test('TimelineTransactionEngine shifts subsequent PENDING recommendations after GLOBAL_SYNC_RIPPLE and restores exact ranges on Undo/Redo', () => {
+  const s = (sec: number) => TimeMath.secondsToFlicks(sec);
+  const engine = new TimelineTransactionEngine(makeBaseDoc());
+
+  // rec-crosstalk starts at [6s..7s) — strictly after rec-ripple [2s..3s) (1s ripple cut)
+  engine.applySmartSpliceRecommendation('rec-ripple', { start: 0, end: s(0.5) });
+  const afterApply = engine.getCommittedState();
+  const shiftedLaterRec = afterApply.recommendations.find((r) => r.id === 'rec-crosstalk')!;
+  assert.equal(shiftedLaterRec.status, 'PENDING');
+  assert.equal(shiftedLaterRec.spliceDescriptor.snappedAcousticRange.start, s(5));
+  assert.equal(shiftedLaterRec.spliceDescriptor.snappedAcousticRange.end, s(6));
+
+  // Undo restores rec-crosstalk back to [6s..7s)
+  const afterUndo = engine.undo()!;
+  const restoredRec = afterUndo.recommendations.find((r) => r.id === 'rec-crosstalk')!;
+  assert.equal(restoredRec.spliceDescriptor.snappedAcousticRange.start, s(6));
+  assert.equal(restoredRec.spliceDescriptor.snappedAcousticRange.end, s(7));
+
+  // Redo shifts rec-crosstalk back to [5s..6s)
+  const afterRedo = engine.redo()!;
+  const reShiftedRec = afterRedo.recommendations.find((r) => r.id === 'rec-crosstalk')!;
+  assert.equal(reShiftedRec.spliceDescriptor.snappedAcousticRange.start, s(5));
+  assert.equal(reShiftedRec.spliceDescriptor.snappedAcousticRange.end, s(6));
+});
+

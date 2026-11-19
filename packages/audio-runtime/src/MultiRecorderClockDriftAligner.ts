@@ -31,6 +31,16 @@ export class MultiRecorderClockDriftAligner {
     maxSearchOffsetSeconds = 15.0,
   ): ClockDriftAlignmentReport {
     const minLen = Math.min(referenceTrackPcm.length, secondaryTrackPcm.length);
+    if (!Number.isFinite(sampleRate) || sampleRate <= 0 || minLen === 0) {
+      return {
+        initialOffsetSamples: 0,
+        initialOffsetSeconds: 0,
+        measuredClockDriftPpm: 0,
+        resampleStretchFactor: 1.0,
+        alignmentConfidence: 0,
+      };
+    }
+
     const windowDurationSec = Math.min(30.0, minLen / sampleRate / 3);
 
     if (windowDurationSec < 2.0) {
@@ -48,10 +58,15 @@ export class MultiRecorderClockDriftAligner {
     const refEnv = this.extractEnergyEnvelope(referenceTrackPcm, decimationStep);
     const secEnv = this.extractEnergyEnvelope(secondaryTrackPcm, decimationStep);
 
-    const winEnvSamples = Math.floor(windowDurationSec * envRate);
-    const maxLagEnv = Math.floor(maxSearchOffsetSeconds * envRate);
+    const winEnvSamples = Math.max(1, Math.min(refEnv.length, Math.floor(windowDurationSec * envRate)));
+    const safeMaxOffsetSec =
+      Number.isFinite(maxSearchOffsetSeconds) && maxSearchOffsetSeconds >= 0
+        ? maxSearchOffsetSeconds
+        : 15.0;
+    const maxLagEnv = Math.floor(safeMaxOffsetSec * envRate);
 
-    const anchorAIndex = Math.floor(refEnv.length * 0.1);
+    const maxValidAnchor = Math.max(0, refEnv.length - winEnvSamples);
+    const anchorAIndex = Math.min(maxValidAnchor, Math.floor(refEnv.length * 0.1));
     const lagA = this.findBestEnvelopeLag(
       refEnv,
       secEnv,
@@ -60,9 +75,12 @@ export class MultiRecorderClockDriftAligner {
       maxLagEnv,
     );
 
-    const anchorBIndex = Math.max(
-      anchorAIndex + winEnvSamples,
-      Math.floor(refEnv.length * 0.8) - winEnvSamples,
+    const anchorBIndex = Math.min(
+      maxValidAnchor,
+      Math.max(
+        anchorAIndex + winEnvSamples,
+        Math.floor(refEnv.length * 0.8) - winEnvSamples,
+      ),
     );
     const lagB = this.findBestEnvelopeLag(
       refEnv,
@@ -103,21 +121,36 @@ export class MultiRecorderClockDriftAligner {
     targetLengthSamples: number,
     report: ClockDriftAlignmentReport,
   ): Float32Array {
-    const out = new Float32Array(targetLengthSamples);
+    const safeTargetLen =
+      Number.isFinite(targetLengthSamples) && targetLengthSamples > 0
+        ? Math.floor(targetLengthSamples)
+        : 0;
+    const out = new Float32Array(safeTargetLen);
     const srcLen = secondaryTrackPcm.length;
-    const offset = report.initialOffsetSamples;
-    const factor = report.resampleStretchFactor;
+    if (safeTargetLen === 0 || srcLen === 0) return out;
 
-    for (let i = 0; i < targetLengthSamples; i++) {
+    const offset = Number.isFinite(report.initialOffsetSamples) ? report.initialOffsetSamples : 0;
+    const factor =
+      Number.isFinite(report.resampleStretchFactor) && report.resampleStretchFactor > 0
+        ? report.resampleStretchFactor
+        : 1.0;
+
+    const readSafe = (k: number): number => {
+      const clamped = k < 0 ? 0 : k >= srcLen ? srcLen - 1 : k;
+      const v = secondaryTrackPcm[clamped];
+      return Number.isFinite(v) ? v : 0;
+    };
+
+    for (let i = 0; i < safeTargetLen; i++) {
       const exactSrcPos = i * factor + offset;
       const idx = Math.floor(exactSrcPos);
       const frac = exactSrcPos - idx;
 
-      if (idx >= 1 && idx < srcLen - 2) {
-        const y0 = secondaryTrackPcm[idx - 1];
-        const y1 = secondaryTrackPcm[idx];
-        const y2 = secondaryTrackPcm[idx + 1];
-        const y3 = secondaryTrackPcm[idx + 2];
+      if (idx >= 0 && idx < srcLen) {
+        const y0 = readSafe(idx - 1);
+        const y1 = readSafe(idx);
+        const y2 = readSafe(idx + 1);
+        const y3 = readSafe(idx + 2);
 
         const c0 = y1;
         const c1 = 0.5 * (y2 - y0);
@@ -125,8 +158,6 @@ export class MultiRecorderClockDriftAligner {
         const c3 = 0.5 * (y3 - y0) + 1.5 * (y1 - y2);
 
         out[i] = ((c3 * frac + c2) * frac + c1) * frac + c0;
-      } else if (idx >= 0 && idx < srcLen) {
-        out[i] = secondaryTrackPcm[idx];
       }
     }
 
@@ -137,15 +168,17 @@ export class MultiRecorderClockDriftAligner {
     pcm: Float32Array,
     stepSamples: number,
   ): Float32Array {
-    const envLen = Math.floor(pcm.length / stepSamples);
+    const safeStep = Math.max(1, Math.floor(stepSamples));
+    const envLen = Math.floor(pcm.length / safeStep);
     const env = new Float32Array(envLen);
     for (let i = 0; i < envLen; i++) {
-      const base = i * stepSamples;
+      const base = i * safeStep;
       let sum = 0;
-      for (let k = 0; k < stepSamples; k++) {
-        sum += Math.abs(pcm[base + k]);
+      for (let k = 0; k < safeStep; k++) {
+        const v = pcm[base + k];
+        sum += Number.isFinite(v) ? Math.abs(v) : 0;
       }
-      env[i] = sum / stepSamples;
+      env[i] = sum / safeStep;
     }
     return env;
   }
@@ -157,11 +190,15 @@ export class MultiRecorderClockDriftAligner {
     winLen: number,
     maxLag: number,
   ): { bestLag: number; confidence: number } {
+    if (startIdx < 0 || winLen <= 0 || startIdx + winLen > refEnv.length) {
+      return { bestLag: 0, confidence: 0 };
+    }
+
     let bestLag = 0;
     let maxCorr = -1;
 
     for (let lag = -maxLag; lag <= maxLag; lag++) {
-      if (startIdx + lag < 0 || startIdx + lag + winLen >= secEnv.length) continue;
+      if (startIdx + lag < 0 || startIdx + lag + winLen > secEnv.length) continue;
 
       let dot = 0;
       let magA = 0;

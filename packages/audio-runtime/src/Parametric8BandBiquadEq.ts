@@ -84,8 +84,10 @@ export class Parametric8BandBiquadEq {
       let { x1, x2, y1, y2 } = f;
 
       for (let i = 0; i < len; i++) {
-        const x0 = samples[i];
-        const y0 = b0 * x0 + b1 * x1 + b2 * x2 - a1 * y1 - a2 * y2;
+        const raw = samples[i];
+        const x0 = Number.isFinite(raw) ? raw : 0;
+        const rawY0 = b0 * x0 + b1 * x1 + b2 * x2 - a1 * y1 - a2 * y2;
+        const y0 = Number.isFinite(rawY0) ? rawY0 : 0;
         x2 = x1;
         x1 = x0;
         y2 = y1;
@@ -138,13 +140,16 @@ export class Parametric8BandBiquadEq {
   }
 
   private computeBiquadCoefficients(band: EqBandConfig): BiquadCoefficientsAndState {
-    const freq = Math.max(15, Math.min(this.sampleRate * 0.45, band.frequencyHz));
-    const q = Math.max(0.1, Math.min(25.0, band.qFactor));
+    const safeFreq = Number.isFinite(band.frequencyHz) ? band.frequencyHz : 1000;
+    const safeQ = Number.isFinite(band.qFactor) ? band.qFactor : 0.707;
+    const safeGainDb = Number.isFinite(band.gainDb) ? Math.max(-24, Math.min(24, band.gainDb)) : 0;
+    const freq = Math.max(15, Math.min(this.sampleRate * 0.45, safeFreq));
+    const q = Math.max(0.1, Math.min(25.0, safeQ));
     const w0 = (2.0 * Math.PI * freq) / this.sampleRate;
     const cosW0 = Math.cos(w0);
     const sinW0 = Math.sin(w0);
     const alpha = sinW0 / (2.0 * q);
-    const A = Math.pow(10.0, band.gainDb / 40.0);
+    const A = Math.pow(10.0, safeGainDb / 40.0);
 
     let b0 = 1,
       b1 = 0,

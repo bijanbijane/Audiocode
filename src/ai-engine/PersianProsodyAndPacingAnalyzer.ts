@@ -79,9 +79,21 @@ export class PersianProsodyAndPacingAnalyzer {
     sampleRate: SampleRate,
     windowDurationSec = 15.0,
   ): ProsodicWindowReport[] {
-    if (tokens.length === 0 || pcmMono.length === 0 || sampleRate <= 0 || windowDurationSec <= 0) {
+    if (
+      tokens.length === 0 ||
+      pcmMono.length === 0 ||
+      !Number.isFinite(sampleRate) ||
+      sampleRate <= 0 ||
+      !Number.isFinite(windowDurationSec) ||
+      windowDurationSec <= 0
+    ) {
       return [];
     }
+
+    const validTokens = tokens.filter(
+      (t) => Number.isFinite(t.range.start) && Number.isFinite(t.range.end),
+    );
+    if (validTokens.length === 0) return [];
 
     const totalDurationSec = pcmMono.length / sampleRate;
     const reports: ProsodicWindowReport[] = [];
@@ -95,7 +107,7 @@ export class PersianProsodyAndPacingAnalyzer {
         end: TimeMath.secondsToFlicks(endSec),
       };
 
-      const winTokens = tokens.filter((t) => {
+      const winTokens = validTokens.filter((t) => {
         const midFlicks = (t.range.start + t.range.end) / 2;
         return midFlicks >= winRange.start && midFlicks < winRange.end;
       });
@@ -106,7 +118,7 @@ export class PersianProsodyAndPacingAnalyzer {
       let totalSyllables = 0;
       for (const tok of winTokens) {
         const dur = TimeMath.flicksToSeconds(tok.range.end - tok.range.start);
-        netSpeechSeconds += Math.max(0.05, dur);
+        netSpeechSeconds += Math.max(0.05, Number.isFinite(dur) ? dur : 0.05);
         totalSyllables += this.estimatePersianWordSyllables(tok.normalizedText);
       }
 
@@ -114,8 +126,11 @@ export class PersianProsodyAndPacingAnalyzer {
       const syllablesPerSecond = Number((totalSyllables / netSpeechSeconds).toFixed(2));
 
       // 2. Fundamental frequency (F0) contour and Semitone standard deviation
-      const startSample = Math.floor(startSec * sampleRate);
-      const endSample = Math.min(pcmMono.length, Math.floor(endSec * sampleRate));
+      const startSample = Math.max(0, Math.min(pcmMono.length, Math.floor(startSec * sampleRate)));
+      const endSample = Math.max(
+        startSample,
+        Math.min(pcmMono.length, Math.floor(endSec * sampleRate)),
+      );
       const { medianHz, stdDevSemitones } = this.estimatePitchContourStats(
         pcmMono.subarray(startSample, endSample),
         sampleRate,
@@ -177,10 +192,17 @@ export class PersianProsodyAndPacingAnalyzer {
     config: SpeechAnalysisThresholdConfig = DEFAULT_SPEECH_EVENT_THRESHOLDS_V1,
     options?: { readonly offsetSeconds?: number; readonly windowDurationSec?: number },
   ): ComprehensiveProsodyReport {
-    const windowDurationSec = options?.windowDurationSec ?? 8.0;
-    const offsetSeconds = options?.offsetSeconds ?? 0;
+    const rawWinSec = options?.windowDurationSec ?? 8.0;
+    const windowDurationSec =
+      Number.isFinite(rawWinSec) && rawWinSec > 0 ? Math.max(1.0, rawWinSec) : 8.0;
+    const rawOffsetSec = options?.offsetSeconds ?? 0;
+    const offsetSeconds = Number.isFinite(rawOffsetSec) ? rawOffsetSec : 0;
 
-    if (tokens.length === 0) {
+    const validTokens = tokens.filter(
+      (t) => Number.isFinite(t.range.start) && Number.isFinite(t.range.end),
+    );
+
+    if (validTokens.length === 0) {
       return {
         totalSpeakingRateWpm: 0,
         netArticulationRateWpm: 0,
@@ -195,11 +217,13 @@ export class PersianProsodyAndPacingAnalyzer {
       };
     }
 
-    const sorted = [...tokens].sort((a, b) => a.range.start - b.range.start);
+    const sorted = [...validTokens].sort((a, b) => a.range.start - b.range.start);
     const firstStartSec = TimeMath.flicksToSeconds(sorted[0].range.start);
     const lastEndSec = TimeMath.flicksToSeconds(sorted[sorted.length - 1].range.end);
     const audioSpanSec =
-      pcmMono.length > 0 && sampleRate > 0 ? pcmMono.length / sampleRate : 0;
+      pcmMono.length > 0 && Number.isFinite(sampleRate) && sampleRate > 0
+        ? pcmMono.length / sampleRate
+        : 0;
     const totalSpanSec = Math.max(0.2, audioSpanSec, lastEndSec - firstStartSec);
 
     let totalArticulationSec = 0;

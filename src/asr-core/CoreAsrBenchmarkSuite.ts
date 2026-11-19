@@ -159,8 +159,14 @@ export function computePairedBootstrapCi(params: {
   seed?: number;
 }): BootstrapConfidenceInterval {
   const { baselineErrors, candidateErrors, metric } = params;
-  const iterations = Math.max(200, Math.min(10_000, params.iterations ?? 2000));
-  const seed = params.seed ?? 20261118;
+  const rawIter = params.iterations;
+  const iterations =
+    typeof rawIter === 'number' && Number.isFinite(rawIter)
+      ? Math.max(200, Math.min(10_000, Math.floor(rawIter)))
+      : 2000;
+  const rawSeed = params.seed;
+  const seed =
+    typeof rawSeed === 'number' && Number.isFinite(rawSeed) ? Math.floor(rawSeed) : 20261118;
   const n = Math.min(baselineErrors.length, candidateErrors.length);
 
   if (n === 0) {
@@ -181,12 +187,15 @@ export function computePairedBootstrapCi(params: {
     return state % maxExclusive;
   };
 
+  const cleanBase = baselineErrors.slice(0, n).map((v) => (Number.isFinite(v) ? v : 0));
+  const cleanCand = candidateErrors.slice(0, n).map((v) => (Number.isFinite(v) ? v : 0));
+
   const deltas = new Float64Array(iterations);
   for (let b = 0; b < iterations; b++) {
     let diffSum = 0;
     for (let i = 0; i < n; i++) {
       const idx = randInt(n);
-      diffSum += candidateErrors[idx] - baselineErrors[idx];
+      diffSum += cleanCand[idx] - cleanBase[idx];
     }
     deltas[b] = diffSum / n;
   }
@@ -194,8 +203,7 @@ export function computePairedBootstrapCi(params: {
   const sorted = Array.from(deltas).sort((a, b) => a - b);
   const lowIdx = Math.floor(0.025 * (iterations - 1));
   const highIdx = Math.ceil(0.975 * (iterations - 1));
-  const meanDelta =
-    baselineErrors.slice(0, n).reduce((acc, v, idx) => acc + (candidateErrors[idx] - v), 0) / n;
+  const meanDelta = cleanBase.reduce((acc, v, idx) => acc + (cleanCand[idx] - v), 0) / n;
 
   const ci95Low = Number(sorted[lowIdx].toFixed(5));
   const ci95High = Number(sorted[highIdx].toFixed(5));
@@ -516,9 +524,11 @@ export function runCoreBenchmarkAndAdaptationSuite(bootstrapIterations = 2000): 
 }
 
 export function buildLongFormStressAudioPcm(durationSec = 42): Float32Array {
+  const safeDurationSec =
+    Number.isFinite(durationSec) && durationSec > 0 ? Math.min(3600, durationSec) : 42;
   const phraseA = synthesizeAcousticSpeechFromText('سلام امروز سرویس گفتار', { speakerPitchHz: 140 });
   const phraseB = synthesizeAcousticSpeechFromText('پادکست هوشمند typescript آماده', { speakerPitchHz: 145 });
-  const totalSamples = Math.round(durationSec * CORE_SAMPLE_RATE);
+  const totalSamples = Math.max(CORE_SAMPLE_RATE, Math.round(safeDurationSec * CORE_SAMPLE_RATE));
   const out = new Float32Array(totalSamples);
   let cursor = Math.round(0.4 * CORE_SAMPLE_RATE);
   let toggle = true;

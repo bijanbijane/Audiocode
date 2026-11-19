@@ -168,14 +168,16 @@ export function runModularTranslationCapability(params: {
     });
     const srcNeg = detectNegation(seg.text);
     const dstNeg = detectNegation(translatedText);
+    const safeStart = Number.isFinite(seg.startSec) ? Math.max(0, seg.startSec) : 0;
+    const safeEnd = Number.isFinite(seg.endSec) ? Math.max(safeStart, seg.endSec) : safeStart;
     return {
       sourceSegmentIds: [seg.segmentId],
       sourceLanguage: srcLang,
       targetLanguage: params.targetLanguage,
       sourceText: seg.text,
       translatedText,
-      startSec: Number(seg.startSec.toFixed(3)),
-      endSec: Number(seg.endSec.toFixed(3)),
+      startSec: Number(safeStart.toFixed(3)),
+      endSec: Number(safeEnd.toFixed(3)),
       speakerId: seg.speakerHint,
       preservedNumbers: extractCriticalNumerics(seg.text),
       negationPreserved: srcNeg === dstNeg,
@@ -260,7 +262,8 @@ export function evaluateTranslationCriticalAccuracy(params: {
 // ── Subtitle & Caption Generator (§8) ────────────────────────────────────────
 
 function formatSrtTimestamp(sec: number): string {
-  const msTotal = Math.max(0, Math.round(sec * 1000));
+  const safeSec = Number.isFinite(sec) ? Math.max(0, sec) : 0;
+  const msTotal = Math.max(0, Math.round(safeSec * 1000));
   const hrs = Math.floor(msTotal / 3600000);
   const mins = Math.floor((msTotal % 3600000) / 60000);
   const secs = Math.floor((msTotal % 60000) / 1000);
@@ -278,20 +281,18 @@ function wrapIntoTwoBalancedLines(text: string, maxCharsPerLine: number): string
   const words = clean.split(' ');
   const lines: string[] = [];
   let cur = '';
-  for (const w of words) {
+  for (let i = 0; i < words.length; i++) {
+    const w = words[i];
     if ((cur ? cur.length + 1 : 0) + w.length <= maxCharsPerLine) {
       cur = cur ? `${cur} ${w}` : w;
     } else {
       if (cur) lines.push(cur);
       cur = w;
       if (lines.length === 1) {
-        // Put remaining words on second line cleanly without breaking script direction
-        const idx = words.indexOf(w);
-        if (idx >= 0) {
-          lines.push(words.slice(idx).join(' '));
-          cur = '';
-          break;
-        }
+        // Put remaining words from current index i on second line without repeating earlier words
+        lines.push(words.slice(i).join(' '));
+        cur = '';
+        break;
       }
     }
   }
@@ -318,10 +319,23 @@ export function generateModularSubtitles(params: {
 }): SubtitleResultPayload {
   const formats = params.formats ?? ['srt', 'vtt', 'json', 'txt'];
   const level = params.level ?? 'sentence';
-  const minDur = params.minDurationSec ?? 1.0;
-  const maxDur = params.maxDurationSec ?? 7.0;
-  const minGapSec = (params.minInterCueGapMs ?? 80) / 1000;
-  const targetCps = params.targetMaxCps ?? 17;
+  const minDur =
+    typeof params.minDurationSec === 'number' && Number.isFinite(params.minDurationSec) && params.minDurationSec > 0
+      ? params.minDurationSec
+      : 1.0;
+  const maxDur =
+    typeof params.maxDurationSec === 'number' && Number.isFinite(params.maxDurationSec) && params.maxDurationSec >= minDur
+      ? params.maxDurationSec
+      : Math.max(7.0, minDur);
+  const safeGapMs =
+    typeof params.minInterCueGapMs === 'number' && Number.isFinite(params.minInterCueGapMs) && params.minInterCueGapMs >= 0
+      ? params.minInterCueGapMs
+      : 80;
+  const minGapSec = safeGapMs / 1000;
+  const targetCps =
+    typeof params.targetMaxCps === 'number' && Number.isFinite(params.targetMaxCps) && params.targetMaxCps > 0
+      ? params.targetMaxCps
+      : 17;
 
   const translationBySegId = new Map<string, string>();
   for (const ts of params.translatedSegments ?? []) {
@@ -340,13 +354,15 @@ export function generateModularSubtitles(params: {
 
   if (level === 'word') {
     for (const seg of params.segments) {
+      const safeSegStart = Number.isFinite(seg.startSec) ? Math.max(0, seg.startSec) : 0;
+      const safeSegEnd = Number.isFinite(seg.endSec) ? Math.max(safeSegStart + 0.1, seg.endSec) : safeSegStart + 0.1;
       const words = seg.text.trim().split(/\s+/).filter(Boolean);
-      const dur = Math.max(0.1, seg.endSec - seg.startSec);
+      const dur = Math.max(0.1, safeSegEnd - safeSegStart);
       const step = dur / Math.max(1, words.length);
       words.forEach((w, idx) => {
         rawUnits.push({
-          startSec: seg.startSec + idx * step,
-          endSec: seg.startSec + (idx + 1) * step,
+          startSec: safeSegStart + idx * step,
+          endSec: safeSegStart + (idx + 1) * step,
           text: w,
           speaker: seg.speakerHint,
         });
@@ -354,9 +370,11 @@ export function generateModularSubtitles(params: {
     }
   } else {
     for (const seg of params.segments) {
+      const safeSegStart = Number.isFinite(seg.startSec) ? Math.max(0, seg.startSec) : 0;
+      const safeSegEnd = Number.isFinite(seg.endSec) ? Math.max(safeSegStart + 0.1, seg.endSec) : safeSegStart + 0.1;
       rawUnits.push({
-        startSec: seg.startSec,
-        endSec: seg.endSec,
+        startSec: safeSegStart,
+        endSec: safeSegEnd,
         text: seg.text,
         speaker: seg.speakerHint,
         translation: translationBySegId.get(seg.segmentId),

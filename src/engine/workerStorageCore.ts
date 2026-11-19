@@ -785,12 +785,18 @@ export class WorkerStorageCore {
             readyAssetIds.push(assetId);
             continue;
           }
+          const safeMaxAge =
+            typeof maxIngestingAgeMs === 'number' &&
+            Number.isFinite(maxIngestingAgeMs) &&
+            maxIngestingAgeMs >= 0
+              ? maxIngestingAgeMs
+              : 0;
           const ageMs = now - (manifest.updatedAtMs || manifest.createdAtMs || 0);
           if (
             manifest.state === 'abandoned' ||
             manifest.state === 'failed' ||
             manifest.state === 'finalizing' ||
-            (manifest.state === 'ingesting' && ageMs >= maxIngestingAgeMs)
+            (manifest.state === 'ingesting' && ageMs >= safeMaxAge)
           ) {
             await this.deleteAsset(assetId);
             cleanedAssetIds.push(assetId);

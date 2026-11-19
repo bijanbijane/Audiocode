@@ -269,11 +269,28 @@ export class PersianDisfluencyEngine {
    * N-gram repetitions, vocal fillers, isolated discourse fillers, and abnormal pauses.
    * Preserves legacy contract for existing callers.
    */
+  private static sanitizeConfidence(conf: number, fallback = 0.85): number {
+    return Number.isFinite(conf) ? Math.max(0, Math.min(1, conf)) : fallback;
+  }
+
+  private static safeGapMs(startFlicks: number, endFlicks: number, fallback = 0): number {
+    if (!Number.isFinite(startFlicks) || !Number.isFinite(endFlicks)) return fallback;
+    return TimeMath.flicksToSeconds(endFlicks - startFlicks) * 1000;
+  }
+
   public static analyzeTranscript(
     tokens: TimedPersianToken[],
     maxNaturalMidPauseMs = 450,
     maxNaturalSentencePauseMs = 950,
   ): DetectedSpeechIssue[] {
+    const safeMidPauseMs =
+      Number.isFinite(maxNaturalMidPauseMs) && maxNaturalMidPauseMs > 0
+        ? maxNaturalMidPauseMs
+        : 450;
+    const safeSentencePauseMs =
+      Number.isFinite(maxNaturalSentencePauseMs) && maxNaturalSentencePauseMs > 0
+        ? Math.max(safeMidPauseMs, maxNaturalSentencePauseMs)
+        : Math.max(safeMidPauseMs, 950);
     const issues: DetectedSpeechIssue[] = [];
     const consumedIndices = new Set<number>();
 
@@ -296,14 +313,17 @@ export class PersianDisfluencyEngine {
           repairMatch.deleteEndIdx + 1,
         );
         const avgAsrConf =
-          deletedTokens.reduce((acc, t) => acc + t.confidence, 0) / deletedTokens.length;
+          deletedTokens.reduce((acc, t) => acc + this.sanitizeConfidence(t.confidence), 0) /
+          deletedTokens.length;
 
         issues.push({
           issueId: `rep_${tokens[i].tokenId}`,
           type: 'WORD_REPETITION',
           targetRange: {
-            start: deletedTokens[0].range.start,
-            end: deletedTokens[deletedTokens.length - 1].range.end,
+            start: Number.isFinite(deletedTokens[0].range.start) ? deletedTokens[0].range.start : 0,
+            end: Number.isFinite(deletedTokens[deletedTokens.length - 1].range.end)
+              ? deletedTokens[deletedTokens.length - 1].range.end
+              : 0,
           },
           affectedTokenIds: deletedTokens.map((t) => t.tokenId),
           displayExcerpt: deletedTokens.map((t) => t.displayText).join(' '),
@@ -321,14 +341,18 @@ export class PersianDisfluencyEngine {
       const tok = tokens[i];
       if (this.PURE_VOCAL_FILLERS.test(tok.normalizedText)) {
         consumedIndices.add(i);
+        const safeConf = this.sanitizeConfidence(tok.confidence);
         issues.push({
           issueId: `fil_${tok.tokenId}`,
           type: 'INDEPENDENT_FILLER',
-          targetRange: tok.range,
+          targetRange: {
+            start: Number.isFinite(tok.range.start) ? tok.range.start : 0,
+            end: Number.isFinite(tok.range.end) ? tok.range.end : 0,
+          },
           affectedTokenIds: [tok.tokenId],
           displayExcerpt: tok.displayText,
           reasonFa: 'تپق آوایی مستقل در میانه گفتار',
-          compositeConfidence: Number(Math.min(0.96, tok.confidence * 0.92).toFixed(2)),
+          compositeConfidence: Number(Math.min(0.96, safeConf * 0.92).toFixed(2)),
           suggestedRemainingPauseFlicks: TimeMath.secondsToFlicks(0.06),
         });
         continue;
@@ -342,14 +366,17 @@ export class PersianDisfluencyEngine {
         }
         const phraseTokens = tokens.slice(discourseMatch.startIdx, discourseMatch.endIdx + 1);
         const avgConf =
-          phraseTokens.reduce((acc, t) => acc + t.confidence, 0) / phraseTokens.length;
+          phraseTokens.reduce((acc, t) => acc + this.sanitizeConfidence(t.confidence), 0) /
+          phraseTokens.length;
 
         issues.push({
           issueId: `disc_${phraseTokens[0].tokenId}`,
           type: 'INDEPENDENT_FILLER',
           targetRange: {
-            start: phraseTokens[0].range.start,
-            end: phraseTokens[phraseTokens.length - 1].range.end,
+            start: Number.isFinite(phraseTokens[0].range.start) ? phraseTokens[0].range.start : 0,
+            end: Number.isFinite(phraseTokens[phraseTokens.length - 1].range.end)
+              ? phraseTokens[phraseTokens.length - 1].range.end
+              : 0,
           },
           affectedTokenIds: phraseTokens.map((t) => t.tokenId),
           displayExcerpt: phraseTokens.map((t) => t.displayText).join(' '),
@@ -366,13 +393,14 @@ export class PersianDisfluencyEngine {
 
       const curr = tokens[i];
       const next = tokens[i + 1];
+      if (!Number.isFinite(curr.range.end) || !Number.isFinite(next.range.start)) continue;
       const gapFlicks = next.range.start - curr.range.end;
       const gapMs = TimeMath.flicksToSeconds(gapFlicks) * 1000;
 
-      if (gapMs <= maxNaturalMidPauseMs) continue;
+      if (!Number.isFinite(gapMs) || gapMs <= safeMidPauseMs) continue;
 
       const isMidClause = this.MID_CLAUSE_BOUNDARY_WORDS.has(curr.normalizedText);
-      const thresholdMs = isMidClause ? maxNaturalMidPauseMs : maxNaturalSentencePauseMs;
+      const thresholdMs = isMidClause ? safeMidPauseMs : safeSentencePauseMs;
 
       if (gapMs > thresholdMs) {
         const targetRemainingMs = isMidClause ? 150 : 400;
@@ -424,9 +452,13 @@ export class PersianDisfluencyEngine {
         }
         const spanTokens = tokens.slice(sylMatch.startIdx, sylMatch.endIdx + 1);
         const repeatedCount = spanTokens.length;
-        const avgConf = spanTokens.reduce((a, t) => a + t.confidence, 0) / spanTokens.length;
-        const durationSec = TimeMath.flicksToSeconds(
-          spanTokens[spanTokens.length - 1].range.end - spanTokens[0].range.start,
+        const avgConf =
+          spanTokens.reduce((a, t) => a + this.sanitizeConfidence(t.confidence), 0) /
+          spanTokens.length;
+        const durationSec = Math.max(
+          0,
+          this.safeGapMs(spanTokens[0].range.start, spanTokens[spanTokens.length - 1].range.end, 0) /
+            1000,
         );
 
         const isStutterLikeBlock =
@@ -441,8 +473,10 @@ export class PersianDisfluencyEngine {
           uncertaintyState: hasAcoustic ? 'MODERATE_UNCERTAINTY' : 'INSUFFICIENT_EVIDENCE',
           trackId: spanTokens[0].trackId,
           targetRange: {
-            start: spanTokens[0].range.start,
-            end: spanTokens[spanTokens.length - 1].range.end,
+            start: Number.isFinite(spanTokens[0].range.start) ? spanTokens[0].range.start : 0,
+            end: Number.isFinite(spanTokens[spanTokens.length - 1].range.end)
+              ? spanTokens[spanTokens.length - 1].range.end
+              : 0,
           },
           affectedTokenIds: spanTokens.map((t) => t.tokenId),
           relatedText: spanTokens.map((t) => t.displayText).join(' '),
@@ -476,7 +510,9 @@ export class PersianDisfluencyEngine {
           repairOrFalseStart.markStartIdx,
           repairOrFalseStart.markEndIdx + 1,
         );
-        const avgConf = spanTokens.reduce((a, t) => a + t.confidence, 0) / spanTokens.length;
+        const avgConf =
+          spanTokens.reduce((a, t) => a + this.sanitizeConfidence(t.confidence), 0) /
+          spanTokens.length;
         results.push({
           id: `fs_${spanTokens[0].tokenId}`,
           category: repairOrFalseStart.category,
@@ -485,8 +521,10 @@ export class PersianDisfluencyEngine {
           uncertaintyState: 'MODERATE_UNCERTAINTY',
           trackId: spanTokens[0].trackId,
           targetRange: {
-            start: spanTokens[0].range.start,
-            end: spanTokens[spanTokens.length - 1].range.end,
+            start: Number.isFinite(spanTokens[0].range.start) ? spanTokens[0].range.start : 0,
+            end: Number.isFinite(spanTokens[spanTokens.length - 1].range.end)
+              ? spanTokens[spanTokens.length - 1].range.end
+              : 0,
           },
           affectedTokenIds: spanTokens.map((t) => t.tokenId),
           relatedText: spanTokens.map((t) => t.displayText).join(' '),
@@ -559,7 +597,9 @@ export class PersianDisfluencyEngine {
         const { prevGapMs, nextGapMs } = this.computeAdjacentGapsMs(tokens, startIdx, endIdx);
         const isolatedByPause = prevGapMs >= 160 && nextGapMs >= 160;
         const repeatedNearby = this.isPhraseRepeatedNearby(tokens, startIdx, words.length);
-        const avgConf = spanTokens.reduce((a, t) => a + t.confidence, 0) / spanTokens.length;
+        const avgConf =
+          spanTokens.reduce((a, t) => a + this.sanitizeConfidence(t.confidence), 0) /
+          spanTokens.length;
 
         const isFillerUsage = isolatedByPause || repeatedNearby || entry.lexiconId === 'fil-colloq-chi-migan';
         const score = isFillerUsage
@@ -576,7 +616,12 @@ export class PersianDisfluencyEngine {
             detectionState: isFillerUsage ? 'PROBABLE' : 'POSSIBLE',
             uncertaintyState: isFillerUsage ? 'MODERATE_UNCERTAINTY' : 'HIGH_UNCERTAINTY',
             trackId: first.trackId,
-            targetRange: { start: spanTokens[0].range.start, end: spanTokens[endIdx - startIdx].range.end },
+            targetRange: {
+              start: Number.isFinite(spanTokens[0].range.start) ? spanTokens[0].range.start : 0,
+              end: Number.isFinite(spanTokens[endIdx - startIdx].range.end)
+                ? spanTokens[endIdx - startIdx].range.end
+                : 0,
+            },
             affectedTokenIds: spanTokens.map((t) => t.tokenId),
             relatedText: spanTokens.map((t) => t.displayText).join(' '),
             matchedLexiconId: entry.lexiconId,
@@ -607,13 +652,14 @@ export class PersianDisfluencyEngine {
             (v) => this.cleanPersianLetters(v) === firstNormClean || v === first.displayText,
           ),
         ) ?? PERSIAN_FILLER_LEXICON[1];
-      const durMs = TimeMath.flicksToSeconds(first.range.end - first.range.start) * 1000;
+      const durMs = Math.max(0, this.safeGapMs(first.range.start, first.range.end, 120));
       const { prevGapMs, nextGapMs } = this.computeAdjacentGapsMs(tokens, startIdx, startIdx);
       const repeatedVocal =
         startIdx + 1 < tokens.length &&
         this.PURE_VOCAL_FILLERS.test(tokens[startIdx + 1].normalizedText);
       const stretched = durMs >= 160;
       const pauseContext = prevGapMs >= 100 || nextGapMs >= 100;
+      const safeConf = this.sanitizeConfidence(first.confidence);
       const score = Math.min(
         0.95,
         matchedEntry.baseLinguisticScore * 0.85 + (stretched ? 0.06 : 0) + (pauseContext ? 0.05 : 0) + (repeatedVocal ? 0.05 : 0),
@@ -629,7 +675,10 @@ export class PersianDisfluencyEngine {
           detectionState: 'DETECTED',
           uncertaintyState: 'LOW_UNCERTAINTY',
           trackId: first.trackId,
-          targetRange: first.range,
+          targetRange: {
+            start: Number.isFinite(first.range.start) ? first.range.start : 0,
+            end: Number.isFinite(first.range.end) ? first.range.end : 0,
+          },
           affectedTokenIds: [first.tokenId],
           relatedText: first.displayText,
           matchedLexiconId: matchedEntry.lexiconId,
@@ -637,9 +686,9 @@ export class PersianDisfluencyEngine {
           linguisticRole: matchedEntry.linguisticRole,
           linguisticScore: Number(score.toFixed(3)),
           ruleEvidenceCount: 1 + (stretched ? 1 : 0) + (pauseContext ? 1 : 0) + (repeatedVocal ? 1 : 0),
-          modelTokenConfidence: Number(first.confidence.toFixed(3)),
+          modelTokenConfidence: Number(safeConf.toFixed(3)),
           potentiallyRemovable: true,
-          requiresHumanReview: durMs < 90 || first.confidence < 0.75,
+          requiresHumanReview: durMs < 90 || safeConf < 0.75,
           reasonFa: `تپق آوایی مستقل «${first.displayText}» (${Math.round(durMs)}ms)`,
           notes: [`مدت: ${Math.round(durMs)}ms`, `مکث اطراف: ${Math.round(prevGapMs)}ms / ${Math.round(nextGapMs)}ms`],
         },
@@ -666,7 +715,8 @@ export class PersianDisfluencyEngine {
     const prevNorm = prevTok ? this.cleanPersianLetters(prevTok.normalizedText) : '';
     const nextNorm = nextTok ? this.cleanPersianLetters(nextTok.normalizedText) : '';
     const { prevGapMs, nextGapMs } = this.computeAdjacentGapsMs(tokens, startIdx, startIdx);
-    const durMs = TimeMath.flicksToSeconds(first.range.end - first.range.start) * 1000;
+    const durMs = Math.max(0, this.safeGapMs(first.range.start, first.range.end, 120));
+    const safeConf = this.sanitizeConfidence(first.confidence);
 
     let preserveReason: string | null = null;
 
@@ -710,7 +760,10 @@ export class PersianDisfluencyEngine {
           detectionState: 'NOT_DETECTED',
           uncertaintyState: 'LOW_UNCERTAINTY',
           trackId: first.trackId,
-          targetRange: first.range,
+          targetRange: {
+            start: Number.isFinite(first.range.start) ? first.range.start : 0,
+            end: Number.isFinite(first.range.end) ? first.range.end : 0,
+          },
           affectedTokenIds: [first.tokenId],
           relatedText: first.displayText,
           matchedLexiconId: singleEntry.lexiconId,
@@ -718,7 +771,7 @@ export class PersianDisfluencyEngine {
           linguisticRole: singleEntry.linguisticRole,
           linguisticScore: 0.18,
           ruleEvidenceCount: 1,
-          modelTokenConfidence: Number(first.confidence.toFixed(3)),
+          modelTokenConfidence: Number(safeConf.toFixed(3)),
           potentiallyRemovable: false,
           requiresHumanReview: false,
           reasonFa: preserveReason,
@@ -751,7 +804,10 @@ export class PersianDisfluencyEngine {
         detectionState: strongFillerEvidence ? 'PROBABLE' : 'POSSIBLE',
         uncertaintyState: strongFillerEvidence ? 'MODERATE_UNCERTAINTY' : 'HIGH_UNCERTAINTY',
         trackId: first.trackId,
-        targetRange: first.range,
+        targetRange: {
+          start: Number.isFinite(first.range.start) ? first.range.start : 0,
+          end: Number.isFinite(first.range.end) ? first.range.end : 0,
+        },
         affectedTokenIds: [first.tokenId],
         relatedText: first.displayText,
         matchedLexiconId: singleEntry.lexiconId,
@@ -763,7 +819,7 @@ export class PersianDisfluencyEngine {
           (isolatedByHesitation ? 1 : 0) +
           (followedByVocalFiller || precededByVocalFiller ? 1 : 0) +
           (repeatedSame ? 1 : 0),
-        modelTokenConfidence: Number(first.confidence.toFixed(3)),
+        modelTokenConfidence: Number(safeConf.toFixed(3)),
         potentiallyRemovable: strongFillerEvidence && singleEntry.potentiallyRemovable,
         requiresHumanReview: true,
         reasonFa: strongFillerEvidence
@@ -795,8 +851,10 @@ export class PersianDisfluencyEngine {
     let j = startIdx + 1;
     while (j < tokens.length && j - startIdx <= 4) {
       if (tokens[j].trackId !== first.trackId) break;
-      const gapSec = TimeMath.flicksToSeconds(tokens[j].range.start - tokens[j - 1].range.end);
-      if (gapSec > 1.2 || gapSec < 0) break;
+      const gapSec =
+        this.safeGapMs(tokens[j - 1].range.end, tokens[j].range.start, Number.POSITIVE_INFINITY) /
+        1000;
+      if (!Number.isFinite(gapSec) || gapSec > 1.2 || gapSec < 0) break;
 
       const curClean = this.cleanPersianLetters(tokens[j].normalizedText);
       // Either another identical short fragment or the full target word starting with this phoneme/syllable
@@ -861,8 +919,11 @@ export class PersianDisfluencyEngine {
       if (!isCorrectionMarker) continue;
 
       const prevBeforeMarker = tokens[m - 1];
-      const gapBeforeMarkerMs =
-        TimeMath.flicksToSeconds(markerTok.range.start - prevBeforeMarker.range.end) * 1000;
+      const gapBeforeMarkerMs = this.safeGapMs(
+        prevBeforeMarker.range.end,
+        markerTok.range.start,
+        0,
+      );
       const hasAbandonedClauseCue =
         gapBeforeMarkerMs >= 200 ||
         /\.\.\.|…|،$/.test(prevBeforeMarker.displayText) ||
@@ -905,8 +966,10 @@ export class PersianDisfluencyEngine {
         markEndIdx: m - 1,
         continuationText: repairSpan.map((t) => t.displayText).join(' '),
         continuationRange: {
-          start: repairSpan[0].range.start,
-          end: repairSpan[repairSpan.length - 1].range.end,
+          start: Number.isFinite(repairSpan[0].range.start) ? repairSpan[0].range.start : 0,
+          end: Number.isFinite(repairSpan[repairSpan.length - 1].range.end)
+            ? repairSpan[repairSpan.length - 1].range.end
+            : 0,
         },
         score: gapBeforeMarkerMs >= 280 ? 0.8 : 0.68,
         ruleCount: 2 + (gapBeforeMarkerMs >= 280 ? 1 : 0),
@@ -935,11 +998,11 @@ export class PersianDisfluencyEngine {
     const prevGapMs =
       startIdx === 0 || tokens[startIdx - 1].trackId !== first.trackId
         ? 250
-        : Math.max(0, TimeMath.flicksToSeconds(first.range.start - tokens[startIdx - 1].range.end) * 1000);
+        : Math.max(0, this.safeGapMs(tokens[startIdx - 1].range.end, first.range.start, 250));
     const nextGapMs =
       endIdx === tokens.length - 1 || tokens[endIdx + 1].trackId !== last.trackId
         ? 250
-        : Math.max(0, TimeMath.flicksToSeconds(tokens[endIdx + 1].range.start - last.range.end) * 1000);
+        : Math.max(0, this.safeGapMs(last.range.end, tokens[endIdx + 1].range.start, 250));
     return { prevGapMs, nextGapMs };
   }
 
@@ -992,10 +1055,13 @@ export class PersianDisfluencyEngine {
       if (repairStartIdx + n > tokens.length) continue;
       const secondSpan = tokens.slice(repairStartIdx, repairStartIdx + n);
 
-      const gapSeconds = TimeMath.flicksToSeconds(
-        secondSpan[0].range.start - firstSpan[firstSpan.length - 1].range.end,
-      );
-      if (gapSeconds > 2.5 || gapSeconds < 0) continue;
+      const gapSeconds =
+        this.safeGapMs(
+          firstSpan[firstSpan.length - 1].range.end,
+          secondSpan[0].range.start,
+          Number.POSITIVE_INFINITY,
+        ) / 1000;
+      if (!Number.isFinite(gapSeconds) || gapSeconds > 2.5 || gapSeconds < 0) continue;
 
       const hasSubstantiveToken = firstSpan.some((tok) => tok.normalizedText.length > 1);
       if (!hasSubstantiveToken) continue;
@@ -1053,15 +1119,15 @@ export class PersianDisfluencyEngine {
       const prevGapMs =
         startIdx === 0
           ? 250
-          : TimeMath.flicksToSeconds(
-              tokens[startIdx].range.start - tokens[startIdx - 1].range.end,
-            ) * 1000;
+          : this.safeGapMs(tokens[startIdx - 1].range.end, tokens[startIdx].range.start, 250);
       const nextGapMs =
         matchedEndIdx === tokens.length - 1
           ? 250
-          : TimeMath.flicksToSeconds(
-              tokens[matchedEndIdx + 1].range.start - tokens[matchedEndIdx].range.end,
-            ) * 1000;
+          : this.safeGapMs(
+              tokens[matchedEndIdx].range.end,
+              tokens[matchedEndIdx + 1].range.start,
+              250,
+            );
 
       if (prevGapMs >= 180 && nextGapMs >= 180) {
         return { startIdx, endIdx: matchedEndIdx };

@@ -1251,14 +1251,22 @@ async function startServer() {
   app.use(createSpeechSecurityHttpRouter(speechSecurityGateway));
 
   // ── Phase 14 Sandbox UI Routes (`/api/v1/security/sandbox/*`) ────────────────
-  app.get('/api/v1/security/sandbox/overview', async (_req, res) => {
-    await modelFactoryGateway.service.ensureSandboxDemoSeeded('org_avapardaz_sandbox');
-    res.json(speechSecurityService.getSandboxSecurityOverview('org_avapardaz_sandbox'));
+  app.get('/api/v1/security/sandbox/overview', async (_req, res, next) => {
+    try {
+      await modelFactoryGateway.service.ensureSandboxDemoSeeded('org_avapardaz_sandbox');
+      res.json(speechSecurityService.getSandboxSecurityOverview('org_avapardaz_sandbox'));
+    } catch (err) {
+      next(err);
+    }
   });
 
-  app.post('/api/v1/security/sandbox/red-team/run', async (_req, res) => {
-    await modelFactoryGateway.service.ensureSandboxDemoSeeded('org_avapardaz_sandbox');
-    res.json({ groups: speechSecurityService.runFullRedTeamVerificationSuite('org_avapardaz_sandbox') });
+  app.post('/api/v1/security/sandbox/red-team/run', async (_req, res, next) => {
+    try {
+      await modelFactoryGateway.service.ensureSandboxDemoSeeded('org_avapardaz_sandbox');
+      res.json({ groups: speechSecurityService.runFullRedTeamVerificationSuite('org_avapardaz_sandbox') });
+    } catch (err) {
+      next(err);
+    }
   });
 
   app.post('/api/v1/security/sandbox/pii-redact', (req, res) => {
@@ -1390,9 +1398,13 @@ async function startServer() {
   });
 
   // ── Unified Processing Engine Routes (`/api/v1/processing/*`) ──────────────
-  app.get('/api/v1/processing/capabilities', async (_req, res) => {
-    const report = await unifiedProcessingOrchestrator.discoverCapabilities();
-    res.json(report);
+  app.get('/api/v1/processing/capabilities', async (_req, res, next) => {
+    try {
+      const report = await unifiedProcessingOrchestrator.discoverCapabilities();
+      res.json(report);
+    } catch (err) {
+      next(err);
+    }
   });
 
   app.get('/api/v1/processing/trace', (req, res) => {
@@ -1441,6 +1453,33 @@ async function startServer() {
       });
     }
   });
+
+  // Sanitized JSON error handler for malformed JSON bodies and unexpected API errors
+  app.use(
+    '/api',
+    (
+      err: unknown,
+      _req: express.Request,
+      res: express.Response,
+      next: express.NextFunction,
+    ) => {
+      if (res.headersSent) {
+        next(err);
+        return;
+      }
+      if (err instanceof SyntaxError && 'body' in err) {
+        res.status(400).json({
+          error: 'INVALID_JSON',
+          message: 'Malformed JSON request payload.',
+        });
+        return;
+      }
+      res.status(500).json({
+        error: 'INTERNAL_API_ERROR',
+        message: sanitizePublicErrorOutput(err instanceof Error ? err.message : String(err)),
+      });
+    },
+  );
 
   if (!IS_PROD) {
     const vite = await createViteServer({

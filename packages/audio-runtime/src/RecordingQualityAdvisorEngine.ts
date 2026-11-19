@@ -32,6 +32,18 @@ export class RecordingQualityAdvisorEngine {
     const summaryAdviceFa: string[] = [];
     const recommendedGraphNodes: ProcessingNodeSpec[] = [];
 
+    if (!Number.isFinite(sampleRate) || sampleRate <= 0) {
+      return {
+        has50HzMainsHum: false,
+        humFundamentalAndHarmonicsDb: { hz50: -100, hz100: -100, hz150: -100 },
+        plosivePopEvents: [],
+        harshSibilanceEvents: [],
+        signalToNoiseRatioDb: 0,
+        recommendedGraphNodes,
+        summaryAdviceFa,
+      };
+    }
+
     // 1. Windowed Goertzel detection for 50Hz mains hum and 100Hz/150Hz harmonics vs neighboring bins
     const p50 = this.computeGoertzelPowerDb(roomToneSlice, sampleRate, 50);
     const p100 = this.computeGoertzelPowerDb(roomToneSlice, sampleRate, 100);
@@ -145,7 +157,14 @@ export class RecordingQualityAdvisorEngine {
     targetFreqHz: number,
   ): number {
     const n = samples.length;
-    if (n === 0) return -100.0;
+    if (
+      n === 0 ||
+      !Number.isFinite(sampleRate) ||
+      sampleRate <= 0 ||
+      !Number.isFinite(targetFreqHz)
+    ) {
+      return -100.0;
+    }
 
     const omega = (2.0 * Math.PI * targetFreqHz) / sampleRate;
     const coeff = 2.0 * Math.cos(omega);
@@ -156,7 +175,8 @@ export class RecordingQualityAdvisorEngine {
     for (let i = 0; i < n; i++) {
       const w = n > 1 ? 0.5 * (1.0 - Math.cos((2.0 * Math.PI * i) / (n - 1))) : 1.0;
       windowSum += w;
-      const s0 = samples[i] * w + coeff * s1 - s2;
+      const sample = Number.isFinite(samples[i]) ? samples[i] : 0;
+      const s0 = sample * w + coeff * s1 - s2;
       s2 = s1;
       s1 = s0;
     }
@@ -191,10 +211,11 @@ export class RecordingQualityAdvisorEngine {
       let highFreqSq = 0;
       let lpState = 0;
       let hpState = 0;
-      let prevX = pcm[start];
+      let prevX = Number.isFinite(pcm[start]) ? pcm[start] : 0;
 
       for (let i = start; i < start + frameSamples; i++) {
-        const x = pcm[i];
+        const raw = pcm[i];
+        const x = Number.isFinite(raw) ? raw : 0;
         totalSq += x * x;
 
         lpState = (1.0 - lpAlpha) * x + lpAlpha * lpState;
@@ -247,7 +268,10 @@ export class RecordingQualityAdvisorEngine {
   private static computeRmsDb(slice: Float32Array): number {
     if (slice.length === 0) return -90.0;
     let sumSq = 0;
-    for (let i = 0; i < slice.length; i++) sumSq += slice[i] * slice[i];
+    for (let i = 0; i < slice.length; i++) {
+      const s = Number.isFinite(slice[i]) ? slice[i] : 0;
+      sumSq += s * s;
+    }
     return 10 * Math.log10(sumSq / slice.length + 1e-12);
   }
 }

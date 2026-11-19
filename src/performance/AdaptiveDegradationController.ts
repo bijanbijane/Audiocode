@@ -32,7 +32,8 @@ export class AdaptiveDegradationController {
   private readonly recoveryCooldownMs: number;
 
   constructor(recoveryCooldownMs = 5_000) {
-    this.recoveryCooldownMs = Math.max(0, recoveryCooldownMs);
+    this.recoveryCooldownMs =
+      Number.isFinite(recoveryCooldownMs) && recoveryCooldownMs >= 0 ? recoveryCooldownMs : 5_000;
   }
 
   public evaluate(params: {
@@ -40,13 +41,17 @@ export class AdaptiveDegradationController {
     readonly recentLongTaskCount: number;
     readonly nowMs?: number;
   }): AdaptiveDegradationPolicyState {
-    const now = params.nowMs ?? Date.now();
+    const rawNow = params.nowMs;
+    const now = typeof rawNow === 'number' && Number.isFinite(rawNow) ? rawNow : Date.now();
+    const recentLongTasks = Number.isFinite(params.recentLongTaskCount)
+      ? Math.max(0, params.recentLongTaskCount)
+      : 0;
     let desired: DegradationLevel = 'NORMAL';
     if (params.memoryPressure === 'emergency') {
       desired = 'EMERGENCY_SAFE_MODE';
-    } else if (params.memoryPressure === 'throttle' || params.recentLongTaskCount >= 8) {
+    } else if (params.memoryPressure === 'throttle' || recentLongTasks >= 8) {
       desired = 'DEGRADED';
-    } else if (params.memoryPressure === 'elevated' || params.recentLongTaskCount >= 3) {
+    } else if (params.memoryPressure === 'elevated' || recentLongTasks >= 3) {
       desired = 'CONSERVATIVE';
     }
 

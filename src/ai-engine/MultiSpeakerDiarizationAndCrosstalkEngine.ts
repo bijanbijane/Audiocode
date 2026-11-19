@@ -42,24 +42,29 @@ export class MultiSpeakerDiarizationAndCrosstalkEngine {
     frameDurationMs = 50,
   ): SpeakerTimelineSegment[] {
     if (tracksPcm.length === 0) return [];
-    const frameSamples = Math.floor((sampleRate * frameDurationMs) / 1000);
-    if (frameSamples <= 0) return [];
+    const safeRate: SampleRate =
+      Number.isFinite(sampleRate) && sampleRate > 0 ? sampleRate : 48000;
+    const safeFrameMs =
+      Number.isFinite(frameDurationMs) && frameDurationMs > 0 ? frameDurationMs : 50;
+    const frameSamples = Math.floor((safeRate * safeFrameMs) / 1000);
+    if (!Number.isFinite(frameSamples) || frameSamples <= 0) return [];
 
     const totalSamples = Math.min(...tracksPcm.map((t) => t.pcmMono.length));
-    const maxAcousticLagSamples = Math.floor((sampleRate * 8) / 1000);
+    const maxAcousticLagSamples = Math.floor((safeRate * 8) / 1000);
 
     const rawSegments: SpeakerTimelineSegment[] = [];
 
     for (let start = 0; start + frameSamples <= totalSamples; start += frameSamples) {
       const range: TimeRange = {
-        start: TimeMath.samplesToFlicks(start, sampleRate),
-        end: TimeMath.samplesToFlicks(start + frameSamples, sampleRate),
+        start: TimeMath.samplesToFlicks(start, safeRate),
+        end: TimeMath.samplesToFlicks(start + frameSamples, safeRate),
       };
 
       const trackLevels = tracksPcm.map((t) => {
         let sumSq = 0;
         for (let i = start; i < start + frameSamples; i++) {
-          const s = t.pcmMono[i];
+          const rawS = t.pcmMono[i];
+          const s = Number.isFinite(rawS) ? rawS : 0;
           sumSq += s * s;
         }
         const rms = Math.sqrt(sumSq / frameSamples);
@@ -100,7 +105,7 @@ export class MultiSpeakerDiarizationAndCrosstalkEngine {
           start,
           frameSamples,
           maxAcousticLagSamples,
-          sampleRate,
+          safeRate,
         );
 
         if (levelDiffDb >= 11.0 && maxCorr >= 0.58) {
@@ -153,12 +158,15 @@ export class MultiSpeakerDiarizationAndCrosstalkEngine {
     similarityThreshold = 0.72,
   ): SpeakerTimelineSegment[] {
     if (frames.length === 0) return [];
+    const safeThreshold =
+      Number.isFinite(similarityThreshold) ? similarityThreshold : 0.72;
     const centroids: { speakerId: string; vector: Float32Array; count: number }[] = [];
     const segments: SpeakerTimelineSegment[] = [];
 
     for (let i = 0; i < frames.length; i++) {
       const frame = frames[i];
-      if (frame.vadProbability < 0.45) continue;
+      if (!Number.isFinite(frame.vadProbability) || frame.vadProbability < 0.45) continue;
+      if (!frame.embeddingVector || frame.embeddingVector.length === 0) continue;
 
       let bestSpeakerId: SpeakerId = 'UNKNOWN_SPEAKER';
       let bestSim = -1;
@@ -172,19 +180,27 @@ export class MultiSpeakerDiarizationAndCrosstalkEngine {
         }
       }
 
-      if (bestSim >= similarityThreshold && bestCentroidIdx !== -1) {
+      if (bestSim >= safeThreshold && bestCentroidIdx !== -1) {
         bestSpeakerId = centroids[bestCentroidIdx].speakerId;
         const cent = centroids[bestCentroidIdx];
-        for (let d = 0; d < cent.vector.length; d++) {
-          cent.vector[d] =
-            (cent.vector[d] * cent.count + frame.embeddingVector[d]) / (cent.count + 1);
+        const dim = Math.min(cent.vector.length, frame.embeddingVector.length);
+        for (let d = 0; d < dim; d++) {
+          const val = frame.embeddingVector[d];
+          if (Number.isFinite(val)) {
+            cent.vector[d] = (cent.vector[d] * cent.count + val) / (cent.count + 1);
+          }
         }
         cent.count++;
       } else if (frame.vadProbability >= 0.75 && centroids.length < 8) {
         const newId = `SPEAKER_${centroids.length + 1}`;
+        const cleanVec = new Float32Array(frame.embeddingVector.length);
+        for (let d = 0; d < frame.embeddingVector.length; d++) {
+          const v = frame.embeddingVector[d];
+          cleanVec[d] = Number.isFinite(v) ? v : 0;
+        }
         centroids.push({
           speakerId: newId,
-          vector: new Float32Array(frame.embeddingVector),
+          vector: cleanVec,
           count: 1,
         });
         bestSpeakerId = newId;
@@ -198,7 +214,7 @@ export class MultiSpeakerDiarizationAndCrosstalkEngine {
         classification:
           bestSpeakerId === 'UNKNOWN_SPEAKER' ? 'UNKNOWN_SPEAKER' : 'PRIMARY_SPEECH',
         range: frame.range,
-        confidence: Number(Math.max(0.4, bestSim).toFixed(2)),
+        confidence: Number(Math.max(0.4, Number.isFinite(bestSim) ? bestSim : 0.4).toFixed(2)),
         manuallyVerifiedByUser: false,
       });
     }
@@ -238,7 +254,8 @@ export class MultiSpeakerDiarizationAndCrosstalkEngine {
     sampleRate: SampleRate,
   ): number {
     let maxCorr = 0;
-    const step = Math.max(1, Math.floor(sampleRate / 16000));
+    const safeRate = Number.isFinite(sampleRate) && sampleRate > 0 ? sampleRate : 48000;
+    const step = Math.max(1, Math.floor(safeRate / 16000));
 
     for (let lag = 0; lag <= maxLag; lag += step) {
       if (start + len + lag > sigB.length) break;
@@ -246,8 +263,10 @@ export class MultiSpeakerDiarizationAndCrosstalkEngine {
       let magA = 0;
       let magB = 0;
       for (let i = 0; i < len; i++) {
-        const a = sigA[start + i];
-        const b = sigB[start + i + lag];
+        const rawA = sigA[start + i];
+        const rawB = sigB[start + i + lag];
+        const a = Number.isFinite(rawA) ? rawA : 0;
+        const b = Number.isFinite(rawB) ? rawB : 0;
         dot += a * b;
         magA += a * a;
         magB += b * b;
@@ -264,9 +283,11 @@ export class MultiSpeakerDiarizationAndCrosstalkEngine {
     let normB = 0;
     const len = Math.min(a.length, b.length);
     for (let i = 0; i < len; i++) {
-      dot += a[i] * b[i];
-      normA += a[i] * a[i];
-      normB += b[i] * b[i];
+      const va = Number.isFinite(a[i]) ? a[i] : 0;
+      const vb = Number.isFinite(b[i]) ? b[i] : 0;
+      dot += va * vb;
+      normA += va * va;
+      normB += vb * vb;
     }
     return dot / (Math.sqrt(normA * normB) + 1e-12);
   }
