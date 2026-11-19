@@ -146,6 +146,34 @@ export class OnnxPersianAsrAndVadAdapter implements AsrModelRunnerAdapter {
   }
 
   /**
+   * Estimates explicit transient JavaScript TypedArray allocations for feature extraction
+   * over `sampleCount16k` samples (Log-Mel tensor + FFT real/imag + power spectrum).
+   *
+   * NOTE: Does NOT include opaque memory allocated internally inside an external ONNX
+   * Runtime, WebAssembly heap, or WebGPU driver unless separately exposed by that runtime.
+   */
+  public estimateWorkingMemoryBytes(sampleCount16k: number): number {
+    if (
+      typeof sampleCount16k !== 'number' ||
+      !Number.isFinite(sampleCount16k) ||
+      sampleCount16k < this.winLength
+    ) {
+      return 0;
+    }
+
+    const safeSamples = Math.trunc(sampleCount16k);
+    const numFrames = 1 + Math.floor((safeSamples - this.winLength) / this.hopLength);
+    const nFreqBins = (this.nFft >> 1) + 1; // 257
+
+    const melTensorBytes = numFrames * this.nMels * Float32Array.BYTES_PER_ELEMENT;
+    const fftRealBytes = this.nFft * Float32Array.BYTES_PER_ELEMENT;
+    const fftImagBytes = this.nFft * Float32Array.BYTES_PER_ELEMENT;
+    const powerSpectrumBytes = nFreqBins * Float32Array.BYTES_PER_ELEMENT;
+
+    return melTensorBytes + fftRealBytes + fftImagBytes + powerSpectrumBytes;
+  }
+
+  /**
    * Extracts Log-Mel features for a 16kHz window and runs the bound ONNX inference runner if present.
    */
   public async transcribeWindow(pcm16kMono: Float32Array): Promise<RawWordPrediction[]> {

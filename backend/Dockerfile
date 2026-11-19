@@ -2,13 +2,14 @@
 FROM node:22-bookworm-slim AS builder
 WORKDIR /workspace
 
-COPY package.json ./
-RUN npm install --no-audit --no-fund
+COPY package.json package-lock.json* ./
+RUN npm ci --no-audit --no-fund || npm install --no-audit --no-fund
 
 COPY tsconfig.json vite.config.ts index.html metadata.json server.ts ./
 COPY src ./src
 COPY packages ./packages
 COPY backend ./backend
+COPY platform/migrations ./platform/migrations
 COPY public ./public
 
 RUN npm run lint && npm run build \
@@ -30,13 +31,14 @@ COPY --from=builder /workspace/platform/migrations ./platform/migrations
 COPY --from=builder /workspace/public ./public
 
 ENV NODE_ENV=production
-ENV PORT=4000
+ENV PORT=3000
+ENV ENABLE_CLOUD_ASR=false
 
-RUN useradd -r -u 1001 -m paudio && mkdir -p /var/lib/paudio/models && chown -R paudio:paudio /var/lib/paudio
+RUN useradd -r -u 1001 -m paudio && mkdir -p /var/lib/paudio/models && chown -R paudio:paudio /var/lib/paudio /app
 USER paudio
 
-EXPOSE 4000
+EXPOSE 3000
 HEALTHCHECK --interval=15s --timeout=3s --start-period=10s --retries=3 \
-  CMD node -e "fetch('http://127.0.0.1:4000/api/v1/asr/health').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"
+  CMD node -e "fetch('http://127.0.0.1:3000/api/v1/asr/health').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"
 
 CMD ["node", "dist/server.mjs"]

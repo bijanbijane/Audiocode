@@ -1,13 +1,26 @@
 import {
   AudioAsset,
   EphemeralDspParams,
+  ExportValidationReport,
   FlickRange,
   Track,
 } from '../contracts/v1_2';
+import { CompiledRenderPlan } from '../processing-core/ProcessingGraphEngine';
+import { ParallelChunkRenderCoordinator } from '../processing-core/ParallelChunkRenderCoordinator';
+import {
+  StreamingWavExportEncoder,
+  WavSyncAccessTarget,
+} from '../processing-core/StreamingExportEncoder';
 import { applyEqualPowerMicroCrossfade, synthesizeRoomToneFill } from './dsp';
 import { processChunkWithPreRoll } from './processingGraph';
 import { computeTimelineDurationFlicks } from './timeline';
 import { flicksToSamples, flicksToSeconds } from './timebase';
+
+export type ReadAssetRangeFn = (
+  assetId: string,
+  startSample: number,
+  length: number,
+) => Promise<Float32Array>;
 
 /**
  * Renders the non-destructive multi-track timeline through the Processing Graph

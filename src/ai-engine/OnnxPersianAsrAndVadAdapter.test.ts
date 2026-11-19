@@ -64,3 +64,22 @@ test('Section 62: greedyDecodeCtcToWords collapses repeated CTC frames and space
   assert.equal(words[1].word, 'من');
   assert.ok(words[0].relativeStartSec < words[0].relativeEndSec);
 });
+
+test('Section 62: estimateWorkingMemoryBytes accurately estimates transient JS feature buffers', () => {
+  const adapter = new OnnxPersianAsrAndVadAdapter();
+
+  assert.equal(adapter.estimateWorkingMemoryBytes(0), 0);
+  assert.equal(adapter.estimateWorkingMemoryBytes(399), 0);
+  assert.equal(adapter.estimateWorkingMemoryBytes(Number.NaN), 0);
+
+  // For 16,000 samples (1s @ 16kHz): numFrames = 98 -> melTensor = 98 * 80 * 4 = 31,360 B
+  // Plus real (512 * 4 = 2048), imag (512 * 4 = 2048), powerSpectrum (257 * 4 = 1028) -> 36,484 B
+  const oneSecEstimate = adapter.estimateWorkingMemoryBytes(16_000);
+  assert.equal(oneSecEstimate, 98 * 80 * 4 + 512 * 4 + 512 * 4 + 257 * 4);
+
+  // For a 25s window (400,000 samples): numFrames = 2,498 -> ~804,484 B
+  const window25sEstimate = adapter.estimateWorkingMemoryBytes(25 * 16_000);
+  assert.equal(window25sEstimate, 2498 * 80 * 4 + 512 * 4 + 512 * 4 + 257 * 4);
+  assert.ok(Number.isSafeInteger(window25sEstimate));
+});
+

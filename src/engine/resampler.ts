@@ -123,3 +123,216 @@ export function computeSignalRms(samples: Float32Array): number {
   }
   return Math.sqrt(sumSq / samples.length);
 }
+
+/**
+ * Stateful chunk-by-chunk Kaiser-windowed sinc resampler.
+ * Keeps only a tiny O(filterTaps) boundary history in memory across chunks
+ * so multi-hour audio can be downsampled to 16 kHz Mono without allocating
+ * a full-file intermediate or output buffer.
+ */
+export class StreamingKaiserSincResampler {
+  public readonly inputSampleRate: number;
+  public readonly targetSampleRate: number;
+  public readonly cutoffHz: number;
+  public readonly filterTaps: number;
+  public readonly aliasingAttenuationDb: number;
+
+  private readonly ratio: number;
+  private readonly fc: number;
+  private readonly halfWidth: number;
+  private readonly beta = 6.5;
+  private readonly invI0Beta: number;
+
+  private ringTail = new Float32Array(0);
+  private windowStartGlobalIdx = 0;
+  private totalInputSamples = 0;
+  private nextOutIdx = 0;
+  private flushed = false;
+
+  constructor(inputSampleRate: number, targetSampleRate = 16_000) {
+    if (!Number.isFinite(inputSampleRate) || inputSampleRate <= 0) {
+      throw new RangeError(`Invalid inputSampleRate: ${inputSampleRate}`);
+    }
+    if (!Number.isFinite(targetSampleRate) || targetSampleRate <= 0) {
+      throw new RangeError(`Invalid targetSampleRate: ${targetSampleRate}`);
+    }
+    this.inputSampleRate = inputSampleRate;
+    this.targetSampleRate = targetSampleRate;
+    this.ratio = inputSampleRate / targetSampleRate;
+    this.cutoffHz = targetSampleRate * 0.45;
+    this.fc = this.cutoffHz / inputSampleRate;
+
+    if (inputSampleRate === targetSampleRate) {
+      this.halfWidth = 0;
+      this.filterTaps = 1;
+      this.aliasingAttenuationDb = 96;
+      this.invI0Beta = 1;
+    } else {
+      this.halfWidth = Math.max(12, Math.round(16 * this.ratio));
+      this.filterTaps = this.halfWidth * 2 + 1;
+      this.aliasingAttenuationDb = 68;
+      this.invI0Beta = 1 / besselI0(this.beta);
+    }
+  }
+
+  public pushChunk(monoChunk: Float32Array): Float32Array {
+    if (this.flushed) {
+      throw new Error('StreamingKaiserSincResampler cannot accept chunks after flush()');
+    }
+    if (monoChunk.length === 0) return new Float32Array(0);
+
+    if (this.inputSampleRate === this.targetSampleRate) {
+      this.totalInputSamples += monoChunk.length;
+      this.nextOutIdx += monoChunk.length;
+      return new Float32Array(monoChunk);
+    }
+
+    const combined = new Float32Array(this.ringTail.length + monoChunk.length);
+    combined.set(this.ringTail, 0);
+    combined.set(monoChunk, this.ringTail.length);
+    const combinedEndGlobal = this.windowStartGlobalIdx + combined.length;
+    this.totalInputSamples = combinedEndGlobal;
+
+    // Only emit outputs whose full [centerInt - halfWidth .. centerInt + halfWidth] support is available
+    const maxSafeCenter = combinedEndGlobal - 1 - this.halfWidth;
+    const outSamples: number[] = [];
+
+    while (true) {
+      const center = this.nextOutIdx * this.ratio;
+      const centerInt = Math.floor(center);
+      if (centerInt + this.halfWidth > combinedEndGlobal - 1 || centerInt > maxSafeCenter) {
+        break;
+      }
+      outSamples.push(this.evalTap(combined, this.windowStartGlobalIdx, center, centerInt));
+      this.nextOutIdx++;
+    }
+
+    // Retain at most the last (2 * halfWidth + ceil(ratio) + 2) samples needed for next boundary
+    const keepLen = Math.min(combined.length, this.halfWidth * 2 + Math.ceil(this.ratio) + 4);
+    const trimCount = combined.length - keepLen;
+    if (trimCount > 0) {
+      this.ringTail = combined.slice(trimCount);
+      this.windowStartGlobalIdx += trimCount;
+    } else {
+      this.ringTail = combined;
+    }
+
+    return Float32Array.from(outSamples);
+  }
+
+  public flush(): Float32Array {
+    if (this.flushed) return new Float32Array(0);
+    this.flushed = true;
+
+    if (this.inputSampleRate === this.targetSampleRate) {
+      return new Float32Array(0);
+    }
+
+    const targetTotalOut = Math.floor(this.totalInputSamples / this.ratio);
+    const remaining = Math.max(0, targetTotalOut - this.nextOutIdx);
+    const out = new Float32Array(remaining);
+
+    for (let i = 0; i < remaining; i++) {
+      const center = (this.nextOutIdx + i) * this.ratio;
+      const centerInt = Math.floor(center);
+      out[i] = this.evalTap(this.ringTail, this.windowStartGlobalIdx, center, centerInt);
+    }
+
+    this.nextOutIdx = targetTotalOut;
+    this.ringTail = new Float32Array(0);
+    return out;
+  }
+
+  public getStats() {
+    return {
+      inputSampleRate: this.inputSampleRate,
+      outputSampleRate: this.targetSampleRate,
+      cutoffHz: this.cutoffHz,
+      filterTaps: this.filterTaps,
+      aliasingAttenuationDb: this.aliasingAttenuationDb,
+      totalInputSamples: this.totalInputSamples,
+      totalOutputSamples: this.nextOutIdx,
+    };
+  }
+
+  private evalTap(
+    buf: Float32Array,
+    bufStartGlobal: number,
+    center: number,
+    centerInt: number,
+  ): number {
+    const startTap = Math.max(bufStartGlobal, centerInt - this.halfWidth);
+    const endTap = Math.min(bufStartGlobal + buf.length - 1, centerInt + this.halfWidth);
+    let acc = 0;
+    let weightSum = 0;
+
+    for (let inIdx = startTap; inIdx <= endTap; inIdx++) {
+      const x = inIdx - center;
+      const norm = x / this.halfWidth;
+      const windowArg = Math.max(0, 1 - norm * norm);
+      const win = besselI0(this.beta * Math.sqrt(windowArg)) * this.invI0Beta;
+      const sincArg = 2 * this.fc * x;
+      const sinc =
+        Math.abs(sincArg) < 1e-8 ? 2 * this.fc : Math.sin(Math.PI * sincArg) / (Math.PI * x);
+      const w = sinc * win;
+      acc += buf[inIdx - bufStartGlobal] * w;
+      weightSum += w;
+    }
+
+    return weightSum > 1e-9 ? acc / weightSum : 0;
+  }
+}
+
+export async function resampleChunkedTo16kStream(params: {
+  inputSampleRate: number;
+  targetSampleRate?: number;
+  totalInputSamples: number;
+  chunkSizeSamples: number;
+  readInputChunkFn: (startSample: number, count: number) => Promise<Float32Array>;
+  onOutputChunk: (chunk16k: Float32Array, offset16k: number) => Promise<void> | void;
+  abortSignal?: AbortSignal;
+  onProgress?: (pct: number) => void;
+}): Promise<{
+  totalOutputSamples: number;
+  cutoffHz: number;
+  filterTaps: number;
+  aliasingAttenuationDb: number;
+}> {
+  const resampler = new StreamingKaiserSincResampler(
+    params.inputSampleRate,
+    params.targetSampleRate ?? 16_000,
+  );
+  let cursor = 0;
+  let outputOffset = 0;
+
+  while (cursor < params.totalInputSamples) {
+    if (params.abortSignal?.aborted) {
+      throw new Error('RESAMPLE_ABORTED');
+    }
+    const count = Math.min(params.chunkSizeSamples, params.totalInputSamples - cursor);
+    const inChunk = await params.readInputChunkFn(cursor, count);
+    const outChunk = resampler.pushChunk(inChunk);
+    if (outChunk.length > 0) {
+      await params.onOutputChunk(outChunk, outputOffset);
+      outputOffset += outChunk.length;
+    }
+    cursor += count;
+    params.onProgress?.(Math.min(99, Math.round((cursor / params.totalInputSamples) * 100)));
+  }
+
+  const tail = resampler.flush();
+  if (tail.length > 0) {
+    await params.onOutputChunk(tail, outputOffset);
+    outputOffset += tail.length;
+  }
+  params.onProgress?.(100);
+
+  const stats = resampler.getStats();
+  return {
+    totalOutputSamples: outputOffset,
+    cutoffHz: stats.cutoffHz,
+    filterTaps: stats.filterTaps,
+    aliasingAttenuationDb: stats.aliasingAttenuationDb,
+  };
+}
+

@@ -78,3 +78,94 @@ export function selectPeakLevel(pyramid: PeakPyramid, samplesPerPixel: number): 
   }
   return chosen;
 }
+
+/**
+ * Incrementally computes a Multi-Resolution PeakPyramid across streaming PCM chunks
+ * without retaining full-file audio in JavaScript memory.
+ */
+export class StreamingPeakPyramidBuilder {
+  private readonly binSizes: readonly number[];
+  private readonly levelStates: Array<{
+    binSize: number;
+    mins: number[];
+    maxs: number[];
+    rmss: number[];
+    curMin: number;
+    curMax: number;
+    curSumSq: number;
+    curCount: number;
+  }>;
+  private totalSamples = 0;
+
+  constructor(
+    private readonly assetId: string,
+    private readonly sampleRate: number,
+    binSizes: readonly number[] = DEFAULT_BIN_SIZES,
+  ) {
+    this.binSizes = binSizes;
+    this.levelStates = binSizes.map((binSize) => ({
+      binSize,
+      mins: [],
+      maxs: [],
+      rmss: [],
+      curMin: 1.0,
+      curMax: -1.0,
+      curSumSq: 0,
+      curCount: 0,
+    }));
+  }
+
+  public pushMonoChunk(samples: Float32Array): void {
+    if (samples.length === 0) return;
+    this.totalSamples += samples.length;
+
+    for (const st of this.levelStates) {
+      for (let i = 0; i < samples.length; i++) {
+        const s = samples[i];
+        if (s < st.curMin) st.curMin = s;
+        if (s > st.curMax) st.curMax = s;
+        st.curSumSq += s * s;
+        st.curCount++;
+
+        if (st.curCount >= st.binSize) {
+          st.mins.push(st.curMin);
+          st.maxs.push(st.curMax);
+          st.rmss.push(Math.sqrt(st.curSumSq / st.curCount));
+          st.curMin = 1.0;
+          st.curMax = -1.0;
+          st.curSumSq = 0;
+          st.curCount = 0;
+        }
+      }
+    }
+  }
+
+  public finalize(): PeakPyramid {
+    if (this.totalSamples === 0) {
+      return { assetId: this.assetId, sampleRate: this.sampleRate, totalSamples: 0, levels: [] };
+    }
+
+    const levels: PeakLevel[] = this.levelStates.map((st) => {
+      if (st.curCount > 0) {
+        st.mins.push(st.curMin);
+        st.maxs.push(st.curMax);
+        st.rmss.push(Math.sqrt(st.curSumSq / st.curCount));
+        st.curCount = 0;
+      }
+      return {
+        samplesPerBin: st.binSize,
+        min: Float32Array.from(st.mins),
+        max: Float32Array.from(st.maxs),
+        rms: Float32Array.from(st.rmss),
+      };
+    });
+
+    return {
+      assetId: this.assetId,
+      sampleRate: this.sampleRate,
+      totalSamples: this.totalSamples,
+      levels,
+    };
+  }
+}
+

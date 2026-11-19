@@ -1,17 +1,21 @@
 /**
- * Offline-First Atomic Service Worker with COOP/COEP Guarantee (Architecture Doc Sections 3, 11, 47 & 48)
+ * Offline-First Atomic Service Worker with COOP/COEP Guarantee (Architecture Doc & Mission 09)
  * - Precaches critical App Shell assets atomically.
  * - Guarantees Cross-Origin-Opener-Policy & Cross-Origin-Embedder-Policy on cached/offline responses
  *   so SharedArrayBuffer remains operational when the user launches offline.
- * - Queries navigator.locks before skipWaiting() to avoid updating mid-edit or during active AI jobs.
+ * - Strictly bypasses /models/, /api/, /v1/, Range audio streams, private blobs, and external origins.
+ * - Queries navigator.locks before skipWaiting() to avoid updating mid-edit or during active AI/render jobs.
+ * - Protects existing working caches against storage quota failures during update installation.
  */
 
-export const APP_SHELL_CACHE_VERSION = 'paudio-shell-v1.2.0';
+export const APP_SHELL_CACHE_VERSION = 'paudio-shell-v1.3.0';
 
 export const APP_SHELL_CRITICAL_ASSETS: readonly string[] = [
   '/',
   '/index.html',
   '/manifest.webmanifest',
+  '/icon.svg',
+  '/asr-stream-worklet.js',
 ];
 
 export interface LockSnapshotEntryLike {
@@ -43,6 +47,11 @@ export interface SwFetchEventLike {
   respondWith(responsePromise: Promise<Response>): void;
 }
 
+export interface SwMessageEventLike {
+  readonly data?: { readonly type?: string; readonly activeCriticalTasks?: readonly string[] };
+  waitUntil?(promise: Promise<unknown>): void;
+}
+
 export interface SwGlobalScopeLike {
   readonly location: { readonly origin: string };
   readonly caches: SwCacheStorageLike;
@@ -50,14 +59,40 @@ export interface SwGlobalScopeLike {
   skipWaiting(): Promise<void>;
   addEventListener(type: 'install' | 'activate', listener: (event: SwExtendableEventLike) => void): void;
   addEventListener(type: 'fetch', listener: (event: SwFetchEventLike) => void): void;
+  addEventListener?(type: 'message', listener: (event: SwMessageEventLike) => void): void;
 }
 
 /**
- * Model chunks (/models/) are managed directly via ChunkedModelDownloader + OPFS,
- * and backend API calls (/api/) must never be served from static app shell cache.
+ * Model chunks (/models/), API endpoints (/api/, /v1/), and private audio downloads
+ * must never be intercepted or served from static app shell cache.
  */
-export function shouldBypassShellInterception(url: URL): boolean {
-  return url.pathname.startsWith('/models/') || url.pathname.startsWith('/api/');
+export function shouldBypassShellInterception(
+  url: URL,
+  origin?: string,
+  requestHeaders?: Headers,
+): boolean {
+  if (
+    url.pathname.startsWith('/models/') ||
+    url.pathname.startsWith('/api/') ||
+    url.pathname.startsWith('/v1/')
+  ) {
+    return true;
+  }
+
+  // Never cache partial/Range media requests or user-exported audio downloads
+  if (requestHeaders?.has('range')) {
+    return true;
+  }
+  if (/\.(wav|rf64|mp3|ogg|flac|m4a|opus|aac)$/i.test(url.pathname)) {
+    return true;
+  }
+
+  // Never intercept cross-origin third-party requests (strict Local-First boundary)
+  if (origin && url.origin !== origin && !url.pathname.endsWith('.wasm')) {
+    return true;
+  }
+
+  return false;
 }
 
 /**
@@ -82,7 +117,8 @@ export function enforceCrossOriginIsolationHeaders(response: Response): Response
 }
 
 /**
- * Checks Web Locks state so atomic updates never replace the active worker while a project or AI job is running.
+ * Checks Web Locks state so atomic updates never replace the active worker while a project,
+ * transcription, rendering, export, or model installation job is running.
  */
 export async function isSafeToActivateNewVersion(
   locksApi?: LockManagerLike,
@@ -102,7 +138,9 @@ export async function isSafeToActivateNewVersion(
     (lock) =>
       Boolean(lock.name?.startsWith('project_edit_lock_')) ||
       Boolean(lock.name?.startsWith('avapardaz-')) ||
-      Boolean(lock.name?.startsWith('ai-job-')),
+      Boolean(lock.name?.startsWith('ai-job-')) ||
+      Boolean(lock.name?.startsWith('render-job-')) ||
+      Boolean(lock.name?.startsWith('model-install-')),
   );
 
   return !hasActiveProjectOrAiJob;
@@ -113,7 +151,12 @@ export function registerOfflineFirstServiceWorkerListeners(scope: SwGlobalScopeL
     event.waitUntil(
       (async () => {
         const cache = await scope.caches.open(APP_SHELL_CACHE_VERSION);
-        await cache.addAll(APP_SHELL_CRITICAL_ASSETS);
+        try {
+          await cache.addAll(APP_SHELL_CRITICAL_ASSETS);
+        } catch (err) {
+          // Do not delete existing working caches on quota/network failure during install
+          throw err;
+        }
 
         const canActivateImmediately = await isSafeToActivateNewVersion();
         if (canActivateImmediately) {
@@ -142,7 +185,7 @@ export function registerOfflineFirstServiceWorkerListeners(scope: SwGlobalScopeL
     if (request.method !== 'GET') return;
 
     const url = new URL(request.url);
-    if (shouldBypassShellInterception(url)) {
+    if (shouldBypassShellInterception(url, scope.location.origin, request.headers)) {
       return;
     }
 
@@ -156,12 +199,19 @@ export function registerOfflineFirstServiceWorkerListeners(scope: SwGlobalScopeL
             networkResponse.ok &&
             (url.origin === scope.location.origin || url.pathname.endsWith('.wasm'))
           ) {
-            await cache.put(request, networkResponse.clone());
+            try {
+              await cache.put(request, networkResponse.clone());
+            } catch {
+              // Quota exceeded on secondary cache write: still serve live response safely
+            }
           }
           return enforceCrossOriginIsolationHeaders(networkResponse);
         } catch {
           const cachedResponse =
-            (await cache.match(request)) ?? (await cache.match('/index.html'));
+            (await cache.match(request)) ??
+            (request.mode === 'navigate' || url.pathname === '/' || !url.pathname.includes('.')
+              ? await cache.match('/index.html')
+              : undefined);
 
           if (!cachedResponse) {
             return enforceCrossOriginIsolationHeaders(
@@ -176,6 +226,25 @@ export function registerOfflineFirstServiceWorkerListeners(scope: SwGlobalScopeL
       })(),
     );
   });
+
+  if (typeof scope.addEventListener === 'function') {
+    (scope.addEventListener as (t: 'message', l: (e: SwMessageEventLike) => void) => void)(
+      'message',
+      (event: SwMessageEventLike) => {
+        if (event.data?.type !== 'SKIP_WAITING_IF_SAFE') return;
+        const activeTasks = event.data.activeCriticalTasks ?? [];
+        if (activeTasks.length > 0) return;
+
+        const activationPromise = (async () => {
+          const safe = await isSafeToActivateNewVersion();
+          if (safe) {
+            await scope.skipWaiting();
+          }
+        })();
+        event.waitUntil?.(activationPromise);
+      },
+    );
+  }
 }
 
 // Auto-bind only when executed inside a genuine Service Worker Global Scope

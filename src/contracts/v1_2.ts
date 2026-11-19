@@ -63,6 +63,32 @@ export interface AcousticProfile {
   sampleRate: number;
 }
 
+export type AssetStorageLifecycleState =
+  | 'ingesting'
+  | 'finalizing'
+  | 'ready'
+  | 'abandoned'
+  | 'failed';
+
+export interface PersistedAudioAssetManifest {
+  readonly assetId: string;
+  readonly fileName: string;
+  readonly mimeType: string;
+  readonly fileSizeBytes: number;
+  readonly contentSha256: string;
+  readonly sampleRate: number;
+  readonly channels: 1 | 2;
+  readonly totalSamples: number;
+  readonly blockSizeSamples: number;
+  readonly totalBlocks: number;
+  readonly bytesPerSample: number;
+  readonly state: AssetStorageLifecycleState;
+  readonly createdAtMs: number;
+  readonly updatedAtMs: number;
+  readonly finalizedAtMs: number | null;
+  readonly errorMessage?: string;
+}
+
 export interface AudioAsset {
   id: string;
   name: string;
@@ -81,6 +107,9 @@ export interface AudioAsset {
   seekTable: SeekTableEntry[];
   peakPyramid: PeakPyramid;
   acousticProfile: AcousticProfile;
+  storageLifecycle?: AssetStorageLifecycleState;
+  storageBackend?: string;
+  blockSizeSamples?: number;
 }
 
 export type ClipKind = 'speech' | 'room-tone-fill';
@@ -237,6 +266,13 @@ export interface PersianWordToken {
     | 'COMPLETE_VERB_OR_CLAUSE'
     | 'NEUTRAL_NOMINAL'
     | 'INCOMPLETE_CONJUNCTION_OR_PREP';
+  /** Distinguishes real model/CTC timestamps from proportionally distributed approximations */
+  alignmentPrecision?:
+    | 'model_timestamps'
+    | 'ctc_frame_aligned'
+    | 'distributed_segment'
+    | 'forced_aligned';
+  rawPreserved?: boolean;
 }
 
 export interface ProcessingNodeDescriptor {
@@ -300,6 +336,13 @@ export interface StorageBrokerTelemetry {
   activeLeases: FileHandleLease[];
   lockConflictsPrevented: number;
   cacheStats: RollingCacheStats;
+  persistenceAvailable?: boolean;
+  persistenceStatus?: 'OPFS-SyncAccessHandle' | 'OPFS-Writable' | 'OPFS-Unavailable' | 'Disposed';
+  workerCacheStats?: RollingCacheStats | null;
+  totalAudioCacheBudgetBytes?: number;
+  disposed?: boolean;
+  recoveredAssetCount?: number;
+  cleanedAbandonedCount?: number;
 }
 
 export interface RuntimeCapabilities {

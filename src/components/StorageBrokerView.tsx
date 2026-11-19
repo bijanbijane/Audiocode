@@ -317,12 +317,12 @@ export const StorageBrokerView: React.FC<StorageBrokerViewProps> = ({
           </div>
           <div className="p-3 rounded border border-[#252F42] bg-[#0E131D]">
             <div className="text-slate-400">OPFS & SyncAccessHandle</div>
-            <div dir="ltr" className="font-mono text-emerald-400 mt-1 text-right">
+            <div dir="ltr" className={`font-mono mt-1 text-right ${telemetry.opfsSupported ? 'text-emerald-400' : 'text-amber-400'}`}>
               {telemetry.opfsSupported
                 ? telemetry.syncAccessHandleSupported
                   ? 'OPFS SyncActive'
                   : 'OPFS Writable'
-                : 'Sandbox Fallback'}
+                : 'OPFS Unavailable (No Durable Cache)'}
             </div>
           </div>
           <div className="p-3 rounded border border-[#252F42] bg-[#0E131D]">
@@ -366,10 +366,19 @@ export const StorageBrokerView: React.FC<StorageBrokerViewProps> = ({
                 <span dir="ltr" className="inline-block">{usedBytesLabel}</span>
               </span>
               <span className="text-slate-400">
-                سقف:{' '}
+                سقف کش فعال:{' '}
                 <span dir="ltr" className="inline-block">
                   {(telemetry.cacheStats.maxBytes / (1024 * 1024)).toFixed(1)} MB
-                </span>{' '}
+                </span>
+                {telemetry.totalAudioCacheBudgetBytes ? (
+                  <>
+                    {' '}
+                    / بودجه کل:{' '}
+                    <span dir="ltr" className="inline-block">
+                      {(telemetry.totalAudioCacheBudgetBytes / (1024 * 1024)).toFixed(1)} MB
+                    </span>
+                  </>
+                ) : null}{' '}
                 (<span dir="ltr" className="inline-block">{cachePct}%</span>)
               </span>
             </div>
@@ -425,12 +434,14 @@ export const StorageBrokerView: React.FC<StorageBrokerViewProps> = ({
 
           <div className="flex items-center justify-between p-3 rounded bg-[#0E131D] border border-[#252F42] text-xs">
             <span className="text-slate-300">وضعیت ذخیره‌سازی پایدار (Eviction Protection):</span>
-            <span className="font-mono text-emerald-400">
-              {telemetry.persistentStorageGranted === true
-                ? 'Granted (محافظت‌شده)'
-                : telemetry.persistentStorageGranted === false
-                  ? 'Best-Effort'
-                  : 'Checked'}
+            <span className={`font-mono ${telemetry.opfsSupported ? 'text-emerald-400' : 'text-amber-400'}`}>
+              {!telemetry.opfsSupported
+                ? 'OPFS Unavailable (غیرماندگار)'
+                : telemetry.persistentStorageGranted === true
+                  ? 'Granted (محافظت‌شده)'
+                  : telemetry.persistentStorageGranted === false
+                    ? 'Best-Effort'
+                    : 'Checked'}
             </span>
           </div>
 

@@ -5,22 +5,14 @@ import {
   SmartRecommendation,
   Track,
 } from '../contracts/v1_2';
-import {
-  detectLongPauses,
-  detectPitchPlateauSegments,
-  extractAcousticProfile,
-  refinePersianCutBoundary,
-  detectCrosstalkBleed,
-} from './dsp';
+import { detectLongPauses, detectPitchPlateauSegments, extractAcousticProfile, refinePersianCutBoundary, detectCrosstalkBleed } from './dsp';
 import { buildPeakPyramid } from './peakPyramid';
 import { normalizePersianText, assessTrailingEzafeRisk } from './persianText';
 import { resampleTo16kMono } from './resampler';
-import { buildSeekTable } from './storageBroker';
+import { buildSeekTable, StorageBrokerClient } from './storageBroker';
 import { flicksToSeconds, secondsToFlicks } from './timebase';
-import {
-  alignPersianScriptToAudio,
-  buildOfflineAcousticSegmentedTranscript,
-} from './persianAsrTranscriber';
+import { alignPersianScriptToAudio } from './persianAsrTranscriber';
+import { ingestAudioFileStreaming, StreamingIngestOptions } from './streamingIngest';
 
 export interface LoadedStudioProject {
   projectName: string;
@@ -432,192 +424,62 @@ export function buildDefaultPersianPodcastProject(): LoadedStudioProject {
 
 /**
  * Ingests any real uploaded audio file (.wav, .mp3, .ogg, .m4a, .webm)
- * builds Seek Table, Peak Pyramid, Acoustic Profile, Anti-Aliased 16kHz stream,
- * and runs instant Group A DSP pause + pitch-plateau detection!
+ * using bounded-memory chunk streaming and OPFS persistence without generating synthetic transcripts.
  */
-export async function ingestUploadedAudioFile(file: File): Promise<LoadedStudioProject> {
-  const arrayBuffer = await file.arrayBuffer();
-  const headerBytes = new Uint8Array(arrayBuffer, 0, Math.min(16, arrayBuffer.byteLength));
-  const verifiedContainer = AudioSecurityGuard.verifyMagicBytes(headerBytes, file.size);
+export async function ingestUploadedAudioFile(
+  file: File,
+  options?: StreamingIngestOptions,
+): Promise<LoadedStudioProject> {
+  return ingestAudioFileStreaming(file, options);
+}
 
-  const AudioCtx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
-  const ctx = new AudioCtx();
-  let decoded: AudioBuffer;
-  try {
-    decoded = await ctx.decodeAudioData(arrayBuffer);
-  } finally {
-    await ctx.close().catch(() => {});
+export async function persistRecordedPcmAssetToBroker(
+  asset: AudioAsset,
+  pcm: Float32Array,
+  broker: StorageBrokerClient | null | undefined,
+): Promise<{ persisted: boolean; asset: AudioAsset }> {
+  if (!broker || broker.isDisposed() || !broker.getTelemetry().opfsSupported) {
+    return { persisted: false, asset };
   }
-
-  AudioSecurityGuard.assertSafeDecodedDuration(
-    decoded.duration,
-    file.size,
-    decoded.sampleRate,
-    decoded.numberOfChannels,
-  );
-
-  const sampleRate = decoded.sampleRate;
-  const totalSamples = decoded.length;
-  // Fold to mono for clean PoC processing while preserving native sample rate
-  const mono = new Float32Array(totalSamples);
-  const numCh = decoded.numberOfChannels;
-  for (let c = 0; c < numCh; c++) {
-    const ch = decoded.getChannelData(c);
-    for (let i = 0; i < totalSamples; i++) {
-      mono[i] += ch[i] / numCh;
-    }
-  }
-
-  const assetId = `asset-upload-${Date.now()}`;
-  const acousticProfile = extractAcousticProfile(assetId, mono, sampleRate);
-  const peakPyramid = buildPeakPyramid(assetId, [mono], sampleRate);
-  const durationFlicks = secondsToFlicks(totalSamples / sampleRate);
-
-  const containerMap: Record<typeof verifiedContainer, AudioAsset['container']> = {
-    WAV: 'wav',
-    MP3: 'mp3',
-    OGG: 'ogg',
-    FLAC: 'wav',
-    M4A_AAC: 'webm',
-    WEBM: 'webm',
-  };
-
-  const asset: AudioAsset = {
-    id: assetId,
-    name: file.name,
-    contentHash: `sha256:local-${file.size}-${totalSamples}`,
-    partialFingerprint: `fp:${file.name}-${sampleRate}`,
-    contentVersion: 1,
-    fileSizeBytes: file.size,
-    container: containerMap[verifiedContainer],
-    codec: 'decoded-pcm',
-    nativeSampleRate: sampleRate,
-    channelLayout: numCh > 1 ? 'stereo' : 'mono',
-    exactSampleCount: totalSamples,
-    durationFlicks,
-    importTimestamp: Date.now(),
-    validationStatus: 'verified',
-    seekTable: buildSeekTable(totalSamples, sampleRate * 2, 4, 1),
-    peakPyramid,
-    acousticProfile,
-  };
-
-  const tracks: Track[] = [
-    {
-      id: 'track-main',
-      name: `ترک اصلی — ${file.name}`,
-      speakerLabel: 'گوینده فایل ورودی',
-      syncGroupId: null,
-      muted: false,
-      solo: false,
-      gainDb: 0,
-      pan: 0,
-      clips: [
-        {
-          id: 'clip-upload-1',
-          assetId,
-          trackId: 'track-main',
-          kind: 'speech',
-          timelineRange: { startFlicks: 0, endFlicks: durationFlicks },
-          sourceStartFlicks: 0,
-          fadeInMs: 10,
-          fadeOutMs: 10,
-          gainDb: 0,
-          muted: false,
-        },
-      ],
-    },
-  ];
-
-  // Run Anti-Aliased Resampler to 16kHz Mono for Group A + Group B alignment analysis
-  const resampled16k = resampleTo16kMono([mono], sampleRate, 16_000);
-  const pauses = detectLongPauses(mono, sampleRate, acousticProfile, 650);
-  const plateaus = detectPitchPlateauSegments(resampled16k.samples, 16_000, 280);
-
-  const initialScript = buildOfflineAcousticSegmentedTranscript(mono, sampleRate, acousticProfile);
-  const aligned = alignPersianScriptToAudio({
-    pcm: mono,
-    sampleRate,
-    trackId: 'track-main',
-    speakerName: 'گوینده فایل ورودی',
-    rawTranscriptText: initialScript,
-    acousticProfile,
-    alignmentSource: 'AcousticSnap',
+  const blockSizeSamples = asset.blockSizeSamples ?? Math.max(1, asset.nativeSampleRate * 4);
+  const totalBlocks = Math.ceil(pcm.length / blockSizeSamples);
+  await broker.beginAssetIngest({
+    assetId: asset.id,
+    fileName: asset.name,
+    mimeType: 'audio/wav',
+    fileSizeBytes: asset.fileSizeBytes,
+    contentSha256: asset.contentHash,
+    sampleRate: asset.nativeSampleRate,
+    channels: 1,
+    totalSamples: pcm.length,
+    blockSizeSamples,
+    totalBlocks,
+    bytesPerSample: Float32Array.BYTES_PER_ELEMENT,
+    state: 'ingesting',
+    createdAtMs: Date.now(),
+    updatedAtMs: Date.now(),
+    finalizedAtMs: null,
   });
-
-  const recommendations: SmartRecommendation[] = [...aligned.recommendations];
-
-  for (let i = 0; i < Math.min(8, pauses.length); i++) {
-    const p = pauses[i];
-    const startSec = p.startSample / sampleRate + 0.08;
-    const endSec = p.endSample / sampleRate - 0.08;
-    if (endSec - startSec < 0.35) continue;
-    const range = { startFlicks: secondsToFlicks(startSec), endFlicks: secondsToFlicks(endSec) };
-    if (
-      recommendations.some(
-        (r) =>
-          r.kind === 'long-pause' &&
-          Math.abs(r.range.startFlicks - range.startFlicks) < secondsToFlicks(0.25),
-      )
-    ) {
-      continue;
-    }
-    recommendations.push({
-      id: `rec-pause-${i}`,
-      trackId: 'track-main',
-      kind: 'long-pause',
-      recommendedMode: 'sync-locked-ripple-cut',
-      range,
-      relatedText: `مکث ${(p.durationMs / 1000).toFixed(2)} ثانیه‌ای`,
-      reasonFa: `شناسایی خودکار سکوت در ثانیه صفر (گروه A) در بازه ${flicksToSeconds(range.startFlicks).toFixed(2)} تا ${flicksToSeconds(range.endFlicks).toFixed(2)} ثانیه.`,
-      confidence: 0.94,
-      sourceTier: 'Group-A-DSP',
-      status: 'Pending',
-      boundary: refinePersianCutBoundary(mono, sampleRate, range, { microCrossfadeMs: 10 }),
-    });
+  let allPersisted = true;
+  for (let i = 0; i < totalBlocks; i++) {
+    const start = i * blockSizeSamples;
+    const end = Math.min(pcm.length, start + blockSizeSamples);
+    const res = await broker.writeAssetChunk(asset.id, i, pcm.subarray(start, end), 'io-broker');
+    allPersisted = allPersisted && res.persisted;
   }
-
-  for (let i = 0; i < Math.min(4, plateaus.length); i++) {
-    const pl = plateaus[i];
-    const range = {
-      startFlicks: secondsToFlicks(pl.startSample / 16_000),
-      endFlicks: secondsToFlicks(pl.endSample / 16_000),
+  if (allPersisted) {
+    await broker.finalizeAsset(asset.id, { totalSamples: pcm.length, totalBlocks });
+    return {
+      persisted: true,
+      asset: {
+        ...asset,
+        storageLifecycle: 'ready',
+        storageBackend: broker.getTelemetry().persistenceStatus,
+        blockSizeSamples,
+      },
     };
-    recommendations.push({
-      id: `rec-plateau-${i}`,
-      trackId: 'track-main',
-      kind: 'co-articulated-filler',
-      recommendedMode: 'sync-locked-ripple-cut',
-      range,
-      relatedText: `کشیدگی احتمالی واکه (${pl.f0Hz} Hz)`,
-      reasonFa: `ثبات فرکانس پایه روی ${pl.f0Hz} هرتز بدون دره انرژی — کاندید تپق کشیده‌شده.`,
-      confidence: Number(pl.confidence.toFixed(2)),
-      sourceTier: 'Group-A-DSP',
-      status: 'Pending',
-      boundary: refinePersianCutBoundary(mono, sampleRate, range, {
-        pitchPlateauDetected: true,
-        microCrossfadeMs: 12,
-      }),
-    });
   }
-
-  return {
-    projectName: file.name,
-    sampleRate,
-    assets: { [assetId]: asset },
-    pcmSources: { [assetId]: mono },
-    tracks,
-    tokens: aligned.tokens,
-    recommendations,
-    resamplerStats: {
-      inputSampleRate: sampleRate,
-      outputSampleRate: resampled16k.outputSampleRate,
-      cutoffHz: resampled16k.cutoffHz,
-      filterTaps: resampled16k.filterTaps,
-      aliasingAttenuationDb: resampled16k.aliasingAttenuationDb,
-      downsampledLength: resampled16k.samples.length,
-    },
-  };
+  return { persisted: false, asset };
 }
 
 /**
@@ -731,20 +593,61 @@ export function ingestRecordedPcmTake(params: {
     },
   ];
 
-  const script =
-    params.transcriptHint && params.transcriptHint.trim().length > 0
-      ? params.transcriptHint.trim()
-      : buildOfflineAcousticSegmentedTranscript(pcm, sampleRate, acousticProfile);
+  const hasExplicitHint =
+    typeof params.transcriptHint === 'string' && params.transcriptHint.trim().length > 0;
 
-  const aligned = alignPersianScriptToAudio({
-    pcm,
-    sampleRate,
-    trackId,
-    speakerName: 'گوینده استودیو',
-    rawTranscriptText: script,
-    acousticProfile,
-    alignmentSource: 'ASR',
-  });
+  if (hasExplicitHint) {
+    const aligned = alignPersianScriptToAudio({
+      pcm,
+      sampleRate,
+      trackId,
+      speakerName: 'گوینده استودیو',
+      rawTranscriptText: params.transcriptHint!.trim(),
+      acousticProfile,
+      alignmentSource: 'ASR',
+    });
+
+    return {
+      projectName: `برداشت ضبط‌شده استودیو (${(totalSamples / sampleRate).toFixed(1)} ثانیه)`,
+      sampleRate,
+      assets: { [assetId]: asset },
+      pcmSources: { [assetId]: pcm },
+      tracks,
+      tokens: aligned.tokens,
+      recommendations: aligned.recommendations,
+      resamplerStats: {
+        inputSampleRate: sampleRate,
+        outputSampleRate: resampled16k.outputSampleRate,
+        cutoffHz: resampled16k.cutoffHz,
+        filterTaps: resampled16k.filterTaps,
+        aliasingAttenuationDb: resampled16k.aliasingAttenuationDb,
+        downsampledLength: resampled16k.samples.length,
+      },
+    };
+  }
+
+  const pauses = detectLongPauses(pcm, sampleRate, acousticProfile, 650);
+  const pauseRecs: SmartRecommendation[] = [];
+  for (let i = 0; i < Math.min(8, pauses.length); i++) {
+    const p = pauses[i];
+    const startSec = p.startSample / sampleRate + 0.08;
+    const endSec = p.endSample / sampleRate - 0.08;
+    if (endSec - startSec < 0.35) continue;
+    const range = { startFlicks: secondsToFlicks(startSec), endFlicks: secondsToFlicks(endSec) };
+    pauseRecs.push({
+      id: `rec-pause-${i}`,
+      trackId,
+      kind: 'long-pause',
+      recommendedMode: 'sync-locked-ripple-cut',
+      range,
+      relatedText: `مکث ${(p.durationMs / 1000).toFixed(2)} ثانیه‌ای`,
+      reasonFa: `شناسایی خودکار سکوت (گروه A) در بازه ${flicksToSeconds(range.startFlicks).toFixed(2)} تا ${flicksToSeconds(range.endFlicks).toFixed(2)} ثانیه.`,
+      confidence: 0.94,
+      sourceTier: 'Group-A-DSP',
+      status: 'Pending',
+      boundary: refinePersianCutBoundary(pcm, sampleRate, range, { microCrossfadeMs: 10 }),
+    });
+  }
 
   return {
     projectName: `برداشت ضبط‌شده استودیو (${(totalSamples / sampleRate).toFixed(1)} ثانیه)`,
@@ -752,8 +655,8 @@ export function ingestRecordedPcmTake(params: {
     assets: { [assetId]: asset },
     pcmSources: { [assetId]: pcm },
     tracks,
-    tokens: aligned.tokens,
-    recommendations: aligned.recommendations,
+    tokens: [],
+    recommendations: pauseRecs,
     resamplerStats: {
       inputSampleRate: sampleRate,
       outputSampleRate: resampled16k.outputSampleRate,

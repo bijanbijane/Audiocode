@@ -66,6 +66,11 @@ import {
   StorageBrokerClient,
 } from './engine/storageBroker';
 import {
+  AVAPARDAZ_AUDIO_CACHE_SPLIT,
+  AVAPARDAZ_MEMORY_POLICY,
+} from './runtime/memory/MemoryPolicy';
+import { getSharedMemoryBudgetManager } from './runtime/memory/MemoryBudgetManager';
+import {
   applyBatchRecommendationsAtomically,
   applySyncSafeCut,
   cloneRecommendations,
@@ -172,13 +177,17 @@ export default function App() {
     activeLeases: [],
     lockConflictsPrevented: 0,
     cacheStats: {
-      maxBytes: 32 * 1024 * 1024,
+      maxBytes: AVAPARDAZ_AUDIO_CACHE_SPLIT.mainThreadBytes,
       usedBytes: 0,
       cachedBlocks: 0,
       hits: 0,
       misses: 0,
       evictions: 0,
     },
+    persistenceAvailable: false,
+    persistenceStatus: 'OPFS-Unavailable',
+    workerCacheStats: null,
+    totalAudioCacheBudgetBytes: AVAPARDAZ_MEMORY_POLICY.audioCacheBytes,
   }));
 
   // Export Modal & Studio Tool Modals state
@@ -202,23 +211,52 @@ export default function App() {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
+    let cancelled = false;
     const transport = new StudioAudioTransport();
     transportRef.current = transport;
 
-    const broker = new StorageBrokerClient(1024 * 1024 * 8); // 8MB demo LRU cap
-    brokerRef.current = broker;
-    broker.init().then((t) => {
-      setTelemetry(t);
+    const broker = new StorageBrokerClient({
+      mainThreadCacheBytes: AVAPARDAZ_AUDIO_CACHE_SPLIT.mainThreadBytes,
+      workerCacheBytes: 0,
     });
+    brokerRef.current = broker;
 
-    const sessionLock = new CrashRecoveryAndSessionLock();
-    sessionLock.acquireExclusiveProjectLock('avapardaz-demo-ep42').then((acquired) => {
-      if (!acquired) {
-        setStatusNotice('هشدار هم‌زمانی: این پروژه هم‌اکنون در تب دیگری باز است (Web Locks Guard).');
+    const budgetManager = getSharedMemoryBudgetManager();
+    const unregisterEviction = budgetManager.registerCacheEvictionCallback(() => {
+      broker.lruCache.evictToBudget(0);
+      if (!cancelled) {
+        setTelemetry(broker.getTelemetry());
       }
     });
 
+    broker
+      .init()
+      .then((t) => {
+        if (!cancelled) {
+          setTelemetry(t);
+        }
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          setStatusNotice(
+            `خطای راه‌اندازی Storage Broker: ${err instanceof Error ? err.message : String(err)}`,
+          );
+        }
+      });
+
+    const sessionLock = new CrashRecoveryAndSessionLock();
+    sessionLock
+      .acquireExclusiveProjectLock('avapardaz-demo-ep42')
+      .then((acquired) => {
+        if (!cancelled && !acquired) {
+          setStatusNotice('هشدار هم‌زمانی: این پروژه هم‌اکنون در تب دیگری باز است (Web Locks Guard).');
+        }
+      })
+      .catch(() => {});
+
     return () => {
+      cancelled = true;
+      unregisterEviction();
       sessionLock.releaseProjectLock();
       transport.dispose();
       broker.dispose();
@@ -1644,13 +1682,14 @@ export default function App() {
     setIsTestingLru(true);
     try {
       const primaryId = Object.keys(project.assets)[0] ?? 'asset-host';
-      const dummyBlock = new Float32Array(262_144); // 1 MB per block
-      for (let i = 0; i < 10; i++) {
+      const dummyBlock = new Float32Array(262_144); // 1 MiB per block
+      const maxBytes = brokerRef.current.lruCache.getStats().maxBytes;
+      const totalBlocks = Math.max(10, Math.floor(maxBytes / dummyBlock.byteLength) + 2);
+      for (let i = 0; i < totalBlocks; i++) {
         await brokerRef.current.writePcmBlock(primaryId, i, [dummyBlock], 'playback-feeder');
-        setTelemetry(brokerRef.current.getTelemetry());
       }
-      // Exercise a cache hit (block 9 still warm) and a cache miss (block 0 evicted)
-      brokerRef.current.lruCache.get(primaryId, 9);
+      // Exercise a cache hit (newest block warm) and a cache miss (block 0 evicted)
+      brokerRef.current.lruCache.get(primaryId, totalBlocks - 1);
       brokerRef.current.lruCache.get(primaryId, 0);
       setTelemetry(brokerRef.current.getTelemetry());
     } finally {

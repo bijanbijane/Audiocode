@@ -1,5 +1,10 @@
 import { TimedPersianToken } from './PersianTextNormalizer';
-import { TimeMath, TimeRange } from '../contracts/timebase.contract';
+import { SampleRate, TimeMath, TimeRange } from '../contracts/timebase.contract';
+import type {
+  SpeechEventDetectionState,
+  SpeechEventSubtype,
+  SpeechEventUncertaintyState,
+} from './speech-events/SpeechEventContracts';
 
 export interface SemanticRetakeCandidate {
   readonly retakeId: string;
@@ -11,6 +16,30 @@ export interface SemanticRetakeCandidate {
   readonly firstTakeText: string;
   readonly secondTakeText: string;
   readonly semanticSimilarityScore: number;
+  readonly reasonFa: string;
+}
+
+export interface WordRepetitionClassification {
+  readonly id: string;
+  readonly trackId: string;
+  readonly subtype: Extract<
+    SpeechEventSubtype,
+    | 'ACCIDENTAL_WORD_REPETITION'
+    | 'INTENTIONAL_EMPHASIS_REPETITION'
+    | 'LEGITIMATE_LEXICAL_REPETITION'
+  >;
+  readonly detectionState: SpeechEventDetectionState;
+  readonly uncertaintyState: SpeechEventUncertaintyState;
+  readonly targetRange: TimeRange;
+  readonly keptRepetitionRange: TimeRange;
+  readonly affectedTokenIds: readonly string[];
+  readonly repeatedText: string;
+  readonly temporalSeparationMs: number;
+  readonly acousticEnergyRatio: number | null;
+  readonly linguisticScore: number;
+  readonly acousticScore: number | null;
+  readonly eligibleForDeletionSuggestion: boolean;
+  readonly requiresHumanReview: boolean;
   readonly reasonFa: string;
 }
 
@@ -26,13 +55,188 @@ interface ClauseSegment {
 /**
  * Persian Semantic Repetition & Retake Detection Engine (Section 2.2 & Group C Section 35)
  * Identifies consecutive spoken takes where the speaker rephrases the same meaning after a pause,
- * combining light Persian morphological stemming, Jaccard stem overlap, and 3-gram cosine similarity.
+ * and distinguishes accidental repetitions from intentional emphasis and legitimate lexical reduplication.
  */
 export class PersianSemanticRepetitionEngine {
   private static readonly STOP_WORDS = new Set([
     'و', 'در', 'به', 'از', 'که', 'این', 'آن', 'را', 'با', 'برای', 'تا', 'هم', 'بر', 'یا',
     'یک', 'ما', 'من', 'شما', 'او', 'آنها', 'ایشان', 'ولی', 'اما', 'چون', 'اگر', 'هر',
   ]);
+
+  /** Adverbs / intensifiers intentionally repeated in Persian for rhetorical emphasis */
+  private static readonly EMPHASIS_INTENSIFIERS = new Set([
+    'خیلی', 'بسیار', 'حتماً', 'حتما', 'واقعاً', 'واقعا', 'دقیقاً', 'دقیقا',
+    'کاملاً', 'کاملا', 'اصلاً', 'اصلا', 'فوق‌العاده', 'شدیداً', 'همیشه', 'هرگز', 'زود',
+  ]);
+
+  /** Legitimate Persian distributive/idiomatic reduplications */
+  private static readonly LEGITIMATE_REDUPLICATIONS = new Set([
+    'کم', 'تند', 'دونه', 'دانه', 'یکی', 'یواش', 'آروم', 'آرام', 'به‌زودی', 'تک', 'گام', 'لحظه',
+  ]);
+
+  public static classifyWordRepetitionsDetailed(
+    tokens: readonly TimedPersianToken[],
+    options?: {
+      readonly pcmMono?: Float32Array;
+      readonly sampleRate?: SampleRate;
+    },
+  ): WordRepetitionClassification[] {
+    if (tokens.length < 2) return [];
+    const results: WordRepetitionClassification[] = [];
+    const pcm = options?.pcmMono;
+    const sampleRate = options?.sampleRate;
+    const hasAudio = Boolean(pcm && pcm.length > 0 && sampleRate && sampleRate > 0);
+
+    for (let i = 0; i < tokens.length - 1; i++) {
+      const first = tokens[i];
+      const second = tokens[i + 1];
+      if (first.trackId !== second.trackId) continue;
+
+      const normA = first.normalizedText.replace(/[،؛.!؟«»()[\]\u200c\s]/g, '');
+      const normB = second.normalizedText.replace(/[،؛.!؟«»()[\]\u200c\s]/g, '');
+      if (!normA || normA !== normB) continue;
+
+      const gapMs = Math.max(
+        0,
+        TimeMath.flicksToSeconds(second.range.start - first.range.end) * 1000,
+      );
+      if (gapMs > 2200) continue;
+
+      // Measure acoustic RMS ratio if PCM is supplied
+      let acousticEnergyRatio: number | null = null;
+      let acousticScore: number | null = null;
+      if (hasAudio && pcm && sampleRate) {
+        const rmsA = this.measureRangeRms(pcm, sampleRate, first.range);
+        const rmsB = this.measureRangeRms(pcm, sampleRate, second.range);
+        if (rmsA > 1e-6 && rmsB > 1e-6) {
+          acousticEnergyRatio = Number((rmsB / rmsA).toFixed(3));
+        }
+      }
+
+      // 1. Legitimate distributive / idiomatic lexical repetition («کم کم», «یکی یکی», «روز به روز»)
+      if (this.LEGITIMATE_REDUPLICATIONS.has(normA)) {
+        results.push({
+          id: `wrep_legit_${first.tokenId}`,
+          trackId: first.trackId,
+          subtype: 'LEGITIMATE_LEXICAL_REPETITION',
+          detectionState: 'NOT_DETECTED',
+          uncertaintyState: 'LOW_UNCERTAINTY',
+          targetRange: first.range,
+          keptRepetitionRange: second.range,
+          affectedTokenIds: [first.tokenId, second.tokenId],
+          repeatedText: `${first.displayText} ${second.displayText}`,
+          temporalSeparationMs: Math.round(gapMs),
+          acousticEnergyRatio,
+          linguisticScore: 0.15,
+          acousticScore: hasAudio ? 0.2 : null,
+          eligibleForDeletionSuggestion: false,
+          requiresHumanReview: false,
+          reasonFa: `تکرار دستوری/واژگانی معنادار («${first.displayText} ${second.displayText}») که تغییر معنا می‌دهد و نباید حذف شود.`,
+        });
+        i++;
+        continue;
+      }
+
+      // 2. Intentional emphasis («خیلی خیلی مهمه», «حتماً حتماً», «باید باید» with prosodic accent)
+      const isIntensifier = this.EMPHASIS_INTENSIFIERS.has(normA);
+      const strongEmphaticAccent =
+        acousticEnergyRatio !== null &&
+        acousticEnergyRatio >= 1.18 &&
+        gapMs <= 220 &&
+        first.normalizedText.length >= 3;
+
+      if (isIntensifier || strongEmphaticAccent) {
+        results.push({
+          id: `wrep_emph_${first.tokenId}`,
+          trackId: first.trackId,
+          subtype: 'INTENTIONAL_EMPHASIS_REPETITION',
+          detectionState: hasAudio ? 'DETECTED' : 'PROBABLE',
+          uncertaintyState: hasAudio ? 'MODERATE_UNCERTAINTY' : 'INSUFFICIENT_EVIDENCE',
+          targetRange: first.range,
+          keptRepetitionRange: second.range,
+          affectedTokenIds: [first.tokenId, second.tokenId],
+          repeatedText: `${first.displayText} ${second.displayText}`,
+          temporalSeparationMs: Math.round(gapMs),
+          acousticEnergyRatio,
+          linguisticScore: isIntensifier ? 0.84 : 0.68,
+          acousticScore: acousticEnergyRatio !== null ? 0.78 : null,
+          eligibleForDeletionSuggestion: false,
+          requiresHumanReview: true,
+          reasonFa: isIntensifier
+            ? `تکرار تأکیدی عمدی قید/صفت («${first.displayText} ${second.displayText}») برای شدت معنا — حذف توصیه نمی‌شود.`
+            : `تکرار همراه با افزایش تاکید صوتی (${acousticEnergyRatio}x)؛ احتمال تأکید عمدی وجود دارد.`,
+        });
+        i++;
+        continue;
+      }
+
+      // 3. Accidental repetition (function words like «من من», «این این», «باید باید» when flat/hesitant)
+      const isFunctionWordOrShortPronoun =
+        this.STOP_WORDS.has(normA) || normA.length <= 3 || ['باید', 'می‌خوام', 'میخوام'].includes(normA);
+      const hesitationGap = gapMs >= 80 && gapMs <= 1200;
+      const flatOrFalteringEnergy =
+        acousticEnergyRatio !== null && acousticEnergyRatio >= 0.75 && acousticEnergyRatio <= 1.25;
+
+      if (hasAudio && acousticEnergyRatio !== null) {
+        acousticScore = flatOrFalteringEnergy ? 0.8 : 0.55;
+      }
+
+      const sufficientAcoustic = hasAudio && acousticEnergyRatio !== null;
+      const accidentalConfidenceReady =
+        sufficientAcoustic && (isFunctionWordOrShortPronoun || hesitationGap);
+
+      results.push({
+        id: `wrep_acc_${first.tokenId}`,
+        trackId: first.trackId,
+        subtype: 'ACCIDENTAL_WORD_REPETITION',
+        detectionState: accidentalConfidenceReady
+          ? 'PROBABLE'
+          : sufficientAcoustic
+            ? 'POSSIBLE'
+            : 'UNCERTAIN',
+        uncertaintyState: sufficientAcoustic
+          ? accidentalConfidenceReady
+            ? 'MODERATE_UNCERTAINTY'
+            : 'HIGH_UNCERTAINTY'
+          : 'INSUFFICIENT_EVIDENCE',
+        targetRange: {
+          start: first.range.start,
+          end: second.range.start,
+        },
+        keptRepetitionRange: second.range,
+        affectedTokenIds: [first.tokenId],
+        repeatedText: `${first.displayText} ${second.displayText}`,
+        temporalSeparationMs: Math.round(gapMs),
+        acousticEnergyRatio,
+        linguisticScore: isFunctionWordOrShortPronoun ? 0.82 : 0.64,
+        acousticScore,
+        eligibleForDeletionSuggestion: accidentalConfidenceReady,
+        requiresHumanReview: true,
+        reasonFa: sufficientAcoustic
+          ? `تکرار متوالی کلمه «${first.displayText}» (فاصله ${Math.round(gapMs)}ms، نسبت انرژی ${acousticEnergyRatio}x)`
+          : `تکرار کلمه «${first.displayText}» بدون شواهد آکوستیکی کافی (وضعیت نامطمئن؛ نیازمند بازبینی)`,
+      });
+      i++;
+    }
+
+    return results;
+  }
+
+  private static measureRangeRms(
+    pcm: Float32Array,
+    sampleRate: SampleRate,
+    range: TimeRange,
+  ): number {
+    const startSample = Math.max(0, TimeMath.flicksToSamplesFloor(range.start, sampleRate));
+    const endSample = Math.min(pcm.length, TimeMath.flicksToSamplesFloor(range.end, sampleRate));
+    if (endSample <= startSample) return 0;
+    let sumSq = 0;
+    for (let i = startSample; i < endSample; i++) {
+      const s = pcm[i];
+      sumSq += s * s;
+    }
+    return Math.sqrt(sumSq / (endSample - startSample));
+  }
 
   public static detectSemanticRetakes(
     tokens: readonly TimedPersianToken[],

@@ -1,12 +1,40 @@
 # deploy/docker-compose.backend.yml
+# Canonical ADR-001 / ADR-002 Compose Configuration
+# - Runs the canonical Express+Vite control/data plane (/server.ts) on port 3000 via deploy/Dockerfile.control-plane.
+# - Keeps Local-First audio processing independent of PostgreSQL (optional cloud-plane profile).
+# - Explicitly disables cloud ASR fallback by default (ENABLE_CLOUD_ASR=false).
+
 services:
+  avapardaz-app:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.control-plane
+    restart: unless-stopped
+    environment:
+      NODE_ENV: "production"
+      PORT: "3000"
+      ENABLE_CLOUD_ASR: "false"
+      MODEL_STORAGE_DIR: "/var/lib/paudio/models"
+      # Optional external control-plane database (not required for local-first audio editing)
+      DATABASE_URL: ${DATABASE_URL:-}
+    ports:
+      - "3000:3000"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/api/v1/asr/health').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      interval: 15s
+      timeout: 3s
+      retries: 3
+    volumes:
+      - model_chunks_storage:/var/lib/paudio/models:ro
+
   postgres:
     image: postgres:16-alpine
+    profiles: ["optional-cloud-db"]
     restart: unless-stopped
     environment:
       POSTGRES_DB: paudio_platform
       POSTGRES_USER: paudio_app
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?required}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?required when optional-cloud-db profile is enabled}
     volumes:
       - pg_data:/var/lib/postgresql/data
       - ../platform/migrations:/docker-entrypoint-initdb.d:ro
@@ -15,37 +43,6 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
-
-  platform-backend:
-    build:
-      context: ..
-      dockerfile: backend/Dockerfile
-    restart: unless-stopped
-    depends_on:
-      postgres:
-        condition: service_healthy
-    environment:
-      PORT: "4000"
-      HOST: "0.0.0.0"
-      DATABASE_URL: "postgresql://paudio_app:${POSTGRES_PASSWORD}@postgres:5432/paudio_platform"
-      MODEL_STORAGE_DIR: "/var/lib/paudio/models"
-      ENABLE_CLOUD_ASR: "false"
-      ED25519_PRIVATE_KEY_PEM: ${ED25519_PRIVATE_KEY_PEM:?required}
-      ED25519_PUBLIC_KEY_PEM: ${ED25519_PUBLIC_KEY_PEM:?required}
-      PAYMENT_WEBHOOK_HMAC_SECRET: ${PAYMENT_WEBHOOK_HMAC_SECRET:?required}
-      ADMIN_API_SECRET_KEY: ${ADMIN_API_SECRET_KEY:?required}
-    ports:
-      - "4000:4000"
-    volumes:
-      - model_chunks_storage:/var/lib/paudio/models:ro
-
-  prometheus:
-    image: prom/prometheus:v2.55.1
-    restart: unless-stopped
-    ports:
-      - "9090:9090"
-    depends_on:
-      - platform-backend
 
 volumes:
   pg_data:

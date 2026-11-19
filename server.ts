@@ -1699,8 +1699,32 @@ async function startServer() {
     app.use(vite.middlewares);
   } else {
     const distDir = path.resolve(__dirname, 'dist');
-    app.use(express.static(distDir));
+    app.use(
+      express.static(distDir, {
+        setHeaders: (res, filePath) => {
+          const normalized = filePath.replace(/\\/g, '/');
+          if (normalized.endsWith('.wasm')) {
+            res.setHeader('Content-Type', 'application/wasm');
+          } else if (normalized.endsWith('.mjs') || normalized.endsWith('.js')) {
+            res.setHeader('Content-Type', 'application/javascript; charset=utf-8');
+          }
+          if (
+            normalized.endsWith('/sw.js') ||
+            normalized.endsWith('/index.html') ||
+            normalized.endsWith('/manifest.webmanifest') ||
+            normalized.endsWith('/release-manifest.json')
+          ) {
+            res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+          } else if (normalized.includes('/assets/')) {
+            res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+          } else {
+            res.setHeader('Cache-Control', 'public, max-age=3600');
+          }
+        },
+      }),
+    );
     app.get('*', (_req, res) => {
+      res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
       res.sendFile(path.join(distDir, 'index.html'));
     });
   }
