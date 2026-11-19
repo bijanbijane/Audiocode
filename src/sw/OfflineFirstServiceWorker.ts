@@ -59,7 +59,7 @@ export interface SwGlobalScopeLike {
   skipWaiting(): Promise<void>;
   addEventListener(type: 'install' | 'activate', listener: (event: SwExtendableEventLike) => void): void;
   addEventListener(type: 'fetch', listener: (event: SwFetchEventLike) => void): void;
-  addEventListener?(type: 'message', listener: (event: SwMessageEventLike) => void): void;
+  addEventListener(type: 'message', listener: (event: SwMessageEventLike) => void): void;
 }
 
 /**

@@ -11,8 +11,10 @@ import {
   Square,
   X,
 } from 'lucide-react';
-import { AudioRenderConfig, RenderExportFormat } from '../audio-renderer';
+import { AudioRenderConfig, RenderExportContainer, RenderExportEncoding } from '../audio-renderer';
 import { SampleRate } from '../contracts/timebase.contract';
+
+type RenderFormatPreset = 'WAV_PCM16' | 'WAV_PCM24' | 'WAV_FLOAT32' | 'RF64_PCM24';
 import { StudioWorkflowState } from '../workflow/StudioWorkflowController';
 import { sanitizeExportFilename } from '../security/LocalPrivacyPolicy';
 import { serializeEdlSnapshot } from '../ai-engine/edit-decision';
@@ -64,7 +66,7 @@ export const RenderExportModal: React.FC<RenderExportModalProps> = ({
   onMarkDownloaded,
 }) => {
   const isFa = workflowState.locale === 'fa';
-  const [format, setFormat] = useState<RenderExportFormat>('WAV_PCM16');
+  const [format, setFormat] = useState<RenderFormatPreset>('WAV_PCM16');
   const [sampleRate, setSampleRate] = useState<SampleRate>(projectSampleRate);
 
   useEffect(() => {
@@ -95,15 +97,16 @@ export const RenderExportModal: React.FC<RenderExportModalProps> = ({
   const canDownloadAudio = validationPassed && Boolean(result?.outputBytes);
 
   const handleRun = (resume: boolean) => {
+    const encoding: RenderExportEncoding =
+      format === 'WAV_FLOAT32' ? 'float32' : format === 'WAV_PCM16' ? 'pcm16' : 'pcm24';
+    const container: RenderExportContainer = format === 'RF64_PCM24' ? 'rf64' : 'wav';
     onStartRender(
       {
-        format,
+        encoding,
+        container,
         targetSampleRate: sampleRate,
-        channelCount: workflowState.sourceAudio?.channelCount ?? 1,
         chunkSizeSamples: 8192,
-        enableCrossfades: true,
         defaultCrossfadeMs: 10,
-        allowUnapprovedProposals: false,
       },
       resume,
     );
@@ -168,7 +171,7 @@ export const RenderExportModal: React.FC<RenderExportModalProps> = ({
     );
   };
 
-  const progressPct = workflowState.renderProgress?.progressPct ?? (validationPassed ? 100 : 0);
+  const progressPct = workflowState.renderProgress?.progressPercent ?? (validationPassed ? 100 : 0);
 
   return (
     <div
@@ -210,7 +213,7 @@ export const RenderExportModal: React.FC<RenderExportModalProps> = ({
               </span>
               <select
                 value={format}
-                onChange={(e) => setFormat(e.target.value as RenderExportFormat)}
+                onChange={(e) => setFormat(e.target.value as RenderFormatPreset)}
                 disabled={isRendering}
                 className="w-full rounded-md border border-slate-300 dark:border-[#252F42] bg-slate-50 dark:bg-[#0E131D] px-3 py-2 text-xs"
               >
@@ -295,11 +298,11 @@ export const RenderExportModal: React.FC<RenderExportModalProps> = ({
 
             {result?.postValidation && (
               <div className="text-[11px] font-mono text-slate-600 dark:text-slate-400 flex flex-wrap gap-3" dir="ltr">
-                <span>Header: {result.postValidation.headerValid ? 'OK' : 'FAIL'}</span>
-                <span>NaN/Inf: {result.postValidation.nanOrInfCount}</span>
-                <span>Peak: {result.postValidation.peakAbs.toFixed(4)}</span>
-                <span>Bytes: {result.postValidation.byteLength}</span>
-                <span>SHA-256: {result.postValidation.sha256Hex.slice(0, 12)}</span>
+                <span>Validation: {result.postValidation.passed ? 'OK' : 'FAIL'}</span>
+                <span>Container: {result.postValidation.verifiedContainer ?? 'wav'}</span>
+                <span>Peak: {(result.postValidation.verifiedPeakAmplitude ?? 0).toFixed(4)}</span>
+                <span>Bytes: {result.postValidation.verifiedFileSizeBytes ?? result.outputBytes?.byteLength ?? 0}</span>
+                <span>Samples: {result.postValidation.verifiedOutputSamples ?? 0}</span>
               </div>
             )}
           </div>

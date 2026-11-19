@@ -482,7 +482,7 @@ export class EditCandidateEvaluator {
         operation: 'SHORTEN_SILENCE',
         eligibility: safeShortening ? 'SAFE_EDIT_CANDIDATE' : 'REVIEW_REQUIRED_CANDIDATE',
         confidenceClassification: confClass,
-        requiresHumanReview: !safeShortening || event.subtype === 'RECORDING_GAP',
+        requiresHumanReview: !safeShortening,
         protectedEvent: false,
         reason: `Excessive silence (${event.subtype}) eligible for partial shortening while preserving natural spacing.`,
         explanationFa: `سکوت طولانی (${event.durationSec.toFixed(2)}s) قابل کوتاه‌سازی با حفظ حاشیه تنفس طبیعی است.`,

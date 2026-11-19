@@ -8,7 +8,11 @@ import { ProsodicWarningType } from '../contracts/persian-editing.contract';
 import { AudioSecurityGuard } from '../security/AudioSecurityGuard';
 import {
   CrashRecoveryAndSessionLock,
+  CrashRecoveryAndSessionLockOptions,
+  ProjectLockAcquisitionResult,
+  ProjectLockState,
   RecoveryJournalStore,
+  SafeCrashRecoveryExecutionResult,
 } from '../runtime/CrashRecoveryAndSessionLock';
 import { TimelineTransactionEngine } from '../project-core/TimelineTransactionEngine';
 import {
@@ -38,12 +42,42 @@ export class VerticalSliceOrchestrator {
   private readonly sessionManager: CrashRecoveryAndSessionLock;
   private readonly graphEngine = new ProcessingGraphEngine();
   private txEngine: TimelineTransactionEngine | null = null;
+  private activeProjectId: string | null = null;
+  private readOnlyMode = true;
+  private lastRecoveryResult: SafeCrashRecoveryExecutionResult | null = null;
+  private lastCheckpointError: string | null = null;
 
   private roomToneBuffer: Float32Array = new Float32Array(24000);
   private roomToneRange: TimeRange = { start: 0, end: TimeMath.secondsToFlicks(0.5) };
 
-  constructor(journalStore?: RecoveryJournalStore) {
-    this.sessionManager = new CrashRecoveryAndSessionLock(journalStore);
+  constructor(
+    journalStore?: RecoveryJournalStore,
+    sessionOptions?: CrashRecoveryAndSessionLockOptions,
+  ) {
+    this.sessionManager = new CrashRecoveryAndSessionLock(journalStore, sessionOptions);
+    this.sessionManager.onLockLost(() => {
+      this.readOnlyMode = true;
+    });
+  }
+
+  public getSessionManager(): CrashRecoveryAndSessionLock {
+    return this.sessionManager;
+  }
+
+  public getLockState(): ProjectLockState {
+    return this.sessionManager.getLockState();
+  }
+
+  public isReadOnly(): boolean {
+    return this.readOnlyMode;
+  }
+
+  public getLastRecoveryResult(): SafeCrashRecoveryExecutionResult | null {
+    return this.lastRecoveryResult;
+  }
+
+  public getLastCheckpointError(): string | null {
+    return this.lastCheckpointError;
   }
 
   public getRoomToneBuffer(): Float32Array {
@@ -54,25 +88,60 @@ export class VerticalSliceOrchestrator {
     return this.txEngine;
   }
 
-  public async initializeProjectSession(initialDoc: ProjectDocument): Promise<{
+  public async initializeProjectSession(
+    initialDoc: ProjectDocument,
+    options?: {
+      readonly allowReadOnlyOnContention?: boolean;
+      readonly conflictResolution?: 'REJECT_STALE' | 'FORCE_RESTORE_STALE';
+    },
+  ): Promise<{
     lockAcquired: boolean;
+    lockResult: ProjectLockAcquisitionResult;
+    readOnly: boolean;
     recoveredFromCrash: boolean;
+    recoveryResult: SafeCrashRecoveryExecutionResult | null;
     activeDocument: ProjectDocument;
   }> {
-    const lockAcquired = await this.sessionManager.acquireExclusiveProjectLock(
-      initialDoc.projectId,
-    );
-    if (!lockAcquired) {
+    const lockResult = await this.sessionManager.acquireProjectLock(initialDoc.projectId);
+    if (!lockResult.acquired) {
+      this.readOnlyMode = true;
+      if (options?.allowReadOnlyOnContention) {
+        this.activeProjectId = initialDoc.projectId;
+        this.txEngine = new TimelineTransactionEngine(initialDoc);
+        return {
+          lockAcquired: false,
+          lockResult,
+          readOnly: true,
+          recoveredFromCrash: false,
+          recoveryResult: null,
+          activeDocument: this.txEngine.getActiveState(),
+        };
+      }
+      if (lockResult.state === 'LOCK_UNAVAILABLE') {
+        throw new Error(
+          'PROJECT_LOCK_UNAVAILABLE: محیط فعلی از قفل انحصاری پشتیبانی نمی‌کند؛ ویرایش مسدود شد.',
+        );
+      }
       throw new Error('PROJECT_LOCKED_IN_ANOTHER_TAB: این پروژه هم‌اکنون در تب دیگری باز است.');
     }
 
-    const recoveryRecord = await this.sessionManager.checkCrashRecovery(initialDoc.projectId);
-    const docToLoad = recoveryRecord ? recoveryRecord.snapshot : initialDoc;
+    this.activeProjectId = initialDoc.projectId;
+    this.readOnlyMode = false;
+
+    const recoveryResult = await this.sessionManager.executeSafeCrashRecovery({
+      currentSavedProject: initialDoc,
+      conflictResolution: options?.conflictResolution ?? 'REJECT_STALE',
+    });
+    this.lastRecoveryResult = recoveryResult;
+    const docToLoad = recoveryResult.restored ? recoveryResult.document : initialDoc;
 
     this.txEngine = new TimelineTransactionEngine(docToLoad);
     return {
       lockAcquired: true,
-      recoveredFromCrash: Boolean(recoveryRecord),
+      lockResult,
+      readOnly: false,
+      recoveredFromCrash: recoveryResult.restored,
+      recoveryResult,
       activeDocument: this.txEngine.getActiveState(),
     };
   }
@@ -274,20 +343,46 @@ export class VerticalSliceOrchestrator {
   public async acceptRecommendationAndSaveCheckpoint(
     recommendationId: RecommendationId,
   ): Promise<ProjectDocument> {
-    if (!this.txEngine) {
+    if (!this.txEngine || !this.activeProjectId) {
       throw new Error('SESSION_NOT_INITIALIZED');
+    }
+    if (this.readOnlyMode) {
+      throw new Error('SESSION_READ_ONLY_LOCK_REQUIRED: پروژه در حالت فقط‌خواندنی است.');
+    }
+    const stillOwnsLock = await this.sessionManager.verifyActiveLockOwnership(this.activeProjectId);
+    if (!stillOwnsLock) {
+      this.readOnlyMode = true;
+      throw new Error('PROJECT_LOCK_LOST: قفل انحصاری پروژه از دست رفت؛ تغییرات متوقف شد.');
     }
     this.txEngine.applySmartSpliceRecommendation(recommendationId, this.roomToneRange);
     const updatedDoc = this.txEngine.getActiveState();
-    await this.sessionManager.writeRecoveryCheckpoint(updatedDoc, false);
+    const writeResult = await this.sessionManager.persistRecoveryCheckpoint(updatedDoc, {
+      shutdownState: 'DIRTY_ACTIVE',
+      requireHeldLock: true,
+    });
+    if (!writeResult.persisted) {
+      this.lastCheckpointError = `${writeResult.errorCode ?? 'STORAGE_WRITE_FAILED'}: ${writeResult.message}`;
+      throw new Error(this.lastCheckpointError);
+    }
+    this.lastCheckpointError = null;
     return updatedDoc;
   }
 
   public async closeSessionCleanly(): Promise<void> {
-    if (this.txEngine) {
-      await this.sessionManager.writeRecoveryCheckpoint(this.txEngine.getCommittedState(), true);
+    if (this.txEngine && !this.readOnlyMode) {
+      const { checkpointResult } = await this.sessionManager.completeCleanShutdown(
+        this.txEngine.getCommittedState(),
+      );
+      if (!checkpointResult.persisted) {
+        this.lastCheckpointError = `${checkpointResult.errorCode ?? 'STORAGE_WRITE_FAILED'}: ${checkpointResult.message}`;
+      } else {
+        this.lastCheckpointError = null;
+      }
+      this.readOnlyMode = true;
+      return;
     }
-    this.sessionManager.releaseProjectLock();
+    await this.sessionManager.releaseProjectLockAsync();
+    this.readOnlyMode = true;
   }
 
   public runAudioRestorationStage(

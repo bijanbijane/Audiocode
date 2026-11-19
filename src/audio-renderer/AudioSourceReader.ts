@@ -91,24 +91,16 @@ export function createStorageBrokerPcmSource(params: {
       const out = Array.from({ length: params.channelCount }, () => new Float32Array(len));
       if (len === 0) return out;
 
-      let cursor = 0;
-      await params.broker.streamReadRange({
-        assetId: params.sourceAudioId,
-        startSample: start,
-        sampleCount: len,
-        channelCount: params.channelCount,
-        onChunk: (planarChunk) => {
-          const chLen = planarChunk[0]?.length ?? 0;
-          const copyLen = Math.min(chLen, len - cursor);
-          for (let c = 0; c < params.channelCount; c++) {
-            const srcCh = planarChunk[c] ?? planarChunk[0];
-            if (srcCh) {
-              out[c].set(srcCh.subarray(0, copyLen), cursor);
-            }
-          }
-          cursor += copyLen;
-        },
-      });
+      const monoRange = await params.broker.streamReadRange(
+        params.sourceAudioId,
+        start,
+        len,
+        65536,
+      );
+      const copyLen = Math.min(monoRange.length, len);
+      for (let c = 0; c < params.channelCount; c++) {
+        out[c].set(monoRange.subarray(0, copyLen), 0);
+      }
       return out;
     },
   };

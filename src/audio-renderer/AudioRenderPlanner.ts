@@ -500,7 +500,9 @@ export class AudioRenderPlanner {
 
         derivedTimelineClips.push({
           id: `rendered_clip_${segIdx}_${deterministicHexHash(`${sourceAudioId}:${srcCursor}:${cutStart}`)}`,
+          trackId: targetTrackId,
           assetId: sourceAudioId,
+          kind: 'AUDIO_ASSET',
           sourceRange: { start: srcStartFlicks, end: srcEndFlicks },
           timelineRange: { start: outStartFlicks, end: outEndFlicks },
           fadeInFlicks: segIdx > 0 ? TimeMath.secondsToFlicks(defaultCrossfadeMs / 1000) : 0,
@@ -567,7 +569,9 @@ export class AudioRenderPlanner {
 
       derivedTimelineClips.push({
         id: `rendered_clip_${segIdx}_${deterministicHexHash(`${sourceAudioId}:${srcCursor}:${totalSourceSamples}`)}`,
+        trackId: targetTrackId,
         assetId: sourceAudioId,
+        kind: 'AUDIO_ASSET',
         sourceRange: { start: srcStartFlicks, end: srcEndFlicks },
         timelineRange: { start: outStartFlicks, end: outEndFlicks },
         fadeInFlicks: segIdx > 0 ? TimeMath.secondsToFlicks(defaultCrossfadeMs / 1000) : 0,

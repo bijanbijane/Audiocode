@@ -75,10 +75,14 @@ test('Section 57: BatchProcessingOrchestrator enforces Golden Rule 27 staging, b
     renderAndValidateProject: async (project) => ({
       validationReport: {
         passed: true,
+        structurallyValid: true,
         expectedDurationSeconds: 120,
         actualDurationSeconds: 120,
+        channelCount: 2,
+        frameCount: 5_760_000,
         maxSamplePeakDb: -1.0,
         clippedSamplesCount: 0,
+        invalidSamplesCount: 0,
         hasStartOrEndClickRisk: false,
         errors: [],
       },

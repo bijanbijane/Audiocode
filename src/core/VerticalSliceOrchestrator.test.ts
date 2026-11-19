@@ -3,11 +3,16 @@ import assert from 'node:assert/strict';
 import { VerticalSliceOrchestrator } from './VerticalSliceOrchestrator';
 import { ProjectDocument } from '../contracts/project-schema.contract';
 import { TimeMath } from '../contracts/timebase.contract';
-import { RecoveryJournalStore } from '../runtime/CrashRecoveryAndSessionLock';
+import {
+  InMemoryAtomicLeaseStore,
+  RecoveryJournalStore,
+} from '../runtime/CrashRecoveryAndSessionLock';
 
 function makeInMemoryStore(): RecoveryJournalStore {
   const map = new Map<string, string>();
   return {
+    isDurable: true,
+    backendName: 'TEST_ATOMIC_MEMORY',
     async write(id, payload) {
       map.set(id, payload);
     },
@@ -59,7 +64,16 @@ function makeDoc(): ProjectDocument {
 
 test('VerticalSliceOrchestrator runs full Import -> Group A -> Group B -> Accept -> Checkpoint -> Export Validation pipeline', async () => {
   const store = makeInMemoryStore();
-  const orchestrator = new VerticalSliceOrchestrator(store);
+  const leaseStore = new InMemoryAtomicLeaseStore();
+  let fakeNow = 1_700_000_000_000;
+  const sessionOpts = {
+    leaseStore,
+    disableDefaultLockBackends: true,
+    leaseTtlMs: 30_000,
+    leaseRenewIntervalMs: 0,
+    nowFn: () => fakeNow,
+  };
+  const orchestrator = new VerticalSliceOrchestrator(store, sessionOpts);
 
   const session = await orchestrator.initializeProjectSession(makeDoc());
   assert.equal(session.lockAcquired, true);
@@ -110,15 +124,20 @@ test('VerticalSliceOrchestrator runs full Import -> Group A -> Group B -> Accept
     true,
   );
 
-  // Inject recommendation into session and accept + verify crash recovery checkpoint
+  // Release first session cleanly before opening second session to inject recommendation & accept
   const docWithRec = orchestrator.getTransactionEngine()!.getCommittedState();
-  const orchestrator2 = new VerticalSliceOrchestrator(store);
+  await orchestrator.closeSessionCleanly();
+
+  const orchestrator2 = new VerticalSliceOrchestrator(store, sessionOpts);
   await orchestrator2.initializeProjectSession({ ...docWithRec, recommendations });
   const afterAccept = await orchestrator2.acceptRecommendationAndSaveCheckpoint(recommendations[0].id);
   assert.equal(afterAccept.revision, 2);
 
+  // Simulate abrupt crash of orchestrator2 (lease expires without clean shutdown)
+  fakeNow += 35_000;
+
   // Verify dirty crash recovery picks up revision 2
-  const crashedSession = new VerticalSliceOrchestrator(store);
+  const crashedSession = new VerticalSliceOrchestrator(store, sessionOpts);
   const recovered = await crashedSession.initializeProjectSession(makeDoc());
   assert.equal(recovered.recoveredFromCrash, true);
   assert.equal(recovered.activeDocument.revision, 2);

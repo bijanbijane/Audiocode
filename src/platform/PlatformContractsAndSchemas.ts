@@ -40,11 +40,21 @@ export type ApiCredentialScope =
   | 'usage:read'
   | 'projects:read'
   | 'webhooks:manage'
-  | 'models:read';
+  | 'models:read'
+  | 'models:write'
+  | 'models:approve'
+  | 'models:deploy'
+  | 'security:read'
+  | 'security:write'
+  | 'security:audit'
+  | 'security:admin'
+  | 'privacy:write';
 
 export type PlatformErrorCode =
   | 'AUTHENTICATION_FAILED'
+  | 'AUTHORIZATION_DENIED'
   | 'INSUFFICIENT_SCOPE'
+  | 'VALIDATION_ERROR'
   | 'RESOURCE_NOT_FOUND'
   | 'TENANT_ISOLATION_DENIED'
   | 'AUDIO_FORMAT_UNSUPPORTED'
@@ -137,6 +147,8 @@ export interface ApiCredentialRecord {
   id: string;
   organizationId: string;
   projectId: string;
+  /** Server-side bound principal (PlatformUser.id). Authorization role is resolved strictly from this principal's active organization membership. */
+  principalId: string;
   name: string;
   publicIdentifier: string;
   secretHash: string; // HMAC-SHA256 with server-side pepper over high-entropy random secret

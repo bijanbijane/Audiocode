@@ -68,6 +68,7 @@ import type {
 } from './src/intelligence/SpeechIntelligenceContracts.ts';
 import { DataFactoryGateway } from './src/data-factory/DataFactoryGateway.ts';
 import { ModelFactoryGateway } from './src/model-factory/ModelFactoryGateway.ts';
+import { createModelFactoryHttpRouter } from './src/model-factory/ModelFactoryHttpRouter.ts';
 import type {
   AugmentationConfig,
   DatasetReleaseType,
@@ -77,23 +78,20 @@ import type {
   SplitPolicyConfig,
   StereoChannelPolicy,
 } from './src/data-factory/DataFactoryContracts.ts';
-import type {
-  DeploymentEnvironment,
-  DeploymentStrategy,
-  ExperimentHypothesis,
-  ExperimentObjective,
-  ModelInitializationType,
-  OptimizationExperimentRecord,
-  ResourceClass,
-} from './src/model-factory/ModelFactoryContracts.ts';
 import { SpeechSecurityService } from './src/security/SpeechSecurityService.ts';
 import { SpeechSecurityGateway } from './src/security/SpeechSecurityGateway.ts';
-import type { PiiRedactionConfig, PrivacyRetentionPolicy } from './src/security/SpeechSecurityContracts.ts';
+import { createSpeechSecurityHttpRouter } from './src/security/SpeechSecurityHttpRouter.ts';
 import { CoreModelRouter } from './src/asr-core/CoreModelRouter.ts';
 import { float32ToPcm16Buffer } from './src/asr-core/CoreAudioIngestion.ts';
 import { CORE_SAMPLE_RATE, synthesizeAcousticSpeechFromText } from './src/asr-core/CoreAcousticCtcEngine.ts';
 import { runCoreBenchmarkAndAdaptationSuite } from './src/asr-core/CoreAsrBenchmarkSuite.ts';
 import type { DetectedLanguageTag, LongFormConfig } from './src/asr-core/CoreAsrContracts.ts';
+import {
+  LocalExecutionAdapter,
+  UnifiedProcessingError,
+  UnifiedProcessingOrchestrator,
+  type UnifiedProcessingRequest,
+} from './src/processing-engine/index.ts';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.PORT || 3000);
@@ -119,6 +117,9 @@ async function startServer() {
   const speechSecurityGateway = new SpeechSecurityGateway(speechSecurityService);
   const coreAsrRouter = new CoreModelRouter();
   coreAsrRouter.warmup();
+  const unifiedProcessingOrchestrator = new UnifiedProcessingOrchestrator({
+    localAdapter: new LocalExecutionAdapter({ coreRouter: coreAsrRouter }),
+  });
 
   // Preserve Cross-Origin Isolation so SharedArrayBuffer & OPFS SyncAccessHandle remain active
   app.use((_req, res, next) => {
@@ -1206,226 +1207,8 @@ async function startServer() {
   });
 
   // ── Phase 13 Public Model Factory & MLOps API (`/v1/ml/*`) ──────────────────
-  app.post('/v1/ml/experiments', (req, res) => {
-    const out = modelFactoryGateway.createExperiment({
-      bearerToken: String(req.headers.authorization ?? ''),
-      body: (req.body ?? {}) as {
-        experimentName?: string;
-        primaryObjective?: ExperimentObjective;
-        hypothesis?: ExperimentHypothesis;
-        modelFamily?: string;
-        architecture?: string;
-        initializationType?: ModelInitializationType;
-        baseModelVersion?: string;
-        datasetReleaseIds?: readonly string[];
-        requestedResourceClass?: ResourceClass;
-      },
-    });
-    res.status(out.status).json(out.body);
-  });
-
-  app.get('/v1/ml/experiments', (req, res) => {
-    const out = modelFactoryGateway.listExperiments(String(req.headers.authorization ?? ''));
-    res.status(out.status).json(out.body);
-  });
-
-  app.get('/v1/ml/experiments/:experimentId', (req, res) => {
-    const out = modelFactoryGateway.getExperiment(String(req.headers.authorization ?? ''), req.params.experimentId);
-    res.status(out.status).json(out.body);
-  });
-
-  app.post('/v1/ml/experiments/:experimentId/runs', (req, res) => {
-    const out = modelFactoryGateway.createTrainingRun({
-      bearerToken: String(req.headers.authorization ?? ''),
-      experimentId: req.params.experimentId,
-      body: (req.body ?? {}) as Parameters<ModelFactoryGateway['createTrainingRun']>[0]['body'],
-    });
-    res.status(out.status).json(out.body);
-  });
-
-  app.post('/v1/ml/training-jobs', (req, res) => {
-    const out = modelFactoryGateway.createTrainingRun({
-      bearerToken: String(req.headers.authorization ?? ''),
-      body: (req.body ?? {}) as Parameters<ModelFactoryGateway['createTrainingRun']>[0]['body'],
-    });
-    res.status(out.status).json(out.body);
-  });
-
-  app.get('/v1/ml/training-jobs/:jobId', (req, res) => {
-    const out = modelFactoryGateway.getTrainingJob(String(req.headers.authorization ?? ''), req.params.jobId);
-    res.status(out.status).json(out.body);
-  });
-
-  app.post('/v1/ml/training-jobs/:jobId/cancel', (req, res) => {
-    const out = modelFactoryGateway.cancelTrainingJob(String(req.headers.authorization ?? ''), req.params.jobId);
-    res.status(out.status).json(out.body);
-  });
-
-  app.post('/v1/ml/training-jobs/:jobId/resume', (req, res) => {
-    const out = modelFactoryGateway.resumeTrainingJob({
-      bearerToken: String(req.headers.authorization ?? ''),
-      jobId: req.params.jobId,
-      body: (req.body ?? {}) as { checkpointId?: string; newMaxSteps?: number },
-    });
-    res.status(out.status).json(out.body);
-  });
-
-  app.get('/v1/ml/training-jobs/:jobId/checkpoints', (req, res) => {
-    const out = modelFactoryGateway.listTrainingCheckpoints(String(req.headers.authorization ?? ''), req.params.jobId);
-    res.status(out.status).json(out.body);
-  });
-
-  app.post('/v1/ml/evaluations', (req, res) => {
-    const out = modelFactoryGateway.createEvaluation({
-      bearerToken: String(req.headers.authorization ?? ''),
-      body: (req.body ?? {}) as Parameters<ModelFactoryGateway['createEvaluation']>[0]['body'],
-    });
-    res.status(out.status).json(out.body);
-  });
-
-  app.get('/v1/ml/evaluations/:evaluationId', (req, res) => {
-    const out = modelFactoryGateway.getEvaluation(String(req.headers.authorization ?? ''), req.params.evaluationId);
-    res.status(out.status).json(out.body);
-  });
-
-  app.get('/v1/ml/experiments/:experimentId/evaluations', (req, res) => {
-    const out = modelFactoryGateway.listExperimentEvaluations(String(req.headers.authorization ?? ''), req.params.experimentId);
-    res.status(out.status).json(out.body);
-  });
-
-  app.post('/v1/ml/models', (req, res) => {
-    const out = modelFactoryGateway.registerModel({
-      bearerToken: String(req.headers.authorization ?? ''),
-      body: (req.body ?? {}) as Parameters<ModelFactoryGateway['registerModel']>[0]['body'],
-    });
-    res.status(out.status).json(out.body);
-  });
-
-  app.get('/v1/ml/models', (req, res) => {
-    const out = modelFactoryGateway.listModels(String(req.headers.authorization ?? ''));
-    res.status(out.status).json(out.body);
-  });
-
-  app.get('/v1/ml/models/:modelId', (req, res) => {
-    const out = modelFactoryGateway.getModel(String(req.headers.authorization ?? ''), req.params.modelId);
-    res.status(out.status).json(out.body);
-  });
-
-  app.get('/v1/ml/models/:modelId/versions', (req, res) => {
-    const out = modelFactoryGateway.getModel(String(req.headers.authorization ?? ''), req.params.modelId);
-    res.status(out.status).json(out.body);
-  });
-
-  app.get('/v1/ml/models/:modelId/versions/:version', (req, res) => {
-    const out = modelFactoryGateway.getModelVersion(
-      String(req.headers.authorization ?? ''),
-      req.params.modelId,
-      req.params.version
-    );
-    res.status(out.status).json(out.body);
-  });
-
-  app.post('/v1/ml/models/:modelVersionId/package', (req, res) => {
-    const body = (req.body ?? {}) as { extraMetadataForSecretScan?: string };
-    const out = modelFactoryGateway.packageModel({
-      bearerToken: String(req.headers.authorization ?? ''),
-      modelVersionId: req.params.modelVersionId,
-      extraMetadataForSecretScan: body.extraMetadataForSecretScan,
-    });
-    res.status(out.status).json(out.body);
-  });
-
-  app.post('/v1/ml/models/:modelVersionId/optimize', (req, res) => {
-    const body = (req.body ?? {}) as {
-      newVersion?: string;
-      technique?: OptimizationExperimentRecord['technique'];
-    };
-    const out = modelFactoryGateway.optimizeModel({
-      bearerToken: String(req.headers.authorization ?? ''),
-      modelVersionId: req.params.modelVersionId,
-      newVersion: body.newVersion ?? `1.0.0-opt-${Date.now() % 1000}`,
-      technique: body.technique,
-    });
-    res.status(out.status).json(out.body);
-  });
-
-  app.post('/v1/ml/approvals', (req, res) => {
-    const actorRole = typeof req.headers['x-avapardaz-role'] === 'string' ? req.headers['x-avapardaz-role'] : undefined;
-    const out = modelFactoryGateway.approveModel({
-      bearerToken: String(req.headers.authorization ?? ''),
-      actorRole,
-      body: (req.body ?? {}) as Parameters<ModelFactoryGateway['approveModel']>[0]['body'],
-    });
-    res.status(out.status).json(out.body);
-  });
-
-  app.post('/v1/ml/deployments', (req, res) => {
-    const actorRole = typeof req.headers['x-avapardaz-role'] === 'string' ? req.headers['x-avapardaz-role'] : undefined;
-    const out = modelFactoryGateway.createDeployment({
-      bearerToken: String(req.headers.authorization ?? ''),
-      actorRole,
-      body: (req.body ?? {}) as {
-        modelVersionId?: string;
-        packageId?: string;
-        environment?: DeploymentEnvironment;
-        strategy?: DeploymentStrategy;
-        trafficPercentage?: number;
-        previousModelVersionId?: string;
-      },
-    });
-    res.status(out.status).json(out.body);
-  });
-
-  app.get('/v1/ml/deployments/:deploymentId', (req, res) => {
-    const out = modelFactoryGateway.getDeployment(String(req.headers.authorization ?? ''), req.params.deploymentId);
-    res.status(out.status).json(out.body);
-  });
-
-  app.post('/v1/ml/deployments/:deploymentId/promote', (req, res) => {
-    const body = (req.body ?? {}) as { trafficPercentage?: number };
-    const actorRole = typeof req.headers['x-avapardaz-role'] === 'string' ? req.headers['x-avapardaz-role'] : undefined;
-    const out = modelFactoryGateway.promoteDeployment({
-      bearerToken: String(req.headers.authorization ?? ''),
-      deploymentId: req.params.deploymentId,
-      actorRole,
-      trafficPercentage: body.trafficPercentage,
-    });
-    res.status(out.status).json(out.body);
-  });
-
-  app.post('/v1/ml/deployments/:deploymentId/rollback', (req, res) => {
-    const body = (req.body ?? {}) as { reason?: string };
-    const out = modelFactoryGateway.rollbackDeployment({
-      bearerToken: String(req.headers.authorization ?? ''),
-      deploymentId: req.params.deploymentId,
-      reason: body.reason,
-    });
-    res.status(out.status).json(out.body);
-  });
-
-  app.get('/v1/ml/models/:modelId/monitoring', (req, res) => {
-    const out = modelFactoryGateway.getMonitoring(String(req.headers.authorization ?? ''), req.params.modelId);
-    res.status(out.status).json(out.body);
-  });
-
-  app.get('/v1/ml/models/:modelId/drift', (req, res) => {
-    const out = modelFactoryGateway.getMonitoring(String(req.headers.authorization ?? ''), req.params.modelId);
-    if (out.status !== 200) {
-      res.status(out.status).json(out.body);
-      return;
-    }
-    const snap = out.body as { behaviorAndDataDrift?: unknown; performanceDrift?: unknown; alerts?: unknown };
-    res.json({
-      behaviorAndDataDrift: snap?.behaviorAndDataDrift ?? null,
-      performanceDrift: snap?.performanceDrift ?? null,
-      alerts: snap?.alerts ?? [],
-    });
-  });
-
-  app.get('/v1/ml/models/:modelId/health', (req, res) => {
-    const out = modelFactoryGateway.getModelHealth(String(req.headers.authorization ?? ''), req.params.modelId);
-    res.status(out.status).json(out.body);
-  });
+  // Strictly server-side identity & membership authorization; x-avapardaz-role is ignored.
+  app.use(createModelFactoryHttpRouter(modelFactoryGateway));
 
   // ── Phase 13 Sandbox Studio Routes (`/api/v1/model-factory/sandbox/*`) ─────
   app.get('/api/v1/model-factory/sandbox/overview', async (_req, res) => {
@@ -1464,90 +1247,8 @@ async function startServer() {
   });
 
   // ── Phase 14 Public Security & Robustness Gateway (`/v1/security/*`) ─────────
-  app.get('/v1/security/threat-model', (req, res) => {
-    const out = speechSecurityGateway.getThreatModel(String(req.headers.authorization ?? ''));
-    res.status(out.status).json(out.body);
-  });
-
-  app.post('/v1/security/inspect-audio', (req, res) => {
-    const out = speechSecurityGateway.inspectUpload({
-      bearerToken: String(req.headers.authorization ?? ''),
-      body: (req.body ?? {}) as Parameters<SpeechSecurityGateway['inspectUpload']>[0]['body'],
-    });
-    res.status(out.status).json(out.body);
-  });
-
-  app.post('/v1/security/validate-url', (req, res) => {
-    const body = (req.body ?? {}) as { url?: string };
-    const out = speechSecurityGateway.validateRemoteUrl({
-      bearerToken: String(req.headers.authorization ?? ''),
-      url: body.url ?? '',
-    });
-    res.status(out.status).json(out.body);
-  });
-
-  app.post('/v1/security/robustness/evaluate', (req, res) => {
-    const actorRole = typeof req.headers['x-avapardaz-role'] === 'string' ? req.headers['x-avapardaz-role'] : undefined;
-    const body = (req.body ?? {}) as { modelVersionId?: string };
-    const out = speechSecurityGateway.runRobustnessSuite({
-      bearerToken: String(req.headers.authorization ?? ''),
-      actorRole,
-      modelVersionId: body.modelVersionId,
-    });
-    res.status(out.status).json(out.body);
-  });
-
-  app.post('/v1/security/transcript/trust-boundary', (req, res) => {
-    const body = (req.body ?? {}) as { recordingId?: string; transcriptText?: string };
-    const out = speechSecurityGateway.evaluateTranscriptBoundary({
-      bearerToken: String(req.headers.authorization ?? ''),
-      recordingId: body.recordingId,
-      transcriptText: body.transcriptText,
-    });
-    res.status(out.status).json(out.body);
-  });
-
-  app.post('/v1/security/privacy/redact', (req, res) => {
-    const out = speechSecurityGateway.createRedactedDerivative({
-      bearerToken: String(req.headers.authorization ?? ''),
-      body: (req.body ?? {}) as { recordingId?: string; originalTranscript?: string; config?: Partial<PiiRedactionConfig> },
-    });
-    res.status(out.status).json(out.body);
-  });
-
-  app.put('/v1/security/privacy/retention', (req, res) => {
-    const actorRole = typeof req.headers['x-avapardaz-role'] === 'string' ? req.headers['x-avapardaz-role'] : undefined;
-    const out = speechSecurityGateway.updateRetentionPolicy({
-      bearerToken: String(req.headers.authorization ?? ''),
-      actorRole,
-      body: (req.body ?? {}) as Partial<Omit<PrivacyRetentionPolicy, 'tenantId' | 'updatedAtIso' | 'updatedBy'>>,
-    });
-    res.status(out.status).json(out.body);
-  });
-
-  app.delete('/v1/security/privacy/recordings/:recordingId', (req, res) => {
-    const actorRole = typeof req.headers['x-avapardaz-role'] === 'string' ? req.headers['x-avapardaz-role'] : undefined;
-    const out = speechSecurityGateway.executeDeletion({
-      bearerToken: String(req.headers.authorization ?? ''),
-      actorRole,
-      recordingId: req.params.recordingId,
-    });
-    res.status(out.status).json(out.body);
-  });
-
-  app.post('/v1/security/red-team/run', (req, res) => {
-    const actorRole = typeof req.headers['x-avapardaz-role'] === 'string' ? req.headers['x-avapardaz-role'] : undefined;
-    const out = speechSecurityGateway.runRedTeamSuite({
-      bearerToken: String(req.headers.authorization ?? ''),
-      actorRole,
-    });
-    res.status(out.status).json(out.body);
-  });
-
-  app.get('/v1/security/audit-events', (req, res) => {
-    const out = speechSecurityGateway.getAuditEvents(String(req.headers.authorization ?? ''));
-    res.status(out.status).json(out.body);
-  });
+  // Strictly server-side identity & membership authorization; x-avapardaz-role is ignored.
+  app.use(createSpeechSecurityHttpRouter(speechSecurityGateway));
 
   // ── Phase 14 Sandbox UI Routes (`/api/v1/security/sandbox/*`) ────────────────
   app.get('/api/v1/security/sandbox/overview', async (_req, res) => {
@@ -1686,6 +1387,59 @@ async function startServer() {
   app.get('/api/v1/asr-core/benchmark', (req, res) => {
     const iters = Math.max(500, Math.min(5000, Number(req.query.iterations) || 1000));
     res.json(runCoreBenchmarkAndAdaptationSuite(iters));
+  });
+
+  // ── Unified Processing Engine Routes (`/api/v1/processing/*`) ──────────────
+  app.get('/api/v1/processing/capabilities', async (_req, res) => {
+    const report = await unifiedProcessingOrchestrator.discoverCapabilities();
+    res.json(report);
+  });
+
+  app.get('/api/v1/processing/trace', (req, res) => {
+    const limit = Math.max(1, Math.min(200, Number(req.query.limit) || 50));
+    res.json({ trace: unifiedProcessingOrchestrator.getExecutionTrace(limit) });
+  });
+
+  app.post('/api/v1/processing/execute', async (req, res) => {
+    const abortCtrl = new AbortController();
+    req.on('close', () => {
+      if (!res.writableEnded) abortCtrl.abort();
+    });
+    try {
+      const payload = req.body as UnifiedProcessingRequest;
+      const result = await unifiedProcessingOrchestrator.execute(payload, abortCtrl.signal);
+      res.json(result);
+    } catch (err) {
+      if (err instanceof UnifiedProcessingError) {
+        const status =
+          err.code === 'INVALID_PROCESSING_REQUEST'
+            ? 400
+            : err.code === 'UNSUPPORTED_AUDIO_FORMAT'
+              ? 415
+              : err.code === 'PROVIDER_AUTHENTICATION_FAILED'
+                ? 401
+                : err.code === 'PROVIDER_RATE_LIMITED'
+                  ? 429
+                  : err.code === 'PROVIDER_TIMEOUT'
+                    ? 504
+                    : err.code === 'PROCESSING_CANCELLED'
+                      ? 499
+                      : err.code === 'PROCESSING_RESOURCE_LIMIT_EXCEEDED'
+                        ? 413
+                        : err.code === 'LOCAL_RUNTIME_UNAVAILABLE' ||
+                            err.code === 'CLOUD_PROVIDER_UNAVAILABLE'
+                          ? 503
+                          : 502;
+        res.status(status).json({ error: err.toPayload() });
+        return;
+      }
+      res.status(500).json({
+        error: {
+          code: 'PROCESSING_FAILED',
+          messageEn: sanitizePublicErrorOutput(err instanceof Error ? err.message : String(err)),
+        },
+      });
+    }
   });
 
   if (!IS_PROD) {

@@ -11,7 +11,7 @@ export interface SubsystemHealthCheckDefinition {
     readonly status: SubsystemHealthStatus;
     readonly summaryFa: string;
     readonly summaryEn: string;
-    readonly details?: Readonly<Record<string, string | number | boolean | null>>;
+    readonly details?: Readonly<Record<string, string | number | boolean | null | undefined>>;
   }>;
 }
 
@@ -28,6 +28,14 @@ export async function runSubsystemHealthProbe(
         timer = setTimeout(() => reject(new Error('HEALTH_PROBE_TIMEOUT')), timeoutMs);
       }),
     ]);
+    const cleanDetails: Record<string, string | number | boolean | null> = {};
+    if (result.details) {
+      for (const [k, v] of Object.entries(result.details)) {
+        if (v !== undefined) {
+          cleanDetails[k] = v;
+        }
+      }
+    }
     return {
       subsystemId: definition.subsystemId,
       displayNameFa: definition.displayNameFa,
@@ -37,7 +45,7 @@ export async function runSubsystemHealthProbe(
       durationMs: Math.max(0, Date.now() - started),
       summaryFa: result.summaryFa,
       summaryEn: result.summaryEn,
-      details: result.details ?? {},
+      details: cleanDetails,
     };
   } catch (err) {
     return {

@@ -1,10 +1,14 @@
-# STRIDE 5x5 Threat Model & OWASP ASVS 5.0.0 Traceability (Phase 8)
+# STRIDE 5x5 Threat Model & OWASP ASVS 5.0.0 Traceability (Phase 8 & Security Hardening)
 
 | Threat ID | STRIDE Category | L x I = Score | Severity | Control Verified |
 |---|---|---|---|---|
-| `TM-01` | Elevation of Privilege (Cross-Tenant IDOR) | 4 x 5 = 20 | `CRITICAL` | `assertTenantIsolation` rejects cross-tenant reads/writes/deletes. |
-| `TM-02` | Denial of Service (`ASR1` Frame Flood) | 4 x 4 = 16 | `HIGH` | Strict 24-byte `ASR1` validation, max size cap, even PCM16 check, bounded queues. |
-| `TM-03` | Tampering (Spoofed Upload / Traversal) | 3 x 5 = 15 | `HIGH` | `validateUploadedAudioSecurity` rejects `..`, null bytes & invalid RIFF/WAVE magic. |
-| `TM-04` | Info Disclosure (`local_only` Bypass / Secret Leak) | 3 x 5 = 15 | `HIGH` | 18-gate hard filter + `sanitizePublicErrorOutput` scrubs keys & paths. |
+| `TM-01` | Elevation of Privilege (Cross-Tenant IDOR) | 4 x 5 = 20 | `CRITICAL` | `assertTenantIsolation`, `SpeechSecurityGateway`, and `ModelFactoryGateway` reject cross-tenant reads/writes/deletes, cross-tenant `x-tenant-id`/`x-organization-id` hints, and cross-tenant model/package/deployment/recording references before mutation. |
+| `TM-02` | Denial of Service (`ASR1` Frame Flood & Security Eval Abuse) | 4 x 4 = 16 | `HIGH` | Strict 24-byte `ASR1` validation, max size cap, even PCM16 check, bounded queues, plus per-tenant rate & concurrency guards on security robustness and red-team suites. |
+| `TM-03` | Tampering (Spoofed Upload / Traversal / Forged Checkpoint) | 3 x 5 = 15 | `HIGH` | `validateUploadedAudioSecurity` rejects `..`, null bytes & invalid RIFF/WAVE magic; `RecoveryCheckpointSchema` validates project IDs, uses injective hex keys, verifies SHA-256 digests, and validates canonical `ProjectDocument` schema. |
+| `TM-04` | Info Disclosure (`local_only` Bypass / Secret Leak) | 3 x 5 = 15 | `HIGH` | 18-gate hard filter, `sanitizePublicErrorOutput` scrubs keys & paths, uniform `401` authentication responses prevent credential existence enumeration, and recovery checkpoints block forbidden credential/secret fields. |
 | `TM-05` | Tampering (Dataset Consent / Speaker Leak) | 3 x 5 = 15 | `HIGH` | 8-permission Consent Gate (`ALLOW_MODEL_TRAINING`) & speaker-disjoint split guard. |
-| `TM-06` | Spoofing (Token Replay) | 3 x 4 = 12 | `MEDIUM` | Single-use nonce enforcement + Ed25519 asymmetric signatures. |
+| `TM-06` | Spoofing (Token Replay / Role Header Forgery) | 4 x 5 = 20 | `CRITICAL` | Single-use nonce enforcement + Ed25519 asymmetric signatures; **fail-open `OWNER` fallbacks (`resolveRole`, `resolveActorRole`) and client-controlled `x-avapardaz-role` / query `role` / body `approverRole` trust completely eliminated**. Unified `AuthorizationPolicyEngine` derives actor identity and verified organization membership strictly from server-side `PlatformControlPlaneService` state with independent least-privilege scope checks. |
+
+## Explicit Scope Boundaries (Honest Non-Claims)
+- **Active in-process controls verified by automated tests:** Server-side `PlatformControlPlaneService` user/organization/membership lifecycle, credential binding/revocation/expiry, unified `AuthorizationPolicyEngine` RBAC + scope enforcement across all 10 Security and 12 Model Factory operations, HTTP route isolation (`SpeechSecurityHttpRouter`, `ModelFactoryHttpRouter`), and structured audit provenance.
+- **Not provisioned in local sandbox:** External enterprise OIDC/SAML IdP, SCIM directory sync, managed PostgreSQL Row-Level Security (RLS) runtime, and external HSM/KMS key wrapping remain external infrastructure prerequisites (`M-P1-01` / `M-P3-01`).

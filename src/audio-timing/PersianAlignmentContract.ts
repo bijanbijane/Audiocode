@@ -141,8 +141,8 @@ export function runPersianForcedAlignmentContract(params: {
     for (const { word, meta } of normalizedMeta) {
       const matched = byId.get(word.id);
       if (matched && !meta.ambiguousMapping) {
-        const relStart = flicksToSourceSampleExact(matched.alignedRange.startFlicks, sourceSampleRate);
-        const relEnd = flicksToSourceSampleExact(matched.alignedRange.endFlicks, sourceSampleRate);
+        const relStart = flicksToSourceSampleExact(matched.alignedRange.start, sourceSampleRate);
+        const relEnd = flicksToSourceSampleExact(matched.alignedRange.end, sourceSampleRate);
         const absStart = asSourceSamplePosition(Math.min(totalSourceSamples, chunkOffsetSamples + relStart));
         const absEnd = asSourceSamplePosition(
           Math.min(totalSourceSamples, Math.max(absStart, chunkOffsetSamples + relEnd)),

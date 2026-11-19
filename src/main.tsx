@@ -3,12 +3,16 @@ import { createRoot } from 'react-dom/client';
 import App from './App.tsx';
 import './index.css';
 import { StudioRootBootstrapper } from './ui/bootstrap/StudioRootBootstrapper.tsx';
+import { ErrorBoundary } from './components/ErrorBoundary.tsx';
 
 const rootEl = document.getElementById('root');
 if (rootEl) {
   createRoot(rootEl).render(
     <StrictMode>
-      <StudioRootBootstrapper desktopStudioElement={<App />} />
+      <ErrorBoundary>
+        <StudioRootBootstrapper desktopStudioElement={<App />} />
+      </ErrorBoundary>
     </StrictMode>,
   );
 }
+

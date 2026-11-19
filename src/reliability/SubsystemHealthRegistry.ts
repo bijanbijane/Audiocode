@@ -589,18 +589,49 @@ export function createDefaultSubsystemHealthRegistry(
           details: { swSupported, cachesSupported },
         };
       }
-      const readiness = await shellManager.verifyActualOfflineReadiness();
+      const swSupported = typeof navigator !== 'undefined' && 'serviceWorker' in navigator;
+      const cachesSupported = typeof caches !== 'undefined';
+      let serviceWorkerRegistered = false;
+      if (swSupported) {
+        try {
+          const regs = await navigator.serviceWorker.getRegistrations();
+          serviceWorkerRegistered = regs.length > 0;
+        } catch {
+          serviceWorkerRegistered = false;
+        }
+      }
+      const criticalAssets = ['/', '/index.html'];
+      const readiness = await AppUpdateAndShellManager.verifyActualOfflineReadiness({
+        serviceWorkerRegistered,
+        criticalAssets,
+        hasCachedAsset: async (assetPath: string) => {
+          if (!cachesSupported) return false;
+          try {
+            const match = await caches.match(assetPath);
+            return Boolean(match);
+          } catch {
+            return false;
+          }
+        },
+        wasmAssetsCached: false,
+        localModelInstalled: Boolean(modelManager?.getSnapshot().activeModel),
+      });
+      const cachedCount =
+        readiness.criticalAssetsChecked.length - readiness.missingCriticalAssets.length;
       return {
-        status: readiness.shellReadyOffline
+        status: readiness.offlineStartupReady
           ? 'HEALTHY'
-          : readiness.serviceWorkerSupported
+          : swSupported
             ? 'DEGRADED'
             : 'UNAVAILABLE',
-        summaryFa: readiness.summaryFa,
-        summaryEn: readiness.summaryEn,
+        summaryFa: readiness.offlineStartupReady
+          ? 'پوسته آفلاین برنامه کش و تایید شده است.'
+          : 'پوسته آفلاین هنوز آماده راه‌اندازی کامل بدون شبکه نیست.',
+        summaryEn: readiness.note,
         details: {
-          shellReadyOffline: readiness.shellReadyOffline,
-          cachedAssetCount: readiness.cachedCriticalAssets.length,
+          shellReadyOffline: readiness.offlineStartupReady,
+          offlineFullAsrReady: readiness.offlineFullAsrReady,
+          cachedAssetCount: cachedCount,
           missingAssetCount: readiness.missingCriticalAssets.length,
         },
       };

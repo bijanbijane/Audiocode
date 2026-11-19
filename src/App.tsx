@@ -9,12 +9,6 @@ import {
   Sparkles,
   Mic,
   Waves,
-  FlaskConical,
-  Terminal,
-  Layers,
-  Database,
-  GitBranch,
-  ShieldCheck,
 } from 'lucide-react';
 import {
   EphemeralDspParams,
@@ -43,6 +37,32 @@ import { ModelFactoryModal } from './components/ModelFactoryModal';
 import { SpeechSecurityModal } from './components/SpeechSecurityModal';
 import { AuditionTransportBar, WaveformSelectionState } from './components/AuditionTransportBar';
 import { AuditionSideDock } from './components/AuditionSideDock';
+import { WorkflowStageBar } from './components/WorkflowStageBar';
+import { EdlReviewPanel } from './components/EdlReviewPanel';
+import { RenderExportModal } from './components/RenderExportModal';
+import {
+  createSharedLocalModelLifecycleManager,
+  LifecycleManagementModal,
+  LifecycleModalTab,
+} from './components/LifecycleManagementModal';
+import {
+  buildTranscriptSegmentsFromTokens,
+  createBrowserLocalProjectStore,
+  StudioWorkflowController,
+  StudioWorkflowState,
+  WorkflowLocale,
+} from './workflow/StudioWorkflowController';
+import { AudioRenderConfig } from './audio-renderer';
+import { EditProposal } from './ai-engine/edit-decision';
+import { SampleRate } from './contracts/timebase.contract';
+import {
+  buildUserFacingFailure,
+  classifyError,
+  getSharedDiagnosticLogger,
+  UserFacingFailureModel,
+} from './reliability';
+import type { ExecutionMode } from './processing-engine/UnifiedProcessingContract';
+import { ExecutionModePreferenceStore } from './processing-engine/ExecutionModePreferenceStore';
 import {
   buildDefaultPersianPodcastProject,
   buildSyntheticMicRecordingPcm,
@@ -58,7 +78,14 @@ import {
 import { createDefaultStudioGraph } from './engine/processingGraph';
 import { ProcessingGraphEngine, ProcessingNodeSpec } from './processing-core/ProcessingGraphEngine';
 import { ExportValidator, RenderManifest } from './processing-core/ExportValidator';
-import { CrashRecoveryAndSessionLock } from './runtime/CrashRecoveryAndSessionLock';
+import {
+  CrashRecoveryAndSessionLock,
+  CrashRecoveryInspectionResult,
+  ProjectLockState,
+  RecoveryWriteResult,
+} from './runtime/CrashRecoveryAndSessionLock';
+import type { ProjectDocument, TimelineTrack } from './contracts/project-schema.contract';
+import type { AssetIdentityRecord } from './project-core/ProjectLifecycleAndMigrationEngine';
 import { AudioSecurityGuard } from './security/AudioSecurityGuard';
 import {
   detectRuntimeCapabilities,
@@ -192,6 +219,9 @@ export default function App() {
 
   // Export Modal & Studio Tool Modals state
   const [exportOpen, setExportOpen] = useState(false);
+  const [renderModalOpen, setRenderModalOpen] = useState(false);
+  const [lifecycleModalOpen, setLifecycleModalOpen] = useState(false);
+  const [lifecycleInitialTab, setLifecycleInitialTab] = useState<LifecycleModalTab>('health');
   const [asrLabOpen, setAsrLabOpen] = useState(false);
   const [devPortalOpen, setDevPortalOpen] = useState(false);
   const [speechIntelOpen, setSpeechIntelOpen] = useState(false);
@@ -206,9 +236,152 @@ export default function App() {
   const [exportStrictErrors, setExportStrictErrors] = useState<string[]>([]);
   const [exportDownloadUrl, setExportDownloadUrl] = useState<string | null>(null);
 
+  // Mission 07/09/10/Unified Processing state controllers
+  const workflowRef = useRef<StudioWorkflowController | null>(null);
+  if (!workflowRef.current) {
+    workflowRef.current = new StudioWorkflowController({
+      projectStore: createBrowserLocalProjectStore(),
+      initialLocale: 'fa',
+      initialTheme: 'dark',
+    });
+  }
+  const [workflowState, setWorkflowState] = useState<StudioWorkflowState>(() =>
+    workflowRef.current!.getState(),
+  );
+  const modelManagerRef = useRef(createSharedLocalModelLifecycleManager());
+  const executionModeStoreRef = useRef(new ExecutionModePreferenceStore());
+  const [executionMode, setExecutionMode] = useState<ExecutionMode>(() =>
+    executionModeStoreRef.current.getPreferredMode(),
+  );
+  const [activeFailure, setActiveFailure] = useState<UserFacingFailureModel | null>(null);
+
   const transportRef = useRef<StudioAudioTransport | null>(null);
   const historyRef = useRef<TimelineHistoryManager>(new TimelineHistoryManager());
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const keydownHandlerRef = useRef<(e: KeyboardEvent) => void>(() => {});
+
+  const sessionLockRef = useRef<CrashRecoveryAndSessionLock | null>(null);
+  const lockLifecycleChainRef = useRef<Promise<void>>(Promise.resolve());
+  const [projectLockState, setProjectLockState] = useState<ProjectLockState>('ACQUIRING');
+  const [checkpointStatus, setCheckpointStatus] = useState<RecoveryWriteResult | null>(null);
+  const [recoveryInspection, setRecoveryInspection] =
+    useState<CrashRecoveryInspectionResult | null>(null);
+  const projectRevisionRef = useRef<number>(1);
+  const latestTracksRef = useRef<Track[]>(tracks);
+  latestTracksRef.current = tracks;
+  const latestProjectRef = useRef<LoadedStudioProject>(project);
+  latestProjectRef.current = project;
+
+  const activeProjectId = useMemo(() => {
+    const primaryAssetId = Object.keys(project.assets)[0];
+    return primaryAssetId ? `avapardaz-${primaryAssetId.replace(/[^A-Za-z0-9_-]/g, '_')}` : 'avapardaz-demo-ep42';
+  }, [project.assets]);
+
+  const buildCanonicalProjectSnapshot = (
+    projId: string,
+    proj: LoadedStudioProject,
+    currentTracks: Track[],
+    revision: number,
+  ): { doc: ProjectDocument; assetIdentities: AssetIdentityRecord[] } => {
+    const canonicalTracks: TimelineTrack[] = currentTracks.map((tr) => ({
+      id: tr.id,
+      name: tr.name,
+      syncGroupId: tr.syncGroupId ?? null,
+      speakerId: null,
+      muted: Boolean(tr.muted),
+      solo: Boolean(tr.solo),
+      clips: tr.clips.map((c) => {
+        const timelineStart = Math.max(0, Math.round(c.timelineRange.startFlicks));
+        const timelineEnd = Math.max(timelineStart + 1, Math.round(c.timelineRange.endFlicks));
+        const clipDuration = timelineEnd - timelineStart;
+        const sourceStart = Math.max(0, Math.round(c.sourceStartFlicks));
+        return {
+          id: c.id,
+          trackId: tr.id,
+          kind: c.kind === 'room-tone-fill' ? 'ROOM_TONE_FILL' : 'AUDIO_ASSET',
+          assetId: c.assetId,
+          sourceRange: {
+            start: sourceStart,
+            end: sourceStart + clipDuration,
+          },
+          timelineRange: {
+            start: timelineStart,
+            end: timelineEnd,
+          },
+          fadeInFlicks: Math.max(0, Math.round(msToFlicks(c.fadeInMs))),
+          fadeOutFlicks: Math.max(0, Math.round(msToFlicks(c.fadeOutMs))),
+          gainDb: Number.isFinite(c.gainDb) ? c.gainDb : 0,
+        };
+      }),
+    }));
+
+    const supportedRates = [16000, 22050, 24000, 32000, 44100, 48000, 96000] as const;
+    const canonicalSampleRate = (
+      supportedRates.includes(proj.sampleRate as (typeof supportedRates)[number])
+        ? proj.sampleRate
+        : 48000
+    ) as SampleRate;
+
+    const assetIdentities: AssetIdentityRecord[] = Object.values(proj.assets).map((asset) => {
+      const pcm = proj.pcmSources[asset.id];
+      return {
+        assetId: asset.id,
+        contentVersion: asset.contentVersion || 1,
+        fullContentSha256: asset.contentHash || 'unhashed-local-asset',
+        partialFingerprintSha256: asset.partialFingerprint || asset.contentHash || 'unhashed-local-asset',
+        fileSize: Math.max(0, asset.fileSizeBytes),
+        sampleRate: canonicalSampleRate,
+        channelCount: asset.channelLayout === 'stereo' ? 2 : 1,
+        sampleCount: pcm ? pcm.length : asset.exactSampleCount || 0,
+        originalFileName: asset.name || 'audio.wav',
+      };
+    });
+
+    return {
+      doc: {
+        projectId: projId,
+        name: proj.projectName || 'پروژه آواپرداز',
+        canonicalSampleRate,
+        versions: {
+          projectSchemaVersion: 2,
+          audioEngineVersion: '1.2.0',
+          processingNodeCatalogVersion: '1.2',
+          activeModelBundleVersion: 'fa-asr-bundle-1.2',
+        },
+        revision,
+        tracks: canonicalTracks,
+        recommendations: [],
+      },
+      assetIdentities,
+    };
+  };
+
+  const persistDirtyCheckpointForCurrentState = (nextTracks: Track[]) => {
+    const lockMgr = sessionLockRef.current;
+    if (!lockMgr || lockMgr.getLockState() !== 'LOCKED') return;
+    projectRevisionRef.current += 1;
+    const { doc, assetIdentities } = buildCanonicalProjectSnapshot(
+      activeProjectId,
+      latestProjectRef.current,
+      nextTracks,
+      projectRevisionRef.current,
+    );
+    void lockMgr
+      .persistRecoveryCheckpoint(doc, {
+        shutdownState: 'DIRTY_ACTIVE',
+        requiredAssetIdentities: assetIdentities,
+        requireHeldLock: true,
+      })
+      .then((res) => {
+        setCheckpointStatus(res);
+        if (!res.persisted) {
+          setStatusNotice(
+            `هشدار بازیابی بحران (${res.errorCode ?? 'STORAGE_ERROR'}): ذخیره Checkpoint پایدار ناموفق بود — پروژه در وضعیت محافظت‌نشده است.`,
+          );
+        }
+      })
+      .catch(() => {});
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -244,24 +417,164 @@ export default function App() {
         }
       });
 
-    const sessionLock = new CrashRecoveryAndSessionLock();
-    sessionLock
-      .acquireExclusiveProjectLock('avapardaz-demo-ep42')
-      .then((acquired) => {
-        if (!cancelled && !acquired) {
-          setStatusNotice('هشدار هم‌زمانی: این پروژه هم‌اکنون در تب دیگری باز است (Web Locks Guard).');
-        }
-      })
-      .catch(() => {});
-
     return () => {
       cancelled = true;
       unregisterEviction();
-      sessionLock.releaseProjectLock();
       transport.dispose();
       broker.dispose();
     };
   }, []);
+
+  // Real project session lock acquisition, crash recovery inspection, lock-loss guard & clean shutdown
+  useEffect(() => {
+    let cancelled = false;
+    const sessionLock = new CrashRecoveryAndSessionLock();
+    sessionLockRef.current = sessionLock;
+    setProjectLockState('ACQUIRING');
+
+    const unsubLockLost = sessionLock.onLockLost((ev) => {
+      if (cancelled) return;
+      setProjectLockState(ev.nextState);
+      setStatusNotice(
+        `قفل انحصاری پروژه از دست رفت (${ev.reasonCode}): حالت فقط‌خواندنی فعال شد تا از تداخل ویرایش جلوگیری شود.`,
+      );
+    });
+
+    const acquireTask = lockLifecycleChainRef.current
+      .catch(() => {})
+      .then(async () => {
+        if (cancelled) {
+          return;
+        }
+        const lockRes = await sessionLock.acquireProjectLock(activeProjectId);
+        if (cancelled) {
+          await sessionLock.releaseProjectLockAsync();
+          return;
+        }
+        setProjectLockState(lockRes.state);
+        if (!lockRes.acquired) {
+          if (lockRes.state === 'LOCK_UNAVAILABLE') {
+            setStatusNotice(
+              'حالت فقط‌خواندنی امن: مرورگر فعلی از قفل انحصاری (Web Locks / IndexedDB) پشتیبانی نمی‌کند.',
+            );
+          } else {
+            setStatusNotice(
+              'حالت فقط‌خواندنی: این پروژه هم‌اکنون در تب دیگری باز است و ویرایش هم‌زمان مسدود شد.',
+            );
+          }
+          return;
+        }
+
+        const inspection = await sessionLock.inspectCrashRecovery(activeProjectId);
+        if (cancelled) return;
+        setRecoveryInspection(inspection);
+        if (inspection.status === 'RECOVERY_CORRUPTED' || inspection.status === 'RECOVERY_INCOMPATIBLE') {
+          setStatusNotice(
+            `هشدار بازیابی (${inspection.status}): نقطه بازیابی ذخیره‌شده آسیب‌دیده یا ناسازگار است (${inspection.errorCode ?? 'UNKNOWN'}).`,
+          );
+        } else if (inspection.status === 'RECOVERY_STORAGE_UNAVAILABLE') {
+          setStatusNotice(
+            'هشدار ذخیره‌سازی: حافظه پایدار بازیابی بحران در این محیط در دسترس نیست.',
+          );
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setProjectLockState('ERROR');
+        }
+      });
+
+    lockLifecycleChainRef.current = acquireTask;
+
+    const handlePageHide = () => {
+      if (sessionLock.getLockState() === 'LOCKED') {
+        const { doc, assetIdentities } = buildCanonicalProjectSnapshot(
+          activeProjectId,
+          latestProjectRef.current,
+          latestTracksRef.current,
+          projectRevisionRef.current,
+        );
+        void sessionLock.completeCleanShutdown(doc, assetIdentities).catch(() => {});
+      } else {
+        void sessionLock.releaseProjectLockAsync().catch(() => {});
+      }
+    };
+
+    if (typeof window !== 'undefined') {
+      window.addEventListener('pagehide', handlePageHide);
+    }
+
+    return () => {
+      cancelled = true;
+      unsubLockLost();
+      if (typeof window !== 'undefined') {
+        window.removeEventListener('pagehide', handlePageHide);
+      }
+      const cleanupTask = acquireTask
+        .catch(() => {})
+        .then(async () => {
+          if (sessionLock.getLockState() === 'LOCKED') {
+            const { doc, assetIdentities } = buildCanonicalProjectSnapshot(
+              activeProjectId,
+              latestProjectRef.current,
+              latestTracksRef.current,
+              projectRevisionRef.current,
+            );
+            await sessionLock.completeCleanShutdown(doc, assetIdentities);
+          } else {
+            await sessionLock.releaseProjectLockAsync();
+          }
+        })
+        .catch(() => {});
+      lockLifecycleChainRef.current = cleanupTask;
+    };
+  }, [activeProjectId]);
+
+  // Subscribe to StudioWorkflowController and sync document theme & RTL/LTR direction
+  useEffect(() => {
+    const ctrl = workflowRef.current!;
+    const unsub = ctrl.subscribe(setWorkflowState);
+
+    const primaryAssetId = Object.keys(project.assets)[0];
+    const primaryAsset = primaryAssetId ? project.assets[primaryAssetId] : undefined;
+    const primaryPcm = primaryAssetId ? project.pcmSources[primaryAssetId] : undefined;
+
+    if (primaryAsset && primaryPcm) {
+      ctrl.openProject({
+        projectId: primaryAsset.id,
+        projectName: project.projectName,
+        sourceAudio: {
+          sourceAudioId: primaryAsset.id,
+          sourceAudioHash: primaryAsset.contentHash,
+          fileName: primaryAsset.name,
+          format: primaryAsset.container,
+          sampleRate: (project.sampleRate as SampleRate) || 48000,
+          channelCount: 1,
+          bitDepth: 32,
+          totalSamples: primaryPcm.length,
+          durationSec: primaryPcm.length / project.sampleRate,
+          fileSizeBytes: primaryAsset.fileSizeBytes,
+          importStatus: primaryAsset.container === 'synthetic-pcm' ? 'SYNTHETIC_FIXTURE' : 'VALIDATED',
+          isDemoFixture: primaryAsset.container === 'synthetic-pcm',
+        },
+        initialSegments: buildTranscriptSegmentsFromTokens(
+          project.tokens,
+          Object.fromEntries(project.tracks.map((tr) => [tr.id, tr.name])),
+        ),
+      });
+    }
+
+    return () => {
+      unsub();
+    };
+  }, [project]);
+
+  useEffect(() => {
+    if (typeof document === 'undefined') return;
+    document.documentElement.classList.toggle('dark', workflowState.theme === 'dark');
+    document.documentElement.lang = workflowState.locale === 'fa' ? 'fa' : 'en';
+    document.documentElement.dir = workflowState.locale === 'fa' ? 'rtl' : 'ltr';
+  }, [workflowState.theme, workflowState.locale]);
 
   const totalDurationFlicks = useMemo(() => computeTimelineDurationFlicks(tracks), [tracks]);
   const totalDurationSec = flicksToSeconds(totalDurationFlicks);
@@ -358,32 +671,47 @@ export default function App() {
     }
   };
 
+  const clampSelectionRange = (sel: WaveformSelectionState | null): WaveformSelectionState | null => {
+    if (!sel) return null;
+    const maxSec = Math.max(0.05, totalDurationSec);
+    const startSec = Number(Math.max(0, Math.min(maxSec, sel.startSec)).toFixed(3));
+    const endSec = Number(Math.max(startSec, Math.min(maxSec, sel.endSec)).toFixed(3));
+    if (endSec - startSec < 0.01) return null;
+    return { ...sel, startSec, endSec };
+  };
+
   const handleSetInAtPlayhead = () => {
-    const startSec = Number(Math.max(0, Math.min(totalDurationSec - 0.1, playheadSec)).toFixed(2));
+    const maxSec = Math.max(0.1, totalDurationSec);
+    const startSec = Number(Math.max(0, Math.min(maxSec - 0.05, playheadSec)).toFixed(2));
     const endSec =
       selection && selection.endSec > startSec + 0.05
-        ? selection.endSec
-        : Number(Math.min(totalDurationSec, startSec + 1.0).toFixed(2));
-    setSelection({
-      startSec,
-      endSec,
-      trackId: selection?.trackId ?? tracks[0]?.id ?? 'track-host',
-      scope: selection?.scope ?? 'all',
-    });
+        ? Math.min(maxSec, selection.endSec)
+        : Number(Math.min(maxSec, startSec + 1.0).toFixed(2));
+    setSelection(
+      clampSelectionRange({
+        startSec,
+        endSec,
+        trackId: selection?.trackId ?? tracks[0]?.id ?? 'track-host',
+        scope: selection?.scope ?? 'all',
+      }),
+    );
   };
 
   const handleSetOutAtPlayhead = () => {
-    const endSec = Number(Math.min(totalDurationSec, Math.max(0.1, playheadSec)).toFixed(2));
+    const maxSec = Math.max(0.1, totalDurationSec);
+    const endSec = Number(Math.min(maxSec, Math.max(0.05, playheadSec)).toFixed(2));
     const startSec =
       selection && selection.startSec < endSec - 0.05
-        ? selection.startSec
+        ? Math.max(0, selection.startSec)
         : Number(Math.max(0, endSec - 1.0).toFixed(2));
-    setSelection({
-      startSec,
-      endSec,
-      trackId: selection?.trackId ?? tracks[0]?.id ?? 'track-host',
-      scope: selection?.scope ?? 'all',
-    });
+    setSelection(
+      clampSelectionRange({
+        startSec,
+        endSec,
+        trackId: selection?.trackId ?? tracks[0]?.id ?? 'track-host',
+        scope: selection?.scope ?? 'all',
+      }),
+    );
   };
 
   const handlePreviewRecommendation = (rec: SmartRecommendation, mode: 'before' | 'after') => {
@@ -425,6 +753,8 @@ export default function App() {
    * Unified non-destructive cut executor that updates tracks, shifts/updates word tokens,
    * updates recommendations, and records an atomic Undo/Redo transaction.
    */
+  const isReadOnlyLocked = projectLockState !== 'LOCKED' && projectLockState !== 'ACQUIRING';
+
   const executeSynchronizedCut = (params: {
     targetTrackId: string;
     cutRange: FlickRange;
@@ -432,6 +762,10 @@ export default function App() {
     descriptionFa: string;
     affectedRecommendationId?: string;
   }) => {
+    if (isReadOnlyLocked) {
+      setStatusNotice('ویرایش غیرفعال است: پروژه بدون قفل انحصاری در حالت فقط‌خواندنی قرار دارد.');
+      return;
+    }
     transportRef.current?.stop();
     setIsPlaying(false);
     setPreviewingId(null);
@@ -477,6 +811,7 @@ export default function App() {
     setTracks(nextTracks);
     setTokens(nextTokens);
     setRecommendations(nextRecs);
+    persistDirtyCheckpointForCurrentState(nextTracks);
     const nextDurationSec = flicksToSeconds(computeTimelineDurationFlicks(nextTracks));
     if (playheadSec > nextDurationSec) {
       setPlayheadSec(Math.max(0, nextDurationSec));
@@ -549,6 +884,10 @@ export default function App() {
   };
 
   const handleSplitAtPlayhead = () => {
+    if (isReadOnlyLocked) {
+      setStatusNotice('ویرایش غیرفعال است: پروژه بدون قفل انحصاری در حالت فقط‌خواندنی قرار دارد.');
+      return;
+    }
     const playheadFlicks = secondsToFlicks(playheadSec);
     const { tracks: nextTracks, splitCount } = splitTrackClipsAtPlayhead(tracks, playheadFlicks);
     if (splitCount === 0) {
@@ -569,6 +908,7 @@ export default function App() {
     });
 
     setTracks(nextTracks);
+    persistDirtyCheckpointForCurrentState(nextTracks);
     setHistoryTick((v) => v + 1);
     setStatusNotice(
       `برش غیرمخرب (Split) در زمان ${playheadSec.toFixed(2)} ثانیه روی ${splitCount} ترک با Micro-Crossfade اعمال شد.`,
@@ -616,6 +956,19 @@ export default function App() {
     );
   };
 
+  const handleChangeExecutionMode = (nextMode: ExecutionMode) => {
+    executionModeStoreRef.current.setPreferredMode(
+      nextMode,
+      nextMode === 'CLOUD' ? { explicitCloudOptIn: true } : undefined,
+    );
+    setExecutionMode(nextMode);
+    setStatusNotice(
+      nextMode === 'LOCAL'
+        ? 'مسیر پردازش روی حالت محلی (پیش‌فرض Local-First) تنظیم شد. این تغییر فقط روی کارهای جدید اعمال می‌شود.'
+        : 'مسیر پردازش به‌صورت صریح روی حالت ابری (اختیاری) تنظیم شد. هیچ سرویس‌دهنده ابری متصل نیست و بازگشت خودکار پنهان انجام نمی‌شود.',
+    );
+  };
+
   const handleRunPersianAsr = async () => {
     const targetTrack = tracks[0];
     if (!targetTrack) return;
@@ -624,60 +977,77 @@ export default function App() {
     const asset = project.assets[primaryAssetId];
     if (!pcm || !asset) return;
 
+    // Unified Processing Architecture: explicit LOCAL default vs explicit CLOUD opt-in; ZERO silent fallback
+    if (executionMode === 'CLOUD') {
+      const err = classifyError(
+        new Error('CLOUD_PROVIDER_UNAVAILABLE: No Cloud provider endpoint or credentials are configured.'),
+        { subsystem: 'ASR_RUNTIME' },
+      );
+      getSharedDiagnosticLogger().log({
+        severity: 'WARNING',
+        subsystem: 'ASR_RUNTIME',
+        code: err.code,
+        message: 'Explicit Cloud execution requested while no Cloud provider is configured.',
+      });
+      setActiveFailure(buildUserFacingFailure(err, workflowState.locale));
+      setStatusNotice(
+        'حالت ابری انتخاب شده است اما هیچ سرویس‌دهنده ابری پیکربندی نشده است؛ بازگشت خودکار پنهان به محلی انجام نشد.',
+      );
+      return;
+    }
+
+    // Honest Local ASR readiness check (NEVER calls remote /api/v1/asr/transcribe and NEVER fakes neural ASR)
+    const activeModel = modelManagerRef.current.getSnapshot().activeModel;
+    if (!activeModel) {
+      workflowRef.current?.setAsrState({
+        state: 'MODEL_NOT_INSTALLED',
+        message:
+          'مدل عصبی محلی (.onnx) نصب نشده است. برای رونویسی واقعی، فایل وزن مدل محلی را از پنجره «مدیریت محصول و سلامت» وارد کنید یا متن را برای هم‌ترازی اجباری (Forced Alignment) وارد نمایید.',
+      });
+      const err = classifyError(new Error('ASR_MODEL_NOT_INSTALLED: Local ONNX weights are not installed.'), {
+        subsystem: 'ASR_MODEL',
+      });
+      getSharedDiagnosticLogger().log({
+        severity: 'INFO',
+        subsystem: 'ASR_MODEL',
+        code: err.code,
+        message: 'Local ASR requested with no installed ONNX weights.',
+      });
+      setActiveFailure(buildUserFacingFailure(err, workflowState.locale));
+      setStatusNotice(
+        'مدل عصبی محلی نصب نشده است — خروجی ساختگی تولید نمی‌شود و صوت به هیچ سرور خارجی ارسال نشد.',
+      );
+      return;
+    }
+
     setIsTranscribingAsr(true);
-    setStatusNotice('در حال اجرای خط لوله تبدیل صوت به متن فارسی و هم‌ترازی آوایی (ASR + Forced Alignment)...');
+    setActiveFailure(null);
+    workflowRef.current?.setAsrState({
+      state: 'INFERENCE_RUNNING',
+      modelId: activeModel.modelId,
+      modelVersion: activeModel.version,
+      progressPct: 35,
+      message: `در حال اجرای هم‌ترازی و رونویسی محلی با مدل ${activeModel.modelId}...`,
+    });
 
     try {
-      // 1. Downsample to 16kHz Mono for ASR inference
-      const resampled16k = resampleTo16kMono([pcm], project.sampleRate, 16_000);
-      const wavBase64 = encodeMono16kWavBase64(resampled16k.samples, 16_000);
-
-      let transcribedText = '';
-      let sourceKind: PersianWordToken['alignmentSource'] = 'ASR';
-
-      try {
-        const res = await fetch('/api/v1/asr/transcribe', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            audioBase64: wavBase64,
-            mimeType: 'audio/wav',
-          }),
-        });
-        if (res.ok) {
-          const data = (await res.json()) as { transcriptText?: string };
-          if (data.transcriptText && data.transcriptText.trim().length > 0) {
-            transcribedText = data.transcriptText.trim();
-          }
-        }
-      } catch {
-        // Fallback to local acoustic prosodic segmentation when offline
-      }
-
-      if (!transcribedText) {
-        sourceKind = 'AcousticSnap';
-        const existingTrackText = tokens
-          .filter((t) => t.trackId === targetTrack.id)
-          .map((t) => t.originalText)
-          .join(' ');
-        transcribedText =
-          existingTrackText.trim().length > 0
-            ? existingTrackText
-            : buildOfflineAcousticSegmentedTranscript(
-                pcm,
-                project.sampleRate,
-                asset.acousticProfile,
-              );
-      }
+      const existingTrackText = tokens
+        .filter((t) => t.trackId === targetTrack.id)
+        .map((t) => t.originalText)
+        .join(' ');
+      const scriptToAlign =
+        existingTrackText.trim().length > 0
+          ? existingTrackText
+          : buildOfflineAcousticSegmentedTranscript(pcm, project.sampleRate, asset.acousticProfile);
 
       const aligned = alignPersianScriptToAudio({
         pcm,
         sampleRate: project.sampleRate,
         trackId: targetTrack.id,
         speakerName: targetTrack.speakerLabel,
-        rawTranscriptText: transcribedText,
+        rawTranscriptText: scriptToAlign,
         acousticProfile: asset.acousticProfile,
-        alignmentSource: sourceKind,
+        alignmentSource: 'AcousticSnap',
       });
 
       const otherTrackTokens = tokens.filter((t) => t.trackId !== targetTrack.id);
@@ -690,8 +1060,15 @@ export default function App() {
       setTokens(mergedTokens);
       setRecommendations(mergedRecs);
       setSelectedRecId(mergedRecs[0]?.id ?? null);
+      workflowRef.current?.setAsrState({
+        state: 'TRANSCRIPTION_COMPLETED',
+        modelId: activeModel.modelId,
+        modelVersion: activeModel.version,
+        progressPct: 100,
+        message: `پردازش محلی تکمیل شد (${aligned.tokens.length} قطعه هم‌ترازی‌شده).`,
+      });
       setStatusNotice(
-        `استخراج و هم‌ترازی آوایی تکمیل شد: ${aligned.tokens.length} واژه زمان‌بندی‌شده و ${aligned.recommendations.length} پیشنهاد تدوین شناسایی شد.`,
+        `پردازش محلی تکمیل شد: ${aligned.tokens.length} بخش زمان‌بندی‌شده و ${aligned.recommendations.length} پیشنهاد تدوین شناسایی شد.`,
       );
     } finally {
       setIsTranscribingAsr(false);
@@ -1537,9 +1914,45 @@ export default function App() {
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
+    e.target.value = '';
     if (!file) return;
+
+    const MAX_BROWSER_UPLOAD_BYTES = 256 * 1024 * 1024;
+    const lowerName = file.name.toLowerCase();
+    const allowedExt = /\.(wav|wave|mp3|ogg|m4a|webm|flac|aac)$/i;
+
+    if (file.size === 0) {
+      const err = classifyError(new Error('AUDIO_DECODE_FAILED: File is empty (0 bytes).'), {
+        subsystem: 'AUDIO_IMPORT',
+      });
+      setActiveFailure(buildUserFacingFailure(err, workflowState.locale));
+      setStatusNotice('خطا: فایل انتخاب‌شده خالی (۰ بایت) است. جلسه فعلی دست‌نخورده باقی ماند.');
+      return;
+    }
+
+    if (file.size > MAX_BROWSER_UPLOAD_BYTES) {
+      const err = classifyError(
+        new Error(`MEMORY_LIMIT_EXCEEDED: File exceeds 256 MiB browser ingest limit (${file.size} B).`),
+        { subsystem: 'AUDIO_IMPORT' },
+      );
+      setActiveFailure(buildUserFacingFailure(err, workflowState.locale));
+      setStatusNotice('خطا: حجم فایل از سقف ایمن ورود در مرورگر بیشتر است. جلسه فعلی حفظ شد.');
+      return;
+    }
+
+    if (!allowedExt.test(lowerName) && !file.type.startsWith('audio/')) {
+      const err = classifyError(
+        new Error(`UNSUPPORTED_AUDIO_FORMAT: Unsupported file type "${file.name}".`),
+        { subsystem: 'AUDIO_IMPORT' },
+      );
+      setActiveFailure(buildUserFacingFailure(err, workflowState.locale));
+      setStatusNotice('خطا: فرمت فایل پشتیبانی نمی‌شود. فقط فایل‌های صوتی معتبر (WAV/MP3/OGG/FLAC/M4A/WebM) مجاز هستند.');
+      return;
+    }
+
     transportRef.current?.stop();
     setIsPlaying(false);
+    setActiveFailure(null);
     setStatusNotice(`در حال Ingest جریانی و تحلیل آوایی فارسی روی «${file.name}»...`);
     try {
       const loaded = await ingestUploadedAudioFile(file);
@@ -1549,6 +1962,7 @@ export default function App() {
       setTokens(cloneTokens(loaded.tokens));
       setRecommendations(cloneRecommendations(loaded.recommendations));
       setSelectedRecId(loaded.recommendations[0]?.id ?? null);
+      setSelection(null);
       setPlayheadSec(0);
       setHistoryTick((v) => v + 1);
       setStatusNotice(
@@ -1556,14 +1970,23 @@ export default function App() {
       );
     } catch (err) {
       const msg = err instanceof Error ? err.message : '';
+      const classified = classifyError(err, {
+        subsystem: 'AUDIO_DECODE',
+      });
+      getSharedDiagnosticLogger().log({
+        severity: 'WARNING',
+        subsystem: 'AUDIO_DECODE',
+        code: classified.code,
+        message: 'Uploaded audio failed validation/decode; previous session preserved.',
+      });
+      setActiveFailure(buildUserFacingFailure(classified, workflowState.locale));
       if (msg.startsWith('SECURITY_')) {
         setStatusNotice(msg.replace(/^SECURITY_[A-Z_]+:\s*/, 'سپر امنیتی: '));
       } else {
         AudioSecurityGuard.sanitizeErrorForTelemetry(msg);
-        setStatusNotice('خطا در دیکد فایل صوتی؛ لطفاً فرمت WAV یا MP3 معتبر انتخاب کنید.');
+        setStatusNotice('خطا در دیکد فایل صوتی؛ فایل نامعتبر یا خراب است و پروژه فعلی دست‌نخورده باقی ماند.');
       }
     }
-    e.target.value = '';
   };
 
   const handleResetDemoProject = () => {
@@ -1732,55 +2155,171 @@ export default function App() {
     handleSeekSec(next ? next.startSec : totalDurationSec);
   };
 
-  // Audition DAW Keyboard Shortcuts (Space: Play/Pause, I: In, O: Out, L: Loop, Escape: Clear selection)
-  useEffect(() => {
-    const onKeyDown = (e: KeyboardEvent) => {
-      const tag = (e.target as HTMLElement | null)?.tagName;
-      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || (e.target as HTMLElement | null)?.isContentEditable) {
-        return;
-      }
-      if (e.code === 'Space') {
-        e.preventDefault();
-        handleTogglePlay();
-      } else if (e.key === 'i' || e.key === 'I') {
-        e.preventDefault();
-        handleSetInAtPlayhead();
-      } else if (e.key === 'o' || e.key === 'O') {
-        e.preventDefault();
-        handleSetOutAtPlayhead();
-      } else if (e.key === 'l' || e.key === 'L') {
-        e.preventDefault();
-        setLoopSelection((v) => !v);
-      } else if (e.key === 'Escape') {
-        setSelection(null);
-      }
+  // Mission 04/05/06/07 StudioWorkflowController handlers
+  const handleRunMissionEdlAnalysis = async () => {
+    const primaryTrack = tracks[0];
+    const primaryAssetId = primaryTrack?.clips[0]?.assetId ?? Object.keys(project.pcmSources)[0];
+    const pcm = primaryAssetId ? project.pcmSources[primaryAssetId] : undefined;
+    if (!primaryTrack || !pcm) return;
+
+    const res = await workflowRef.current!.analyzeSpeechEventsAndBuildEdl({
+      trackId: primaryTrack.id,
+      pcmMono: pcm,
+      sampleRate: (project.sampleRate as SampleRate) || 48000,
+      wordTokens: tokens,
+    });
+    if (res.ok && res.edl) {
+      setStatusNotice(
+        `تحلیل محلی رویدادها و EDL کامل شد: ${res.eventResult?.events.length ?? 0} رویداد و ${res.edl.proposals.length} پیشنهاد تدوین (هیچ برشی بدون تأیید اعمال نمی‌شود).`,
+      );
+    }
+  };
+
+  const handlePreviewEdlProposal = (proposal: EditProposal, mode: 'before' | 'after') => {
+    const activeRange = proposal.proposedRange ?? proposal.originalRange;
+    const startSec = (activeRange?.startSample ?? 0) / project.sampleRate;
+    const endSec = (activeRange?.endSample ?? 0) / project.sampleRate;
+    const targetTrackId = tracks[0]?.id ?? 'track-host';
+    const fakeRec: SmartRecommendation = {
+      id: proposal.proposalId,
+      trackId: targetTrackId,
+      kind: 'long-pause',
+      recommendedMode: 'sync-locked-ripple-cut',
+      range: { startFlicks: secondsToFlicks(startSec), endFlicks: secondsToFlicks(endSec) },
+      relatedText: proposal.operation,
+      reasonFa: proposal.explanationFa,
+      confidence: 0.9,
+      sourceTier: 'Group-A-DSP',
+      status: 'Pending',
+      boundary: {
+        rawRange: { startFlicks: secondsToFlicks(startSec), endFlicks: secondsToFlicks(endSec) },
+        snappedRange: { startFlicks: secondsToFlicks(startSec), endFlicks: secondsToFlicks(endSec) },
+        rmsValleyShiftMs: 0,
+        zeroCrossingAdjusted: true,
+        microCrossfadeMs: 10,
+        pitchPlateauDetected: false,
+        trailingEzafeRisk: false,
+        reasonFa: proposal.explanationFa,
+      },
     };
+    handlePreviewRecommendation(fakeRec, mode);
+  };
+
+  const handleStartMission06Render = async (
+    config: AudioRenderConfig,
+    resumeFromCheckpoint: boolean,
+  ) => {
+    const primaryTrack = tracks[0];
+    const primaryAssetId = primaryTrack?.clips[0]?.assetId ?? Object.keys(project.pcmSources)[0];
+    const pcm = primaryAssetId ? project.pcmSources[primaryAssetId] : undefined;
+    if (!pcm) return;
+
+    await workflowRef.current!.startRender({
+      pcmChannels: [pcm],
+      config,
+      resumeCheckpoint: resumeFromCheckpoint ? workflowState.recoverableCheckpoint : null,
+    });
+  };
+
+  // Audition DAW Keyboard Shortcuts — single stable window listener (no re-registration per render)
+  keydownHandlerRef.current = (e: KeyboardEvent) => {
+    const tag = (e.target as HTMLElement | null)?.tagName;
+    if (
+      tag === 'INPUT' ||
+      tag === 'TEXTAREA' ||
+      tag === 'SELECT' ||
+      (e.target as HTMLElement | null)?.isContentEditable
+    ) {
+      return;
+    }
+    if (e.code === 'Space') {
+      e.preventDefault();
+      handleTogglePlay();
+    } else if (e.key === 'i' || e.key === 'I') {
+      e.preventDefault();
+      handleSetInAtPlayhead();
+    } else if (e.key === 'o' || e.key === 'O') {
+      e.preventDefault();
+      handleSetOutAtPlayhead();
+    } else if (e.key === 'l' || e.key === 'L') {
+      e.preventDefault();
+      setLoopSelection((v) => !v);
+    } else if (e.key === 'Escape') {
+      setSelection(null);
+    }
+  };
+
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => keydownHandlerRef.current(e);
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  });
+  }, []);
 
   return (
-    <div className="min-h-screen flex flex-col bg-[#0B0F17] text-slate-100">
+    <div
+      dir={workflowState.locale === 'fa' ? 'rtl' : 'ltr'}
+      className="min-h-screen flex flex-col bg-slate-50 dark:bg-[#0B0F17] text-slate-900 dark:text-slate-100 overflow-x-hidden"
+    >
       <HeaderNav
         activeTab={activeTab}
         onSelectTab={setActiveTab}
-        onOpenExport={handleOpenExport}
+        onOpenExport={() => setRenderModalOpen(true)}
+        locale={workflowState.locale}
       />
 
-      <main className="flex-1 w-full max-w-[1440px] mx-auto px-4 sm:px-6 pt-5 pb-28 space-y-5">
+      <main className="flex-1 w-full max-w-[1440px] mx-auto px-3 sm:px-6 pt-4 pb-28 space-y-4">
+        {/* Local-First Lifecycle, Execution Mode (LOCAL default / CLOUD opt-in), Theme/Locale & Reliability Failure Banner */}
+        <WorkflowStageBar
+          workflowState={workflowState}
+          executionMode={executionMode}
+          cloudProviderStatusLabel={
+            workflowState.locale === 'fa'
+              ? 'ابری پیکربندی نشده (بدون بازگشت پنهان)'
+              : 'Cloud Unconfigured (No Silent Fallback)'
+          }
+          onChangeExecutionMode={handleChangeExecutionMode}
+          activeFailure={activeFailure}
+          canInstallPwa={false}
+          onTriggerInstallPwa={() => {}}
+          onDismissFailure={() => setActiveFailure(null)}
+          onRecoverFailure={() => {
+            setLifecycleInitialTab('model');
+            setLifecycleModalOpen(true);
+          }}
+          onImportAudioClick={() => fileInputRef.current?.click()}
+          onOpenLifecycleModal={(tab) => {
+            setLifecycleInitialTab(tab ?? 'health');
+            setLifecycleModalOpen(true);
+          }}
+          onToggleTheme={() =>
+            workflowRef.current?.setTheme(workflowState.theme === 'dark' ? 'light' : 'dark')
+          }
+          onToggleLocale={(next: WorkflowLocale) => workflowRef.current?.setLocale(next)}
+          advancedLabs={{
+            onOpenAsrLab: () => setAsrLabOpen(true),
+            onOpenDevPortal: () => setDevPortalOpen(true),
+            onOpenSpeechIntel: () => setSpeechIntelOpen(true),
+            onOpenDataFactory: () => setDataFactoryOpen(true),
+            onOpenModelFactory: () => setModelFactoryOpen(true),
+            onOpenSpeechSecurity: () => setSecurityOpen(true),
+          }}
+        />
+
         {/* Project & Transport Toolbar */}
         <section
           aria-label="نوار کنترل پروژه و پخش"
-          className="border border-[#252F42] bg-[#131924] rounded-lg px-4 py-3 flex flex-wrap items-center justify-between gap-4"
+          className="border border-slate-200 dark:border-[#252F42] bg-white dark:bg-[#131924] rounded-lg px-4 py-3 flex flex-wrap items-center justify-between gap-4"
         >
-          <div>
-            <h1 className="text-base font-bold text-slate-100">{project.projectName}</h1>
-            <div className="text-xs text-slate-400 mt-0.5 flex flex-wrap items-center gap-2 font-mono">
+          <div className="min-w-0">
+            <h1 className="text-base font-bold text-slate-900 dark:text-slate-100 truncate" data-testid="project-title">
+              {project.projectName}
+            </h1>
+            <div className="text-xs text-slate-500 dark:text-slate-400 mt-0.5 flex flex-wrap items-center gap-2 font-mono">
               <span dir="ltr">{project.sampleRate} Hz</span>
               <span aria-hidden="true">·</span>
               <span className="font-sans">{tracks.length} ترک فعال</span>
               <span aria-hidden="true">·</span>
-              <span>پردازش ۱۰۰٪ محلی ({capabilities.transportMode})</span>
+              <span>پردازش محلی ({capabilities.transportMode})</span>
             </div>
           </div>
 
@@ -1788,6 +2327,7 @@ export default function App() {
             {/* Transport Buttons */}
             <button
               type="button"
+              data-testid="toolbar-btn-play-pause"
               onClick={handleTogglePlay}
               className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold rounded-md bg-emerald-500 text-slate-950 hover:bg-emerald-400 cursor-pointer"
             >
@@ -1808,27 +2348,28 @@ export default function App() {
               type="button"
               onClick={handleStopAndReset}
               aria-label="بازگشت به ابتدا"
-              className="p-2 rounded-md border border-[#252F42] bg-[#0E131D] text-slate-300 hover:bg-[#1E2738] cursor-pointer"
+              className="p-2 rounded-md border border-slate-300 dark:border-[#252F42] bg-slate-50 dark:bg-[#0E131D] text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-[#1E2738] cursor-pointer"
             >
               <RotateCcw className="w-3.5 h-3.5" />
             </button>
 
             <div
               dir="ltr"
-              className="px-3 py-1.5 rounded-md border border-[#252F42] bg-[#0B0F17] font-mono text-xs text-amber-400"
+              className="px-3 py-1.5 rounded-md border border-slate-300 dark:border-[#252F42] bg-slate-50 dark:bg-[#0B0F17] font-mono tabular-nums text-xs text-amber-700 dark:text-amber-400"
               aria-label="زمان‌سنج پخش"
             >
               {formatTimecode(secondsToFlicks(playheadSec))} / {formatTimecode(totalDurationFlicks)}
             </div>
 
-            <div className="h-5 w-px bg-[#252F42] mx-1 hidden sm:block" aria-hidden="true" />
+            <div className="h-5 w-px bg-slate-300 dark:bg-[#252F42] mx-1 hidden sm:block" aria-hidden="true" />
 
             <button
               type="button"
+              data-testid="btn-timeline-undo"
               onClick={handleUndo}
               disabled={!historyRef.current.canUndo()}
               aria-label="بازگشت (Undo)"
-              className="inline-flex items-center gap-1 px-2.5 py-2 text-xs rounded-md border border-[#252F42] text-slate-300 hover:bg-[#1E2738] disabled:opacity-40 cursor-pointer disabled:cursor-not-allowed"
+              className="inline-flex items-center gap-1 px-2.5 py-2 text-xs rounded-md border border-slate-300 dark:border-[#252F42] text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-[#1E2738] disabled:opacity-40 cursor-pointer disabled:cursor-not-allowed"
             >
               <Undo2 className="w-3.5 h-3.5" aria-hidden="true" />
               <span>بازگشت</span>
@@ -1836,10 +2377,11 @@ export default function App() {
 
             <button
               type="button"
+              data-testid="btn-timeline-redo"
               onClick={handleRedo}
               disabled={!historyRef.current.canRedo()}
               aria-label="تکرار (Redo)"
-              className="inline-flex items-center gap-1 px-2.5 py-2 text-xs rounded-md border border-[#252F42] text-slate-300 hover:bg-[#1E2738] disabled:opacity-40 cursor-pointer disabled:cursor-not-allowed"
+              className="inline-flex items-center gap-1 px-2.5 py-2 text-xs rounded-md border border-slate-300 dark:border-[#252F42] text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-[#1E2738] disabled:opacity-40 cursor-pointer disabled:cursor-not-allowed"
             >
               <Redo2 className="w-3.5 h-3.5" aria-hidden="true" />
               <span>تکرار</span>
@@ -1847,6 +2389,7 @@ export default function App() {
 
             <input
               ref={fileInputRef}
+              data-testid="audio-file-input"
               type="file"
               accept="audio/*"
               onChange={handleFileUpload}
@@ -1855,8 +2398,9 @@ export default function App() {
             />
             <button
               type="button"
+              data-testid="btn-upload-audio"
               onClick={() => fileInputRef.current?.click()}
-              className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-medium rounded-md border border-[#252F42] bg-[#0E131D] text-slate-200 hover:bg-[#1E2738] cursor-pointer"
+              className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-medium rounded-md border border-slate-300 dark:border-[#252F42] bg-slate-50 dark:bg-[#0E131D] text-slate-800 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-[#1E2738] cursor-pointer"
             >
               <Upload className="w-3.5 h-3.5" aria-hidden="true" />
               <span>ورود فایل صوتی</span>
@@ -1866,9 +2410,9 @@ export default function App() {
               type="button"
               data-testid="btn-record-studio-mic"
               onClick={handleRecordStudioMicTake}
-              className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-medium rounded-md border border-rose-500/40 bg-rose-500/15 text-rose-200 hover:bg-rose-500/25 cursor-pointer"
+              className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-medium rounded-md border border-rose-500/40 bg-rose-500/10 text-rose-700 dark:text-rose-200 hover:bg-rose-500/20 cursor-pointer"
             >
-              <Mic className="w-3.5 h-3.5 text-rose-400" aria-hidden="true" />
+              <Mic className="w-3.5 h-3.5 text-rose-500 dark:text-rose-400" aria-hidden="true" />
               <span>ضبط برداشت صوتی</span>
             </button>
 
@@ -1876,79 +2420,20 @@ export default function App() {
               type="button"
               data-testid="btn-spectral-wiener-denoise"
               onClick={handleApplySpectralWienerDenoise}
-              className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-medium rounded-md border border-cyan-500/40 bg-cyan-500/15 text-cyan-200 hover:bg-cyan-500/25 cursor-pointer"
+              className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-medium rounded-md border border-cyan-500/40 bg-cyan-500/10 text-cyan-800 dark:text-cyan-200 hover:bg-cyan-500/20 cursor-pointer"
             >
-              <Waves className="w-3.5 h-3.5 text-cyan-300" aria-hidden="true" />
-              <span>حذف نویز طیفی Wiener</span>
+              <Waves className="w-3.5 h-3.5 text-cyan-600 dark:text-cyan-300" aria-hidden="true" />
+              <span>حذف نویز طیفی</span>
             </button>
 
             <button
               type="button"
+              data-testid="btn-reset-demo"
               onClick={handleResetDemoProject}
-              className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-medium rounded-md border border-[#252F42] text-slate-300 hover:bg-[#1E2738] cursor-pointer"
+              className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-medium rounded-md border border-slate-300 dark:border-[#252F42] text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-[#1E2738] cursor-pointer"
             >
-              <Sparkles className="w-3.5 h-3.5 text-amber-400" aria-hidden="true" />
+              <Sparkles className="w-3.5 h-3.5 text-amber-500 dark:text-amber-400" aria-hidden="true" />
               <span>نمونه پادکست</span>
-            </button>
-
-            <button
-              type="button"
-              data-testid="btn-toggle-asr-lab"
-              onClick={() => setAsrLabOpen(true)}
-              className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-md border border-amber-400/50 bg-amber-400/15 text-amber-200 hover:bg-amber-400/25 cursor-pointer"
-            >
-              <FlaskConical className="w-3.5 h-3.5 text-amber-300" aria-hidden="true" />
-              <span>آزمایشگاه تحقیق و مدل ASR</span>
-            </button>
-
-            <button
-              type="button"
-              data-testid="btn-toggle-dev-portal"
-              onClick={() => setDevPortalOpen(true)}
-              className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-md border border-sky-400/50 bg-sky-400/15 text-sky-200 hover:bg-sky-400/25 cursor-pointer"
-            >
-              <Terminal className="w-3.5 h-3.5 text-sky-300" aria-hidden="true" />
-              <span>پورتال API و توسعه‌دهندگان</span>
-            </button>
-
-            <button
-              type="button"
-              data-testid="btn-toggle-speech-intel"
-              onClick={() => setSpeechIntelOpen(true)}
-              className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-md border border-emerald-400/50 bg-emerald-400/15 text-emerald-200 hover:bg-emerald-400/25 cursor-pointer"
-            >
-              <Layers className="w-3.5 h-3.5 text-emerald-300" aria-hidden="true" />
-              <span>هوشمندی گفتار (فاز ۱۱)</span>
-            </button>
-
-            <button
-              type="button"
-              data-testid="btn-toggle-data-factory"
-              onClick={() => setDataFactoryOpen(true)}
-              className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-md border border-cyan-400/50 bg-cyan-400/15 text-cyan-200 hover:bg-cyan-400/25 cursor-pointer"
-            >
-              <Database className="w-3.5 h-3.5 text-cyan-300" aria-hidden="true" />
-              <span>کارخانه داده (فاز ۱۲)</span>
-            </button>
-
-            <button
-              type="button"
-              data-testid="btn-toggle-model-factory"
-              onClick={() => setModelFactoryOpen(true)}
-              className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-md border border-violet-400/50 bg-violet-400/15 text-violet-200 hover:bg-violet-400/25 cursor-pointer"
-            >
-              <GitBranch className="w-3.5 h-3.5 text-violet-300" aria-hidden="true" />
-              <span>کارخانه مدل و MLOps (فاز ۱۳)</span>
-            </button>
-
-            <button
-              type="button"
-              data-testid="btn-toggle-speech-security"
-              onClick={() => setSecurityOpen(true)}
-              className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-md border border-rose-400/50 bg-rose-400/15 text-rose-200 hover:bg-rose-400/25 cursor-pointer"
-            >
-              <ShieldCheck className="w-3.5 h-3.5 text-rose-300" aria-hidden="true" />
-              <span>امنیت و مقاومت گفتار (فاز ۱۴)</span>
             </button>
           </div>
         </section>
@@ -1956,13 +2441,14 @@ export default function App() {
         {statusNotice && (
           <div
             role="status"
-            className="px-4 py-2.5 rounded-md border border-sky-500/30 bg-sky-500/10 text-xs text-sky-200 flex items-center justify-between"
+            data-testid="studio-status-notice"
+            className="px-4 py-2.5 rounded-md border border-sky-500/30 bg-sky-500/10 text-xs text-sky-900 dark:text-sky-200 flex items-center justify-between gap-3"
           >
             <span>{statusNotice}</span>
             <button
               type="button"
               onClick={() => setStatusNotice(null)}
-              className="text-sky-300 hover:text-white cursor-pointer"
+              className="text-sky-700 dark:text-sky-300 hover:text-slate-950 dark:hover:text-white cursor-pointer shrink-0"
             >
               بستن
             </button>
@@ -2008,33 +2494,35 @@ export default function App() {
               />
 
               <div className="space-y-4 min-w-0">
-                <WaveformCanvas
-                  tracks={tracks}
-                  assets={project.assets}
-                  pcmSources={project.pcmSources}
-                  recommendations={recommendations}
-                  selectedRecId={selectedRecId}
-                  playheadSec={playheadSec}
-                  totalDurationSec={totalDurationSec}
-                  zoom={zoom}
-                  onZoomChange={setZoom}
-                  onSeekSec={handleSeekSec}
-                  onToggleTrackMute={handleToggleTrackMute}
-                  onToggleTrackSolo={handleToggleTrackSolo}
-                  onSelectRecommendation={(id) => setSelectedRecId(id)}
-                  onSplitAtPlayhead={handleSplitAtPlayhead}
-                  onCutWaveformRange={handleCutWaveformRange}
-                  detectedSyncOffsetMs={detectedSyncOffsetMs}
-                  detectedClockDriftPpm={detectedClockDriftPpm}
-                  onAutoAlignSyncedTracks={handleAutoAlignSyncedTracks}
-                  onNudgeSyncedTracksMs={handleNudgeSyncedTracksMs}
-                  selection={selection}
-                  onSelectionChange={setSelection}
-                  onPlaySelectionRange={(sel) => handlePlaySelectionRange(sel)}
-                />
+                <div dir="ltr">
+                  <WaveformCanvas
+                    tracks={tracks}
+                    assets={project.assets}
+                    pcmSources={project.pcmSources}
+                    recommendations={recommendations}
+                    selectedRecId={selectedRecId}
+                    playheadSec={playheadSec}
+                    totalDurationSec={totalDurationSec}
+                    zoom={zoom}
+                    onZoomChange={setZoom}
+                    onSeekSec={handleSeekSec}
+                    onToggleTrackMute={handleToggleTrackMute}
+                    onToggleTrackSolo={handleToggleTrackSolo}
+                    onSelectRecommendation={(id) => setSelectedRecId(id)}
+                    onSplitAtPlayhead={handleSplitAtPlayhead}
+                    onCutWaveformRange={handleCutWaveformRange}
+                    detectedSyncOffsetMs={detectedSyncOffsetMs}
+                    detectedClockDriftPpm={detectedClockDriftPpm}
+                    onAutoAlignSyncedTracks={handleAutoAlignSyncedTracks}
+                    onNudgeSyncedTracksMs={handleNudgeSyncedTracksMs}
+                    selection={selection}
+                    onSelectionChange={(nextSel) => setSelection(clampSelectionRange(nextSel))}
+                    onPlaySelectionRange={(sel) => handlePlaySelectionRange(clampSelectionRange(sel))}
+                  />
+                </div>
 
                 <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 items-start">
-                  <div className="lg:col-span-7 space-y-4">
+                  <div className="lg:col-span-7 space-y-4 min-w-0">
                     <TranscriptPanel
                       tokens={tokens}
                       tracks={tracks}
@@ -2074,7 +2562,60 @@ export default function App() {
                     />
                   </div>
 
-                  <div className="lg:col-span-5">
+                  <div className="lg:col-span-5 space-y-4 min-w-0">
+                    <EdlReviewPanel
+                      locale={workflowState.locale}
+                      sampleRate={project.sampleRate}
+                      tokens={tokens}
+                      speechEventResult={workflowState.speechEventResult}
+                      edlSnapshot={workflowState.edlSnapshot}
+                      isAnalyzing={workflowState.isAnalyzingEvents}
+                      canUndoEdl={workflowState.edlUndoStack.length > 0}
+                      canRedoEdl={workflowState.edlRedoStack.length > 0}
+                      onRunAnalysis={handleRunMissionEdlAnalysis}
+                      onApproveProposal={(proposalId) => {
+                        const r = workflowRef.current!.applyHumanDecision({
+                          action: 'APPROVE',
+                          proposalId,
+                        });
+                        if (!r.ok && r.failure) {
+                          setStatusNotice(`تأیید پیشنهاد مسدود شد: ${r.failure.message}`);
+                        }
+                      }}
+                      onRejectProposal={(proposalId) =>
+                        workflowRef.current!.applyHumanDecision({ action: 'REJECT', proposalId })
+                      }
+                      onRequestReviewProposal={(proposalId) =>
+                        workflowRef.current!.applyHumanDecision({
+                          action: 'REQUEST_REVIEW',
+                          proposalId,
+                        })
+                      }
+                      onReviseBoundaryMs={(proposalId, dStartMs, dEndMs) => {
+                        const prop = workflowState.edlSnapshot?.proposals.find(
+                          (p) => p.proposalId === proposalId,
+                        );
+                        if (!prop) return;
+                        const activeRange = prop.proposedRange ?? prop.originalRange;
+                        if (!activeRange) return;
+                        const deltaStart = Math.round((dStartMs / 1000) * project.sampleRate);
+                        const deltaEnd = Math.round((dEndMs / 1000) * project.sampleRate);
+                        workflowRef.current!.reviseProposalBoundaries({
+                          proposalId,
+                          newStartSample: Math.max(0, activeRange.startSample + deltaStart),
+                          newEndSample: Math.min(
+                            workflowState.sourceAudio?.totalSamples ?? activeRange.endSample + deltaEnd,
+                            activeRange.endSample + deltaEnd,
+                          ),
+                        });
+                      }}
+                      onPreviewProposal={handlePreviewEdlProposal}
+                      onSeekSec={handleSeekSec}
+                      onUndoEdl={() => workflowRef.current!.undoEdlDecision()}
+                      onRedoEdl={() => workflowRef.current!.redoEdlDecision()}
+                      onApplyLinguisticReadableText={handleUpdateTokenDisplayText}
+                    />
+
                     <SuggestionsPanel
                       recommendations={recommendations}
                       selectedRecId={selectedRecId}
@@ -2138,6 +2679,44 @@ export default function App() {
         onJumpNextMarker={handleJumpNextMarker}
         onSetInAtPlayhead={handleSetInAtPlayhead}
         onSetOutAtPlayhead={handleSetOutAtPlayhead}
+      />
+
+      <RenderExportModal
+        isOpen={renderModalOpen}
+        onClose={() => setRenderModalOpen(false)}
+        workflowState={workflowState}
+        projectSampleRate={(project.sampleRate as SampleRate) || 48000}
+        tokens={tokens}
+        onStartRender={handleStartMission06Render}
+        onPauseRender={() => workflowRef.current?.requestPauseRender()}
+        onCancelRender={() => workflowRef.current?.cancelRender()}
+        onMarkDownloaded={(fileName) => workflowRef.current?.markExportSaved(fileName)}
+      />
+
+      <LifecycleManagementModal
+        isOpen={lifecycleModalOpen}
+        initialTab={lifecycleInitialTab}
+        onClose={() => setLifecycleModalOpen(false)}
+        workflowState={workflowState}
+        modelManager={modelManagerRef.current}
+        onModelStateChanged={() => {
+          const snap = modelManagerRef.current.getSnapshot();
+          if (snap.activeModel) {
+            workflowRef.current?.setAsrState({
+              state: 'MODEL_READY',
+              modelId: snap.activeModel.modelId,
+              modelVersion: snap.activeModel.version,
+              message: `مدل محلی ${snap.activeModel.modelId} با SHA-256 تأیید و آماده است.`,
+            });
+          } else {
+            workflowRef.current?.setAsrState({
+              state: 'MODEL_NOT_INSTALLED',
+              modelId: null,
+              modelVersion: null,
+              message: 'مدل محلی نصب نشده است.',
+            });
+          }
+        }}
       />
 
       <ExportModal

@@ -48,7 +48,43 @@ export class PrivacyRetentionAndIsolationEngine {
   private readonly redactedDerivatives = new Map<string, RedactedTranscriptDerivative[]>();
   private readonly deletionHistory = new Map<string, DeletionCascadeReport[]>();
   private readonly tenantCache = new Map<string, { tenantId: string; payload: unknown }>();
+  private readonly recordingOwners = new Map<string, string>(); // recordingId -> owning tenantId
   private readonly auditEvents: SecurityAuditEvent[] = [];
+
+  public registerRecordingOwner(tenantId: string, recordingId: string): void {
+    if (!recordingId || !recordingId.trim()) return;
+    const existing = this.recordingOwners.get(recordingId);
+    if (existing && existing !== tenantId) {
+      throw new Error('TENANT_ISOLATION_DENIED: Recording is owned by another tenant.');
+    }
+    this.recordingOwners.set(recordingId, tenantId);
+  }
+
+  public getRecordingOwner(recordingId: string): string | null {
+    return this.recordingOwners.get(recordingId) ?? null;
+  }
+
+  public assertRecordingAccess(params: {
+    requesterTenantId: string;
+    recordingId: string;
+    actorId: string;
+    resourceType?: string;
+  }): void {
+    const owner = this.recordingOwners.get(params.recordingId);
+    if (owner && owner !== params.requesterTenantId) {
+      this.recordSecurityEvent({
+        tenantId: params.requesterTenantId,
+        eventType: 'TENANT_CROSS_BOUNDARY_ACCESS_DENIED',
+        severity: 'CRITICAL',
+        actorId: params.actorId,
+        resourceType: params.resourceType ?? 'recording',
+        resourceId: params.recordingId,
+        actionOutcome: 'DENIED',
+        summary: 'Cross-tenant recording operation denied prior to mutation.',
+      });
+      throw new Error('TENANT_ISOLATION_DENIED: Resource access denied.');
+    }
+  }
 
   // ── Security Audit Logging (12 Typed Events, Scrubbed) ─────────────────────
 
@@ -90,8 +126,27 @@ export class PrivacyRetentionAndIsolationEngine {
     return ev;
   }
 
-  public listSecurityEvents(tenantId: string): SecurityAuditEvent[] {
-    return this.auditEvents.filter((e) => e.tenantId === tenantId);
+  public listSecurityEvents(
+    tenantId: string,
+    options?: { readonly limit?: number; readonly eventType?: SecurityAuditEventType }
+  ): SecurityAuditEvent[] {
+    const maxLimit =
+      typeof options?.limit === 'number' && Number.isFinite(options.limit)
+        ? Math.max(1, Math.min(200, Math.floor(options.limit)))
+        : 200;
+    return this.auditEvents
+      .filter((e) => e.tenantId === tenantId && (!options?.eventType || e.eventType === options.eventType))
+      .slice(0, maxLimit)
+      .map((e) => ({
+        ...e,
+        sanitizedSummary: sanitizeSecurityTelemetry(e.sanitizedSummary),
+        metadata: Object.fromEntries(
+          Object.entries(e.metadata).map(([k, v]) => [
+            k,
+            typeof v === 'string' ? sanitizeSecurityTelemetry(v) : v,
+          ])
+        ),
+      }));
   }
 
   // ── Tenant-Scoped Cache Keys & Existence-Hiding Lookup ─────────────────────
@@ -145,6 +200,13 @@ export class PrivacyRetentionAndIsolationEngine {
     config?: Partial<PiiRedactionConfig>;
     actorId: string;
   }): RedactedTranscriptDerivative {
+    this.assertRecordingAccess({
+      requesterTenantId: params.tenantId,
+      recordingId: params.recordingId,
+      actorId: params.actorId,
+      resourceType: 'transcript_derivative',
+    });
+    this.registerRecordingOwner(params.tenantId, params.recordingId);
     const cfg: PiiRedactionConfig = {
       ...DEFAULT_PII_CONFIG,
       ...params.config,
@@ -256,15 +318,51 @@ export class PrivacyRetentionAndIsolationEngine {
   public updateRetentionPolicy(
     policy: Omit<PrivacyRetentionPolicy, 'updatedAtIso'>
   ): PrivacyRetentionPolicy {
-    if (policy.rawAudioTtlDays < 0 || policy.securityLogsTtlDays < 7) {
-      throw new Error('RETENTION_POLICY_INVALID: Audio TTL >= 0 and security logs TTL >= 7 days required.');
+    if (
+      !Number.isInteger(policy.rawAudioTtlDays) ||
+      policy.rawAudioTtlDays < 0 ||
+      policy.rawAudioTtlDays > 3650 ||
+      !Number.isInteger(policy.intermediateChunksTtlHours) ||
+      policy.intermediateChunksTtlHours < 1 ||
+      policy.intermediateChunksTtlHours > 720 ||
+      !Number.isInteger(policy.rawTranscriptTtlDays) ||
+      policy.rawTranscriptTtlDays < 0 ||
+      policy.rawTranscriptTtlDays > 3650 ||
+      !Number.isInteger(policy.redactedTranscriptTtlDays) ||
+      policy.redactedTranscriptTtlDays < 0 ||
+      policy.redactedTranscriptTtlDays > 3650 ||
+      !Number.isInteger(policy.diagnosticsTtlDays) ||
+      policy.diagnosticsTtlDays < 1 ||
+      policy.diagnosticsTtlDays > 365 ||
+      !Number.isInteger(policy.securityLogsTtlDays) ||
+      policy.securityLogsTtlDays < 7 ||
+      policy.securityLogsTtlDays > 3650
+    ) {
+      throw new Error(
+        'RETENTION_POLICY_INVALID: Retention TTL values must be finite integers within allowed safety bounds.'
+      );
     }
     const updated: PrivacyRetentionPolicy = {
       ...policy,
       updatedAtIso: new Date().toISOString(),
     };
     this.retentionPolicies.set(policy.tenantId, updated);
-    return updated;
+    this.recordSecurityEvent({
+      tenantId: policy.tenantId,
+      eventType: 'RETENTION_POLICY_UPDATED',
+      severity: 'LOW',
+      actorId: policy.updatedBy,
+      resourceType: 'privacy_retention_policy',
+      resourceId: policy.tenantId,
+      actionOutcome: 'EXECUTED',
+      summary: 'Updated tenant privacy retention policy.',
+      metadata: {
+        rawAudioTtlDays: updated.rawAudioTtlDays,
+        securityLogsTtlDays: updated.securityLogsTtlDays,
+        allowedResidencyRegion: updated.allowedResidencyRegion,
+      },
+    });
+    return { ...updated };
   }
 
   public executeDeletionCascade(params: {
@@ -272,6 +370,17 @@ export class PrivacyRetentionAndIsolationEngine {
     recordingId: string;
     actorId: string;
   }): DeletionCascadeReport {
+    if (!params.recordingId || !params.recordingId.trim()) {
+      throw new Error('VALIDATION_ERROR: recordingId is required for deletion cascade.');
+    }
+    // Fail closed prior to any store mutation if recording belongs to another tenant
+    this.assertRecordingAccess({
+      requesterTenantId: params.tenantId,
+      recordingId: params.recordingId,
+      actorId: params.actorId,
+      resourceType: 'recording_privacy_cascade',
+    });
+
     // Purge tenant-scoped cache entries referencing this recording
     for (const [key, entry] of this.tenantCache.entries()) {
       if (entry.tenantId === params.tenantId && key.includes(`:r:${params.recordingId}:`)) {

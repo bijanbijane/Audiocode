@@ -23,15 +23,15 @@ import { SpeechEventAnalysisResult } from '../ai-engine/speech-events';
 import { PersianWordToken } from '../contracts/v1_2';
 import { flicksToSeconds } from '../engine/timebase';
 import {
-  analyzePersianNumberExpression,
-  analyzePersianOrthographyAndCodeSwitch,
-  analyzePersianPunctuation,
+  analyzePersianOrthography,
+  analyzePersianPunctuationProposals,
+  analyzePersianSpokenNumbers,
   assessSemanticChangeRisk,
-  buildPersianTranscriptDocument,
+  createPersianTranscriptDocument,
   PersianAsrCorrectionCandidate,
   PersianTranscriptDocument,
-  PersianTranscriptLayer,
   renderTranscriptLayerText,
+  TranscriptLayerKind,
   TranscriptTransformationEngine,
 } from '../persian-linguistics';
 
@@ -58,15 +58,16 @@ interface EdlReviewPanelProps {
 
 type PanelTab = 'edl' | 'events' | 'linguistics';
 
-function riskIcon(risk: EditProposal['riskLevel']) {
+function riskIcon(risk: EditProposal['risk']['overallLevel']) {
   switch (risk) {
-    case 'LOW_RISK':
+    case 'LOW':
       return <ShieldCheck className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" aria-hidden="true" />;
-    case 'MEDIUM_RISK':
+    case 'MEDIUM':
       return <AlertCircle className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" aria-hidden="true" />;
-    case 'HIGH_RISK':
+    case 'HIGH':
       return <AlertTriangle className="w-3.5 h-3.5 text-orange-600 dark:text-orange-400" aria-hidden="true" />;
-    case 'CRITICAL_RISK':
+    case 'CRITICAL':
+    case 'UNKNOWN':
       return <ShieldAlert className="w-3.5 h-3.5 text-rose-600 dark:text-rose-400" aria-hidden="true" />;
   }
 }
@@ -81,12 +82,14 @@ function statusLabel(status: EditProposal['status'], isFa: boolean): string {
       return isFa ? 'ردشده' : 'Rejected';
     case 'NEEDS_REVIEW':
       return isFa ? 'نیازمند بازبینی' : 'Needs Review';
-    case 'MODIFIED':
-      return isFa ? 'مرز اصلاح‌شده' : 'Boundary Revised';
+    case 'SUPERSEDED':
+      return isFa ? 'جایگزین‌شده' : 'Superseded';
     case 'STALE':
       return isFa ? 'منقضی (Stale)' : 'Stale';
-    case 'BLOCKED':
-      return isFa ? 'مسدود' : 'Blocked';
+    case 'INVALID':
+      return isFa ? 'نامعتبر' : 'Invalid';
+    case 'APPLIED':
+      return isFa ? 'اعمال‌شده' : 'Applied';
   }
 }
 
@@ -115,122 +118,99 @@ export const EdlReviewPanel: React.FC<EdlReviewPanelProps> = ({
   const [expandedProposalId, setExpandedProposalId] = useState<string | null>(null);
 
   // P13 Persian Linguistic Refinement interactive state (non-destructive, versioned)
-  const [lingLayer, setLingLayer] = useState<PersianTranscriptLayer>('READABLE');
+  const [lingLayer, setLingLayer] = useState<TranscriptLayerKind>('READABLE');
   const [lingDoc, setLingDoc] = useState<PersianTranscriptDocument | null>(null);
   const [lingCandidates, setLingCandidates] = useState<PersianAsrCorrectionCandidate[]>([]);
   const [lingStatusMsg, setLingStatusMsg] = useState<string | null>(null);
   const transformEngine = useMemo(() => new TranscriptTransformationEngine(), []);
 
   const handleRunPersianLinguistics = () => {
-    const doc = buildPersianTranscriptDocument({
+    const rawAsrText = tokens.map((t) => t.originalText).join(' ');
+    const doc = createPersianTranscriptDocument({
       documentId: `ling_${Date.now()}`,
-      sourceAudioHash: edlSnapshot?.sourceAudioHash ?? 'local_session_audio',
-      asrModelVersion: 'local-session',
-      tokens: tokens.map((t) => ({
-        tokenId: t.id,
-        rawAsrText: t.originalText,
-        sourceStartSample: Math.round(flicksToSeconds(t.range.startFlicks) * sampleRate),
-        sourceEndSample: Math.round(flicksToSeconds(t.range.endFlicks) * sampleRate),
-        alignmentConfidence: t.confidence ?? null,
-      })),
+      rawAsrText,
+      sampleRate,
     });
 
     const candidates: PersianAsrCorrectionCandidate[] = [];
-    for (let i = 0; i < doc.tokens.length; i++) {
-      const tok = doc.tokens[i];
-      const ortho = analyzePersianOrthographyAndCodeSwitch(tok.verbatimText);
-      if (ortho.suggestedReadableText !== tok.readableText) {
-        candidates.push({
-          candidateId: `ortho_${tok.tokenId}`,
-          sourceTranscriptVersion: doc.version,
-          tokenIds: [tok.tokenId],
-          originalText: tok.readableText,
-          proposedText: ortho.suggestedReadableText,
+    const orthoProposals = analyzePersianOrthography(doc);
+    for (const op of orthoProposals) {
+      candidates.push({
+        candidateId: op.proposalId,
+        sourceTranscriptVersion: doc.version,
+        tokenIds: op.tokenIds,
+        originalText: op.originalText,
+        proposedText: op.proposedText,
+        category: 'ORTHOGRAPHY_READABLE',
+        evidenceStrength: op.confidenceStatus === 'STRONG_EVIDENCE' ? 'STRONG_EVIDENCE' : 'MODERATE_EVIDENCE',
+        acousticEvidenceAvailable: false,
+        acousticConfidence: null,
+        linguisticEvidence: op.linguisticRationale,
+        semanticRisk: assessSemanticChangeRisk({
+          originalText: op.originalText,
+          proposedText: op.proposedText,
           category: 'ORTHOGRAPHY_READABLE',
-          evidenceStrength: 'STRONG_EVIDENCE',
-          acousticEvidenceAvailable: false,
-          acousticConfidence: tok.alignmentConfidence,
-          linguisticEvidence: ortho.reasons.join('؛ ') || 'پیشنهاد نیم‌فاصله/املای خوانا با حفظ متن خام.',
-          semanticRisk: assessSemanticChangeRisk({
-            originalText: tok.readableText,
-            proposedText: ortho.suggestedReadableText,
-            category: 'ORTHOGRAPHY_READABLE',
-          }),
-          alignmentImpact: 'NONE',
-          epistemicSource: 'RULE_BASED_NORMALIZATION',
-          provenanceModule: 'PersianOrthographyAndCodeSwitching',
-          sourceStartSample: tok.sourceStartSample,
-          sourceEndSample: tok.sourceEndSample,
-          status: 'PROPOSED',
-        });
-      }
-
-      const numRes = analyzePersianNumberExpression(tok.verbatimText);
-      if (
-        numRes.recognized &&
-        numRes.suggestedReadableForm &&
-        numRes.suggestedReadableForm !== tok.readableText &&
-        !numRes.ambiguous
-      ) {
-        candidates.push({
-          candidateId: `num_${tok.tokenId}`,
-          sourceTranscriptVersion: doc.version,
-          tokenIds: [tok.tokenId],
-          originalText: tok.readableText,
-          proposedText: numRes.suggestedReadableForm,
-          category: 'NUMBER_FORMAT',
-          evidenceStrength: 'MODERATE_EVIDENCE',
-          acousticEvidenceAvailable: false,
-          acousticConfidence: tok.alignmentConfidence,
-          linguisticEvidence: numRes.rationale,
-          semanticRisk: assessSemanticChangeRisk({
-            originalText: tok.readableText,
-            proposedText: numRes.suggestedReadableForm,
-            category: 'NUMBER_FORMAT',
-          }),
-          alignmentImpact: 'NONE',
-          epistemicSource: 'RULE_BASED_NORMALIZATION',
-          provenanceModule: 'PersianNumberParser',
-          sourceStartSample: tok.sourceStartSample,
-          sourceEndSample: tok.sourceEndSample,
-          status: 'PROPOSED',
-        });
-      }
+        }),
+        alignmentImpact: op.alignmentRecalculationNeeded ? 'RECALCULATE_REQUIRED' : 'NONE',
+        epistemicSource: 'DETERMINISTIC_NORMALIZATION',
+        provenanceModule: 'PersianOrthographyAndCodeSwitching',
+        sourceStartSample: null,
+        sourceEndSample: null,
+        status: 'PROPOSED',
+      });
     }
 
-    const puncts = analyzePersianPunctuation(
-      doc.tokens.map((t, idx) => {
-        const next = doc.tokens[idx + 1];
-        const pauseMs =
-          next && t.sourceEndSample !== null && next.sourceStartSample !== null
-            ? Math.max(0, ((next.sourceStartSample - t.sourceEndSample) / sampleRate) * 1000)
-            : 0;
-        return { tokenId: t.tokenId, text: t.readableText, followingPauseMs: pauseMs };
-      }),
-    );
+    const numProposals = analyzePersianSpokenNumbers(doc);
+    for (const np of numProposals) {
+      if (np.status !== 'PARSEABLE_DISPLAY_PROPOSAL' || !np.formattedDisplayValue) continue;
+      candidates.push({
+        candidateId: np.proposalId,
+        sourceTranscriptVersion: doc.version,
+        tokenIds: np.tokenIds,
+        originalText: np.originalSpokenText,
+        proposedText: np.formattedDisplayValue,
+        category: 'NUMBER_FORMAT',
+        evidenceStrength: 'MODERATE_EVIDENCE',
+        acousticEvidenceAvailable: false,
+        acousticConfidence: null,
+        linguisticEvidence: np.rationale,
+        semanticRisk: assessSemanticChangeRisk({
+          originalText: np.originalSpokenText,
+          proposedText: np.formattedDisplayValue,
+          category: 'NUMBER_FORMAT',
+        }),
+        alignmentImpact: 'NONE',
+        epistemicSource: 'DETERMINISTIC_NORMALIZATION',
+        provenanceModule: 'PersianPunctuationAndNumbers',
+        sourceStartSample: null,
+        sourceEndSample: null,
+        status: 'PROPOSED',
+      });
+    }
 
+    const puncts = analyzePersianPunctuationProposals(doc);
     for (const p of puncts.slice(0, 6)) {
       const tok = doc.tokens.find((t) => t.tokenId === p.afterTokenId);
-      if (!tok || tok.readableText.endsWith(p.punctuation)) continue;
+      if (!tok || tok.readableText.endsWith(p.proposedMark)) continue;
       candidates.push({
-        candidateId: `punct_${tok.tokenId}`,
+        candidateId: p.proposalId,
         sourceTranscriptVersion: doc.version,
         tokenIds: [tok.tokenId],
         originalText: tok.readableText,
-        proposedText: p.punctuation,
+        proposedText: p.proposedMark,
         category: 'PUNCTUATION_ONLY',
-        evidenceStrength: p.confidence >= 0.75 ? 'MODERATE_EVIDENCE' : 'WEAK_EVIDENCE',
-        acousticEvidenceAvailable: true,
-        acousticConfidence: p.confidence,
+        evidenceStrength: p.confidenceStatus === 'MODERATE_EVIDENCE' ? 'MODERATE_EVIDENCE' : 'WEAK_EVIDENCE',
+        acousticEvidenceAvailable: p.pauseDurationMs !== null,
+        acousticConfidence: null,
         linguisticEvidence: p.rationale,
         semanticRisk: assessSemanticChangeRisk({
           originalText: tok.readableText,
-          proposedText: `${tok.readableText}${p.punctuation}`,
+          proposedText: `${tok.readableText}${p.proposedMark}`,
           category: 'PUNCTUATION_ONLY',
         }),
         alignmentImpact: 'NONE',
-        epistemicSource: 'INFERRED_LINGUISTIC_PROPOSAL',
-        provenanceModule: 'PersianPunctuationAnalyzer',
+        epistemicSource: 'RULE_BASED_LINGUISTIC_INFERENCE',
+        provenanceModule: 'PersianPunctuationAndNumbers',
         sourceStartSample: tok.sourceStartSample,
         sourceEndSample: tok.sourceEndSample,
         status: 'PROPOSED',
@@ -276,7 +256,7 @@ export const EdlReviewPanel: React.FC<EdlReviewPanelProps> = ({
 
   const handleRevertLingCandidate = (candidateId: string) => {
     if (!lingDoc) return;
-    const res = transformEngine.revertCandidate(lingDoc, candidateId);
+    const res = transformEngine.revertLastTransformation(lingDoc);
     if (!res.reverted) return;
     setLingDoc(res.document);
     setLingCandidates((prev) =>
@@ -430,8 +410,11 @@ export const EdlReviewPanel: React.FC<EdlReviewPanelProps> = ({
               ) : (
                 <div className="space-y-2.5">
                   {proposals.map((prop) => {
-                    const startSec = prop.refinedRange.startSample / sampleRate;
-                    const endSec = prop.refinedRange.endSample / sampleRate;
+                    const activeRange = prop.proposedRange ?? prop.originalRange;
+                    const startSample = activeRange?.startSample ?? 0;
+                    const endSample = activeRange?.endSample ?? 0;
+                    const startSec = startSample / sampleRate;
+                    const endSec = endSample / sampleRate;
                     const durationMs = Math.round((endSec - startSec) * 1000);
                     const isExpanded = expandedProposalId === prop.proposalId;
 
@@ -443,9 +426,9 @@ export const EdlReviewPanel: React.FC<EdlReviewPanelProps> = ({
                       >
                         <div className="flex flex-wrap items-center justify-between gap-2">
                           <div className="flex items-center gap-2">
-                            {riskIcon(prop.riskLevel)}
+                            {riskIcon(prop.risk.overallLevel)}
                             <span className="font-semibold text-slate-900 dark:text-slate-100">
-                              {prop.action}
+                              {prop.operation}
                             </span>
                             <span className="text-slate-500 dark:text-slate-400">·</span>
                             <span className="text-slate-700 dark:text-slate-300">
@@ -464,7 +447,7 @@ export const EdlReviewPanel: React.FC<EdlReviewPanelProps> = ({
                         </div>
 
                         <p className="text-slate-700 dark:text-slate-300 leading-relaxed">
-                          {prop.explanation}
+                          {prop.explanationFa}
                         </p>
 
                         <div className="flex flex-wrap items-center gap-1.5 pt-1">
@@ -472,7 +455,7 @@ export const EdlReviewPanel: React.FC<EdlReviewPanelProps> = ({
                             type="button"
                             data-testid={`btn-approve-${prop.proposalId}`}
                             onClick={() => onApproveProposal(prop.proposalId)}
-                            disabled={prop.status === 'APPROVED' || prop.status === 'BLOCKED'}
+                            disabled={prop.status === 'APPROVED' || prop.status === 'INVALID' || prop.status === 'STALE'}
                             className="inline-flex items-center gap-1 px-2.5 py-1 rounded bg-emerald-600 text-white hover:bg-emerald-500 disabled:opacity-40 cursor-pointer disabled:cursor-not-allowed"
                           >
                             <Check className="w-3 h-3" aria-hidden="true" />
@@ -539,13 +522,13 @@ export const EdlReviewPanel: React.FC<EdlReviewPanelProps> = ({
                         {isExpanded && (
                           <div className="mt-2 pt-2 border-t border-slate-200 dark:border-[#252F42] space-y-1 text-[11px] text-slate-600 dark:text-slate-400">
                             <div>
-                              <strong>{isFa ? 'سطح ریسک:' : 'Risk Level:'}</strong> {prop.riskLevel} (
-                              {prop.riskReasons.join(' · ') || '—'})
+                              <strong>{isFa ? 'سطح ریسک:' : 'Risk Level:'}</strong> {prop.risk.overallLevel} (
+                              {prop.risk.blockingReasons.join(' · ') || '—'})
                             </div>
                             <div className="font-mono" dir="ltr">
-                              Samples: [{prop.refinedRange.startSample} .. {prop.refinedRange.endSample}] ·
-                              Crossfade: {prop.boundaryRefinement.crossfadeMs}ms · Event IDs:{' '}
-                              {prop.evidence.sourceEventIds.join(', ') || 'none'}
+                              Samples: [{startSample} .. {endSample}] · Basis:{' '}
+                              {prop.boundary.measurementBasis} · Event IDs:{' '}
+                              {prop.speechEventSourceIds.join(', ') || 'none'}
                             </div>
                           </div>
                         )}
@@ -576,20 +559,20 @@ export const EdlReviewPanel: React.FC<EdlReviewPanelProps> = ({
               >
                 <div className="space-y-0.5">
                   <div className="font-semibold text-slate-900 dark:text-slate-100">
-                    {ev.type}{' '}
+                    {ev.category}{' '}
                     <span className="font-normal text-slate-500 dark:text-slate-400">
-                      ({ev.evidence.decisionCategory})
+                      ({ev.subtype})
                     </span>
                   </div>
-                  <div className="text-slate-600 dark:text-slate-400">{ev.explanation}</div>
+                  <div className="text-slate-600 dark:text-slate-400">{ev.explanationFa}</div>
                 </div>
                 <button
                   type="button"
-                  onClick={() => onSeekSec(ev.timeRangeSec.startSec)}
+                  onClick={() => onSeekSec(ev.startSec)}
                   dir="ltr"
                   className="font-mono tabular-nums text-[11px] text-amber-700 dark:text-amber-300 hover:underline cursor-pointer"
                 >
-                  {ev.timeRangeSec.startSec.toFixed(2)}s–{ev.timeRangeSec.endSec.toFixed(2)}s ·{' '}
+                  {ev.startSec.toFixed(2)}s–{ev.endSec.toFixed(2)}s ·{' '}
                   {Math.round(ev.confidence * 100)}%
                 </button>
               </div>

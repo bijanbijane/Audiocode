@@ -3,7 +3,7 @@ import { SampleRate as ContractSampleRate } from '../contracts/timebase.contract
 export type CanonicalSampleRate = ContractSampleRate;
 
 export const SUPPORTED_CANONICAL_SAMPLE_RATES: readonly CanonicalSampleRate[] = [
-  16000, 22050, 24000, 32000, 44100, 48000, 88200, 96000, 192000,
+  16000, 22050, 24000, 32000, 44100, 48000, 96000,
 ];
 
 export function assertValidSampleRate(rate: number): asserts rate is CanonicalSampleRate {

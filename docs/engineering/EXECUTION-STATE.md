@@ -23,11 +23,22 @@
   - Live Docker image build: `NOT_EVALUATED` (no Docker daemon in container).
   - Live Neural ASR weights / CUDA GPU: `BLOCKED` (`G0_CPU_ONLY`, no ONNX weights bundled).
 
+### Security & Model Factory Authorization Hardening (`VERIFIED` — Vitest HTTP + Adversarial Matrix)
+- Eliminated fail-open `OWNER` fallbacks (`resolveRole`, `resolveActorRole`) and all `x-avapardaz-role` / query `role` / forged body provenance field trust across `/v1/security/*` and `/v1/ml/*`.
+- Centralized RBAC + least-privilege credential scope + cross-tenant ownership enforcement in `src/security/AuthorizationPolicyEngine.ts`, backed by `PlatformControlPlaneService` server-side membership lifecycle.
+- Verified with `speechSecurityGateway.spec.ts` (4/4) and `modelFactoryGateway.spec.ts` (3/3). External OIDC/SCIM, managed PG RLS, and KMS remain unprovisioned.
+
+### Runtime Reliability & Export Integrity Hardening (`VERIFIED` — Deterministic Unit & Lifecycle Suite)
+- Replaced fail-open lock acquisition in `src/runtime/CrashRecoveryAndSessionLock.ts` with cryptographic session IDs, race-free Web Locks (primary), atomic IndexedDB compare-and-set leases with monotonic fencing tokens (fallback), and fail-closed `LOCK_UNAVAILABLE` when no exclusive backend exists.
+- Implemented versioned `envelopeVersion: 2` checkpoints with canonical SHA-256 integrity digests, injective hex storage keys, deep runtime `ProjectDocument` schema validation, interruption-safe OPFS/IndexedDB writes, conflict/media-verified restoration, and real lifecycle wiring in `src/core/VerticalSliceOrchestrator.ts` and `src/App.tsx`.
+- Hardened `src/processing-core/ExportValidator.ts` to reject malformed channel arrays, unequal channel lengths, invalid sample rates/durations, and `NaN`/`Infinity` samples in O(1) memory without mutating input PCM.
+- Verified with `CrashRecoveryAndSessionLock.test.ts` (11/11), `ExportValidator.test.ts` (9/9), `VerticalSliceOrchestrator.test.ts` (1/1), and `docs/engineering/RUNTIME-RELIABILITY.md`.
+
 ---
 
 ## Active Next Prerequisite-Satisfied Queue
-- All 100% CPU-local foundation, reliability, performance, timing, and Persian linguistics milestones (`M-P0-01`, `M-P0-02`, `AVP-P04..P13`) are implemented locally.
-- Downstream commercial cloud milestones require external infrastructure provisioning:
+- All 100% CPU-local foundation, reliability, runtime locking/recovery, export integrity, security/ML authorization hardening, unified processing, timing, and Persian linguistics milestones are implemented and verified locally.
+- Downstream commercial cloud & external corpus milestones require external infrastructure or corpus acquisition:
 
 ## Blocked / Deferred Downstream Queue (External Infrastructure Required)
 - `M-P1-01` (`DATABASE_URL`, `REDIS_URL`) — Live PostgreSQL migration execution & persistent control plane

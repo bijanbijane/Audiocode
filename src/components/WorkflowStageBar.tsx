@@ -33,6 +33,9 @@ export interface AdvancedLabActions {
 
 interface WorkflowStageBarProps {
   workflowState: StudioWorkflowState;
+  executionMode: 'LOCAL' | 'CLOUD';
+  cloudProviderStatusLabel: string;
+  onChangeExecutionMode: (nextMode: 'LOCAL' | 'CLOUD') => void;
   activeFailure: UserFacingFailureModel | null;
   canInstallPwa: boolean;
   onTriggerInstallPwa: () => void;
@@ -80,6 +83,9 @@ function asrLabel(state: StudioWorkflowState['asrState'], locale: WorkflowLocale
 
 export const WorkflowStageBar: React.FC<WorkflowStageBarProps> = ({
   workflowState,
+  executionMode,
+  cloudProviderStatusLabel,
+  onChangeExecutionMode,
   activeFailure,
   canInstallPwa,
   onTriggerInstallPwa,
@@ -123,19 +129,40 @@ export const WorkflowStageBar: React.FC<WorkflowStageBarProps> = ({
         aria-label={isFa ? 'نوار وضعیت محلی و چرخه عمر استودیو' : 'Local Studio Status & Lifecycle Bar'}
         className="border border-slate-200 dark:border-[#252F42] bg-white dark:bg-[#131924] rounded-lg px-4 py-2.5 flex flex-wrap items-center justify-between gap-3 text-xs"
       >
-        {/* Left / Start: Honest local runtime facts separated by hairlines */}
+        {/* Left / Start: Honest local/cloud mode + runtime facts separated by hairlines */}
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 text-slate-600 dark:text-slate-300">
-          <div className="flex items-center gap-1.5 font-medium text-slate-900 dark:text-slate-100">
-            <HardDrive className="w-3.5 h-3.5 text-amber-500 dark:text-amber-400" aria-hidden="true" />
-            <span>
-              {workflowState.persistenceState === 'PERSISTED_LOCAL'
-                ? isFa
-                  ? 'ذخیره محلی فعال'
-                  : 'Local Persistence Active'
-                : isFa
-                  ? 'حافظه محلی نشست'
-                  : 'Local Session Memory'}
-            </span>
+          {/* Explicit Unified Processing Mode Selector (LOCAL default, CLOUD opt-in) */}
+          <div
+            role="group"
+            aria-label={isFa ? 'انتخاب مسیر اجرای پردازش' : 'Processing execution mode'}
+            className="inline-flex items-center rounded border border-slate-300 dark:border-[#252F42] overflow-hidden"
+          >
+            <button
+              type="button"
+              data-testid="btn-mode-local"
+              aria-pressed={executionMode === 'LOCAL'}
+              onClick={() => onChangeExecutionMode('LOCAL')}
+              className={`px-2 py-1 text-[11px] font-semibold whitespace-nowrap cursor-pointer ${
+                executionMode === 'LOCAL'
+                  ? 'bg-emerald-600 text-white'
+                  : 'bg-slate-50 dark:bg-[#0E131D] text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+              }`}
+            >
+              {isFa ? 'محلی (پیش‌فرض)' : 'LOCAL (Default)'}
+            </button>
+            <button
+              type="button"
+              data-testid="btn-mode-cloud"
+              aria-pressed={executionMode === 'CLOUD'}
+              onClick={() => onChangeExecutionMode('CLOUD')}
+              className={`px-2 py-1 text-[11px] font-semibold whitespace-nowrap cursor-pointer ${
+                executionMode === 'CLOUD'
+                  ? 'bg-sky-600 text-white'
+                  : 'bg-slate-50 dark:bg-[#0E131D] text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+              }`}
+            >
+              {isFa ? 'ابری (اختیاری)' : 'CLOUD (Opt-In)'}
+            </button>
           </div>
 
           <span className="h-3.5 w-px bg-slate-300 dark:bg-[#252F42]" aria-hidden="true" />
@@ -147,8 +174,27 @@ export const WorkflowStageBar: React.FC<WorkflowStageBarProps> = ({
             data-testid="btn-asr-status-inspect"
           >
             <Cpu className="w-3.5 h-3.5 text-sky-500 dark:text-sky-400" aria-hidden="true" />
-            <span>{asrLabel(workflowState.asrState, workflowState.locale)}</span>
+            <span>
+              {executionMode === 'LOCAL'
+                ? asrLabel(workflowState.asrState, workflowState.locale)
+                : cloudProviderStatusLabel}
+            </span>
           </button>
+
+          <span className="h-3.5 w-px bg-slate-300 dark:bg-[#252F42]" aria-hidden="true" />
+
+          <div className="flex items-center gap-1.5 font-medium text-slate-800 dark:text-slate-200">
+            <HardDrive className="w-3.5 h-3.5 text-amber-500 dark:text-amber-400" aria-hidden="true" />
+            <span>
+              {workflowState.persistenceState === 'PERSISTED_LOCAL'
+                ? isFa
+                  ? 'ذخیره محلی فعال'
+                  : 'Local Persistence Active'
+                : isFa
+                  ? 'حافظه محلی نشست'
+                  : 'Local Session Memory'}
+            </span>
+          </div>
 
           <span className="h-3.5 w-px bg-slate-300 dark:bg-[#252F42]" aria-hidden="true" />
 
@@ -351,7 +397,7 @@ export const WorkflowStageBar: React.FC<WorkflowStageBarProps> = ({
                   {activeFailure.explanation}
                 </p>
                 <p className="text-emerald-800 dark:text-emerald-300 font-medium">
-                  {activeFailure.dataSafetyMessage}
+                  {activeFailure.originalDataStatus}
                 </p>
               </div>
             </div>
@@ -377,13 +423,13 @@ export const WorkflowStageBar: React.FC<WorkflowStageBarProps> = ({
                 <span>{isFa ? 'تلاش مجدد' : 'Retry'}</span>
               </button>
             )}
-            {activeFailure.recoveryActionLabel && onRecoverFailure && (
+            {activeFailure.recoveryAction && onRecoverFailure && (
               <button
                 type="button"
                 onClick={onRecoverFailure}
                 className="px-3 py-1.5 rounded border border-rose-400/50 text-rose-900 dark:text-rose-100 hover:bg-rose-500/15 cursor-pointer"
               >
-                {activeFailure.recoveryActionLabel}
+                {isFa ? activeFailure.recoveryAction.labelFa : activeFailure.recoveryAction.labelEn}
               </button>
             )}
             <button
@@ -394,7 +440,7 @@ export const WorkflowStageBar: React.FC<WorkflowStageBarProps> = ({
               {isFa ? 'مشاهده گزارش عیب‌یابی محلی' : 'View Local Diagnostics'}
             </button>
             <span className="font-mono text-[11px] text-slate-500 dark:text-slate-400 ms-auto" dir="ltr">
-              {activeFailure.errorCode}
+              {activeFailure.code}
             </span>
           </div>
         </div>

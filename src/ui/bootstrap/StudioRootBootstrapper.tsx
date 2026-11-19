@@ -221,10 +221,10 @@ export const StudioRootBootstrapper: React.FC<StudioRootBootstrapperProps> = ({
       }
 
       const crashLock = new CrashRecoveryAndSessionLock();
-      const recoveryRecord = await crashLock.checkCrashRecovery(
+      const recoveryInspection = await crashLock.inspectCrashRecovery(
         INITIAL_DEMO_PROJECT.projectId,
       );
-      const dirtyRecoveryDetected = Boolean(recoveryRecord);
+      const dirtyRecoveryDetected = recoveryInspection.status === 'RECOVERY_AVAILABLE';
 
       const runtimeMgr = new ResilientAiRuntimeManager();
       const cap = await runtimeMgr.detectCapabilityTier();
@@ -367,7 +367,11 @@ export const StudioRootBootstrapper: React.FC<StudioRootBootstrapperProps> = ({
     );
   }
 
-  if (bootstrapSummary.resolvedTier === 'MOBILE_COMPANION') {
+  const explicitMobileTierRequested =
+    typeof window !== 'undefined' &&
+    new URLSearchParams(window.location.search).get('tier') === 'mobile';
+
+  if (bootstrapSummary.resolvedTier === 'MOBILE_COMPANION' && explicitMobileTierRequested) {
     const pendingRecs = v12Project.recommendations.filter((r) => r.status === 'PENDING');
     return (
       <>
@@ -395,7 +399,7 @@ export const StudioRootBootstrapper: React.FC<StudioRootBootstrapperProps> = ({
     return (
       <>
         {desktopStudioElement}
-        <div className="fixed bottom-4 right-4 z-40">
+        <div className="fixed bottom-24 right-4 z-40">
           <PWAInstallButton />
         </div>
         <OfflineIndicator />

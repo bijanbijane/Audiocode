@@ -80,7 +80,7 @@ export class CrashSafeRecoveryCoordinator {
     readonly payload: TPayload;
   }): Promise<VersionedRecoveryRecord<TPayload>> {
     const payloadJson = JSON.stringify(params.payload);
-    const payloadSha256 = await computeSha256Hex(payloadJson);
+    const payloadSha256 = await computeSha256Hex(new TextEncoder().encode(payloadJson));
     const record: VersionedRecoveryRecord<TPayload> = {
       schemaVersion: RECOVERY_RECORD_SCHEMA_VERSION,
       recordId: params.recordId,
@@ -132,7 +132,7 @@ export class CrashSafeRecoveryCoordinator {
         return { valid: false, record: null, errorReason: 'INVALID_RECOVERY_SCHEMA' };
       }
 
-      const computedHash = await computeSha256Hex(JSON.stringify(parsed.payload));
+      const computedHash = await computeSha256Hex(new TextEncoder().encode(JSON.stringify(parsed.payload)));
       if (computedHash !== parsed.payloadSha256) {
         return { valid: false, record: null, errorReason: 'RECOVERY_CHECKSUM_MISMATCH' };
       }

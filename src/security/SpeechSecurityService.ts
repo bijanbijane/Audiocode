@@ -52,6 +52,9 @@ export class SpeechSecurityService {
   private readonly remoteUrlPolicies = new Map<string, RemoteUrlPolicy>();
   private readonly lastRobustnessReports = new Map<string, AdversarialRobustnessReport>();
   private readonly lastRedTeamSuites = new Map<string, RedTeamGroupResult[]>();
+  private readonly heavyEvalWindowTimestamps = new Map<string, number[]>();
+  private readonly activeHeavyEvalTenants = new Set<string>();
+  public maxHeavySecurityRunsPerMinutePerTenant = 10;
 
   constructor(
     private readonly controlPlane: PlatformControlPlaneService,
@@ -59,11 +62,90 @@ export class SpeechSecurityService {
     private readonly modelFactory?: SpeechModelFactoryService
   ) {}
 
+  public getControlPlane(): PlatformControlPlaneService {
+    return this.controlPlane;
+  }
+
   public authenticate(bearerToken: string, requiredScope: 'models:read' | 'audio:transcribe' = 'audio:transcribe') {
     return this.controlPlane.authenticateApiKeyRequest({
       bearerToken,
       requiredScope,
     });
+  }
+
+  public registerOwnedRecording(tenantId: string, recordingId: string): void {
+    this.privacyEngine.registerRecordingOwner(tenantId, recordingId);
+  }
+
+  public assertRecordingBelongsToTenant(params: {
+    tenantId: string;
+    recordingId: string;
+    actorId: string;
+    resourceType?: string;
+  }): void {
+    this.privacyEngine.assertRecordingAccess({
+      requesterTenantId: params.tenantId,
+      recordingId: params.recordingId,
+      actorId: params.actorId,
+      resourceType: params.resourceType,
+    });
+    if (this.dataFactory) {
+      const dfKnown = this.dataFactory.listRecordings(params.tenantId).some(
+        (r) => r.recordingId === params.recordingId
+      );
+      if (!dfKnown) {
+        // Check if recording exists in dataFactory under a different tenant
+        try {
+          this.dataFactory.getRecording(params.tenantId, params.recordingId);
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          if (msg.startsWith('TENANT_ISOLATION_DENIED')) {
+            // Note: DataFactory throws TENANT_ISOLATION_DENIED both for missing & cross-tenant;
+            // only block when another tenant actually owns this recordingId in DataFactory
+            const ownerInDf = this.findDataFactoryRecordingOwner(params.recordingId);
+            if (ownerInDf && ownerInDf !== params.tenantId) {
+              this.privacyEngine.recordSecurityEvent({
+                tenantId: params.tenantId,
+                eventType: 'TENANT_CROSS_BOUNDARY_ACCESS_DENIED',
+                severity: 'CRITICAL',
+                actorId: params.actorId,
+                resourceType: params.resourceType ?? 'recording',
+                resourceId: params.recordingId,
+                actionOutcome: 'DENIED',
+                summary: 'Cross-tenant recording access denied via DataFactory ownership verification.',
+              });
+              throw new Error('TENANT_ISOLATION_DENIED: Resource access denied.');
+            }
+          }
+        }
+      }
+    }
+  }
+
+  private findDataFactoryRecordingOwner(recordingId: string): string | null {
+    if (!this.dataFactory) return null;
+    const rawMap = (this.dataFactory as unknown as { recordings?: Map<string, { tenantId: string }> }).recordings;
+    const rec = rawMap?.get(recordingId);
+    return rec?.tenantId ?? null;
+  }
+
+  private acquireHeavySecurityRunSlot(tenantId: string, operationKey: string): void {
+    const key = `${tenantId}:${operationKey}`;
+    if (this.activeHeavyEvalTenants.has(key)) {
+      throw new Error('CONCURRENCY_LIMIT_EXCEEDED: Security evaluation already active for tenant.');
+    }
+    const now = Date.now();
+    const recent = (this.heavyEvalWindowTimestamps.get(key) ?? []).filter((ts) => now - ts < 60_000);
+    if (recent.length >= this.maxHeavySecurityRunsPerMinutePerTenant) {
+      throw new Error('RATE_LIMITED: Security evaluation rate limit exceeded for tenant.');
+    }
+    recent.push(now);
+    this.heavyEvalWindowTimestamps.set(key, recent);
+    this.activeHeavyEvalTenants.add(key);
+  }
+
+  private releaseHeavySecurityRunSlot(tenantId: string, operationKey: string): void {
+    this.activeHeavyEvalTenants.delete(`${tenantId}:${operationKey}`);
   }
 
   public getThreatModelAndPlaybooks() {
@@ -157,13 +239,27 @@ export class SpeechSecurityService {
     modelVersionId: string;
     authorizedOperatorContext: boolean;
   }): AdversarialRobustnessReport {
-    const report = AdversarialRobustnessEvaluator.runIsolatedDefensiveSuite({
-      tenantId: params.tenantId,
-      modelVersionId: params.modelVersionId,
-      authorizedOperatorContext: params.authorizedOperatorContext,
-    });
-    this.lastRobustnessReports.set(params.tenantId, report);
-    return report;
+    const cleanModelId = params.modelVersionId.trim();
+    if (
+      !cleanModelId ||
+      cleanModelId.length > 128 ||
+      /[\r\n\t\\]|\.\./.test(cleanModelId) ||
+      !/^[a-zA-Z0-9._:@/-]+$/.test(cleanModelId)
+    ) {
+      throw new Error('VALIDATION_ERROR: Invalid modelVersionId format.');
+    }
+    this.acquireHeavySecurityRunSlot(params.tenantId, 'robustness');
+    try {
+      const report = AdversarialRobustnessEvaluator.runIsolatedDefensiveSuite({
+        tenantId: params.tenantId,
+        modelVersionId: cleanModelId,
+        authorizedOperatorContext: params.authorizedOperatorContext,
+      });
+      this.lastRobustnessReports.set(params.tenantId, report);
+      return report;
+    } finally {
+      this.releaseHeavySecurityRunSlot(params.tenantId, 'robustness');
+    }
   }
 
   // ── 14D Prompt Injection & Tool Authorization ───────────────────────────────
@@ -174,6 +270,13 @@ export class SpeechSecurityService {
     rawTranscriptText: string;
     actorId: string;
   }): TranscriptTrustEnvelope {
+    this.assertRecordingBelongsToTenant({
+      tenantId: params.tenantId,
+      recordingId: params.recordingId,
+      actorId: params.actorId,
+      resourceType: 'transcript',
+    });
+    this.privacyEngine.registerRecordingOwner(params.tenantId, params.recordingId);
     const env = TranscriptTrustBoundaryGuard.wrapUntrustedTranscript({
       tenantId: params.tenantId,
       recordingId: params.recordingId,
@@ -294,6 +397,12 @@ export class SpeechSecurityService {
     config?: Partial<PiiRedactionConfig>;
     actorId: string;
   }): RedactedTranscriptDerivative {
+    this.assertRecordingBelongsToTenant({
+      tenantId: params.tenantId,
+      recordingId: params.recordingId,
+      actorId: params.actorId,
+      resourceType: 'transcript_derivative',
+    });
     return this.privacyEngine.createRedactedTranscriptDerivative(params);
   }
 
@@ -310,6 +419,12 @@ export class SpeechSecurityService {
     recordingId: string;
     actorId: string;
   }): DeletionCascadeReport {
+    this.assertRecordingBelongsToTenant({
+      tenantId: params.tenantId,
+      recordingId: params.recordingId,
+      actorId: params.actorId,
+      resourceType: 'recording_privacy_cascade',
+    });
     return this.privacyEngine.executeDeletionCascade(params);
   }
 
@@ -321,13 +436,25 @@ export class SpeechSecurityService {
     return this.privacyEngine.evaluateExternalProviderTransfer(params);
   }
 
-  public listSecurityEvents(tenantId: string): SecurityAuditEvent[] {
-    return this.privacyEngine.listSecurityEvents(tenantId);
+  public listSecurityEvents(
+    tenantId: string,
+    options?: { readonly limit?: number; readonly eventType?: SecurityAuditEvent['eventType'] }
+  ): SecurityAuditEvent[] {
+    return this.privacyEngine.listSecurityEvents(tenantId, options);
   }
 
   // ── Executable Red-Team Verification Matrix (Groups A..G) ───────────────────
 
   public runFullRedTeamVerificationSuite(tenantId = 'org_avapardaz_sandbox'): RedTeamGroupResult[] {
+    this.acquireHeavySecurityRunSlot(tenantId, 'red_team');
+    try {
+      return this.executeRedTeamGroups(tenantId);
+    } finally {
+      this.releaseHeavySecurityRunSlot(tenantId, 'red_team');
+    }
+  }
+
+  private executeRedTeamGroups(tenantId: string): RedTeamGroupResult[] {
     // Group A: Ingestion & SSRF
     const fakeExe = new Uint8Array([0x4d, 0x5a, 0x90, 0x00, 0x03, 0x00, 0x00, 0x00, 0x04, 0x00, 0x00, 0x00, 0x00, 0x00]);
     const a1 = this.inspectAudioPayload({

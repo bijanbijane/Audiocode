@@ -26,9 +26,7 @@ export class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoun
 
   public static getDerivedStateFromError(error: unknown): ErrorBoundaryState {
     const classified = classifyError(error, {
-      subsystem: 'UI_ERROR_BOUNDARY',
-      operation: 'render',
-      originalDataSafe: true,
+      subsystem: 'INTERNAL',
     });
     const failure = buildUserFacingFailure(classified, 'fa');
     return { hasError: true, failure };
@@ -36,15 +34,12 @@ export class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoun
 
   public componentDidCatch(error: Error, info: React.ErrorInfo): void {
     const classified = classifyError(error, {
-      subsystem: 'UI_ERROR_BOUNDARY',
-      operation: 'componentDidCatch',
-      originalDataSafe: true,
+      subsystem: 'INTERNAL',
     });
-    getSharedDiagnosticLogger().record({
+    getSharedDiagnosticLogger().log({
       severity: 'CRITICAL',
-      subsystem: 'UI_ERROR_BOUNDARY',
-      operation: 'react-render',
-      errorCode: classified.code,
+      subsystem: 'INTERNAL',
+      code: classified.code,
       message: classified.message,
       metadata: {
         componentStackLength: info.componentStack?.length ?? 0,
@@ -94,10 +89,10 @@ export class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoun
           {failure && (
             <div className="rounded border border-slate-200 dark:border-[#252F42] bg-slate-50 dark:bg-[#0E131D] px-3.5 py-2.5 text-xs space-y-1">
               <div className="font-medium text-emerald-700 dark:text-emerald-300">
-                {failure.dataSafetyMessage}
+                {failure.originalDataStatus}
               </div>
               <div className="text-slate-500 dark:text-slate-400 font-mono" dir="ltr">
-                {failure.errorCode}
+                {failure.code}
               </div>
             </div>
           )}

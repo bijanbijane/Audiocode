@@ -50,3 +50,34 @@
   - Preserve `\u200c` inside `PersianTextNormalizer.normalize()` / `normalizeTokenText()` so editorial UI, Layer-2 normalized text, and `FA-STRICT-V1` orthographic gates retain proper Persian typography.
   - Strip optional `\u200c` inside `AutomatedQualityGateRunner.computePersianWER()` exclusively when computing `normalizedWerPercent`, while keeping `rawWerPercent` strict against missing ZWNJ and Arabic characters.
 - **Consequences:** `EditQualityVsModelQualityEvaluator` accurately separates acoustic/lexical errors from harmless ZWNJ concatenation differences without degrading UI typography.
+
+---
+
+## ADR-006: Single Unified Processing Engine with Explicit `LOCAL` and `CLOUD` Execution Paths
+- **Status:** `ACCEPTED`
+- **Context:** Supporting optional cloud processing must not duplicate ASR/validation/normalization business logic or silently transmit user audio to remote endpoints.
+- **Decision:**
+  - Establish a single orchestrator (`src/processing-engine/UnifiedProcessingOrchestrator.ts`) enforcing one versioned contract (`UnifiedProcessingContract.ts`) across interchangeable `LocalExecutionAdapter` and `CloudExecutionAdapter` paths.
+  - Default strictly to `LOCAL` with explicit user opt-in (`ExecutionModePreferenceStore`) and fail-closed cloud consent/configuration checks.
+- **Consequences:** Identical schema, provenance, and normalization semantics across local and cloud execution without silent remote transmission.
+
+---
+
+## ADR-007: Centralized Fail-Closed Server-Side RBAC & Provenance (`AuthorizationPolicyEngine`)
+- **Status:** `ACCEPTED`
+- **Context:** Legacy gateway helpers (`SpeechSecurityGateway.resolveRole()` and `ModelFactoryGateway.resolveActorRole()`) fell back to `OWNER` on missing/invalid roles and accepted caller-supplied `x-avapardaz-role` headers.
+- **Decision:**
+  - Eliminate all client-supplied role fallbacks and HTTP header role pass-throughs in `server.ts`, `SpeechSecurityGateway.ts`, and `ModelFactoryGateway.ts`.
+  - Route all Security and Model Factory operations through `src/security/AuthorizationPolicyEngine.ts`, deriving principal identity and verified membership strictly from `PlatformControlPlaneService` with independent least-privilege scope verification and tenant-ownership checks prior to mutation.
+- **Consequences:** Eliminates privilege escalation, forged governance provenance, and cross-tenant mutations while keeping a single shared authorization engine.
+
+---
+
+## ADR-008: Race-Free Project Session Locking & Verified Recovery Checkpoints
+- **Status:** `ACCEPTED`
+- **Context:** `CrashRecoveryAndSessionLock` previously returned `true` when `navigator.locks` was absent, used `Math.random()` session IDs, built OPFS filenames directly from `projectId`, and blindly trusted `JSON.parse()` recovery payloads.
+- **Decision:**
+  - Use cryptographically generated session IDs, primary Web Locks with race-free same-tab ref-counting, atomic IndexedDB compare-and-set lease fallback with monotonic fencing tokens, and fail-closed `LOCK_UNAVAILABLE` when no exclusive backend exists.
+  - Persist versioned checkpoints (`envelopeVersion: 2`) with canonical SHA-256 digests, injective hex storage keys, deep runtime `ProjectDocument` schema validation, safe migration, per-project serialized interruption-safe writes, and explicit conflict/media verification before restore.
+- **Consequences:** Concurrent tabs cannot silently corrupt projects, interrupted writes preserve the last valid checkpoint, and corrupted/incompatible recovery files are surfaced explicitly without silent data loss.
+

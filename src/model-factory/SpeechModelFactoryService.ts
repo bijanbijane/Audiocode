@@ -529,6 +529,10 @@ export class SpeechModelFactoryService {
       throw new Error('MISSING_TOKENIZER_VERSION: Model registration requires an explicit tokenizer version.');
     }
 
+    if (params.parentModelVersionId) {
+      this.getModelVersion(params.tenantId, params.parentModelVersionId);
+    }
+
     let weights: LearnedAdapterWeights | undefined;
     let chosenCkpt: TrainingCheckpointRecord | undefined;
     if (params.checkpointId) {
@@ -747,6 +751,9 @@ export class SpeechModelFactoryService {
     });
 
     const candWeights = this.weightsStore.get(mv.modelVersionId) ?? null;
+    if (params.baselineModelVersionId) {
+      this.getModelVersion(params.tenantId, params.baselineModelVersionId);
+    }
     const baseWeights = params.baselineModelVersionId
       ? this.weightsStore.get(params.baselineModelVersionId) ?? null
       : null;
@@ -1009,9 +1016,29 @@ export class SpeechModelFactoryService {
     if (!['OWNER', 'ADMIN', 'DEVELOPER'].includes(params.approverRole)) {
       throw new Error(`RBAC_FORBIDDEN: Role ${params.approverRole} cannot approve model releases.`);
     }
+    const ALLOWED_APPROVAL_SCOPES = new Set([
+      'development',
+      'staging',
+      'staging_cpu_local',
+      'shadow',
+      'canary',
+      'canary_cpu_local',
+      'production',
+      'production_cpu_local',
+      'rollback_baseline',
+    ]);
+    if (!ALLOWED_APPROVAL_SCOPES.has(params.approvalScope)) {
+      throw new Error(`VALIDATION_ERROR: Unsupported approvalScope '${params.approvalScope}'.`);
+    }
     const mv = this.getModelVersion(params.tenantId, params.modelVersionId);
     const ev = this.getEvaluation(params.tenantId, params.evaluationId);
+    if (ev.modelVersionId !== mv.modelVersionId) {
+      throw new Error('VALIDATION_ERROR: Evaluation report does not match target modelVersionId.');
+    }
     const pkgBundle = this.packages.get(params.packageId);
+    if (pkgBundle && pkgBundle.packageRecord.tenantId !== params.tenantId) {
+      throw new Error('TENANT_ISOLATION_DENIED: Package does not belong to tenant.');
+    }
 
     if (mv.lifecycleStatus === 'RESEARCH' || mv.lifecycleStatus === 'BLOCKED' || mv.lifecycleStatus === 'REJECTED') {
       throw new Error(`LIFECYCLE_POLICY_DENIED: Model in state ${mv.lifecycleStatus} cannot be approved for release.`);
@@ -1026,7 +1053,12 @@ export class SpeechModelFactoryService {
     if (mandatoryGateFailed) {
       throw new Error('PROMOTION_GATE_FAILED: Evaluation failed mandatory quality/regression promotion gates.');
     }
-    if (!pkgBundle || pkgBundle.packageRecord.modelVersionId !== mv.modelVersionId || !pkgBundle.packageRecord.verifiedSafeToLoad) {
+    if (
+      !pkgBundle ||
+      pkgBundle.packageRecord.tenantId !== params.tenantId ||
+      pkgBundle.packageRecord.modelVersionId !== mv.modelVersionId ||
+      !pkgBundle.packageRecord.verifiedSafeToLoad
+    ) {
       throw new Error('PACKAGE_VALIDATION_REQUIRED: Model package missing or failed safe-load verification.');
     }
     if (!mv.licenseMetadata.commercialUseVerified) {
@@ -1076,8 +1108,29 @@ export class SpeechModelFactoryService {
   }): ModelDeploymentRecord {
     const mv = this.getModelVersion(params.tenantId, params.modelVersionId);
     const pkg = this.packages.get(params.packageId);
-    if (!pkg || pkg.packageRecord.tenantId !== params.tenantId || !pkg.packageRecord.verifiedSafeToLoad) {
-      throw new Error('PACKAGE_INVALID: Cannot deploy unpackaged or unverified model artifact.');
+    if (pkg && pkg.packageRecord.tenantId !== params.tenantId) {
+      throw new Error('TENANT_ISOLATION_DENIED: Package does not belong to tenant.');
+    }
+    if (
+      !pkg ||
+      pkg.packageRecord.tenantId !== params.tenantId ||
+      pkg.packageRecord.modelVersionId !== mv.modelVersionId ||
+      !pkg.packageRecord.verifiedSafeToLoad
+    ) {
+      throw new Error('PACKAGE_INVALID: Cannot deploy unpackaged, mismatched, or unverified model artifact.');
+    }
+
+    if (params.previousModelVersionId) {
+      this.getModelVersion(params.tenantId, params.previousModelVersionId);
+    }
+
+    if (
+      typeof params.trafficPercentage !== 'number' ||
+      !Number.isFinite(params.trafficPercentage) ||
+      params.trafficPercentage < 0 ||
+      params.trafficPercentage > 100
+    ) {
+      throw new Error('VALIDATION_ERROR: trafficPercentage must be a finite number between 0 and 100.');
     }
 
     const integrity = this.verifyModelArtifactIntegrity(params.tenantId, mv.modelVersionId);
@@ -1085,7 +1138,7 @@ export class SpeechModelFactoryService {
       throw new Error(`ARTIFACT_INTEGRITY_FAILED: ${integrity.reason}`);
     }
 
-    // Strict boundary: research/unapproved models CANNOT deploy to CANARY or PRODUCTION!
+    // Strict boundary: non-prod requires OWNER/ADMIN/DEVELOPER; STAGING/CANARY/PRODUCTION require OWNER/ADMIN + approval
     const isProdEnv = params.environment === 'CANARY' || params.environment === 'PRODUCTION' || params.environment === 'STAGING';
     if (isProdEnv) {
       if (!['OWNER', 'ADMIN'].includes(params.actorRole)) {
@@ -1095,6 +1148,8 @@ export class SpeechModelFactoryService {
       if (appr.length === 0) {
         throw new Error('UNAPPROVED_MODEL_DEPLOYMENT_DENIED: Human release approval is mandatory before Staging/Canary/Production deployment.');
       }
+    } else if (!['OWNER', 'ADMIN', 'DEVELOPER'].includes(params.actorRole)) {
+      throw new Error(`RBAC_FORBIDDEN: Role ${params.actorRole} cannot create deployments.`);
     }
 
     // Find current active deployment for fallback ref
@@ -1107,7 +1162,7 @@ export class SpeechModelFactoryService {
 
     const depId = `dep_${crypto.randomUUID().slice(0, 12)}`;
     const nowIso = new Date().toISOString();
-    const clampedPct = Math.max(0, Math.min(100, Math.round(params.trafficPercentage)));
+    const clampedPct = Math.round(params.trafficPercentage);
 
     const record: ModelDeploymentRecord = {
       deploymentId: depId,
@@ -1190,10 +1245,24 @@ export class SpeechModelFactoryService {
       throw new Error(`RBAC_FORBIDDEN: Role ${params.actorRole} cannot promote canary traffic.`);
     }
     const cur = this.getDeployment(params.tenantId, params.deploymentId);
+    if (cur.status !== 'ACTIVE') {
+      throw new Error(`LIFECYCLE_POLICY_DENIED: Cannot promote deployment in ${cur.status} state.`);
+    }
     if (cur.servingHealth !== 'HEALTHY') {
       throw new Error(`HEALTH_GATE_FAILED: Cannot promote deployment in ${cur.servingHealth} health state.`);
     }
-    const pct = Math.max(0, Math.min(100, Math.round(params.nextTrafficPercentage)));
+    if (
+      typeof params.nextTrafficPercentage !== 'number' ||
+      !Number.isFinite(params.nextTrafficPercentage) ||
+      params.nextTrafficPercentage < 1 ||
+      params.nextTrafficPercentage > 100
+    ) {
+      throw new Error('VALIDATION_ERROR: nextTrafficPercentage must be a finite number between 1 and 100.');
+    }
+    const pct = Math.round(params.nextTrafficPercentage);
+    if (pct < cur.trafficPercentage) {
+      throw new Error('VALIDATION_ERROR: Promotion trafficPercentage cannot decrease below current rollout traffic.');
+    }
     const mv = this.getModelVersion(params.tenantId, cur.modelVersionId);
     const promoted: ModelDeploymentRecord = {
       ...cur,
@@ -1229,13 +1298,20 @@ export class SpeechModelFactoryService {
     tenantId: string;
     deploymentId: string;
     actorId: string;
+    actorRole?: OrganizationRole;
     reason: string;
   }): {
     rolledBackDeployment: ModelDeploymentRecord;
     restoredModelVersion: ModelVersionRecord;
     preservedPinnedSessions: number;
   } {
+    if (params.actorRole && !['OWNER', 'ADMIN'].includes(params.actorRole)) {
+      throw new Error(`RBAC_FORBIDDEN: Role ${params.actorRole} cannot execute deployment rollback.`);
+    }
     const cur = this.getDeployment(params.tenantId, params.deploymentId);
+    if (cur.status === 'ROLLED_BACK') {
+      throw new Error('LIFECYCLE_POLICY_DENIED: Deployment is already rolled back.');
+    }
     if (!cur.previousModelVersionId) {
       throw new Error('NO_ROLLBACK_TARGET: No previous verified model version recorded for rollback.');
     }
@@ -1280,6 +1356,14 @@ export class SpeechModelFactoryService {
       restoredModelVersion: prevMv,
       preservedPinnedSessions: cur.activePinnedSessions,
     };
+  }
+
+  public listApprovals(tenantId: string, modelVersionId?: string): ModelApprovalRecord[] {
+    if (modelVersionId) {
+      this.getModelVersion(tenantId, modelVersionId);
+      return (this.approvals.get(modelVersionId) ?? []).filter((a) => a.tenantId === tenantId);
+    }
+    return [...this.approvals.values()].flat().filter((a) => a.tenantId === tenantId);
   }
 
   public getDeployment(tenantId: string, deploymentId: string): ModelDeploymentRecord {

@@ -28,7 +28,7 @@ import { computeSha256Hex } from '../security/LocalPrivacyPolicy';
 import {
   createDefaultSubsystemHealthRegistry,
   getSharedDiagnosticLogger,
-  SubsystemHealthReport,
+  SystemHealthSnapshot,
 } from '../reliability';
 import { getSharedMemoryBudgetManager } from '../runtime/memory/MemoryBudgetManager';
 import { LongSessionMonitor } from '../performance';
@@ -61,7 +61,7 @@ export const LifecycleManagementModal: React.FC<LifecycleManagementModalProps> =
 }) => {
   const isFa = workflowState.locale === 'fa';
   const [activeTab, setActiveTab] = useState<LifecycleModalTab>(initialTab);
-  const [healthReport, setHealthReport] = useState<SubsystemHealthReport | null>(null);
+  const [healthReport, setHealthReport] = useState<SystemHealthSnapshot | null>(null);
   const [runningHealth, setRunningHealth] = useState(false);
   const [offlineReport, setOfflineReport] = useState<ShellOfflineVerificationReport | null>(null);
   const [storageReport, setStorageReport] = useState<StorageBreakdownReport | null>(null);
@@ -92,7 +92,7 @@ export const LifecycleManagementModal: React.FC<LifecycleManagementModalProps> =
     if (!file) return;
     const bytes = new Uint8Array(await file.arrayBuffer());
     const sha = await computeSha256Hex(bytes);
-    const res = await modelManager.installModelFromStream({
+    const res = await modelManager.installOrUpdateFromStream({
       manifest: {
         modelId: file.name.replace(/\.onnx$/i, '') || 'local-persian-asr',
         modelVersion: '1.0.0-local',
@@ -103,7 +103,7 @@ export const LifecycleManagementModal: React.FC<LifecycleManagementModalProps> =
       },
       stream: {
         supportsRangeResume: false,
-        async fetchRange(start, end) {
+        async fetchRange(start: number, end: number) {
           return bytes.subarray(start, end);
         },
       },
@@ -157,10 +157,10 @@ export const LifecycleManagementModal: React.FC<LifecycleManagementModalProps> =
     setRunningHealth(true);
     try {
       const registry = createDefaultSubsystemHealthRegistry({
-        memoryBudgetManager: getSharedMemoryBudgetManager(),
+        memoryBudget: getSharedMemoryBudgetManager(),
         modelManager,
       });
-      const rep = await registry.runAll({ includeExpensive: true });
+      const rep = await registry.checkAll({ lightweightOnly: false });
       setHealthReport(rep);
     } finally {
       setRunningHealth(false);
@@ -192,12 +192,15 @@ export const LifecycleManagementModal: React.FC<LifecycleManagementModalProps> =
   };
 
   const handleExportProjectBackup = async () => {
+    const nowMs = Date.now();
     const envelope: PersistedProjectEnvelope = {
+      schemaVersion: AVAPARDAZ_VERSION_CONTRACT.projectSchemaVersion,
       projectSchemaVersion: AVAPARDAZ_VERSION_CONTRACT.projectSchemaVersion,
       appVersion: AVAPARDAZ_VERSION_CONTRACT.appVersion,
       projectId: workflowState.projectId,
       projectName: workflowState.projectName,
-      updatedAtMs: Date.now(),
+      createdAtMs: nowMs,
+      updatedAtMs: nowMs,
       sourceAudioRef: workflowState.sourceAudio
         ? {
             sourceAudioId: workflowState.sourceAudio.sourceAudioId,
@@ -206,7 +209,7 @@ export const LifecycleManagementModal: React.FC<LifecycleManagementModalProps> =
             sampleRate: workflowState.sourceAudio.sampleRate,
           }
         : null,
-      transcriptVersions: [...workflowState.transcriptVersions],
+      transcriptVersions: workflowState.transcriptVersions.map((v) => ({ ...v })),
       edlSnapshot: workflowState.edlSnapshot,
     };
 
@@ -248,7 +251,7 @@ export const LifecycleManagementModal: React.FC<LifecycleManagementModalProps> =
         pressureLevel: memSnap.pressureLevel,
       },
       longSessionMetrics: perfMonitor.getSnapshot(),
-      diagnosticEvents: logger.exportSanitizedDiagnostics(),
+      diagnosticEvents: logger.exportSanitizedBundle(),
     };
     setDiagJsonPreview(JSON.stringify(bundle, null, 2));
   };

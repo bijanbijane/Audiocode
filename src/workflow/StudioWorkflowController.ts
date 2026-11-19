@@ -626,10 +626,9 @@ export class StudioWorkflowController {
     // Revalidate existing EDL against the new transcript version so outdated proposals become STALE
     let updatedEdl = this.state.edlSnapshot;
     if (updatedEdl && this.state.sourceAudio) {
-      updatedEdl = EditDecisionEngine.revalidateAndMarkStale({
-        edl: updatedEdl,
-        currentSourceAudioHash: this.state.sourceAudio.sourceAudioHash,
-        currentTranscriptVersion: newVersion.versionId,
+      updatedEdl = EditDecisionEngine.revalidateAndMarkStale(updatedEdl, {
+        sourceAudioHash: this.state.sourceAudio.sourceAudioHash,
+        transcriptVersion: newVersion.versionId,
         nowMs,
       });
     }
@@ -680,7 +679,7 @@ export class StudioWorkflowController {
 
     try {
       const timedTokens = convertWordTokensToTimedTokens(params.wordTokens, params.trackId);
-      const eventResult = await SpeechEventEngine.analyze({
+      const eventResult = await SpeechEventEngine.analyzeRecording({
         trackId: params.trackId,
         sampleRate: params.sampleRate,
         totalSamples: params.pcmMono.length,
@@ -755,24 +754,16 @@ export class StudioWorkflowController {
 
     const result =
       params.action === 'APPROVE'
-        ? EditDecisionEngine.approveProposal({
-            edl,
-            proposalId: params.proposalId,
-            currentSourceAudioHash: src.sourceAudioHash,
-            currentTranscriptVersion: activeTr,
+        ? EditDecisionEngine.approveProposal(edl, params.proposalId, {
             reason: params.reason,
             nowMs: params.nowMs,
           })
         : params.action === 'REJECT'
-          ? EditDecisionEngine.rejectProposal({
-              edl,
-              proposalId: params.proposalId,
+          ? EditDecisionEngine.rejectProposal(edl, params.proposalId, {
               reason: params.reason,
               nowMs: params.nowMs,
             })
-          : EditDecisionEngine.requestReview({
-              edl,
-              proposalId: params.proposalId,
+          : EditDecisionEngine.requestReview(edl, params.proposalId, {
               reason: params.reason,
               nowMs: params.nowMs,
             });
@@ -803,14 +794,18 @@ export class StudioWorkflowController {
     const edl = this.state.edlSnapshot;
     if (!edl) return { ok: false, updatedProposal: null, failure: null };
 
-    const result = EditDecisionEngine.reviseProposalBoundaries({
+    const result = EditDecisionEngine.reviseProposalBoundaries(
       edl,
-      proposalId: params.proposalId,
-      newStartSample: params.newStartSample,
-      newEndSample: params.newEndSample,
-      reason: params.reason,
-      nowMs: params.nowMs,
-    });
+      params.proposalId,
+      {
+        startSample: params.newStartSample,
+        endSample: params.newEndSample,
+      },
+      {
+        reason: params.reason,
+        nowMs: params.nowMs,
+      },
+    );
 
     if (!result.ok) {
       return { ok: false, updatedProposal: null, failure: result.failure };
@@ -999,5 +994,5 @@ export function getSpeechEventsForSegment(
   startSec: number,
   endSec: number,
 ): SpeechEvent[] {
-  return events.filter((ev) => ev.timeRangeSec.endSec > startSec && ev.timeRangeSec.startSec < endSec);
+  return events.filter((ev) => ev.endSec > startSec && ev.startSec < endSec);
 }

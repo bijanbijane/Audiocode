@@ -495,12 +495,112 @@ export class PlatformControlPlaneService {
     return this.auditLogs.filter((l) => l.organizationId === organizationId);
   }
 
+  public createUser(params: {
+    id?: string;
+    email: string;
+    displayName: string;
+    accountStatus?: 'ACTIVE' | 'SUSPENDED' | 'DELETED';
+  }): PlatformUser {
+    const user: PlatformUser = {
+      id: params.id ?? `usr_${crypto.randomBytes(6).toString('hex')}`,
+      email: params.email.trim().toLowerCase(),
+      emailVerified: true,
+      displayName: params.displayName.trim() || params.email,
+      identityProvider: 'local_password',
+      mfaEnabled: true,
+      accountStatus: params.accountStatus ?? 'ACTIVE',
+      createdAtIso: new Date().toISOString(),
+    };
+    this.users.set(user.id, user);
+    return user;
+  }
+
+  public getUser(userId: string): PlatformUser | null {
+    return this.users.get(userId) ?? null;
+  }
+
+  public setUserAccountStatus(
+    userId: string,
+    accountStatus: 'ACTIVE' | 'SUSPENDED' | 'DELETED'
+  ): PlatformUser {
+    const user = this.users.get(userId);
+    if (!user) throw new Error('USER_NOT_FOUND');
+    user.accountStatus = accountStatus;
+    return user;
+  }
+
+  public setOrganizationStatus(
+    organizationId: string,
+    organizationStatus: 'ACTIVE' | 'RESTRICTED' | 'SUSPENDED'
+  ): PlatformOrganization {
+    const org = this.organizations.get(organizationId);
+    if (!org) throw new Error('ORGANIZATION_NOT_FOUND');
+    org.organizationStatus = organizationStatus;
+    return org;
+  }
+
+  public setOrganizationMembership(params: {
+    organizationId: string;
+    userId: string;
+    role: OrganizationRole;
+    membershipStatus?: 'ACTIVE' | 'REVOKED';
+  }): OrganizationMembership {
+    const org = this.organizations.get(params.organizationId);
+    if (!org) throw new Error('ORGANIZATION_NOT_FOUND');
+    const existing = this.memberships.find(
+      (m) => m.organizationId === params.organizationId && m.userId === params.userId
+    );
+    if (existing) {
+      existing.role = params.role;
+      existing.membershipStatus = params.membershipStatus ?? 'ACTIVE';
+      return existing;
+    }
+    const created: OrganizationMembership = {
+      organizationId: params.organizationId,
+      userId: params.userId,
+      role: params.role,
+      membershipStatus: params.membershipStatus ?? 'ACTIVE',
+      createdAtIso: new Date().toISOString(),
+    };
+    this.memberships.push(created);
+    return created;
+  }
+
+  public revokeOrganizationMembership(organizationId: string, userId: string): boolean {
+    const existing = this.memberships.find(
+      (m) => m.organizationId === organizationId && m.userId === userId
+    );
+    if (!existing) return false;
+    existing.membershipStatus = 'REVOKED';
+    return true;
+  }
+
+  public getOrganizationMembership(
+    organizationId: string,
+    userId: string
+  ): OrganizationMembership | null {
+    return (
+      this.memberships.find(
+        (m) => m.organizationId === organizationId && m.userId === userId
+      ) ?? null
+    );
+  }
+
+  public appendOrganizationMembershipRecord(record: OrganizationMembership): OrganizationMembership {
+    this.memberships.push({ ...record });
+    return record;
+  }
+
   public hasRolePermission(organizationId: string, userId: string, requiredPermission: string): boolean {
-    const membership = this.memberships.find(
+    const user = this.users.get(userId);
+    if (!user || user.accountStatus !== 'ACTIVE') return false;
+    const org = this.organizations.get(organizationId);
+    if (!org || org.organizationStatus !== 'ACTIVE') return false;
+    const activeMemberships = this.memberships.filter(
       (m) => m.organizationId === organizationId && m.userId === userId && m.membershipStatus === 'ACTIVE'
     );
-    if (!membership) return false;
-    const perms = ROLE_PERMISSION_MATRIX[membership.role] ?? [];
+    if (activeMemberships.length !== 1) return false;
+    const perms = ROLE_PERMISSION_MATRIX[activeMemberships[0].role] ?? [];
     return perms.includes('*') || perms.includes(requiredPermission);
   }
 
@@ -567,6 +667,18 @@ export class PlatformControlPlaneService {
     }
 
     inv.consumedAtIso = new Date().toISOString();
+    if (!this.users.has(params.userId)) {
+      this.users.set(params.userId, {
+        id: params.userId,
+        email: params.email.trim().toLowerCase(),
+        emailVerified: true,
+        displayName: params.email.trim().toLowerCase(),
+        identityProvider: 'local_password',
+        mfaEnabled: false,
+        accountStatus: 'ACTIVE',
+        createdAtIso: inv.consumedAtIso,
+      });
+    }
     const membership: OrganizationMembership = {
       organizationId: inv.organizationId,
       userId: params.userId,
@@ -585,6 +697,19 @@ export class PlatformControlPlaneService {
     ownerUserId?: string;
   }): PlatformOrganization {
     const now = new Date().toISOString();
+    const ownerUserId = params.ownerUserId ?? 'usr_studio_owner_01';
+    if (!this.users.has(ownerUserId)) {
+      this.users.set(ownerUserId, {
+        id: ownerUserId,
+        email: `${ownerUserId}@avapardaz.local`,
+        emailVerified: true,
+        displayName: ownerUserId,
+        identityProvider: 'local_password',
+        mfaEnabled: true,
+        accountStatus: 'ACTIVE',
+        createdAtIso: now,
+      });
+    }
     const org: PlatformOrganization = {
       id: `org_${crypto.randomBytes(6).toString('hex')}`,
       name: params.name.trim(),
@@ -601,7 +726,7 @@ export class PlatformControlPlaneService {
     this.organizations.set(org.id, org);
     this.memberships.push({
       organizationId: org.id,
-      userId: params.ownerUserId ?? 'usr_studio_owner_01',
+      userId: ownerUserId,
       role: 'OWNER',
       membershipStatus: 'ACTIVE',
       createdAtIso: now,
@@ -665,13 +790,17 @@ export class PlatformControlPlaneService {
     name: string;
     scopes: ApiCredentialScope[];
     expiresInDays?: number;
+    expiresAtIso?: string | null;
     allowedIpCidrs?: string[];
+    principalId?: string;
     actorUserId?: string;
   }): ApiCredentialIssuedResponse {
     const project = this.projects.get(params.projectId);
     if (!project || project.organizationId !== params.organizationId) {
       throw new Error('TENANT_ISOLATION_DENIED: Project does not belong to organization');
     }
+
+    const boundPrincipalId = params.principalId ?? params.actorUserId ?? 'usr_studio_owner_01';
 
     const prefix: 'asr_live' | 'asr_test' =
       project.environment === 'PRODUCTION' ? 'asr_live' : 'asr_test';
@@ -682,14 +811,17 @@ export class PlatformControlPlaneService {
 
     const nowIso = new Date().toISOString();
     const expiresAtIso =
-      params.expiresInDays && params.expiresInDays > 0
-        ? new Date(Date.now() + params.expiresInDays * 86400_000).toISOString()
-        : null;
+      params.expiresAtIso !== undefined
+        ? params.expiresAtIso
+        : params.expiresInDays && params.expiresInDays > 0
+          ? new Date(Date.now() + params.expiresInDays * 86400_000).toISOString()
+          : null;
 
     const record: ApiCredentialRecord = {
       id: `cred_${crypto.randomBytes(6).toString('hex')}`,
       organizationId: params.organizationId,
       projectId: params.projectId,
+      principalId: boundPrincipalId,
       name: params.name.trim() || 'Default API Credential',
       publicIdentifier: publicId,
       secretHash,
@@ -710,12 +842,12 @@ export class PlatformControlPlaneService {
     this.recordAuditLog({
       organizationId: params.organizationId,
       actorType: 'USER',
-      actorId: params.actorUserId ?? 'usr_studio_owner_01',
+      actorId: boundPrincipalId,
       action: 'API_KEY_ISSUED',
       resourceType: 'api_credential',
       resourceId: record.id,
       outcome: 'ALLOWED',
-      reason: `Prefix=${prefix}, PublicId=${publicId}, Scopes=${record.scopes.join(',')}`,
+      reason: `Prefix=${prefix}, PublicId=${publicId}, PrincipalId=${boundPrincipalId}, Scopes=${record.scopes.join(',')}`,
     });
 
     const { secretHash: _removed, ...sanitized } = record;
@@ -755,10 +887,11 @@ export class PlatformControlPlaneService {
     const replacement = this.issueApiKey({
       organizationId: existing.organizationId,
       projectId: existing.projectId,
+      principalId: existing.principalId,
       name: `${existing.name} (Rotated)`,
       scopes: existing.scopes,
       allowedIpCidrs: existing.allowedIpCidrs,
-      actorUserId: params.actorUserId,
+      actorUserId: params.actorUserId ?? existing.principalId,
     });
 
     this.recordAuditLog({
@@ -801,11 +934,15 @@ export class PlatformControlPlaneService {
 
   /**
    * Authenticates `asr_live_<publicId>_<secret>` / `asr_test_<publicId>_<secret>`,
-   * checks expiration, overlap revocation, immediate revocation, required scope, and rate limit.
+   * checks expiration, overlap revocation, immediate revocation, active organization/project,
+   * server-side principal & active organization membership (fail-closed, never inferring OWNER),
+   * required scope(s), and rate limit.
+   *
+   * Never leaks whether a credential ID, user ID, or organization exists.
    */
   public authenticateApiKeyRequest(params: {
     bearerToken: string;
-    requiredScope: ApiCredentialScope;
+    requiredScope?: ApiCredentialScope | readonly ApiCredentialScope[];
     requiredProjectId?: string;
     requiredEnvironment?: 'DEVELOPMENT' | 'STAGING' | 'PRODUCTION';
     nowMs?: number;
@@ -815,91 +952,84 @@ export class PlatformControlPlaneService {
         organization: PlatformOrganization;
         project: PlatformProject;
         credential: Omit<ApiCredentialRecord, 'secretHash'>;
+        principal: {
+          readonly principalId: string;
+          readonly role: OrganizationRole;
+          readonly organizationId: string;
+          readonly accountStatus: 'ACTIVE';
+          readonly membershipStatus: 'ACTIVE';
+        };
         rateLimit: { remaining: number; limit: number };
       }
     | {
         authenticated: false;
         httpStatus: number;
+        reasonCode:
+          | 'DENIED_UNAUTHENTICATED'
+          | 'DENIED_PRINCIPAL_DISABLED'
+          | 'DENIED_ORGANIZATION_INACTIVE'
+          | 'DENIED_MEMBERSHIP_MISSING_OR_REVOKED'
+          | 'DENIED_MEMBERSHIP_AMBIGUOUS'
+          | 'DENIED_INSUFFICIENT_CREDENTIAL_SCOPE'
+          | 'DENIED_TENANT_BOUNDARY_MISMATCH'
+          | 'DENIED_RATE_LIMITED';
         errorEnvelope: PlatformApiErrorEnvelope;
       } {
     const nowMs = params.nowMs ?? Date.now();
-    const token = params.bearerToken.replace(/^Bearer\s+/i, '').trim();
+    const rawHeader = typeof params.bearerToken === 'string' ? params.bearerToken : '';
+    const token = rawHeader.replace(/^Bearer\s+/i, '').trim();
     const match = token.match(/^(asr_live|asr_test)_([a-f0-9]+)_(.+)$/);
+    const uniformAuthFailure = (): {
+      authenticated: false;
+      httpStatus: number;
+      reasonCode: 'DENIED_UNAUTHENTICATED';
+      errorEnvelope: PlatformApiErrorEnvelope;
+    } => ({
+      authenticated: false,
+      httpStatus: 401,
+      reasonCode: 'DENIED_UNAUTHENTICATED',
+      errorEnvelope: buildPlatformErrorEnvelope({
+        code: 'AUTHENTICATION_FAILED',
+        message: 'Authentication failed.',
+      }),
+    });
+
     if (!match) {
-      return {
-        authenticated: false,
-        httpStatus: 401,
-        errorEnvelope: buildPlatformErrorEnvelope({
-          code: 'AUTHENTICATION_FAILED',
-          message: 'Malformed or missing API key.',
-        }),
-      };
+      return uniformAuthFailure();
     }
 
     const [, prefix, publicId, rawSecret] = match;
     const cred = this.credentialsByPublicId.get(publicId);
     if (!cred || cred.keyPrefix !== prefix) {
-      return {
-        authenticated: false,
-        httpStatus: 401,
-        errorEnvelope: buildPlatformErrorEnvelope({
-          code: 'AUTHENTICATION_FAILED',
-          message: 'Invalid API key identifier.',
-        }),
-      };
+      return uniformAuthFailure();
     }
 
     const computedHash = this.hashSecretWithPepper(rawSecret);
-    if (!crypto.timingSafeEqual(Buffer.from(computedHash), Buffer.from(cred.secretHash))) {
-      return {
-        authenticated: false,
-        httpStatus: 401,
-        errorEnvelope: buildPlatformErrorEnvelope({
-          code: 'AUTHENTICATION_FAILED',
-          message: 'Invalid API key secret.',
-        }),
-      };
+    const computedBuf = Buffer.from(computedHash);
+    const storedBuf = Buffer.from(cred.secretHash);
+    if (computedBuf.length !== storedBuf.length || !crypto.timingSafeEqual(computedBuf, storedBuf)) {
+      return uniformAuthFailure();
     }
 
     if (cred.revokedAtIso) {
-      return {
-        authenticated: false,
-        httpStatus: 401,
-        errorEnvelope: buildPlatformErrorEnvelope({
-          code: 'AUTHENTICATION_FAILED',
-          message: 'API key has been revoked.',
-        }),
-      };
+      return uniformAuthFailure();
     }
 
     if (cred.overlapRevokesAtIso && new Date(cred.overlapRevokesAtIso).getTime() <= nowMs) {
-      return {
-        authenticated: false,
-        httpStatus: 401,
-        errorEnvelope: buildPlatformErrorEnvelope({
-          code: 'AUTHENTICATION_FAILED',
-          message: 'Rotated API key overlap window has expired.',
-        }),
-      };
+      return uniformAuthFailure();
     }
 
     if (cred.expiresAtIso && new Date(cred.expiresAtIso).getTime() <= nowMs) {
-      return {
-        authenticated: false,
-        httpStatus: 401,
-        errorEnvelope: buildPlatformErrorEnvelope({
-          code: 'AUTHENTICATION_FAILED',
-          message: 'API key has expired.',
-        }),
-      };
+      return uniformAuthFailure();
     }
 
     const project = this.projects.get(cred.projectId);
     const org = this.organizations.get(cred.organizationId);
-    if (!project || !org) {
+    if (!project || !org || project.organizationId !== org.id) {
       return {
         authenticated: false,
         httpStatus: 403,
+        reasonCode: 'DENIED_TENANT_BOUNDARY_MISMATCH',
         errorEnvelope: buildPlatformErrorEnvelope({
           code: 'TENANT_ISOLATION_DENIED',
           message: 'Organization or project boundary invalid.',
@@ -907,10 +1037,71 @@ export class PlatformControlPlaneService {
       };
     }
 
+    if (org.organizationStatus !== 'ACTIVE' || project.status !== 'ACTIVE') {
+      return {
+        authenticated: false,
+        httpStatus: 403,
+        reasonCode: 'DENIED_ORGANIZATION_INACTIVE',
+        errorEnvelope: buildPlatformErrorEnvelope({
+          code: 'AUTHORIZATION_DENIED',
+          message: 'Authorization denied.',
+          details: { reasonCode: 'DENIED_ORGANIZATION_INACTIVE' },
+        }),
+      };
+    }
+
+    // Resolve bound server-side principal and single unambiguous active organization membership (fail-closed).
+    const user = this.users.get(cred.principalId);
+    if (!user || user.accountStatus !== 'ACTIVE') {
+      return {
+        authenticated: false,
+        httpStatus: 403,
+        reasonCode: 'DENIED_PRINCIPAL_DISABLED',
+        errorEnvelope: buildPlatformErrorEnvelope({
+          code: 'AUTHORIZATION_DENIED',
+          message: 'Authorization denied.',
+          details: { reasonCode: 'DENIED_PRINCIPAL_DISABLED' },
+        }),
+      };
+    }
+
+    const activeMemberships = this.memberships.filter(
+      (m) =>
+        m.organizationId === org.id &&
+        m.userId === user.id &&
+        m.membershipStatus === 'ACTIVE'
+    );
+    if (activeMemberships.length === 0) {
+      return {
+        authenticated: false,
+        httpStatus: 403,
+        reasonCode: 'DENIED_MEMBERSHIP_MISSING_OR_REVOKED',
+        errorEnvelope: buildPlatformErrorEnvelope({
+          code: 'AUTHORIZATION_DENIED',
+          message: 'Authorization denied.',
+          details: { reasonCode: 'DENIED_MEMBERSHIP_MISSING_OR_REVOKED' },
+        }),
+      };
+    }
+    if (activeMemberships.length > 1) {
+      return {
+        authenticated: false,
+        httpStatus: 403,
+        reasonCode: 'DENIED_MEMBERSHIP_AMBIGUOUS',
+        errorEnvelope: buildPlatformErrorEnvelope({
+          code: 'AUTHORIZATION_DENIED',
+          message: 'Authorization denied.',
+          details: { reasonCode: 'DENIED_MEMBERSHIP_AMBIGUOUS' },
+        }),
+      };
+    }
+    const membership = activeMemberships[0];
+
     if (params.requiredProjectId && params.requiredProjectId !== project.id) {
       return {
         authenticated: false,
         httpStatus: 403,
+        reasonCode: 'DENIED_TENANT_BOUNDARY_MISMATCH',
         errorEnvelope: buildPlatformErrorEnvelope({
           code: 'TENANT_ISOLATION_DENIED',
           message: 'Credential is not authorized for the target project.',
@@ -922,22 +1113,31 @@ export class PlatformControlPlaneService {
       return {
         authenticated: false,
         httpStatus: 403,
+        reasonCode: 'DENIED_INSUFFICIENT_CREDENTIAL_SCOPE',
         errorEnvelope: buildPlatformErrorEnvelope({
           code: 'INSUFFICIENT_SCOPE',
-          message: `Credential environment (${cred.environment}) cannot access ${params.requiredEnvironment} resources.`,
+          message: 'Credential environment is not permitted for this operation.',
         }),
       };
     }
 
-    if (!cred.scopes.includes(params.requiredScope)) {
-      return {
-        authenticated: false,
-        httpStatus: 403,
-        errorEnvelope: buildPlatformErrorEnvelope({
-          code: 'INSUFFICIENT_SCOPE',
-          message: `Missing required scope "${params.requiredScope}".`,
-        }),
-      };
+    if (params.requiredScope !== undefined) {
+      const acceptedScopes = Array.isArray(params.requiredScope)
+        ? params.requiredScope
+        : [params.requiredScope];
+      const hasScope = acceptedScopes.some((scope) => cred.scopes.includes(scope));
+      if (!hasScope) {
+        return {
+          authenticated: false,
+          httpStatus: 403,
+          reasonCode: 'DENIED_INSUFFICIENT_CREDENTIAL_SCOPE',
+          errorEnvelope: buildPlatformErrorEnvelope({
+            code: 'INSUFFICIENT_SCOPE',
+            message: 'Credential lacks required scope for this operation.',
+            details: { reasonCode: 'DENIED_INSUFFICIENT_CREDENTIAL_SCOPE' },
+          }),
+        };
+      }
     }
 
     // Scoped Token-Bucket Rate Limiter (per credential)
@@ -950,6 +1150,7 @@ export class PlatformControlPlaneService {
       return {
         authenticated: false,
         httpStatus: 429,
+        reasonCode: 'DENIED_RATE_LIMITED',
         errorEnvelope: buildPlatformErrorEnvelope({
           code: 'RATE_LIMITED',
           message: 'Rate limit exceeded for this API credential.',
@@ -966,6 +1167,13 @@ export class PlatformControlPlaneService {
       organization: org,
       project,
       credential: sanitizedCred,
+      principal: {
+        principalId: user.id,
+        role: membership.role,
+        organizationId: org.id,
+        accountStatus: 'ACTIVE',
+        membershipStatus: 'ACTIVE',
+      },
       rateLimit: { remaining: rate.remaining, limit: rate.limit },
     };
   }
