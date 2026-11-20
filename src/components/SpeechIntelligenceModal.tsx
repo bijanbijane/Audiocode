@@ -1,9 +1,11 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
-  Activity,
+  AlertTriangle,
   FileText,
   GitBranch,
+  KeyRound,
   Layers,
+  Lock,
   Play,
   Radio,
   Search,
@@ -44,11 +46,19 @@ interface SpeechIntelligenceModalProps {
   studioTranscriptSegments: Array<{ segmentId: string; startSec: number; endSec: number; text: string }>;
 }
 
+const SANDBOX_REQUESTED_WITH_HEADER = 'AvapardazSandbox';
+
 export const SpeechIntelligenceModal: React.FC<SpeechIntelligenceModalProps> = ({
   isOpen,
   onClose,
   studioTranscriptSegments,
 }) => {
+  const isDevEnvironment = Boolean(import.meta.env.DEV);
+
+  // Kept strictly in React component memory — NEVER persisted to localStorage, sessionStorage, cookies, or URL
+  const [sandboxAccessToken, setSandboxAccessToken] = useState('');
+  const [sandboxAuthState, setSandboxAuthState] = useState<'IDLE' | 'AUTHENTICATED' | 'UNAVAILABLE' | 'DENIED'>('IDLE');
+
   const [activeTab, setActiveTab] = useState<SpeechIntelTabId>('orchestrator_dag');
   const [capabilities, setCapabilities] = useState<CapabilityDescriptor[]>([]);
   const [connectors, setConnectors] = useState<EnterpriseConnectorRecord[]>([]);
@@ -79,6 +89,8 @@ export const SpeechIntelligenceModal: React.FC<SpeechIntelligenceModalProps> = (
   });
 
   const [isRunning, setIsRunning] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
   const [job, setJob] = useState<IntelligenceJobRecord | null>(null);
   const [artifacts, setArtifacts] = useState<SpeechArtifactRecord[]>([]);
   const [subtitlePreviewFormat, setSubtitlePreviewFormat] = useState<'srt' | 'vtt' | 'json' | 'txt'>('srt');
@@ -88,9 +100,105 @@ export const SpeechIntelligenceModal: React.FC<SpeechIntelligenceModalProps> = (
   const [realtimeStatusNote, setRealtimeStatusNote] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
+  // Clear secret token from memory whenever modal closes or unmounts
+  useEffect(() => {
+    if (!isOpen) {
+      setSandboxAccessToken('');
+      setSandboxAuthState('IDLE');
+      setConfirmDeleteOpen(false);
+    }
+    return () => {
+      setSandboxAccessToken('');
+    };
+  }, [isOpen]);
+
+  const handleCloseModal = useCallback(() => {
+    setSandboxAccessToken('');
+    setSandboxAuthState('IDLE');
+    setConfirmDeleteOpen(false);
+    onClose();
+  }, [onClose]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') handleCloseModal();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [isOpen, handleCloseModal]);
+
+  const sandboxFetch = useCallback(
+    async (
+      path: string,
+      options: {
+        method?: 'GET' | 'POST' | 'DELETE';
+        body?: unknown;
+        extraHeaders?: Record<string, string>;
+      } = {}
+    ): Promise<Response | null> => {
+      if (!isDevEnvironment) {
+        setSandboxAuthState('UNAVAILABLE');
+        setNotice('محیط سندباکس هوشمندی گفتار فقط در حالت توسعه در دسترس است و در محیط تولید غیرفعال است.');
+        return null;
+      }
+
+      const trimmedToken = sandboxAccessToken.trim();
+      if (!trimmedToken) {
+        setSandboxAuthState('DENIED');
+        setNotice('برای فراخوانی سرویس سندباکس توسعه، وارد کردن توکن دسترسی سندباکس (Bearer) الزامی است.');
+        return null;
+      }
+
+      const method = options.method ?? 'GET';
+      const headers: Record<string, string> = {
+        Authorization: `Bearer ${trimmedToken}`,
+        ...(options.extraHeaders ?? {}),
+      };
+      if (method !== 'GET') {
+        headers['X-Requested-With'] = SANDBOX_REQUESTED_WITH_HEADER;
+      }
+      if (options.body !== undefined) {
+        headers['Content-Type'] = 'application/json';
+      }
+
+      const res = await fetch(path, {
+        method,
+        headers,
+        credentials: 'same-origin',
+        cache: 'no-store',
+        ...(options.body !== undefined ? { body: JSON.stringify(options.body) } : {}),
+      });
+
+      if (res.status === 401) {
+        setSandboxAuthState('DENIED');
+        setNotice('احراز هویت ناموفق (۴۰۱): توکن دسترسی سندباکس نامعتبر یا منقضی است.');
+      } else if (res.status === 403) {
+        setSandboxAuthState('DENIED');
+        setNotice('دسترسی مسدود شد (۴۰۳): سیاست هم‌منشأ (Same-Origin) یا هدر امنیتی معتبر نیست.');
+      } else if (res.status === 404 || res.status === 503) {
+        setSandboxAuthState('UNAVAILABLE');
+        setNotice(
+          res.status === 404
+            ? 'سرویس سندباکس هوشمندی گفتار روی سرور غیرفعال است (۴۰۴).'
+            : 'سرویس سندباکس فعال است اما توکن سرور پیکربندی نشده یا ضعیف است (۵۰۳).'
+        );
+      } else if (res.status === 429) {
+        setNotice('محدودیت نرخ درخواست فعال شد (۴۲۹). لطفاً پس از چند لحظه مجدداً تلاش کنید.');
+      } else if (res.ok) {
+        setSandboxAuthState('AUTHENTICATED');
+      }
+
+      return res;
+    },
+    [isDevEnvironment, sandboxAccessToken]
+  );
+
   const loadOverview = async () => {
+    setNotice(null);
     try {
-      const res = await fetch('/api/v1/intelligence/sandbox/overview');
+      const res = await sandboxFetch('/api/v1/intelligence/sandbox/overview', { method: 'GET' });
+      if (!res) return;
       if (res.ok) {
         const data = (await res.json()) as {
           capabilities: CapabilityDescriptor[];
@@ -98,8 +206,7 @@ export const SpeechIntelligenceModal: React.FC<SpeechIntelligenceModalProps> = (
         };
         setCapabilities(data.capabilities);
         setConnectors(data.connectors);
-      } else {
-        setNotice(`خطا در بارگذاری نمای کلی هوش گفتار (کد ${res.status}).`);
+        setNotice('اتصال به سندباکس توسعه با موفقیت برقرار شد.');
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -107,22 +214,10 @@ export const SpeechIntelligenceModal: React.FC<SpeechIntelligenceModalProps> = (
     }
   };
 
-  useEffect(() => {
-    if (isOpen) {
-      void loadOverview();
-    }
-  }, [isOpen]);
-
-  useEffect(() => {
-    if (!isOpen) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [isOpen, onClose]);
-
   if (!isOpen) return null;
+
+  const hasToken = sandboxAccessToken.trim().length > 0;
+  const controlsDisabled = !isDevEnvironment || !hasToken;
 
   const toggleCapability = (capId: SpeechCapabilityId) => {
     setSelectedCaps((prev) =>
@@ -131,6 +226,7 @@ export const SpeechIntelligenceModal: React.FC<SpeechIntelligenceModalProps> = (
   };
 
   const handleRunDagJob = async () => {
+    if (controlsDisabled || isRunning) return;
     setIsRunning(true);
     setNotice(null);
     try {
@@ -138,16 +234,16 @@ export const SpeechIntelligenceModal: React.FC<SpeechIntelligenceModalProps> = (
         studioTranscriptSegments.length > 0
           ? studioTranscriptSegments.slice(0, 8)
           : undefined;
-      const res = await fetch('/api/v1/intelligence/sandbox/run-dag', {
+      const res = await sandboxFetch('/api/v1/intelligence/sandbox/run-dag', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
+        body: {
           recordingId,
           segments: segmentsPayload,
           capabilities: selectedCaps,
           consent,
-        }),
+        },
       });
+      if (!res) return;
       if (res.ok) {
         const data = (await res.json()) as {
           job: IntelligenceJobRecord;
@@ -158,9 +254,9 @@ export const SpeechIntelligenceModal: React.FC<SpeechIntelligenceModalProps> = (
         setNotice(
           `پایپ‌لاین DAG با وضعیت ${data.job.status} اجرا شد (${data.job.completedCapabilities.length} موفق / ${data.job.failedCapabilities.length} مسدود یا ناموفق).`
         );
-      } else {
-        const err = (await res.json().catch(() => ({}))) as { message?: string };
-        setNotice(`خطا در اجرای پایپ‌لاین DAG (کد ${res.status}): ${err.message ?? 'پاسخ نامعتبر'}`);
+      } else if (![401, 403, 404, 429, 503].includes(res.status)) {
+        const err = (await res.json().catch(() => ({}))) as { error?: { message?: string }; message?: string };
+        setNotice(`خطا در اجرای پایپ‌لاین DAG (کد ${res.status}): ${err.error?.message ?? err.message ?? 'پاسخ نامعتبر'}`);
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -171,16 +267,18 @@ export const SpeechIntelligenceModal: React.FC<SpeechIntelligenceModalProps> = (
   };
 
   const handleSemanticSearch = async () => {
+    if (controlsDisabled) return;
+    setNotice(null);
     try {
-      const res = await fetch('/api/v1/intelligence/sandbox/search', {
+      const res = await sandboxFetch('/api/v1/intelligence/sandbox/search', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ recordingId, query: searchQuery }),
+        body: { recordingId, query: searchQuery },
       });
+      if (!res) return;
       if (res.ok) {
         const data = (await res.json()) as { results: SemanticSearchResultItem[] };
         setSearchResults(data.results);
-      } else {
+      } else if (![401, 403, 404, 429, 503].includes(res.status)) {
         setNotice(`خطا در جستجوی معنایی (کد ${res.status}).`);
       }
     } catch (err) {
@@ -189,30 +287,48 @@ export const SpeechIntelligenceModal: React.FC<SpeechIntelligenceModalProps> = (
     }
   };
 
-  const handleCascadeDelete = async () => {
+  const handleConfirmedCascadeDelete = async () => {
+    if (controlsDisabled || isDeleting) return;
+    setIsDeleting(true);
+    setNotice(null);
     try {
-      const res = await fetch(`/api/v1/intelligence/sandbox/recordings/${encodeURIComponent(recordingId)}`, {
-        method: 'DELETE',
-      });
+      const trimmedRecordingId = recordingId.trim();
+      const res = await sandboxFetch(
+        `/api/v1/intelligence/sandbox/recordings/${encodeURIComponent(trimmedRecordingId)}`,
+        {
+          method: 'DELETE',
+          extraHeaders: {
+            'X-Confirm-Recording-Id': trimmedRecordingId,
+          },
+        }
+      );
+      if (!res) return;
       if (res.ok) {
         const data = (await res.json()) as { deletedArtifactsCount: number; deletedVectorsCount: number };
         setArtifacts([]);
         setSearchResults([]);
+        setConfirmDeleteOpen(false);
         setNotice(
           `حذف زنجیره‌ای انجام شد: ${data.deletedArtifactsCount} آرتیفکت مشتق و ${data.deletedVectorsCount} بردار جستجو با حفظ جداسازی مستأجر پاک شدند.`
         );
-      } else {
-        setNotice(`خطا در حذف زنجیره‌ای آرتیفکت‌ها (کد ${res.status}).`);
+      } else if (![401, 403, 404, 429, 503].includes(res.status)) {
+        const err = (await res.json().catch(() => ({}))) as { error?: { message?: string } };
+        setNotice(`خطا در حذف زنجیره‌ای آرتیفکت‌ها (کد ${res.status}): ${err.error?.message ?? ''}`);
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       setNotice(`خطا در حذف زنجیره‌ای: ${msg}`);
+    } finally {
+      setIsDeleting(false);
     }
   };
 
   const handleRunRealtimeSim = async () => {
+    if (controlsDisabled) return;
+    setNotice(null);
     try {
-      const res = await fetch('/api/v1/intelligence/sandbox/realtime-sim', { method: 'POST' });
+      const res = await sandboxFetch('/api/v1/intelligence/sandbox/realtime-sim', { method: 'POST' });
+      if (!res) return;
       if (res.ok) {
         const data = (await res.json()) as {
           events: RealtimeIntelligenceEvent[];
@@ -223,7 +339,7 @@ export const SpeechIntelligenceModal: React.FC<SpeechIntelligenceModalProps> = (
         setRealtimeStatusNote(
           `جریان اصلی ASR پایدار ماند (${data.asrStreamAliveThroughout ? 'ACTIVE' : 'BROKEN'}) · ایزوله‌سازی Backpressure روی تاخیر مازاد: ${data.backpressureTriggeredOnOverload ? 'فعال شد' : 'خیر'}`
         );
-      } else {
+      } else if (![401, 403, 404, 429, 503].includes(res.status)) {
         setNotice(`خطا در شبیه‌سازی جریان زنده (کد ${res.status}).`);
       }
     } catch (err) {
@@ -272,20 +388,73 @@ export const SpeechIntelligenceModal: React.FC<SpeechIntelligenceModalProps> = (
                 مجموعه هوشمندی گفتار و یکپارچه‌سازی سازمانی (فاز ۱۱)
               </h2>
               <p className="text-xs text-slate-400 truncate">
-                معماری ماژولار بر پایه هسته تغییرناپذیر ASR · شواهد مستند به بازه زمانی · بدون شناسایی بیومتریک هویت
+                معماری ماژولار بر پایه هسته تغییرناپذیر ASR · شواهد مستند به بازه زمانی · دسترسی سندباکس احراز هویت‌شده
               </p>
             </div>
           </div>
 
           <button
             type="button"
-            onClick={onClose}
+            onClick={handleCloseModal}
             aria-label="بستن پنجره هوشمندی گفتار"
             className="p-1.5 rounded border border-[#252F42] text-slate-300 hover:bg-[#1E2738] cursor-pointer shrink-0"
           >
             <X className="w-4 h-4" />
           </button>
         </header>
+
+        {/* Sandbox Security Gate Banner */}
+        <div className="px-5 py-3 border-b border-[#252F42] bg-[#0C121D] text-xs">
+          {!isDevEnvironment ? (
+            <div
+              data-testid="sandbox-production-disabled-notice"
+              className="flex items-center gap-2 text-amber-300"
+            >
+              <Lock className="w-4 h-4 shrink-0" aria-hidden="true" />
+              <span>
+                سندباکس هوشمندی گفتار صرفاً برای محیط توسعه (Development) است و در نسخه تولید غیرفعال شده است. برای عملیات واقعی از مسیر احراز هویت‌شده <code dir="ltr" className="font-mono">/v1/*</code> استفاده کنید.
+              </span>
+            </div>
+          ) : (
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div className="flex items-center gap-2 text-slate-300">
+                <KeyRound className="w-4 h-4 text-emerald-400 shrink-0" aria-hidden="true" />
+                <label htmlFor="sandbox-access-token-input" className="font-semibold whitespace-nowrap">
+                  Development Sandbox Access Token
+                </label>
+                <span className="text-slate-400 hidden lg:inline">
+                  (فقط در حافظه موقت؛ پس از بستن پنجره پاک می‌شود)
+                </span>
+              </div>
+              <div className="flex items-center gap-2 flex-1 max-w-xl justify-end">
+                <input
+                  id="sandbox-access-token-input"
+                  data-testid="input-sandbox-access-token"
+                  type="password"
+                  autoComplete="off"
+                  spellCheck={false}
+                  value={sandboxAccessToken}
+                  onChange={(e) => {
+                    setSandboxAccessToken(e.target.value);
+                    if (sandboxAuthState !== 'IDLE') setSandboxAuthState('IDLE');
+                  }}
+                  placeholder="INTELLIGENCE_SANDBOX_TOKEN (حداقل ۳۲ بایت)"
+                  dir="ltr"
+                  className="flex-1 min-w-[220px] px-2.5 py-1.5 rounded border border-[#252F42] bg-[#0B0F17] font-mono text-xs text-slate-100"
+                />
+                <button
+                  type="button"
+                  data-testid="btn-connect-sandbox"
+                  disabled={!hasToken}
+                  onClick={loadOverview}
+                  className="px-3 py-1.5 rounded bg-emerald-400 text-slate-950 font-semibold hover:bg-emerald-300 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed whitespace-nowrap"
+                >
+                  اتصال و بارگذاری نمای کلی
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
 
         {/* Sub-navigation */}
         <nav
@@ -324,7 +493,10 @@ export const SpeechIntelligenceModal: React.FC<SpeechIntelligenceModalProps> = (
         </nav>
 
         {notice && (
-          <div className="mx-5 mt-3 px-3.5 py-2 rounded border border-emerald-500/30 bg-emerald-500/10 text-xs text-emerald-200 flex items-center justify-between">
+          <div
+            data-testid="sandbox-notice"
+            className="mx-5 mt-3 px-3.5 py-2 rounded border border-emerald-500/30 bg-emerald-500/10 text-xs text-emerald-200 flex items-center justify-between"
+          >
             <span>{notice}</span>
             <button type="button" onClick={() => setNotice(null)} className="text-emerald-300 cursor-pointer">
               بستن
@@ -357,9 +529,9 @@ export const SpeechIntelligenceModal: React.FC<SpeechIntelligenceModalProps> = (
                     <button
                       type="button"
                       data-testid="btn-run-intel-dag"
-                      disabled={isRunning}
+                      disabled={controlsDisabled || isRunning}
                       onClick={handleRunDagJob}
-                      className="inline-flex items-center gap-1.5 px-4 py-2 rounded bg-emerald-400 text-slate-950 font-semibold hover:bg-emerald-300 cursor-pointer disabled:opacity-50"
+                      className="inline-flex items-center gap-1.5 px-4 py-2 rounded bg-emerald-400 text-slate-950 font-semibold hover:bg-emerald-300 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                     >
                       <Play className="w-3.5 h-3.5" aria-hidden="true" />
                       <span>{isRunning ? 'در حال اجرا...' : 'اجرای پایپ‌لاین هوشمندی'}</span>
@@ -426,29 +598,39 @@ export const SpeechIntelligenceModal: React.FC<SpeechIntelligenceModalProps> = (
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-[#252F42] bg-[#0B0F17]">
-                    {capabilities.map((cap) => (
-                      <tr key={cap.capabilityId}>
-                        <td className="p-2.5">
-                          <input
-                            type="checkbox"
-                            aria-label={`انتخاب ${cap.capabilityId}`}
-                            checked={selectedCaps.includes(cap.capabilityId)}
-                            onChange={() => toggleCapability(cap.capabilityId)}
-                          />
+                    {capabilities.length === 0 ? (
+                      <tr>
+                        <td colSpan={6} className="p-4 text-center text-slate-400">
+                          {isDevEnvironment
+                            ? 'برای مشاهده فهرست قابلیت‌ها، توکن سندباکس را وارد کرده و دکمه «اتصال و بارگذاری نمای کلی» را بزنید.'
+                            : 'نمای سندباکس در محیط تولید غیرفعال است.'}
                         </td>
-                        <td className="p-2.5 font-mono text-emerald-300">{cap.capabilityId}</td>
-                        <td className="p-2.5 font-mono">
-                          <span className={cap.qualityStatus === 'VERIFIED' ? 'text-emerald-400' : 'text-amber-300'}>
-                            {cap.qualityStatus}
-                          </span>
-                        </td>
-                        <td className="p-2.5 font-mono text-slate-300">{cap.workerPool}</td>
-                        <td className="p-2.5 font-mono text-slate-400">
-                          {cap.dependencies.length > 0 ? cap.dependencies.join(', ') : '—'}
-                        </td>
-                        <td className="p-2.5 font-mono text-sky-300">{cap.availabilityStatus}</td>
                       </tr>
-                    ))}
+                    ) : (
+                      capabilities.map((cap) => (
+                        <tr key={cap.capabilityId}>
+                          <td className="p-2.5">
+                            <input
+                              type="checkbox"
+                              aria-label={`انتخاب ${cap.capabilityId}`}
+                              checked={selectedCaps.includes(cap.capabilityId)}
+                              onChange={() => toggleCapability(cap.capabilityId)}
+                            />
+                          </td>
+                          <td className="p-2.5 font-mono text-emerald-300">{cap.capabilityId}</td>
+                          <td className="p-2.5 font-mono">
+                            <span className={cap.qualityStatus === 'VERIFIED' ? 'text-emerald-400' : 'text-amber-300'}>
+                              {cap.qualityStatus}
+                            </span>
+                          </td>
+                          <td className="p-2.5 font-mono text-slate-300">{cap.workerPool}</td>
+                          <td className="p-2.5 font-mono text-slate-400">
+                            {cap.dependencies.length > 0 ? cap.dependencies.join(', ') : '—'}
+                          </td>
+                          <td className="p-2.5 font-mono text-sky-300">{cap.availabilityStatus}</td>
+                        </tr>
+                      ))
+                    )}
                   </tbody>
                 </table>
               </div>
@@ -673,13 +855,53 @@ export const SpeechIntelligenceModal: React.FC<SpeechIntelligenceModalProps> = (
                   <button
                     type="button"
                     data-testid="btn-cascade-delete-rec"
-                    onClick={handleCascadeDelete}
-                    className="inline-flex items-center gap-1 px-3 py-1.5 rounded border border-rose-500/40 bg-rose-500/15 text-rose-200 cursor-pointer"
+                    disabled={controlsDisabled || isDeleting}
+                    onClick={() => setConfirmDeleteOpen(true)}
+                    className="inline-flex items-center gap-1 px-3 py-1.5 rounded border border-rose-500/40 bg-rose-500/15 text-rose-200 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
                   >
                     <Trash2 className="w-3.5 h-3.5" aria-hidden="true" />
                     <span>حذف زنجیره‌ای ضبط و ایندکس</span>
                   </button>
                 </div>
+
+                {confirmDeleteOpen && (
+                  <div
+                    data-testid="confirm-cascade-delete-box"
+                    className="p-3 rounded border border-rose-500/50 bg-rose-950/30 flex flex-wrap items-center justify-between gap-3"
+                  >
+                    <div className="flex items-center gap-2 text-rose-200">
+                      <AlertTriangle className="w-4 h-4 shrink-0" aria-hidden="true" />
+                      <span>
+                        آیا از حذف زنجیره‌ای تمام آرتیفکت‌ها و بردارهای معنایی برای شناسه{' '}
+                        <code dir="ltr" className="font-mono text-rose-100 px-1 py-0.5 rounded bg-rose-900/50">
+                          {recordingId.trim()}
+                        </code>{' '}
+                        اطمینان دارید؟
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        data-testid="btn-cancel-cascade-delete"
+                        disabled={isDeleting}
+                        onClick={() => setConfirmDeleteOpen(false)}
+                        className="px-3 py-1 rounded border border-[#252F42] bg-[#0B0F17] text-slate-300 cursor-pointer"
+                      >
+                        انصراف
+                      </button>
+                      <button
+                        type="button"
+                        data-testid="btn-confirm-cascade-delete"
+                        disabled={isDeleting}
+                        onClick={handleConfirmedCascadeDelete}
+                        className="px-3 py-1 rounded bg-rose-600 text-white font-semibold hover:bg-rose-500 cursor-pointer disabled:opacity-50"
+                      >
+                        {isDeleting ? 'در حال حذف...' : 'تأیید حذف دائمی'}
+                      </button>
+                    </div>
+                  </div>
+                )}
+
                 <div className="flex gap-2">
                   <input
                     type="text"
@@ -692,8 +914,9 @@ export const SpeechIntelligenceModal: React.FC<SpeechIntelligenceModalProps> = (
                   <button
                     type="button"
                     data-testid="btn-run-semantic-search"
+                    disabled={controlsDisabled}
                     onClick={handleSemanticSearch}
-                    className="px-4 py-2 rounded bg-emerald-400 text-slate-950 font-semibold cursor-pointer"
+                    className="px-4 py-2 rounded bg-emerald-400 text-slate-950 font-semibold cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
                   >
                     جستجو
                   </button>
@@ -727,8 +950,9 @@ export const SpeechIntelligenceModal: React.FC<SpeechIntelligenceModalProps> = (
                   <button
                     type="button"
                     data-testid="btn-run-realtime-intel"
+                    disabled={controlsDisabled}
                     onClick={handleRunRealtimeSim}
-                    className="px-4 py-2 rounded bg-emerald-400 text-slate-950 font-semibold cursor-pointer"
+                    className="px-4 py-2 rounded bg-emerald-400 text-slate-950 font-semibold cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
                   >
                     اجرای تست رویداد زنده و Backpressure
                   </button>

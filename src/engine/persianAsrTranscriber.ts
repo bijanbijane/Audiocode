@@ -475,15 +475,30 @@ export function alignPersianScriptToAudio(params: {
   return { tokens, recommendations };
 }
 
+export const MAX_MONO_16K_WAV_SAMPLES = 16_000 * 120;
+
 /**
- * Encodes a 16kHz Mono Float32Array into a compact 16-bit PCM WAV Base64 payload
- * for fast server-side ASR transcription when requested.
+ * Encodes a strictly validated 16 kHz Mono Float32Array (<= 120 seconds) into
+ * binary 16-bit PCM RIFF/WAVE bytes (`Uint8Array`) without Base64 expansion.
  */
-export function encodeMono16kWavBase64(pcm16k: Float32Array, sampleRate = 16_000): string {
-  const safeSampleRate =
-    Number.isFinite(sampleRate) && sampleRate > 0 ? Math.round(sampleRate) : 16_000;
+export function encodeMono16kWavBytes(pcm16k: Float32Array, sampleRate = 16_000): Uint8Array {
+  if (!Number.isFinite(sampleRate) || Math.round(sampleRate) !== 16_000) {
+    throw new RangeError(
+      `encodeMono16kWavBytes requires sampleRate === 16000 (received ${String(sampleRate)}).`,
+    );
+  }
+  if (!(pcm16k instanceof Float32Array) || pcm16k.length === 0) {
+    throw new RangeError('encodeMono16kWavBytes requires a non-empty Float32Array.');
+  }
+  if (pcm16k.length > MAX_MONO_16K_WAV_SAMPLES) {
+    throw new RangeError(
+      `encodeMono16kWavBytes sample count (${pcm16k.length}) exceeds 120-second limit (${MAX_MONO_16K_WAV_SAMPLES}).`,
+    );
+  }
+
   const numSamples = pcm16k.length;
-  const buffer = new ArrayBuffer(44 + numSamples * 2);
+  const dataBytes = numSamples * 2;
+  const buffer = new ArrayBuffer(44 + dataBytes);
   const view = new DataView(buffer);
 
   const writeStr = (offset: number, str: string) => {
@@ -493,29 +508,87 @@ export function encodeMono16kWavBase64(pcm16k: Float32Array, sampleRate = 16_000
   };
 
   writeStr(0, 'RIFF');
-  view.setUint32(4, 36 + numSamples * 2, true);
+  view.setUint32(4, 36 + dataBytes, true);
   writeStr(8, 'WAVE');
   writeStr(12, 'fmt ');
   view.setUint32(16, 16, true);
-  view.setUint16(20, 1, true); // PCM
+  view.setUint16(20, 1, true); // PCM16
   view.setUint16(22, 1, true); // Mono
-  view.setUint32(24, safeSampleRate, true);
-  view.setUint32(28, safeSampleRate * 2, true);
-  view.setUint16(32, 2, true);
-  view.setUint16(34, 16, true);
+  view.setUint32(24, 16_000, true);
+  view.setUint32(28, 32_000, true); // byteRate = 16000 * 1 * 2
+  view.setUint16(32, 2, true); // blockAlign = 2
+  view.setUint16(34, 16, true); // bitsPerSample = 16
   writeStr(36, 'data');
-  view.setUint32(40, numSamples * 2, true);
+  view.setUint32(40, dataBytes, true);
 
   let offset = 44;
   for (let i = 0; i < numSamples; i++) {
     const raw = pcm16k[i];
     const safeSample = Number.isFinite(raw) ? raw : 0;
     const clamped = Math.max(-1, Math.min(1, safeSample));
-    view.setInt16(offset, clamped < 0 ? Math.round(clamped * 0x8000) : Math.round(clamped * 0x7fff), true);
+    view.setInt16(
+      offset,
+      clamped < 0 ? Math.round(clamped * 0x8000) : Math.round(clamped * 0x7fff),
+      true,
+    );
     offset += 2;
   }
 
-  const bytes = new Uint8Array(buffer);
+  return new Uint8Array(buffer);
+}
+
+/**
+ * Compatibility wrapper returning Base64-encoded 16kHz Mono PCM16 WAV.
+ * New Studio Cloud ASR paths must use `encodeMono16kWavBytes()` and binary `audio/wav` transport.
+ */
+export function encodeMono16kWavBase64(pcm16k: Float32Array, sampleRate = 16_000): string {
+  let bytes: Uint8Array;
+  if (
+    Number.isFinite(sampleRate) &&
+    Math.round(sampleRate) === 16_000 &&
+    pcm16k.length > 0 &&
+    pcm16k.length <= MAX_MONO_16K_WAV_SAMPLES
+  ) {
+    bytes = encodeMono16kWavBytes(pcm16k, 16_000);
+  } else {
+    const safeSampleRate =
+      Number.isFinite(sampleRate) && sampleRate > 0 ? Math.round(sampleRate) : 16_000;
+    const numSamples = pcm16k.length;
+    const buffer = new ArrayBuffer(44 + numSamples * 2);
+    const view = new DataView(buffer);
+    const writeStr = (offset: number, str: string) => {
+      for (let i = 0; i < str.length; i++) {
+        view.setUint8(offset + i, str.charCodeAt(i));
+      }
+    };
+    writeStr(0, 'RIFF');
+    view.setUint32(4, 36 + numSamples * 2, true);
+    writeStr(8, 'WAVE');
+    writeStr(12, 'fmt ');
+    view.setUint32(16, 16, true);
+    view.setUint16(20, 1, true);
+    view.setUint16(22, 1, true);
+    view.setUint32(24, safeSampleRate, true);
+    view.setUint32(28, safeSampleRate * 2, true);
+    view.setUint16(32, 2, true);
+    view.setUint16(34, 16, true);
+    writeStr(36, 'data');
+    view.setUint32(40, numSamples * 2, true);
+    let offset = 44;
+    for (let i = 0; i < numSamples; i++) {
+      const raw = pcm16k[i];
+      const safeSample = Number.isFinite(raw) ? raw : 0;
+      const clamped = Math.max(-1, Math.min(1, safeSample));
+      view.setInt16(
+        offset,
+        clamped < 0 ? Math.round(clamped * 0x8000) : Math.round(clamped * 0x7fff),
+        true,
+      );
+      offset += 2;
+    }
+    bytes = new Uint8Array(buffer);
+  }
+
   let binary = '';
   const chunkSize = 0x4000;
   for (let i = 0; i < bytes.length; i += chunkSize) {
@@ -523,7 +596,7 @@ export function encodeMono16kWavBase64(pcm16k: Float32Array, sampleRate = 16_000
   }
   return typeof btoa === 'function'
     ? btoa(binary)
-    : Buffer.from(buffer).toString('base64');
+    : Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength).toString('base64');
 }
 
 /**

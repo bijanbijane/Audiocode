@@ -57,9 +57,11 @@ export class UnifiedOnnxPersianAsrEngine implements AsrModelRunnerAdapter {
   private readonly whisperIdToToken: ReadonlyMap<number, string>;
   private readonly whisperSpecial: WhisperSpecialTokens;
 
+  public readonly architecture: AsrArchitectureKind;
+
   constructor(
     private readonly ortProvider: OrtRuntimeProvider,
-    private readonly architecture: AsrArchitectureKind,
+    architecture: AsrArchitectureKind,
     config: {
       modelId: string;
       modelVersion: string;
@@ -69,6 +71,7 @@ export class UnifiedOnnxPersianAsrEngine implements AsrModelRunnerAdapter {
       persianLmScorer?: PersianLanguageModelScorer;
     },
   ) {
+    this.architecture = architecture;
     this.modelId = config.modelId;
     this.modelVersion = config.modelVersion;
     this.featureExtractor = new OnnxPersianAsrAndVadAdapter(
@@ -79,7 +82,7 @@ export class UnifiedOnnxPersianAsrEngine implements AsrModelRunnerAdapter {
     this.whisperByteDecoderMap = decoderMap;
     this.whisperByteEncoderMap = encoderMap;
 
-    if (architecture === 'FASTCONFORMER_CTC' && config.ctcVocabulary) {
+    if (architecture === 'FASTCONFORMER_CTC' && config.ctcVocabulary && config.ctcVocabulary.length > 0) {
       this.ctcDecoder = new PersianCtcPrefixBeamSearchDecoder(
         config.ctcVocabulary,
         0,
@@ -95,6 +98,44 @@ export class UnifiedOnnxPersianAsrEngine implements AsrModelRunnerAdapter {
       transcribeTaskTokenId: 50359,
       eotTokenId: 50257,
       timestampBeginId: 50364,
+    };
+  }
+
+  public hasDecoderConfiguration(): boolean {
+    if (this.architecture === 'FASTCONFORMER_CTC') {
+      return this.ctcDecoder !== null;
+    }
+    return this.whisperIdToToken.size > 0;
+  }
+
+  public isReady(): boolean {
+    if (!this.encoderSession) return false;
+    if (this.architecture === 'FASTCONFORMER_CTC') {
+      return this.ctcDecoder !== null;
+    }
+    return this.decoderSession !== null && this.whisperIdToToken.size > 0;
+  }
+
+  public getReadinessReport(): {
+    readonly modelId: string;
+    readonly modelVersion: string;
+    readonly architecture: AsrArchitectureKind;
+    readonly sessionInitialized: boolean;
+    readonly decoderConfigured: boolean;
+    readonly ready: boolean;
+  } {
+    const sessionInitialized =
+      this.architecture === 'FASTCONFORMER_CTC'
+        ? this.encoderSession !== null
+        : this.encoderSession !== null && this.decoderSession !== null;
+    const decoderConfigured = this.hasDecoderConfiguration();
+    return {
+      modelId: this.modelId,
+      modelVersion: this.modelVersion,
+      architecture: this.architecture,
+      sessionInitialized,
+      decoderConfigured,
+      ready: sessionInitialized && decoderConfigured,
     };
   }
 
@@ -135,6 +176,10 @@ export class UnifiedOnnxPersianAsrEngine implements AsrModelRunnerAdapter {
     if (this.decoderSession?.release) await this.decoderSession.release();
     this.encoderSession = null;
     this.decoderSession = null;
+  }
+
+  public async dispose(): Promise<void> {
+    await this.unloadModels();
   }
 
   public async detectVoiceActivity(

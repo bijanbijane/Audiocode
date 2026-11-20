@@ -20,27 +20,51 @@ describe('Full Backend Factory Integration & Persian RAKE Keyphrase Suite (Secti
     const pubPem = publicKey.export({ type: 'spki', format: 'pem' }).toString();
     const adminKey = 'admin_factory_secret';
 
+    const queryHandler = async (sql: string, params: unknown[] = []) => {
+      if (sql === 'SELECT 1') {
+        return { rows: [{ '?column?': 1 }] as any, rowCount: 1 };
+      }
+      if (sql.includes('FROM users WHERE id = $1')) {
+        return { rows: [{ id: String(params[0]) }] as any, rowCount: 1 };
+      }
+      if (sql.includes('FROM subscriptions')) {
+        return {
+          rows: [
+            {
+              id: 'sub_factory_1',
+              plan_tier: 'PRO_MONTHLY',
+              current_period_end: new Date(Date.now() + 7 * 86400_000),
+              offline_grace_hours: 72,
+            },
+          ] as any,
+          rowCount: 1,
+        };
+      }
+      if (sql.includes('INSERT INTO enterprise_api_keys')) {
+        return { rows: [{ key_id: 'ent_key_99' }] as any, rowCount: 1 };
+      }
+      if (sql.includes('FROM ai_models_catalog')) {
+        return {
+          rows: [
+            {
+              model_id: 'fastconformer-fa',
+              version: '1.2.0',
+              release_status: 'ACTIVE',
+            },
+          ] as any,
+          rowCount: 1,
+        };
+      }
+      return { rows: [], rowCount: 0 };
+    };
+
     const mockDb: PgPoolLike = {
-      async query(sql) {
-        if (sql === 'SELECT 1') {
-          return { rows: [{ '?column?': 1 }] as any, rowCount: 1 };
-        }
-        if (sql.includes('INSERT INTO enterprise_api_keys')) {
-          return { rows: [{ key_id: 'ent_key_99' }] as any, rowCount: 1 };
-        }
-        if (sql.includes('FROM ai_models_catalog')) {
-          return {
-            rows: [
-              {
-                model_id: 'fastconformer-fa',
-                version: '1.2.0',
-                release_status: 'ACTIVE',
-              },
-            ] as any,
-            rowCount: 1,
-          };
-        }
-        return { rows: [], rowCount: 0 };
+      query: queryHandler,
+      async connect() {
+        return {
+          query: queryHandler,
+          release() {},
+        };
       },
     };
 
@@ -60,13 +84,25 @@ describe('Full Backend Factory Integration & Persian RAKE Keyphrase Suite (Secti
     expect(readyRes.statusCode).toBe(200);
     expect(readyRes.json().postgres).toBe('connected');
 
-    // 2. Verify unauthenticated request to /api/v1/license/lease is blocked by EdDSA JWT preHandler
-    const unauthLicense = await app.fastify.inject({
-      method: 'POST',
-      url: '/api/v1/license/lease',
-      payload: { userId: 'u1', deviceFingerprintHash: 'h1' },
-    });
-    expect(unauthLicense.statusCode).toBe(401);
+    // 2. Verify unauthenticated requests to all three license routes are blocked by EdDSA JWT preHandler
+    for (const url of [
+      '/api/v1/license/lease',
+      '/api/v1/license/enforce-device-seat',
+      '/api/v1/license/sync-state',
+    ]) {
+      const unauthLicense = await app.fastify.inject({
+        method: 'POST',
+        url,
+        payload: {
+          userId: 'u1',
+          deviceFingerprintHash: 'a'.repeat(64),
+          currentDeviceFingerprintHash: 'a'.repeat(64),
+          leaseId: 'lic_1',
+          installedModels: [],
+        },
+      });
+      expect(unauthLicense.statusCode).toBe(401);
+    }
 
     // 3. Verify Admin Enterprise API Key creation endpoint
     const keyRes = await app.fastify.inject({

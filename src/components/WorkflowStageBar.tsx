@@ -62,6 +62,8 @@ function asrLabel(state: StudioWorkflowState['asrState'], locale: WorkflowLocale
   switch (state) {
     case 'MODEL_NOT_INSTALLED':
       return isFa ? 'مدل محلی نصب نشده' : 'Local ASR Not Installed';
+    case 'MODEL_AVAILABLE':
+      return isFa ? 'مدل محلی ذخیره و تأیید شد (در انتظار اجرا)' : 'Local Model Verified (OPFS)';
     case 'MODEL_INTEGRITY_FAILURE':
       return isFa ? 'خطای اصالت مدل' : 'Model Integrity Failure';
     case 'RUNTIME_UNAVAILABLE':

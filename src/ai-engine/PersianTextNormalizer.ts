@@ -67,4 +67,22 @@ export const PersianTextNormalizer = {
       };
     });
   },
+
+  /** Preserves raw model-generated word strings verbatim without post-hoc rewriting. */
+  extractRawTranscript(tokens: readonly TimedPersianToken[]): string {
+    return tokens
+      .map((t) => t.originalText.trim())
+      .filter(Boolean)
+      .join(' ')
+      .trim();
+  },
+
+  /** Extracts normalized display text separately from raw model output. */
+  extractNormalizedTranscript(tokens: readonly TimedPersianToken[]): string {
+    return tokens
+      .map((t) => t.displayText.trim())
+      .filter(Boolean)
+      .join(' ')
+      .trim();
+  },
 } as const;

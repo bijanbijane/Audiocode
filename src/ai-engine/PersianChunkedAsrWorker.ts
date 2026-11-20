@@ -17,6 +17,14 @@ export interface RawWordPrediction {
 export interface AsrModelRunnerAdapter {
   readonly modelId: string;
   readonly modelVersion: string;
+  readonly architecture?: 'FASTCONFORMER_CTC' | 'WHISPER_SEQ2SEQ';
+  readonly modelSha256?: string;
+  /** Optional explicit readiness check confirming initialized inference session + decoder */
+  isReady?(): boolean;
+  /** Optional check confirming required CTC vocabulary or Seq2Seq decoder configuration */
+  hasDecoderConfiguration?(): boolean;
+  /** Optional resource release hook invoked on cancellation/disposal */
+  dispose?(): Promise<void> | void;
   /** Lightweight VAD pre-filter to skip silent windows before waking heavy ASR */
   detectVoiceActivity(
     pcm16kMono: Float32Array,
@@ -112,13 +120,37 @@ export class PersianChunkedAsrEngine {
     let accumulatedTokens: TimedPersianToken[] = [...initialTokens];
     let lastCompletedWindowIndex = safeResumeWindowIdx - 1;
 
+    const buildCancelError = () =>
+      new AsrJobCancelledError({
+        lastCompletedWindowIndex,
+        checkpointTokens: accumulatedTokens,
+        cause: signal?.reason,
+      });
+
     const throwIfAborted = () => {
       if (signal?.aborted) {
-        throw new AsrJobCancelledError({
-          lastCompletedWindowIndex,
-          checkpointTokens: accumulatedTokens,
-          cause: signal.reason,
-        });
+        throw buildCancelError();
+      }
+    };
+
+    const awaitWithAbort = async <T>(promise: Promise<T>): Promise<T> => {
+      throwIfAborted();
+      if (!signal) {
+        return promise;
+      }
+      let onAbort: (() => void) | null = null;
+      const abortPromise = new Promise<never>((_resolve, reject) => {
+        onAbort = () => reject(buildCancelError());
+        signal.addEventListener('abort', onAbort, { once: true });
+      });
+      try {
+        return await Promise.race([promise, abortPromise]);
+      } finally {
+        if (onAbort) {
+          signal.removeEventListener('abort', onAbort);
+        }
+        // Prevent unhandled rejection if the underlying promise rejects after abort
+        promise.catch(() => {});
       }
     };
 
@@ -161,25 +193,27 @@ export class PersianChunkedAsrEngine {
 
         throwIfAborted();
 
-        let pcmChunk: Float32Array | null = await readSamples16kFn(startSample, count);
+        let pcmChunk: Float32Array | null = await awaitWithAbort(
+          readSamples16kFn(startSample, count),
+        );
         throwIfAborted();
 
         const windowStartSec = startSample / this.sampleRate;
 
         // 1. Silero VAD gate: keep short isolated utterances (>= 0.5% ~ 125ms)
-        const vad = await this.adapter.detectVoiceActivity(pcmChunk);
+        const vad = await awaitWithAbort(this.adapter.detectVoiceActivity(pcmChunk));
         throwIfAborted();
 
         const safeSpeechRatio = Number.isFinite(vad.speechRatio) ? vad.speechRatio : 0;
         if (!vad.hasSpeech || safeSpeechRatio < 0.005) {
           pcmChunk = null;
-          await onWindowCheckpoint(wIdx, accumulatedTokens);
+          await awaitWithAbort(onWindowCheckpoint(wIdx, accumulatedTokens));
           lastCompletedWindowIndex = wIdx;
           continue;
         }
 
         // 2. Run Persian ASR over 25s window
-        const rawPredictions = await this.adapter.transcribeWindow(pcmChunk);
+        const rawPredictions = await awaitWithAbort(this.adapter.transcribeWindow(pcmChunk));
         // Drop PCM window reference immediately — never accumulate completed windows
         pcmChunk = null;
         throwIfAborted();

@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   AlertCircle,
   AlertTriangle,
@@ -54,6 +54,10 @@ interface EdlReviewPanelProps {
   onUndoEdl: () => void;
   onRedoEdl: () => void;
   onApplyLinguisticReadableText?: (tokenId: string, nextDisplayText: string) => void;
+  onApplyLinguisticBatchUpdates?: (
+    updates: ReadonlyArray<{ tokenId: string; displayText: string }>,
+    descriptionFa?: string,
+  ) => void;
 }
 
 type PanelTab = 'edl' | 'events' | 'linguistics';
@@ -112,6 +116,7 @@ export const EdlReviewPanel: React.FC<EdlReviewPanelProps> = ({
   onUndoEdl,
   onRedoEdl,
   onApplyLinguisticReadableText,
+  onApplyLinguisticBatchUpdates,
 }) => {
   const isFa = locale === 'fa';
   const [activeTab, setActiveTab] = useState<PanelTab>('edl');
@@ -124,6 +129,24 @@ export const EdlReviewPanel: React.FC<EdlReviewPanelProps> = ({
   const [lingCandidates, setLingCandidates] = useState<PersianAsrCorrectionCandidate[]>([]);
   const [lingStatusMsg, setLingStatusMsg] = useState<string | null>(null);
   const transformEngine = useMemo(() => new TranscriptTransformationEngine(), []);
+
+  // Reset stale linguistic analysis whenever underlying source tokens change (project switch / import / cut),
+  // without resetting when only displayText changes from accepting a linguistic candidate.
+  const rawTokenSignature = useMemo(
+    () =>
+      tokens
+        .map((t) => `${t.id}:${t.originalText}:${t.isCrosstalkSuppressed ? 1 : 0}`)
+        .join('|'),
+    [tokens],
+  );
+
+  useEffect(() => {
+    transformEngine.clearHistory();
+    setLingDoc(null);
+    setLingTokenIdMap({});
+    setLingCandidates([]);
+    setLingStatusMsg(null);
+  }, [rawTokenSignature, transformEngine]);
 
   const handleRunPersianLinguistics = () => {
     transformEngine.clearHistory();
@@ -273,10 +296,25 @@ export const EdlReviewPanel: React.FC<EdlReviewPanelProps> = ({
     setLingCandidates((prev) =>
       prev.map((c) => (c.candidateId === candidate.candidateId ? res.updatedCandidate : c)),
     );
-    const updatedTok = res.document.tokens.find((t) => t.tokenId === candidate.tokenIds[0]);
-    const studioTokenId = updatedTok ? lingTokenIdMap[updatedTok.tokenId] : undefined;
-    if (updatedTok && studioTokenId && onApplyLinguisticReadableText) {
-      onApplyLinguisticReadableText(studioTokenId, updatedTok.readableText);
+    const tokenUpdates: Array<{ tokenId: string; displayText: string }> = [];
+    const seenStudioIds = new Set<string>();
+    for (const lingTokenId of candidate.tokenIds) {
+      const updatedTok = res.document.tokens.find((t) => t.tokenId === lingTokenId);
+      const studioTokenId = updatedTok ? lingTokenIdMap[updatedTok.tokenId] : undefined;
+      if (updatedTok && studioTokenId && !seenStudioIds.has(studioTokenId)) {
+        seenStudioIds.add(studioTokenId);
+        tokenUpdates.push({ tokenId: studioTokenId, displayText: updatedTok.readableText });
+      }
+    }
+    if (tokenUpdates.length > 0) {
+      if (onApplyLinguisticBatchUpdates) {
+        onApplyLinguisticBatchUpdates(
+          tokenUpdates,
+          `اعمال پالایش زبان‌شناختی «${candidate.originalText}» ← «${candidate.proposedText}»`,
+        );
+      } else if (onApplyLinguisticReadableText) {
+        onApplyLinguisticReadableText(tokenUpdates[0].tokenId, tokenUpdates[0].displayText);
+      }
     }
   };
 
@@ -294,9 +332,21 @@ export const EdlReviewPanel: React.FC<EdlReviewPanelProps> = ({
     setLingCandidates((prev) =>
       prev.map((c) => (c.candidateId === candidateId ? { ...c, status: 'REVERTED' } : c)),
     );
-    const studioTokenId = res.revertedTokenId ? lingTokenIdMap[res.revertedTokenId] : undefined;
-    if (studioTokenId && res.restoredReadableText !== null && onApplyLinguisticReadableText) {
-      onApplyLinguisticReadableText(studioTokenId, res.restoredReadableText);
+    const revertUpdates: Array<{ tokenId: string; displayText: string }> = [];
+    const seenStudioIds = new Set<string>();
+    for (const restored of res.restoredTokens) {
+      const studioTokenId = lingTokenIdMap[restored.tokenId];
+      if (studioTokenId && !seenStudioIds.has(studioTokenId)) {
+        seenStudioIds.add(studioTokenId);
+        revertUpdates.push({ tokenId: studioTokenId, displayText: restored.readableText });
+      }
+    }
+    if (revertUpdates.length > 0) {
+      if (onApplyLinguisticBatchUpdates) {
+        onApplyLinguisticBatchUpdates(revertUpdates, 'بازگردانی پالایش زبان‌شناختی فارسی');
+      } else if (onApplyLinguisticReadableText) {
+        onApplyLinguisticReadableText(revertUpdates[0].tokenId, revertUpdates[0].displayText);
+      }
     }
   };
 
@@ -449,8 +499,9 @@ export const EdlReviewPanel: React.FC<EdlReviewPanelProps> = ({
                     const activeRange = prop.proposedRange ?? prop.originalRange;
                     const startSample = activeRange?.startSample ?? 0;
                     const endSample = activeRange?.endSample ?? 0;
-                    const startSec = startSample / sampleRate;
-                    const endSec = endSample / sampleRate;
+                    const safeSampleRate = sampleRate > 0 ? sampleRate : 48_000;
+                    const startSec = startSample / safeSampleRate;
+                    const endSec = endSample / safeSampleRate;
                     const durationMs = Math.round((endSec - startSec) * 1000);
                     const isExpanded = expandedProposalId === prop.proposalId;
 

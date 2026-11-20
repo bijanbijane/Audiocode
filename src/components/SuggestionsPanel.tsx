@@ -151,8 +151,15 @@ export const SuggestionsPanel: React.FC<SuggestionsPanelProps> = ({
             return (
               <div
                 key={rec.id}
+                tabIndex={0}
                 onClick={() => onSelect(rec.id)}
-                className={`p-4 transition-colors ${
+                onKeyDown={(e) => {
+                  if (e.target === e.currentTarget && (e.key === 'Enter' || e.key === ' ')) {
+                    e.preventDefault();
+                    onSelect(rec.id);
+                  }
+                }}
+                className={`p-4 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-amber-400 ${
                   isSelected ? 'bg-[#182132]' : 'hover:bg-[#161D2B]'
                 }`}
               >

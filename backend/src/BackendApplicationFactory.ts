@@ -7,6 +7,7 @@
  */
 
 import type {
+  AuthenticatedRequestContext,
   FastifyInstanceLike,
   FastifyReplyLike,
   PgPoolLike,
@@ -14,6 +15,7 @@ import type {
 import { PlatformBackendServices } from './PlatformBackendServices';
 import { BackendAuthAndPaymentService } from './BackendAuthAndPaymentService';
 import { BackendLicenseAndModelRevocationService } from './BackendLicenseAndModelRevocationService';
+import { isProtectedLicenseRoute } from './license/DeviceSeatEnforcementService';
 import { BackendModelCanaryRolloutService } from './rollout/BackendModelCanaryRolloutService';
 import { BackendExternalApiProxyService } from './gateway/BackendExternalApiProxyService';
 import {
@@ -94,7 +96,7 @@ export class BuiltInFastifyRouter implements TestableFastifyInstance {
   >(
     url: string,
     handler: (
-      request: {
+      request: AuthenticatedRequestContext & {
         params: T['Params'];
         query: T['Querystring'];
         headers: T extends { Headers: infer H }
@@ -120,7 +122,7 @@ export class BuiltInFastifyRouter implements TestableFastifyInstance {
   >(
     url: string,
     handler: (
-      request: {
+      request: AuthenticatedRequestContext & {
         body: T['Body'];
         params: T['Params'];
         headers: T extends { Headers: infer H }
@@ -191,6 +193,7 @@ export class BuiltInFastifyRouter implements TestableFastifyInstance {
       query,
       headers: normalizedHeaders,
       body: opts.payload ?? {},
+      authenticatedUserId: undefined,
     };
 
     for (const pre of this.preHandlers) {
@@ -315,13 +318,9 @@ export function buildBackendApplication(
   const enterpriseKeys = new EnterpriseApiKeyAndQuotaManager(db);
   const advisoryLocks = new AdvisoryLockCoordinator(db);
 
-  // 1. Security preHandler guarding user license endpoints with EdDSA (Ed25519) JWT verification
+  // 1. Security preHandler guarding all user license endpoints with EdDSA (Ed25519) JWT verification
   fastify.addHook('preHandler', async (request, reply) => {
-    const requiresUserJwt =
-      request.url.startsWith('/api/v1/license/lease') ||
-      request.url.startsWith('/api/v1/license/enforce-device-seat');
-
-    if (!requiresUserJwt) return;
+    if (!isProtectedLicenseRoute(request.url)) return;
 
     const authHeader = request.headers?.authorization;
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
@@ -329,7 +328,10 @@ export function buildBackendApplication(
     }
     try {
       const claims = authAndPayment.verifyEdDsaJwt(authHeader.slice(7).trim());
-      request.authenticatedUserId = claims.sub;
+      if (typeof claims.sub !== 'string' || claims.sub.trim().length === 0) {
+        return reply.status(401).send({ error: 'INVALID_OR_EXPIRED_TOKEN' });
+      }
+      request.authenticatedUserId = claims.sub.trim();
     } catch {
       return reply.status(401).send({ error: 'INVALID_OR_EXPIRED_TOKEN' });
     }

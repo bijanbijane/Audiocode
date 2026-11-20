@@ -1,11 +1,28 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
+import {
+  PgTransactionClient,
+  PinnedPgClient,
+  withPinnedPostgresTransaction,
+} from './db/PinnedPostgresTransaction';
+import {
+  LicensePlanTier,
+  enforceDeviceSeatsForAuthenticatedUser,
+  sendClassifiedLicenseError,
+  validateAndNormalizeDeviceFingerprintHash,
+} from './license/DeviceSeatEnforcementService';
+
+export type { PgTransactionClient, PinnedPgClient };
+
+export interface AuthenticatedRequestContext {
+  readonly authenticatedUserId?: string;
+}
 
 export interface BackendOfflineLicenseLeasePayload {
   readonly licenseId: string;
   readonly userId: string;
-  readonly planTier: 'PRO_MONTHLY' | 'PRO_ANNUAL' | 'STUDIO_ENTERPRISE';
+  readonly planTier: LicensePlanTier;
   readonly issuedAtUnixSec: number;
   readonly offlineGraceExpiresAtUnixSec: number;
   readonly subscriptionExpiresAtUnixSec: number;
@@ -24,6 +41,7 @@ export interface PgPoolLike {
     sql: string,
     params?: unknown[],
   ): Promise<{ rows: TRow[]; rowCount: number | null }>;
+  connect?(): Promise<PinnedPgClient>;
 }
 
 export interface BackendRuntimeConfig {
@@ -55,7 +73,7 @@ export interface FastifyInstanceLike {
   >(
     url: string,
     handler: (
-      request: {
+      request: AuthenticatedRequestContext & {
         params: T['Params'];
         query: T['Querystring'];
         headers: T extends { Headers: infer H }
@@ -78,7 +96,7 @@ export interface FastifyInstanceLike {
   >(
     url: string,
     handler: (
-      request: {
+      request: AuthenticatedRequestContext & {
         body: T['Body'];
         params: T['Params'];
         headers: T extends { Headers: infer H } ? H : Record<string, string | undefined>;
@@ -102,57 +120,90 @@ export class PlatformBackendServices {
    * ثبت تمام مسیرهای رسمی API سرور Backend روی Fastify
    */
   public registerAllRoutes(fastify: FastifyInstanceLike): void {
-    // ۱. صدور و تمدید گواهی اجاره آفلاین (Ed25519 Offline License Lease) بر اساس وضعیت اشتراک در PostgreSQL
+    // ۱. صدور و تمدید گواهی اجاره آفلاین (Ed25519 Offline License Lease) بر اساس هویت احراز‌شده و تراکنش اتمی
     fastify.post<{
-      Body: { userId: string; deviceFingerprintHash: string };
+      Body: { deviceFingerprintHash: string; userId?: string };
     }>('/api/v1/license/lease', async (request, reply) => {
-      const { userId, deviceFingerprintHash } = request.body;
+      const authenticatedUserId =
+        typeof request.authenticatedUserId === 'string' &&
+        request.authenticatedUserId.trim().length > 0
+          ? request.authenticatedUserId.trim()
+          : null;
 
-      const subRes = await this.db.query<{
-        id: string;
-        plan_tier: 'PRO_MONTHLY' | 'PRO_ANNUAL' | 'STUDIO_ENTERPRISE';
-        current_period_end: Date;
-        offline_grace_hours: number;
-      }>(
-        `SELECT id, plan_tier, current_period_end, offline_grace_hours
-         FROM subscriptions
-         WHERE user_id = $1 AND status = 'ACTIVE' AND current_period_end > NOW()
-         ORDER BY current_period_end DESC
-         LIMIT 1`,
-        [userId],
-      );
-
-      if (subRes.rows.length === 0) {
-        return reply.status(403).send({
-          error: 'NO_ACTIVE_SUBSCRIPTION',
-          messageFa: 'اشتراک فعالی برای این حساب کاربری یافت نشد.',
+      if (!authenticatedUserId) {
+        return reply.status(401).send({
+          error: 'AUTHENTICATION_REQUIRED',
+          messageFa: 'احراز هویت معتبر برای صدور مجوز الزامی است.',
         });
       }
 
-      const sub = subRes.rows[0];
-      const nowSec = Math.floor(Date.now() / 1000);
-      const subEndSec = Math.floor(new Date(sub.current_period_end).getTime() / 1000);
-      const graceEndSec = Math.min(subEndSec, nowSec + sub.offline_grace_hours * 3600);
-      const leaseId = `lic_${crypto.randomUUID()}`;
-
-      await this.db.query(
-        `INSERT INTO offline_license_leases
-         (lease_id, user_id, subscription_id, device_fingerprint_hash, signing_key_id, offline_grace_expires_at)
-         VALUES ($1, $2, $3, $4, $5, to_timestamp($6))`,
-        [leaseId, userId, sub.id, deviceFingerprintHash, this.config.keyId, graceEndSec],
-      );
-
-      const leasePayload: BackendOfflineLicenseLeasePayload = {
-        licenseId: leaseId,
-        userId,
-        planTier: sub.plan_tier,
-        issuedAtUnixSec: nowSec,
-        offlineGraceExpiresAtUnixSec: graceEndSec,
-        subscriptionExpiresAtUnixSec: subEndSec,
-        allowedModelTiers: ['GROUP_A', 'GROUP_B'],
+      const body = (request.body ?? {}) as {
+        deviceFingerprintHash?: unknown;
+        userId?: unknown;
       };
 
-      return reply.send(this.signEnvelope(leasePayload));
+      if (body.userId !== undefined) {
+        if (typeof body.userId !== 'string' || body.userId !== authenticatedUserId) {
+          return reply.status(403).send({
+            error: 'FORBIDDEN_USER_MISMATCH',
+            messageFa: 'شناسه کاربر درخواست با هویت احراز‌شده مطابقت ندارد.',
+          });
+        }
+      }
+
+      let normalizedFingerprint: string;
+      try {
+        normalizedFingerprint = validateAndNormalizeDeviceFingerprintHash(
+          body.deviceFingerprintHash,
+        );
+      } catch (err) {
+        return sendClassifiedLicenseError(reply, err);
+      }
+
+      try {
+        const leasePayload = await withPinnedPostgresTransaction(this.db, async (txClient) => {
+          const seatResult = await enforceDeviceSeatsForAuthenticatedUser(
+            txClient,
+            authenticatedUserId,
+            normalizedFingerprint,
+          );
+          const sub = seatResult.subscription;
+          const nowSec = Math.floor(Date.now() / 1000);
+          const subEndSec = Math.floor(sub.currentPeriodEnd.getTime() / 1000);
+          const graceEndSec = Math.min(subEndSec, nowSec + sub.offlineGraceHours * 3600);
+          const leaseId = `lic_${crypto.randomUUID()}`;
+
+          await txClient.query(
+            `INSERT INTO offline_license_leases
+             (lease_id, user_id, subscription_id, device_fingerprint_hash, signing_key_id, offline_grace_expires_at)
+             VALUES ($1, $2, $3, $4, $5, to_timestamp($6))`,
+            [
+              leaseId,
+              authenticatedUserId,
+              sub.id,
+              seatResult.normalizedDeviceFingerprintHash,
+              this.config.keyId,
+              graceEndSec,
+            ],
+          );
+
+          const payload: BackendOfflineLicenseLeasePayload = {
+            licenseId: leaseId,
+            userId: authenticatedUserId,
+            planTier: sub.planTier,
+            issuedAtUnixSec: nowSec,
+            offlineGraceExpiresAtUnixSec: graceEndSec,
+            subscriptionExpiresAtUnixSec: subEndSec,
+            allowedModelTiers: ['GROUP_A', 'GROUP_B'],
+          };
+          return payload;
+        });
+
+        // Ed25519 envelope signing runs strictly after COMMIT succeeds.
+        return reply.send(this.signEnvelope(leasePayload));
+      } catch (err) {
+        return sendClassifiedLicenseError(reply, err);
+      }
     });
 
     // ۲. دریافت کاتالوگ مدل‌های فارسی فعال (حذف خودکار مدل‌های REVOKED)

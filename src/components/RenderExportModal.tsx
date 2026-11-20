@@ -11,7 +11,12 @@ import {
   Square,
   X,
 } from 'lucide-react';
-import { AudioRenderConfig, RenderExportContainer, RenderExportEncoding } from '../audio-renderer';
+import {
+  AudioRenderConfig,
+  RenderExportContainer,
+  RenderExportEncoding,
+  pipeRenderArtifactToWritable,
+} from '../audio-renderer';
 import { SampleRate } from '../contracts/timebase.contract';
 
 type RenderFormatPreset = 'WAV_PCM16' | 'WAV_PCM24' | 'WAV_FLOAT32' | 'RF64_PCM24';
@@ -68,6 +73,8 @@ export const RenderExportModal: React.FC<RenderExportModalProps> = ({
   const isFa = workflowState.locale === 'fa';
   const [format, setFormat] = useState<RenderFormatPreset>('WAV_PCM16');
   const [sampleRate, setSampleRate] = useState<SampleRate>(projectSampleRate);
+  const [isDownloading, setIsDownloading] = useState(false);
+  const [downloadError, setDownloadError] = useState<string | null>(null);
 
   useEffect(() => {
     setSampleRate(projectSampleRate);
@@ -93,10 +100,21 @@ export const RenderExportModal: React.FC<RenderExportModalProps> = ({
     workflowState.renderState === 'VALIDATING_OUTPUT';
 
   const result = workflowState.lastRenderResult;
-  const validationPassed = Boolean(result?.ok && result.postValidation?.passed);
-  const canDownloadAudio = validationPassed && Boolean(result?.outputBytes);
+  const outputArtifact = result?.outputArtifact ?? null;
+  const validationPassed = Boolean(
+    result?.ok &&
+    result.state === 'COMPLETED' &&
+    result.postValidation?.passed,
+  );
+  const canDownloadAudio = Boolean(
+    validationPassed &&
+    outputArtifact &&
+    !outputArtifact.disposed &&
+    !isDownloading,
+  );
 
   const handleRun = (resume: boolean) => {
+    setDownloadError(null);
     const encoding: RenderExportEncoding =
       format === 'WAV_FLOAT32' ? 'float32' : format === 'WAV_PCM16' ? 'pcm16' : 'pcm24';
     const container: RenderExportContainer = format === 'RF64_PCM24' ? 'rf64' : 'wav';
@@ -112,23 +130,104 @@ export const RenderExportModal: React.FC<RenderExportModalProps> = ({
     );
   };
 
-  const handleDownloadAudio = () => {
-    if (!canDownloadAudio || !result?.outputBytes) return;
-    const renderedContainer = result.plan?.container ?? result.postValidation?.verifiedContainer ?? 'wav';
-    const renderedEncoding = result.plan?.encoding ?? (format === 'WAV_FLOAT32' ? 'float32' : format === 'WAV_PCM16' ? 'pcm16' : 'pcm24');
+  const handleDownloadAudio = async () => {
+    if (!canDownloadAudio || !result || !outputArtifact || outputArtifact.disposed) return;
+
+    const renderedContainer =
+      result.plan?.container ?? result.postValidation?.verifiedContainer ?? 'wav';
+    const renderedEncoding =
+      result.plan?.encoding ??
+      (format === 'WAV_FLOAT32' ? 'float32' : format === 'WAV_PCM16' ? 'pcm16' : 'pcm24');
     const renderedPresetTag = `${renderedContainer}_${renderedEncoding}`.toLowerCase();
     const ext = renderedContainer === 'rf64' ? 'rf64.wav' : 'wav';
     const fileName = sanitizeExportFilename(`${workflowState.projectId}-${renderedPresetTag}.${ext}`);
-    const blob = new Blob([new Uint8Array(result.outputBytes)], { type: 'audio/wav' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = fileName;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    window.setTimeout(() => URL.revokeObjectURL(url), 2000);
-    onMarkDownloaded(fileName);
+
+    setIsDownloading(true);
+    setDownloadError(null);
+
+    try {
+      // Primary desktop path: File System Access API streaming with native backpressure
+      const savePicker =
+        typeof window !== 'undefined'
+          ? (
+              window as unknown as {
+                showSaveFilePicker?: (options?: {
+                  suggestedName?: string;
+                  types?: Array<{
+                    description?: string;
+                    accept: Record<string, string[]>;
+                  }>;
+                }) => Promise<{
+                  createWritable: () => Promise<WritableStream<Uint8Array>>;
+                }>;
+              }
+            ).showSaveFilePicker
+          : undefined;
+
+      if (typeof savePicker === 'function') {
+        let fileHandle: { createWritable: () => Promise<WritableStream<Uint8Array>> } | null = null;
+        let fallBackToBlob = false;
+
+        try {
+          fileHandle = await savePicker({
+            suggestedName: fileName,
+            types: [
+              {
+                description: renderedContainer === 'rf64' ? 'RF64 WAV Audio' : 'WAV Audio',
+                accept: { [outputArtifact.contentType]: ['.wav'] },
+              },
+            ],
+          });
+        } catch (pickerErr) {
+          const errName = pickerErr instanceof Error ? pickerErr.name : '';
+          if (errName === 'AbortError') {
+            // User dismissed the save dialog; do not trigger a duplicate fallback download.
+            return;
+          }
+          if (
+            errName === 'SecurityError' ||
+            errName === 'NotAllowedError' ||
+            errName === 'TypeError'
+          ) {
+            fallBackToBlob = true;
+          } else {
+            throw pickerErr;
+          }
+        }
+
+        if (fileHandle && !fallBackToBlob) {
+          const writable = await fileHandle.createWritable();
+          await pipeRenderArtifactToWritable(outputArtifact, writable);
+          onMarkDownloaded(fileName);
+          return;
+        }
+      }
+
+      // Fallback path: zero-concatenation Blob constructed directly from artifact chunks/stream
+      const blob = await outputArtifact.createBlob();
+      const url = URL.createObjectURL(blob);
+      try {
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = fileName;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        onMarkDownloaded(fileName);
+      } finally {
+        window.setTimeout(() => URL.revokeObjectURL(url), 2000);
+      }
+    } catch (err) {
+      const message =
+        err instanceof Error
+          ? err.message
+          : isFa
+            ? 'ذخیره یا دانلود فایل صوتی با خطا مواجه شد.'
+            : 'Audio export download failed.';
+      setDownloadError(message);
+    } finally {
+      setIsDownloading(false);
+    }
   };
 
   const handleExportTranscript = (kind: 'txt' | 'srt' | 'json') => {
@@ -293,10 +392,10 @@ export const RenderExportModal: React.FC<RenderExportModalProps> = ({
               </div>
             </div>
 
-            {workflowState.exportError && (
+            {(workflowState.exportError || downloadError) && (
               <div className="flex items-start gap-2 rounded border border-rose-500/40 bg-rose-500/10 p-2.5 text-rose-700 dark:text-rose-200">
                 <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
-                <span>{workflowState.exportError}</span>
+                <span>{downloadError ?? workflowState.exportError}</span>
               </div>
             )}
 
@@ -305,7 +404,7 @@ export const RenderExportModal: React.FC<RenderExportModalProps> = ({
                 <span>Validation: {result.postValidation.passed ? 'OK' : 'FAIL'}</span>
                 <span>Container: {result.postValidation.verifiedContainer ?? 'wav'}</span>
                 <span>Peak: {(result.postValidation.verifiedPeakAmplitude ?? 0).toFixed(4)}</span>
-                <span>Bytes: {result.postValidation.verifiedFileSizeBytes ?? result.outputBytes?.byteLength ?? 0}</span>
+                <span>Bytes: {result.postValidation.verifiedFileSizeBytes ?? outputArtifact?.sizeBytes ?? 0}</span>
                 <span>Samples: {result.postValidation.verifiedOutputSamples ?? 0}</span>
               </div>
             )}

@@ -4,7 +4,6 @@ import {
   buildUserFacingFailure,
   classifyError,
   getSharedDiagnosticLogger,
-  UserFacingFailureModel,
 } from '../reliability';
 
 interface ErrorBoundaryProps {
@@ -15,21 +14,20 @@ interface ErrorBoundaryProps {
 
 interface ErrorBoundaryState {
   hasError: boolean;
-  failure: UserFacingFailureModel | null;
+  classified: ReturnType<typeof classifyError> | null;
 }
 
 export class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundaryState> {
   public constructor(props: ErrorBoundaryProps) {
     super(props);
-    this.state = { hasError: false, failure: null };
+    this.state = { hasError: false, classified: null };
   }
 
   public static getDerivedStateFromError(error: unknown): ErrorBoundaryState {
     const classified = classifyError(error, {
       subsystem: 'INTERNAL',
     });
-    const failure = buildUserFacingFailure(classified, 'fa');
-    return { hasError: true, failure };
+    return { hasError: true, classified };
   }
 
   public componentDidCatch(error: Error, info: React.ErrorInfo): void {
@@ -48,7 +46,7 @@ export class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoun
   }
 
   private handleReset = (): void => {
-    this.setState({ hasError: false, failure: null });
+    this.setState({ hasError: false, classified: null });
     this.props.onResetWorkspace?.();
   };
 
@@ -58,7 +56,9 @@ export class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoun
     }
 
     const locale = this.props.locale ?? 'fa';
-    const failure = this.state.failure;
+    const failure = this.state.classified
+      ? buildUserFacingFailure(this.state.classified, locale)
+      : null;
     const isFa = locale === 'fa';
 
     return (

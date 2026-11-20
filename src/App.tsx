@@ -68,9 +68,17 @@ import {
   buildDefaultPersianPodcastProject,
   buildSyntheticMicRecordingPcm,
   ingestRecordedPcmTake,
-  ingestUploadedAudioFile,
   LoadedStudioProject,
+  ProjectResourceLeaseSlot,
 } from './engine/audioFixtures';
+import {
+  AudioImportCoordinatorError,
+  importAudioProject,
+} from './workflow/AudioImportCoordinator';
+import {
+  IngestAbortedError,
+  IngestTransactionError,
+} from './engine/streamingIngest';
 import {
   buildSplicePreviewBuffer,
   StudioAudioTransport,
@@ -97,7 +105,10 @@ import {
   AVAPARDAZ_AUDIO_CACHE_SPLIT,
   AVAPARDAZ_MEMORY_POLICY,
 } from './runtime/memory/MemoryPolicy';
-import { getSharedMemoryBudgetManager } from './runtime/memory/MemoryBudgetManager';
+import {
+  getSharedMemoryBudgetManager,
+  MemoryPressureError,
+} from './runtime/memory/MemoryBudgetManager';
 import {
   applyBatchRecommendationsAtomically,
   applySyncSafeCut,
@@ -201,6 +212,10 @@ export default function App() {
   // Storage Broker & Capabilities
   const capabilities = useMemo(() => detectRuntimeCapabilities(), []);
   const brokerRef = useRef<StorageBrokerClient | null>(null);
+  const brokerReadyPromiseRef = useRef<Promise<StorageBrokerTelemetry> | null>(null);
+  const activeImportAbortRef = useRef<AbortController | null>(null);
+  const isImportingAudioRef = useRef<boolean>(false);
+  const [isImportingAudio, setIsImportingAudio] = useState<boolean>(false);
   const [telemetry, setTelemetry] = useState<StorageBrokerTelemetry>(() => ({
     opfsSupported: capabilities.opfsSupported,
     syncAccessHandleSupported: false,
@@ -248,6 +263,66 @@ export default function App() {
     workflowRef.current!.getState(),
   );
   const modelManagerRef = useRef(createSharedLocalModelLifecycleManager());
+  const syncModelSnapshotToWorkflow = useCallback(() => {
+    const snap = modelManagerRef.current.getSnapshot();
+    if (snap.activeModel && snap.runtimeReady) {
+      setActiveFailure(null);
+      setAsrInlineFeedback((prev) =>
+        prev?.kind === 'MODEL_NOT_INSTALLED' ? null : prev,
+      );
+      workflowRef.current?.setAsrState({
+        state: 'MODEL_READY',
+        modelId: snap.activeModel.modelId,
+        modelVersion: snap.activeModel.version,
+        message: `مدل محلی ${snap.activeModel.modelId} (${snap.activeModel.version}) تأیید و در موتور استنتاج بارگذاری شده است.`,
+      });
+    } else if (snap.activeModel) {
+      setActiveFailure(null);
+      setAsrInlineFeedback((prev) =>
+        prev?.kind === 'MODEL_NOT_INSTALLED' ? null : prev,
+      );
+      workflowRef.current?.setAsrState({
+        state: 'MODEL_AVAILABLE',
+        modelId: snap.activeModel.modelId,
+        modelVersion: snap.activeModel.version,
+        message: `مدل محلی ${snap.activeModel.modelId} (${snap.activeModel.version}) در OPFS ذخیره و تأیید شده است (در انتظار مقداردهی جلسه استنتاج).`,
+      });
+    } else if (snap.state === 'INTEGRITY_FAILURE') {
+      workflowRef.current?.setAsrState({
+        state: 'MODEL_INTEGRITY_FAILURE',
+        modelId: null,
+        modelVersion: null,
+        message: snap.lastErrorFa ?? 'عدم تطابق امضای SHA-256 در فایل مدل ذخیره‌شده.',
+      });
+    } else {
+      workflowRef.current?.setAsrState({
+        state: 'MODEL_NOT_INSTALLED',
+        modelId: null,
+        modelVersion: null,
+        message: 'مدل محلی نصب نشده است.',
+      });
+    }
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+    void modelManagerRef.current
+      .initialize()
+      .then(() => {
+        if (active) {
+          syncModelSnapshotToWorkflow();
+        }
+      })
+      .catch(() => {
+        if (active) {
+          syncModelSnapshotToWorkflow();
+        }
+      });
+    return () => {
+      active = false;
+    };
+  }, [syncModelSnapshotToWorkflow]);
+
   const executionModeStoreRef = useRef(new ExecutionModePreferenceStore());
   const [executionMode, setExecutionMode] = useState<ExecutionMode>(() =>
     executionModeStoreRef.current.getPreferredMode(),
@@ -256,6 +331,8 @@ export default function App() {
   const [activeFailure, setActiveFailure] = useState<UserFacingFailureModel | null>(null);
 
   const transportRef = useRef<StudioAudioTransport | null>(null);
+  const projectResourceLeaseRef = useRef<ProjectResourceLeaseSlot>(new ProjectResourceLeaseSlot());
+  const isMountedRef = useRef<boolean>(true);
   const activePlaybackScopeRef = useRef<'timeline' | 'selection'>('timeline');
   const historyRef = useRef<TimelineHistoryManager>(new TimelineHistoryManager());
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -387,6 +464,7 @@ export default function App() {
 
   useEffect(() => {
     let cancelled = false;
+    isMountedRef.current = true;
     const transport = new StudioAudioTransport();
     transportRef.current = transport;
 
@@ -404,8 +482,10 @@ export default function App() {
       }
     });
 
-    broker
-      .init()
+    const initPromise = broker.init();
+    brokerReadyPromiseRef.current = initPromise;
+
+    void initPromise
       .then((t) => {
         if (!cancelled) {
           setTelemetry(t);
@@ -421,8 +501,15 @@ export default function App() {
 
     return () => {
       cancelled = true;
+      isMountedRef.current = false;
+      activeImportAbortRef.current?.abort();
+      activeImportAbortRef.current = null;
+      isImportingAudioRef.current = false;
+      brokerReadyPromiseRef.current = null;
       unregisterEviction();
+      transport.stop();
       transport.dispose();
+      projectResourceLeaseRef.current.clear();
       broker.dispose();
     };
   }, []);
@@ -1139,6 +1226,47 @@ export default function App() {
     syncWorkflowTranscript(nextTokens, `ویرایش املای نمایشی واژه به «${newDisplayText}»`);
     setHistoryTick((v) => v + 1);
     setStatusNotice(`املای نمایشی واژه به «${newDisplayText}» با حفظ لایه خام ASR به‌روزرسانی شد.`);
+  };
+
+  const handleBatchUpdateTokenDisplayTexts = (
+    updates: ReadonlyArray<{ tokenId: string; displayText: string }>,
+    descriptionFa?: string,
+  ) => {
+    if (isReadOnlyLocked) {
+      setStatusNotice('ویرایش غیرفعال است: پروژه بدون قفل انحصاری در حالت فقط‌خواندنی قرار دارد.');
+      return;
+    }
+    if (updates.length === 0) return;
+    const updateMap = new Map(updates.map((u) => [u.tokenId, u.displayText]));
+    let changed = false;
+    const nextTokens = tokens.map((tok) => {
+      if (!updateMap.has(tok.id)) return tok;
+      const nextText = updateMap.get(tok.id)!;
+      if (tok.displayText !== nextText) {
+        changed = true;
+        return { ...tok, displayText: nextText };
+      }
+      return tok;
+    });
+    if (!changed) return;
+
+    const beforeTokensSnapshot = cloneTokens(tokens);
+    const label = descriptionFa ?? 'به‌روزرسانی گروهی املای نمایشی واژه‌ها';
+    historyRef.current.commitTransaction({
+      coalescingKey: '',
+      type: 'dsp-parameter-change',
+      description: label,
+      beforeTracks: tracks,
+      afterTracks: tracks,
+      beforeTokens: beforeTokensSnapshot,
+      afterTokens: nextTokens,
+      beforeRecommendations: recommendations,
+      afterRecommendations: recommendations,
+    });
+    setTokens(nextTokens);
+    syncWorkflowTranscript(nextTokens, label);
+    setHistoryTick((v) => v + 1);
+    setStatusNotice(`${label} با حفظ لایه خام ASR اعمال شد.`);
   };
 
   const resolveTrackAssetAndPcm = async (targetTrack: Track | undefined) => {
@@ -2632,6 +2760,7 @@ export default function App() {
       transcriptHint: defaultScript,
     });
 
+    projectResourceLeaseRef.current.replaceWith(recordedProject.runtimeResourceLease ?? null);
     setProject(recordedProject);
     setProjectSessionNonce((n) => n + 1);
     setTracks(cloneTracks(recordedProject.tracks));
@@ -2945,6 +3074,11 @@ export default function App() {
     e.target.value = '';
     if (!file) return;
 
+    if (isImportingAudioRef.current) {
+      setStatusNotice('عملیات ورود فایل صوتی دیگری در حال اجرا است؛ لطفاً تا تکمیل آن صبر کنید.');
+      return;
+    }
+
     const MAX_BROWSER_UPLOAD_BYTES = 256 * 1024 * 1024;
     const lowerName = file.name.toLowerCase();
     const allowedExt = /\.(wav|wave|mp3|ogg|m4a|webm|flac|aac)$/i;
@@ -2978,12 +3112,47 @@ export default function App() {
       return;
     }
 
-    transportRef.current?.stop();
-    setIsPlaying(false);
+    const abortController = new AbortController();
+    activeImportAbortRef.current = abortController;
+    isImportingAudioRef.current = true;
+    setIsImportingAudio(true);
     setActiveFailure(null);
-    setStatusNotice(`در حال Ingest جریانی و تحلیل آوایی فارسی روی «${file.name}»...`);
+    setStatusNotice('در حال ذخیره‌سازی جریانی و تحلیل آوایی فایل صوتی انتخاب‌شده...');
+
     try {
-      const loaded = await ingestUploadedAudioFile(file);
+      const loaded = await importAudioProject(file, {
+        broker: brokerRef.current,
+        brokerReady: brokerReadyPromiseRef.current,
+        memoryBudgetManager: getSharedMemoryBudgetManager(),
+        retainActivePcmMirror: true,
+        abortSignal: abortController.signal,
+        onProgress: (progress) => {
+          if (!isMountedRef.current || abortController.signal.aborted) return;
+          if (progress.phase === 'persisting' && progress.percent % 20 === 0) {
+            setStatusNotice(`در حال ذخیره‌سازی جریانی فایل صوتی (${progress.percent}٪)...`);
+          }
+        },
+      });
+
+      if (!isMountedRef.current || abortController.signal.aborted) {
+        loaded.runtimeResourceLease?.dispose();
+        return;
+      }
+
+      const primaryAsset = Object.values(loaded.assets)[0];
+      if (!primaryAsset || !loaded.pcmSources[primaryAsset.id]) {
+        loaded.runtimeResourceLease?.dispose();
+        throw new AudioImportCoordinatorError(
+          'IMPORT_MANIFEST_INVALID',
+          'Imported project is missing a verified primary asset or resident audio mirror.',
+        );
+      }
+
+      // Transaction-safe activation commit: stop existing playback and replace lease/state
+      // ONLY after full ingestion, OPFS manifest verification, and memory ownership succeed.
+      transportRef.current?.stop();
+      setIsPlaying(false);
+      projectResourceLeaseRef.current.replaceWith(loaded.runtimeResourceLease ?? null);
       historyRef.current = new TimelineHistoryManager();
       setProject(loaded);
       setProjectSessionNonce((n) => n + 1);
@@ -3000,26 +3169,74 @@ export default function App() {
       setDetectedSyncOffsetMs(0);
       setDetectedClockDriftPpm(0);
       setHistoryTick((v) => v + 1);
+
+      if (brokerRef.current && !brokerRef.current.isDisposed()) {
+        setTelemetry(brokerRef.current.getTelemetry());
+      }
+
+      const persistenceBadge =
+        primaryAsset.storageLifecycle === 'ready'
+          ? `ذخیره‌سازی پایدار ${primaryAsset.storageBackend ?? 'OPFS'}`
+          : 'حالت حافظه موقت (بدون OPFS)';
+
       setStatusNotice(
-        `فایل «${file.name}» وارد شد (${loaded.tokens.length} بخش آوایی و ${loaded.recommendations.length} پیشنهاد تدوین شناسایی شد).`,
+        `فایل «${file.name}» وارد شد (${persistenceBadge} • ${loaded.tokens.length} بخش آوایی و ${loaded.recommendations.length} پیشنهاد تدوین).`,
       );
     } catch (err) {
+      if (!isMountedRef.current) return;
+
+      if (brokerRef.current && !brokerRef.current.isDisposed()) {
+        setTelemetry(brokerRef.current.getTelemetry());
+      }
+
+      if (err instanceof IngestAbortedError || abortController.signal.aborted) {
+        setStatusNotice('ورود فایل صوتی متوقف شد و پروژه فعلی دست‌نخورده حفظ گردید.');
+        return;
+      }
+
       const msg = err instanceof Error ? err.message : '';
+      const isMemoryPressure = err instanceof MemoryPressureError;
+      const isStorageOrCoordinator =
+        err instanceof IngestTransactionError || err instanceof AudioImportCoordinatorError;
       const classified = classifyError(err, {
-        subsystem: 'AUDIO_DECODE',
+        subsystem: isMemoryPressure || isStorageOrCoordinator ? 'AUDIO_IMPORT' : 'AUDIO_DECODE',
       });
       getSharedDiagnosticLogger().log({
         severity: 'WARNING',
-        subsystem: 'AUDIO_DECODE',
-        code: classified.code,
-        message: 'Uploaded audio failed validation/decode; previous session preserved.',
+        subsystem: isMemoryPressure || isStorageOrCoordinator ? 'AUDIO_IMPORT' : 'AUDIO_DECODE',
+        code: isMemoryPressure
+          ? err.code
+          : isStorageOrCoordinator
+            ? err.code
+            : classified.code,
+        message: isMemoryPressure
+          ? 'Audio import rejected by application memory budget; previous session and reservation preserved.'
+          : isStorageOrCoordinator
+            ? 'Audio import storage/manifest verification failed; previous session preserved.'
+            : 'Uploaded audio failed validation/decode; previous session preserved.',
       });
       setActiveFailure(buildUserFacingFailure(classified, workflowState.locale));
-      if (msg.startsWith('SECURITY_')) {
+      if (isMemoryPressure) {
+        setStatusNotice(
+          'خطای سقف حافظه برنامه: فضای بودجه حافظه برای نگهداری این فایل صوتی در حافظه کافی نیست و پروژه فعلی دست‌نخورده حفظ شد.',
+        );
+      } else if (isStorageOrCoordinator) {
+        setStatusNotice(
+          'خطا در ذخیره‌سازی پایدار یا راستی‌آزمایی فایل صوتی؛ پروژه فعلی دست‌نخورده حفظ شد.',
+        );
+      } else if (msg.startsWith('SECURITY_')) {
         setStatusNotice(msg.replace(/^SECURITY_[A-Z_]+:\s*/, 'سپر امنیتی: '));
       } else {
         AudioSecurityGuard.sanitizeErrorForTelemetry(msg);
         setStatusNotice('خطا در دیکد فایل صوتی؛ فایل نامعتبر یا خراب است و پروژه فعلی دست‌نخورده باقی ماند.');
+      }
+    } finally {
+      if (activeImportAbortRef.current === abortController) {
+        activeImportAbortRef.current = null;
+        isImportingAudioRef.current = false;
+        if (isMountedRef.current) {
+          setIsImportingAudio(false);
+        }
       }
     }
   };
@@ -3028,6 +3245,7 @@ export default function App() {
     transportRef.current?.stop();
     setIsPlaying(false);
     const fresh = buildDefaultPersianPodcastProject();
+    projectResourceLeaseRef.current.clear();
     historyRef.current = new TimelineHistoryManager();
     setProject(fresh);
     setProjectSessionNonce((n) => n + 1);
@@ -3424,11 +3642,12 @@ export default function App() {
             <button
               type="button"
               data-testid="btn-upload-audio"
+              disabled={isImportingAudio}
               onClick={() => fileInputRef.current?.click()}
-              className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-medium rounded-md border border-slate-300 dark:border-[#252F42] bg-slate-50 dark:bg-[#0E131D] text-slate-800 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-[#1E2738] cursor-pointer"
+              className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-medium rounded-md border border-slate-300 dark:border-[#252F42] bg-slate-50 dark:bg-[#0E131D] text-slate-800 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-[#1E2738] disabled:opacity-50 cursor-pointer disabled:cursor-not-allowed"
             >
               <Upload className="w-3.5 h-3.5" aria-hidden="true" />
-              <span>ورود فایل صوتی</span>
+              <span>{isImportingAudio ? 'در حال ورود...' : 'ورود فایل صوتی'}</span>
             </button>
 
             <button
@@ -3692,6 +3911,7 @@ export default function App() {
                         workflowRef.current!.redoEdlDecision();
                       }}
                       onApplyLinguisticReadableText={handleUpdateTokenDisplayText}
+                      onApplyLinguisticBatchUpdates={handleBatchUpdateTokenDisplayTexts}
                     />
 
                     <SuggestionsPanel
@@ -3777,28 +3997,7 @@ export default function App() {
         onClose={() => setLifecycleModalOpen(false)}
         workflowState={workflowState}
         modelManager={modelManagerRef.current}
-        onModelStateChanged={() => {
-          const snap = modelManagerRef.current.getSnapshot();
-          if (snap.activeModel) {
-            setActiveFailure(null);
-            setAsrInlineFeedback((prev) =>
-              prev?.kind === 'MODEL_NOT_INSTALLED' ? null : prev,
-            );
-            workflowRef.current?.setAsrState({
-              state: 'MODEL_READY',
-              modelId: snap.activeModel.modelId,
-              modelVersion: snap.activeModel.version,
-              message: `مدل محلی ${snap.activeModel.modelId} با SHA-256 تأیید و آماده است.`,
-            });
-          } else {
-            workflowRef.current?.setAsrState({
-              state: 'MODEL_NOT_INSTALLED',
-              modelId: null,
-              modelVersion: null,
-              message: 'مدل محلی نصب نشده است.',
-            });
-          }
-        }}
+        onModelStateChanged={syncModelSnapshotToWorkflow}
       />
 
       <AsrResearchLabModal
@@ -3810,6 +4009,7 @@ export default function App() {
         }
         studioSampleRate={project.sampleRate}
         referenceTranscript={tokens.map((t) => t.displayText).join(' ')}
+        modelManager={modelManagerRef.current}
       />
 
       <DeveloperPlatformPortalModal

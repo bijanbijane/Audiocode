@@ -364,6 +364,7 @@ test('Phase 11F–11G: Realtime Latency Isolation, Gateway Tenant Isolation & En
   const keyA = cp.issueApiKey({
     organizationId: 'org_avapardaz_sandbox',
     projectId: 'prj_avapardaz_dev_01',
+    principalId: 'usr_studio_owner_01',
     name: 'Key A',
     scopes: ['audio:transcribe', 'transcripts:read', 'models:read', 'projects:read', 'webhooks:manage'],
   });
@@ -375,6 +376,7 @@ test('Phase 11F–11G: Realtime Latency Isolation, Gateway Tenant Isolation & En
   const keyB = cp.issueApiKey({
     organizationId: 'org_avapardaz_sandbox',
     projectId: prjB.id,
+    principalId: 'usr_studio_owner_01',
     name: 'Key B',
     scopes: ['audio:transcribe', 'transcripts:read'],
   });

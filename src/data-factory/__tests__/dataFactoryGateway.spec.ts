@@ -16,14 +16,23 @@ describe('Phase 12 DataFactoryGateway HTTP Contracts', () => {
     const issuedA = cp.issueApiKey({
       organizationId: 'org_avapardaz_sandbox',
       projectId: 'prj_avapardaz_dev_01',
+      principalId: 'usr_studio_owner_01',
       name: 'df-key-a',
       scopes: ['audio:transcribe', 'models:read'],
     });
     const orgB = cp.createOrganization({ name: 'Tenant B DF', defaultRegionId: 'ir-thr-01' });
     const prjB = cp.createProject({ organizationId: orgB.id, projectName: 'Proj B', environment: 'DEVELOPMENT' });
+    cp.createUser({ id: 'usr_tenant_b_owner', email: 'owner@tenantb.local', displayName: 'Tenant B Owner' });
+    cp.setOrganizationMembership({
+      organizationId: orgB.id,
+      userId: 'usr_tenant_b_owner',
+      role: 'OWNER',
+      membershipStatus: 'ACTIVE',
+    });
     const issuedB = cp.issueApiKey({
       organizationId: orgB.id,
       projectId: prjB.id,
+      principalId: 'usr_tenant_b_owner',
       name: 'df-key-b',
       scopes: ['audio:transcribe', 'models:read'],
     });

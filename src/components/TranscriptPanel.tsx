@@ -1427,6 +1427,10 @@ export const TranscriptPanel: React.FC<TranscriptPanelProps> = ({
                     ? tok.normalizedText
                     : tok.displayText;
 
+              if (layer === 'display' && textValue.trim().length === 0) {
+                return null;
+              }
+
               const startSec = flicksToSeconds(tok.range.startFlicks);
 
               return (

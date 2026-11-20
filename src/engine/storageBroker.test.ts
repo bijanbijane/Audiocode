@@ -380,3 +380,70 @@ test('WorkerStorageCore serializes concurrent SyncAccessHandle operations on the
   assert.ok(core.getState().lockConflictsPrevented >= 2);
 });
 
+test('StorageBrokerClient.init() returns one authoritative promise per active instance and rejects after dispose()', async () => {
+  let workerSpawnCount = 0;
+  let releaseWorkerInit!: () => void;
+  const initGate = new Promise<void>((resolve) => {
+    releaseWorkerInit = resolve;
+  });
+
+  const client = new StorageBrokerClient({
+    mainThreadCacheBytes: 4 * 1024 * 1024,
+    workerCacheBytes: 0,
+    workerFactory: () => {
+      workerSpawnCount++;
+      const fakeWorker = {
+        onmessage: null as ((ev: MessageEvent) => void) | null,
+        onerror: null as ((ev: ErrorEvent | { message?: string }) => void) | null,
+        onmessageerror: null as ((ev: MessageEvent) => void) | null,
+        postMessage(data: unknown) {
+          const msg = data as { id: string; type: string };
+          if (msg.type === 'INIT') {
+            void initGate.then(() => {
+              fakeWorker.onmessage?.({
+                data: {
+                  id: msg.id,
+                  ok: true,
+                  payload: {
+                    opfsAvailable: true,
+                    syncHandleAvailable: true,
+                    lockConflictsPrevented: 0,
+                    leases: [],
+                    workerCacheStats: null,
+                  },
+                },
+              } as MessageEvent);
+            });
+          } else if (msg.type === 'RECOVER_STARTUP_ASSETS') {
+            fakeWorker.onmessage?.({
+              data: {
+                id: msg.id,
+                ok: true,
+                payload: { readyAssetIds: [], cleanedAssetIds: [] },
+              },
+            } as MessageEvent);
+          }
+        },
+        terminate() {},
+      };
+      return fakeWorker;
+    },
+  });
+
+  assert.equal(client.isInitialized(), false);
+  const p1 = client.init();
+  const p2 = client.init();
+  assert.equal(p1, p2, 'Concurrent init() calls must return the exact same authoritative promise');
+
+  releaseWorkerInit();
+  const [t1, t2] = await Promise.all([p1, p2]);
+  assert.equal(workerSpawnCount, 1, 'Expected exactly one worker spawn across concurrent init calls');
+  assert.equal(client.isInitialized(), true);
+  assert.equal(t1.opfsSupported, true);
+  assert.equal(t2.persistenceStatus, 'OPFS-SyncAccessHandle');
+
+  client.dispose();
+  assert.equal(client.isDisposed(), true);
+  assert.equal(client.isInitialized(), false);
+  await assert.rejects(() => client.init(), /disposed/i);
+});

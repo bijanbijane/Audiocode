@@ -223,6 +223,26 @@ export interface LocalModelManifest {
   readonly expectedByteLength: number;
 }
 
+const SAFE_MODEL_SEGMENT = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
+const MAX_SAFE_LOCAL_MODEL_BYTES = 2 * 1024 * 1024 * 1024;
+
+function isSafeModelPathSegment(value: string): boolean {
+  const trimmed = value.trim();
+  if (
+    trimmed.length === 0 ||
+    trimmed === '.' ||
+    trimmed === '..' ||
+    trimmed.includes('..') ||
+    trimmed.includes('/') ||
+    trimmed.includes('\\') ||
+    /[\u0000-\u001f\u007f]/.test(trimmed) ||
+    trimmed.toLowerCase() === 'registry'
+  ) {
+    return false;
+  }
+  return SAFE_MODEL_SEGMENT.test(trimmed);
+}
+
 export function validateLocalModelManifest(raw: unknown): LocalModelManifest {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
     throw new InputHardeningError('INVALID_MODEL_MANIFEST', 'Model manifest must be a JSON object.');
@@ -230,21 +250,23 @@ export function validateLocalModelManifest(raw: unknown): LocalModelManifest {
   const obj = raw as Record<string, unknown>;
   if (
     typeof obj.modelId !== 'string' ||
-    obj.modelId.trim().length === 0 ||
+    !isSafeModelPathSegment(obj.modelId) ||
     typeof obj.modelVersion !== 'string' ||
-    obj.modelVersion.trim().length === 0 ||
+    !isSafeModelPathSegment(obj.modelVersion) ||
     (obj.architecture !== 'FASTCONFORMER_CTC' && obj.architecture !== 'WHISPER_SEQ2SEQ') ||
     typeof obj.fileName !== 'string' ||
     !/^[a-zA-Z0-9._-]+\.onnx$/i.test(obj.fileName) ||
+    obj.fileName.includes('..') ||
     typeof obj.expectedSha256Hex !== 'string' ||
     !/^[a-f0-9]{64}$/i.test(obj.expectedSha256Hex) ||
     typeof obj.expectedByteLength !== 'number' ||
     !Number.isSafeInteger(obj.expectedByteLength) ||
-    obj.expectedByteLength <= 0
+    obj.expectedByteLength <= 0 ||
+    obj.expectedByteLength > MAX_SAFE_LOCAL_MODEL_BYTES
   ) {
     throw new InputHardeningError(
       'INVALID_MODEL_MANIFEST',
-      'Model manifest failed strict schema validation (modelId, version, .onnx filename, 64-hex SHA-256, positive byteLength required).',
+      'Model manifest failed strict schema validation (safe modelId/version path segments, .onnx filename, 64-hex SHA-256, safe positive byteLength required).',
     );
   }
 

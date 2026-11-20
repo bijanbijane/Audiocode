@@ -2,6 +2,7 @@ import type { PgPoolLike } from '../PlatformBackendServices';
 import {
   AdvisoryLockCoordinator,
   TransactionalOutboxDispatcher,
+  adaptLegacyAdvisoryLockCallback,
 } from './BackendJobOutboxAndAdvisoryLockService';
 import { BackendAsrJobQueueAndPool } from '../queue/BackendAsrJobQueueAndPool';
 
@@ -22,7 +23,7 @@ export class BackendBackgroundCronDaemon {
       eventType: string;
       payload: Record<string, unknown>;
     }) => Promise<void>,
-    cloudRuntimeEnabled: boolean = false
+    cloudRuntimeEnabled: boolean = false,
   ) {
     this.lockCoordinator = new AdvisoryLockCoordinator(db);
     this.outboxDispatcher = new TransactionalOutboxDispatcher(db);
@@ -44,7 +45,8 @@ export class BackendBackgroundCronDaemon {
   }
 
   /**
-   * Executes a single cluster-safe maintenance tick under a PostgreSQL advisory lock.
+   * Executes a single cluster-safe maintenance tick under a connection-pinned
+   * PostgreSQL session advisory lock.
    */
   public async runSingleSweepTick(): Promise<{
     executed: boolean;
@@ -62,16 +64,16 @@ export class BackendBackgroundCronDaemon {
     try {
       const res = await this.lockCoordinator.runWithAdvisoryLock(
         BackendBackgroundCronDaemon.SWEEP_LOCK_ID,
-        async () => {
+        adaptLegacyAdvisoryLockCallback(async () => {
           const outboxRes = await this.outboxDispatcher.processPendingOutboxBatch(
             this.outboxPublisherFn,
-            25
+            25,
           );
           outboxDispatched = outboxRes.dispatchedCount;
 
           const recoveryRes = await this.jobQueuePool.recoverStaleWorkerJobs();
           staleJobsRequeued = recoveryRes.requeuedCount;
-        }
+        }),
       );
 
       return {

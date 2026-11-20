@@ -163,6 +163,23 @@ export interface WritePcmBlockResult {
   readonly backend: WorkerPersistenceBackend;
   readonly cachedInMainLru: boolean;
   readonly bytesWritten: number;
+  readonly blockIndex?: number;
+}
+
+interface BrokerAssetTransactionRecord {
+  readonly transactionId: string;
+  readonly assetId: string;
+  readonly expectedTotalBlocks: number;
+  readonly expectedTotalSamples: number;
+  readonly blockSizeSamples: number;
+  readonly bytesPerSample: number;
+  readonly channels: 1 | 2;
+  readonly expectedBytes: number;
+  state: 'ingesting' | 'finalizing' | 'ready' | 'abandoned' | 'failed';
+  readonly persistedBlocks: Map<number, number>;
+  persistedBytes: number;
+  failureReason?: string;
+  abortedCleaned: boolean;
 }
 
 export class StorageBrokerClient {
@@ -172,9 +189,14 @@ export class StorageBrokerClient {
     { resolve: (v: unknown) => void; reject: (e: Error) => void }
   >();
   private seq = 0;
+  private txSeq = 0;
   private disposed = false;
+  private initialized = false;
+  private initPromise: Promise<StorageBrokerTelemetry> | null = null;
   private readonly workerCacheBytes: number;
   private readonly workerFactory?: () => BrokerWorkerLike;
+  private readonly assetTransactions = new Map<string, BrokerAssetTransactionRecord>();
+  private readonly assetOpQueues = new Map<string, Promise<unknown>>();
   public readonly lruCache: RollingLruBlockCache;
   private telemetry: StorageBrokerTelemetry;
 
@@ -243,6 +265,10 @@ export class StorageBrokerClient {
     return this.disposed;
   }
 
+  public isInitialized(): boolean {
+    return this.initialized && !this.disposed;
+  }
+
   private assertNotDisposed(): void {
     if (this.disposed) {
       throw new Error('StorageBrokerClient has been disposed');
@@ -256,7 +282,52 @@ export class StorageBrokerClient {
     this.pending.clear();
   }
 
-  async init(): Promise<StorageBrokerTelemetry> {
+  /**
+   * Serializes transactional operations for the same assetId in strict FIFO order
+   * so concurrent writes, finalizations, and aborts cannot violate ordering.
+   */
+  private enqueueAssetOp<T>(assetId: string, op: () => Promise<T>): Promise<T> {
+    const prev = this.assetOpQueues.get(assetId) ?? Promise.resolve();
+    const run = prev.catch(() => undefined).then(op);
+    const tracked = run.then(
+      () => undefined,
+      () => undefined,
+    );
+    this.assetOpQueues.set(assetId, tracked);
+    void tracked.finally(() => {
+      if (this.assetOpQueues.get(assetId) === tracked) {
+        this.assetOpQueues.delete(assetId);
+      }
+    });
+    return run;
+  }
+
+  private invalidateInFlightTransactions(reason: string): void {
+    for (const [assetId, tx] of this.assetTransactions.entries()) {
+      if (tx.state === 'ingesting' || tx.state === 'finalizing') {
+        tx.state = 'failed';
+        tx.failureReason = tx.failureReason ?? reason;
+        tx.persistedBlocks.clear();
+        tx.persistedBytes = 0;
+        this.lruCache.evictAsset(assetId);
+      }
+    }
+  }
+
+  init(): Promise<StorageBrokerTelemetry> {
+    if (this.disposed) {
+      return Promise.reject(new Error('StorageBrokerClient has been disposed'));
+    }
+    if (this.initPromise) {
+      return this.initPromise;
+    }
+
+    const run = this.performInit();
+    this.initPromise = run;
+    return run;
+  }
+
+  private async performInit(): Promise<StorageBrokerTelemetry> {
     this.assertNotDisposed();
 
     const storageInfo = await requestPersistentStorage();
@@ -334,6 +405,7 @@ export class StorageBrokerClient {
           this.telemetry.syncAccessHandleSupported = false;
           this.telemetry.persistenceAvailable = false;
           this.telemetry.persistenceStatus = 'OPFS-Unavailable';
+          this.invalidateInFlightTransactions(`StorageBroker worker error: ${detail}`);
           this.rejectAllPending(`StorageBroker worker error: ${detail}`);
           try {
             this.worker?.terminate();
@@ -400,6 +472,10 @@ export class StorageBrokerClient {
       }
     }
 
+    if (this.disposed) {
+      throw new Error('StorageBrokerClient has been disposed');
+    }
+    this.initialized = true;
     this.telemetry.cacheStats = this.lruCache.getStats();
     return this.getTelemetry();
   }
@@ -552,47 +628,109 @@ export class StorageBrokerClient {
     backend: WorkerPersistenceBackend;
   }> {
     this.assertNotDisposed();
-    if (!this.worker || (!this.telemetry.opfsSupported && this.workerCacheBytes === 0)) {
-      return {
-        manifest: {
-          ...manifest,
-          state: 'ingesting',
-          updatedAtMs: Date.now(),
-          finalizedAtMs: null,
-        },
-        persisted: false,
-        backend: 'OPFS-Unavailable',
-      };
+    if (
+      !manifest ||
+      typeof manifest.assetId !== 'string' ||
+      manifest.assetId.trim().length === 0 ||
+      !Number.isSafeInteger(manifest.totalSamples) ||
+      manifest.totalSamples <= 0 ||
+      !Number.isSafeInteger(manifest.blockSizeSamples) ||
+      manifest.blockSizeSamples <= 0 ||
+      !Number.isSafeInteger(manifest.totalBlocks) ||
+      manifest.totalBlocks !== Math.ceil(manifest.totalSamples / manifest.blockSizeSamples) ||
+      !Number.isSafeInteger(manifest.bytesPerSample) ||
+      manifest.bytesPerSample <= 0 ||
+      (manifest.channels !== 1 && manifest.channels !== 2)
+    ) {
+      throw new Error(
+        `BROKER_INVALID_MANIFEST: Invalid ingest manifest metadata for asset "${manifest?.assetId ?? 'unknown'}".`,
+      );
     }
 
-    try {
-      return (await this.callWorker({
-        type: 'BEGIN_ASSET_INGEST',
-        manifest,
-      })) as {
+    return this.enqueueAssetOp(manifest.assetId, async () => {
+      this.assertNotDisposed();
+
+      const existingTx = this.assetTransactions.get(manifest.assetId);
+      if (existingTx && (existingTx.state === 'ingesting' || existingTx.state === 'finalizing')) {
+        throw new Error(
+          `BROKER_TRANSACTION_CONFLICT: Asset "${manifest.assetId}" already has an active transaction in state "${existingTx.state}".`,
+        );
+      }
+
+      if (!this.worker || (!this.telemetry.opfsSupported && this.workerCacheBytes === 0)) {
+        return {
+          manifest: {
+            ...manifest,
+            state: 'ingesting',
+            updatedAtMs: Date.now(),
+            finalizedAtMs: null,
+          },
+          persisted: false,
+          backend: 'OPFS-Unavailable',
+        };
+      }
+
+      this.lruCache.evictAsset(manifest.assetId);
+
+      const executeBegin = async () =>
+        (await this.callWorker({
+          type: 'BEGIN_ASSET_INGEST',
+          manifest,
+        })) as {
+          manifest: PersistedAudioAssetManifest;
+          persisted: boolean;
+          backend: WorkerPersistenceBackend;
+        };
+
+      let res: {
         manifest: PersistedAudioAssetManifest;
         persisted: boolean;
         backend: WorkerPersistenceBackend;
       };
-    } catch (err) {
-      if (isQuotaExceededError(err)) {
-        this.lruCache.evictToBudget(0);
-        await this.recoverStartupAssets(0).catch(() => {});
-        try {
-          return (await this.callWorker({
-            type: 'BEGIN_ASSET_INGEST',
-            manifest,
-          })) as {
-            manifest: PersistedAudioAssetManifest;
-            persisted: boolean;
-            backend: WorkerPersistenceBackend;
-          };
-        } catch (retryErr) {
-          throw new StorageQuotaExceededError(undefined, retryErr);
+      try {
+        res = await executeBegin();
+      } catch (err) {
+        if (isQuotaExceededError(err)) {
+          this.lruCache.evictToBudget(0);
+          await this.recoverStartupAssets(0).catch(() => {});
+          try {
+            res = await executeBegin();
+          } catch (retryErr) {
+            throw new StorageQuotaExceededError(undefined, retryErr);
+          }
+        } else {
+          throw err;
         }
       }
-      throw err;
-    }
+
+      const truthfulPersisted =
+        Boolean(res?.persisted) && res?.backend !== 'OPFS-Unavailable';
+
+      if (truthfulPersisted) {
+        const expectedBytes =
+          manifest.totalSamples * manifest.bytesPerSample * manifest.channels;
+        this.assetTransactions.set(manifest.assetId, {
+          transactionId: `tx-${++this.txSeq}-${manifest.assetId}`,
+          assetId: manifest.assetId,
+          expectedTotalBlocks: manifest.totalBlocks,
+          expectedTotalSamples: manifest.totalSamples,
+          blockSizeSamples: manifest.blockSizeSamples,
+          bytesPerSample: manifest.bytesPerSample,
+          channels: manifest.channels,
+          expectedBytes,
+          state: 'ingesting',
+          persistedBlocks: new Map(),
+          persistedBytes: 0,
+          abortedCleaned: false,
+        });
+      }
+
+      return {
+        manifest: res.manifest,
+        persisted: truthfulPersisted,
+        backend: truthfulPersisted ? res.backend : 'OPFS-Unavailable',
+      };
+    });
   }
 
   async writeAssetChunk(
@@ -602,79 +740,169 @@ export class StorageBrokerClient {
     ownerWorker: FileHandleLease['ownerWorker'] = 'io-broker',
   ): Promise<WritePcmBlockResult> {
     this.assertNotDisposed();
+    if (!Number.isSafeInteger(chunkIndex) || chunkIndex < 0) {
+      throw new Error(
+        `BROKER_INVALID_BLOCK_INDEX: chunkIndex must be a non-negative integer, got ${String(chunkIndex)}.`,
+      );
+    }
+
     const floatView =
       data instanceof Float32Array ? data : new Float32Array(data);
-    const cachedBlock = this.lruCache.put(assetId, chunkIndex, [floatView]);
 
-    const shouldUseWorker =
-      Boolean(this.worker) &&
-      floatView.byteLength > 0 &&
-      (this.telemetry.opfsSupported || this.workerCacheBytes > 0);
+    return this.enqueueAssetOp(assetId, async () => {
+      this.assertNotDisposed();
 
-    if (!shouldUseWorker) {
-      this.telemetry.cacheStats = this.lruCache.getStats();
-      return {
-        persisted: false,
-        backend: 'OPFS-Unavailable',
-        cachedInMainLru: cachedBlock !== null,
-        bytesWritten: 0,
+      const shouldUseWorker =
+        Boolean(this.worker) &&
+        floatView.byteLength > 0 &&
+        (this.telemetry.opfsSupported || this.workerCacheBytes > 0);
+
+      if (!shouldUseWorker) {
+        const cachedBlock = this.lruCache.put(assetId, chunkIndex, [floatView]);
+        this.telemetry.cacheStats = this.lruCache.getStats();
+        return {
+          persisted: false,
+          backend: 'OPFS-Unavailable',
+          cachedInMainLru: cachedBlock !== null,
+          bytesWritten: 0,
+          blockIndex: chunkIndex,
+        };
+      }
+
+      const tx = this.assetTransactions.get(assetId);
+      if (this.telemetry.opfsSupported) {
+        if (!tx) {
+          throw new Error(
+            `BROKER_NO_ACTIVE_TRANSACTION: Cannot write chunk #${chunkIndex} for "${assetId}" without an active beginAssetIngest() transaction.`,
+          );
+        }
+        if (tx.state !== 'ingesting') {
+          throw new Error(
+            `BROKER_TRANSACTION_INVALID_STATE: Cannot write chunk #${chunkIndex} for "${assetId}" while transaction is in state "${tx.state}".`,
+          );
+        }
+        if (chunkIndex >= tx.expectedTotalBlocks) {
+          tx.state = 'failed';
+          tx.failureReason = `Block index ${chunkIndex} out of bounds [0, ${tx.expectedTotalBlocks - 1}]`;
+          this.lruCache.evictAsset(assetId);
+          throw new Error(`BROKER_INVALID_BLOCK_INDEX: ${tx.failureReason}`);
+        }
+        if (tx.persistedBlocks.has(chunkIndex)) {
+          tx.state = 'failed';
+          tx.failureReason = `Duplicate write attempted for already-acknowledged block #${chunkIndex}`;
+          this.lruCache.evictAsset(assetId);
+          throw new Error(`BROKER_DUPLICATE_BLOCK_WRITE: ${tx.failureReason}`);
+        }
+        const expectedChunkSamples = Math.min(
+          tx.blockSizeSamples,
+          Math.max(0, tx.expectedTotalSamples - chunkIndex * tx.blockSizeSamples),
+        );
+        const expectedChunkBytes =
+          expectedChunkSamples * tx.bytesPerSample * tx.channels;
+        if (floatView.byteLength !== expectedChunkBytes) {
+          tx.state = 'failed';
+          tx.failureReason = `Chunk #${chunkIndex} byte length mismatch: expected ${expectedChunkBytes} bytes, got ${floatView.byteLength}`;
+          this.lruCache.evictAsset(assetId);
+          throw new Error(`BROKER_CHUNK_BYTE_MISMATCH: ${tx.failureReason}`);
+        }
+      }
+
+      const sendWrite = async () => {
+        const copy = new Float32Array(floatView);
+        return (await this.callWorker(
+          {
+            type: 'WRITE_ASSET_CHUNK',
+            assetId,
+            chunkIndex,
+            ownerWorker,
+            data: copy.buffer,
+          },
+          [copy.buffer],
+        )) as {
+          bytesWritten: number;
+          persisted: boolean;
+          backend: WorkerPersistenceBackend;
+          lockConflictsPrevented: number;
+          leases: FileHandleLease[];
+          workerCacheStats?: RollingCacheStats | null;
+        };
       };
-    }
 
-    const sendWrite = async () => {
-      const copy = new Float32Array(floatView);
-      return (await this.callWorker(
-        {
-          type: 'WRITE_ASSET_CHUNK',
-          assetId,
-          chunkIndex,
-          ownerWorker,
-          data: copy.buffer,
-        },
-        [copy.buffer],
-      )) as {
-        bytesWritten: number;
-        persisted: boolean;
-        backend: WorkerPersistenceBackend;
-        lockConflictsPrevented: number;
-        leases: FileHandleLease[];
-        workerCacheStats?: RollingCacheStats | null;
-      };
-    };
+      let res;
+      try {
+        res = await sendWrite();
+      } catch (err) {
+        if (isQuotaExceededError(err)) {
+          this.lruCache.evictToBudget(0);
+          await this.recoverStartupAssets(0).catch(() => {});
+          try {
+            res = await sendWrite();
+          } catch (retryErr) {
+            if (tx) {
+              tx.state = 'failed';
+              tx.failureReason =
+                retryErr instanceof Error ? retryErr.message : String(retryErr);
+              this.lruCache.evictAsset(assetId);
+            }
+            throw new StorageQuotaExceededError(undefined, retryErr);
+          }
+        } else {
+          if (tx) {
+            tx.state = 'failed';
+            tx.failureReason = err instanceof Error ? err.message : String(err);
+            this.lruCache.evictAsset(assetId);
+          }
+          throw err;
+        }
+      }
 
-    let res;
-    try {
-      res = await sendWrite();
-    } catch (err) {
-      if (isQuotaExceededError(err)) {
-        this.lruCache.evictToBudget(0);
-        await this.recoverStartupAssets(0).catch(() => {});
-        try {
-          res = await sendWrite();
-        } catch (retryErr) {
-          throw new StorageQuotaExceededError(undefined, retryErr);
+      if (res) {
+        this.telemetry.lockConflictsPrevented =
+          res.lockConflictsPrevented ?? this.telemetry.lockConflictsPrevented;
+        this.telemetry.activeLeases = res.leases ?? this.telemetry.activeLeases;
+        if (res.workerCacheStats !== undefined) {
+          this.telemetry.workerCacheStats = res.workerCacheStats;
+        }
+      }
+
+      const bytesWritten =
+        typeof res?.bytesWritten === 'number' &&
+        Number.isSafeInteger(res.bytesWritten) &&
+        res.bytesWritten >= 0
+          ? res.bytesWritten
+          : 0;
+      const backend: WorkerPersistenceBackend = res?.backend ?? 'OPFS-Unavailable';
+      const rawPersisted = Boolean(res?.persisted) && backend !== 'OPFS-Unavailable';
+      const byteCountMatches = bytesWritten === floatView.byteLength;
+      const truthfulPersisted = rawPersisted && byteCountMatches;
+
+      let cachedInMainLru = false;
+      if (tx) {
+        if (truthfulPersisted) {
+          tx.persistedBlocks.set(chunkIndex, bytesWritten);
+          tx.persistedBytes += bytesWritten;
+          cachedInMainLru = this.lruCache.put(assetId, chunkIndex, [floatView]) !== null;
+        } else {
+          tx.state = 'failed';
+          tx.failureReason = !rawPersisted
+            ? `Block #${chunkIndex} failed durable persistence (backend: ${backend})`
+            : `Block #${chunkIndex} byte write mismatch: expected ${floatView.byteLength}, wrote ${bytesWritten}`;
+          this.lruCache.evictAsset(assetId);
         }
       } else {
-        throw err;
+        cachedInMainLru = this.lruCache.put(assetId, chunkIndex, [floatView]) !== null;
       }
-    }
 
-    if (res) {
-      this.telemetry.lockConflictsPrevented =
-        res.lockConflictsPrevented ?? this.telemetry.lockConflictsPrevented;
-      this.telemetry.activeLeases = res.leases ?? this.telemetry.activeLeases;
-      if (res.workerCacheStats !== undefined) {
-        this.telemetry.workerCacheStats = res.workerCacheStats;
-      }
-    }
-    this.telemetry.cacheStats = this.lruCache.getStats();
+      this.telemetry.cacheStats = this.lruCache.getStats();
 
-    return {
-      persisted: Boolean(res?.persisted),
-      backend: res?.backend ?? 'OPFS-Unavailable',
-      cachedInMainLru: cachedBlock !== null,
-      bytesWritten: res?.bytesWritten ?? 0,
-    };
+      return {
+        persisted: truthfulPersisted,
+        backend,
+        cachedInMainLru,
+        bytesWritten,
+        blockIndex: chunkIndex,
+      };
+    });
   }
 
   async finalizeAsset(
@@ -682,15 +910,99 @@ export class StorageBrokerClient {
     patch?: Partial<PersistedAudioAssetManifest>,
   ): Promise<PersistedAudioAssetManifest | null> {
     this.assertNotDisposed();
-    if (!this.worker || (!this.telemetry.opfsSupported && this.workerCacheBytes === 0)) {
-      return null;
-    }
-    const res = (await this.callWorker({
-      type: 'FINALIZE_ASSET',
-      assetId,
-      patch,
-    })) as { manifest: PersistedAudioAssetManifest };
-    return res?.manifest ?? null;
+    return this.enqueueAssetOp(assetId, async () => {
+      this.assertNotDisposed();
+      if (!this.worker || (!this.telemetry.opfsSupported && this.workerCacheBytes === 0)) {
+        return null;
+      }
+
+      const tx = this.assetTransactions.get(assetId);
+      if (this.telemetry.opfsSupported) {
+        if (!tx) {
+          throw new Error(
+            `BROKER_NO_ACTIVE_TRANSACTION: Cannot finalize asset "${assetId}" without an active ingestion transaction.`,
+          );
+        }
+        if (tx.state === 'ready') {
+          throw new Error(
+            `BROKER_ALREADY_COMMITTED: Asset "${assetId}" transaction "${tx.transactionId}" has already been finalized.`,
+          );
+        }
+        if (tx.state !== 'ingesting') {
+          throw new Error(
+            `BROKER_CANNOT_FINALIZE_STATE: Cannot finalize asset "${assetId}" in state "${tx.state}"${
+              tx.failureReason ? ` (${tx.failureReason})` : ''
+            }.`,
+          );
+        }
+        if (patch?.totalBlocks !== undefined && patch.totalBlocks !== tx.expectedTotalBlocks) {
+          tx.state = 'failed';
+          tx.failureReason = `Finalization patch totalBlocks mismatch: expected ${tx.expectedTotalBlocks}, got ${patch.totalBlocks}`;
+          this.lruCache.evictAsset(assetId);
+          throw new Error(`BROKER_FINALIZE_MISMATCH: ${tx.failureReason}`);
+        }
+        if (patch?.totalSamples !== undefined && patch.totalSamples !== tx.expectedTotalSamples) {
+          tx.state = 'failed';
+          tx.failureReason = `Finalization patch totalSamples mismatch: expected ${tx.expectedTotalSamples}, got ${patch.totalSamples}`;
+          this.lruCache.evictAsset(assetId);
+          throw new Error(`BROKER_FINALIZE_MISMATCH: ${tx.failureReason}`);
+        }
+
+        const missingIndexes: number[] = [];
+        for (let i = 0; i < tx.expectedTotalBlocks; i++) {
+          if (!tx.persistedBlocks.has(i)) {
+            missingIndexes.push(i);
+          }
+        }
+        if (
+          missingIndexes.length > 0 ||
+          tx.persistedBlocks.size !== tx.expectedTotalBlocks ||
+          tx.persistedBytes !== tx.expectedBytes
+        ) {
+          tx.state = 'failed';
+          tx.failureReason = `Incomplete block set before finalization: persisted ${tx.persistedBlocks.size}/${tx.expectedTotalBlocks} blocks (${tx.persistedBytes}/${tx.expectedBytes} bytes), missing [${missingIndexes.join(', ')}]`;
+          this.lruCache.evictAsset(assetId);
+          throw new Error(`BROKER_INCOMPLETE_BLOCKS: ${tx.failureReason}`);
+        }
+
+        tx.state = 'finalizing';
+      }
+
+      try {
+        const res = (await this.callWorker({
+          type: 'FINALIZE_ASSET',
+          assetId,
+          patch,
+        })) as { manifest: PersistedAudioAssetManifest };
+        const manifest = res?.manifest ?? null;
+
+        if (tx) {
+          if (
+            !manifest ||
+            manifest.state !== 'ready' ||
+            manifest.totalBlocks !== tx.expectedTotalBlocks ||
+            manifest.totalSamples !== tx.expectedTotalSamples ||
+            manifest.blockSizeSamples !== tx.blockSizeSamples
+          ) {
+            tx.state = 'failed';
+            tx.failureReason = `Worker returned invalid finalized manifest for "${assetId}" (state=${manifest?.state ?? 'null'}, totalBlocks=${manifest?.totalBlocks ?? 'null'}, totalSamples=${manifest?.totalSamples ?? 'null'}).`;
+            this.lruCache.evictAsset(assetId);
+            throw new Error(`BROKER_INVALID_FINAL_MANIFEST: ${tx.failureReason}`);
+          }
+          tx.state = 'ready';
+        }
+
+        return manifest;
+      } catch (err) {
+        if (tx && tx.state !== 'ready') {
+          tx.state = 'failed';
+          tx.failureReason =
+            tx.failureReason ?? (err instanceof Error ? err.message : String(err));
+          this.lruCache.evictAsset(assetId);
+        }
+        throw err;
+      }
+    });
   }
 
   async abortAssetIngest(
@@ -699,20 +1011,54 @@ export class StorageBrokerClient {
     targetState: 'abandoned' | 'failed' = 'abandoned',
   ): Promise<void> {
     if (this.disposed) return;
-    this.lruCache.evictAsset(assetId);
-    if (this.worker && (this.telemetry.opfsSupported || this.workerCacheBytes > 0)) {
-      await this.callWorker({
-        type: 'ABORT_ASSET_INGEST',
-        assetId,
-        reason,
-        targetState,
-      }).catch(() => {});
-    }
-    this.telemetry.cacheStats = this.lruCache.getStats();
+    return this.enqueueAssetOp(assetId, async () => {
+      if (this.disposed) return;
+      this.lruCache.evictAsset(assetId);
+
+      const tx = this.assetTransactions.get(assetId);
+      if (tx && (tx.state === 'abandoned' || tx.state === 'failed') && tx.abortedCleaned) {
+        this.telemetry.cacheStats = this.lruCache.getStats();
+        return;
+      }
+
+      if (tx) {
+        tx.state = targetState;
+        tx.failureReason = tx.failureReason ?? reason;
+        tx.persistedBlocks.clear();
+        tx.persistedBytes = 0;
+      }
+
+      let rollbackErr: unknown = null;
+      if (this.worker && (this.telemetry.opfsSupported || this.workerCacheBytes > 0)) {
+        try {
+          await this.callWorker({
+            type: 'ABORT_ASSET_INGEST',
+            assetId,
+            reason,
+            targetState,
+          });
+        } catch (err) {
+          rollbackErr = err;
+        }
+      }
+
+      if (tx) {
+        tx.abortedCleaned = true;
+      }
+      this.telemetry.cacheStats = this.lruCache.getStats();
+
+      if (rollbackErr !== null) {
+        throw rollbackErr;
+      }
+    });
   }
 
   async getReadyAssetManifest(assetId: string): Promise<PersistedAudioAssetManifest | null> {
     this.assertNotDisposed();
+    const tx = this.assetTransactions.get(assetId);
+    if (tx && tx.state !== 'ready') {
+      return null;
+    }
     if (!this.worker || (!this.telemetry.opfsSupported && this.workerCacheBytes === 0)) {
       return null;
     }
@@ -720,7 +1066,11 @@ export class StorageBrokerClient {
       type: 'GET_READY_ASSET',
       assetId,
     })) as { manifest: PersistedAudioAssetManifest | null };
-    return res?.manifest ?? null;
+    const manifest = res?.manifest ?? null;
+    if (!manifest || manifest.state !== 'ready') {
+      return null;
+    }
+    return manifest;
   }
 
   async listReadyAssets(): Promise<PersistedAudioAssetManifest[]> {
@@ -736,14 +1086,18 @@ export class StorageBrokerClient {
 
   async deleteAsset(assetId: string): Promise<void> {
     this.assertNotDisposed();
-    this.lruCache.evictAsset(assetId);
-    if (this.worker && (this.telemetry.opfsSupported || this.workerCacheBytes > 0)) {
-      await this.callWorker({
-        type: 'DELETE_ASSET',
-        assetId,
-      });
-    }
-    this.telemetry.cacheStats = this.lruCache.getStats();
+    return this.enqueueAssetOp(assetId, async () => {
+      this.assertNotDisposed();
+      this.assetTransactions.delete(assetId);
+      this.lruCache.evictAsset(assetId);
+      if (this.worker && (this.telemetry.opfsSupported || this.workerCacheBytes > 0)) {
+        await this.callWorker({
+          type: 'DELETE_ASSET',
+          assetId,
+        });
+      }
+      this.telemetry.cacheStats = this.lruCache.getStats();
+    });
   }
 
   async recoverStartupAssets(maxIngestingAgeMs = 0): Promise<{
@@ -883,12 +1237,15 @@ export class StorageBrokerClient {
   dispose(): void {
     if (this.disposed) return;
     this.disposed = true;
+    this.initialized = false;
+    this.initPromise = null;
     this.telemetry.disposed = true;
     this.telemetry.opfsSupported = false;
     this.telemetry.syncAccessHandleSupported = false;
     this.telemetry.persistenceAvailable = false;
     this.telemetry.persistenceStatus = 'Disposed';
 
+    this.invalidateInFlightTransactions('StorageBrokerClient has been disposed');
     this.rejectAllPending('StorageBrokerClient has been disposed');
     try {
       this.worker?.terminate();
@@ -896,6 +1253,8 @@ export class StorageBrokerClient {
       // ignore terminate error during teardown
     }
     this.worker = null;
+    this.assetTransactions.clear();
+    this.assetOpQueues.clear();
     this.lruCache.clear();
     this.telemetry.cacheStats = this.lruCache.getStats();
   }

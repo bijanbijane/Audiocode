@@ -47,25 +47,15 @@ import {
 } from './src/ai-engine/asr/ContinuousLearningAndEvolutionEngine.ts';
 import {
   GLOBAL_PLATFORM_CONTROL_PLANE,
-  PHASE10_VERSIONED_PLAN_CATALOG,
+  PHASE10_PUBLIC_MODEL_CATALOG,
 } from './src/platform/PlatformControlPlaneEngine.ts';
 import { PlatformDataPlaneGateway } from './src/platform/PlatformDataPlaneGateway.ts';
-import type {
-  ApiCredentialScope,
-  ProjectEnvironment,
-  PublicWebhookEventType,
-} from './src/platform/PlatformContractsAndSchemas.ts';
+import { PlatformControlPlaneGateway } from './src/platform/PlatformControlPlaneGateway.ts';
+import { createPlatformControlPlaneHttpRouter } from './src/platform/PlatformControlPlaneHttpRouter.ts';
 import {
-  PHASE11_CAPABILITY_REGISTRY,
-  DEFAULT_FULL_SANDBOX_CONSENT,
-} from './src/intelligence/CapabilityRegistryAndOrchestrator.ts';
-import {
-  RealtimeIntelligenceStreamCoordinator,
-} from './src/intelligence/MeetingAnalyticsSearchEngine.ts';
-import type {
-  GranularProcessingConsent,
-  SpeechCapabilityId,
-} from './src/intelligence/SpeechIntelligenceContracts.ts';
+  createSpeechIntelligenceSandboxRouter,
+  resolveSandboxRuntimePolicy,
+} from './src/intelligence/SandboxHttpAccessGuard.ts';
 import { DataFactoryGateway } from './src/data-factory/DataFactoryGateway.ts';
 import { ModelFactoryGateway } from './src/model-factory/ModelFactoryGateway.ts';
 import { createModelFactoryHttpRouter } from './src/model-factory/ModelFactoryHttpRouter.ts';
@@ -92,6 +82,11 @@ import {
   UnifiedProcessingOrchestrator,
   type UnifiedProcessingRequest,
 } from './src/processing-engine/index.ts';
+import {
+  CloudAsrConsentRegistry,
+  createStudioCloudAsrRouter,
+  STUDIO_CLOUD_MODEL_ID,
+} from './src/security/CloudAsrConsentRegistry.ts';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.PORT || 3000);
@@ -106,7 +101,23 @@ async function startServer() {
     keyVersion: 1,
   });
 
+  // Fail-closed startup guard: production with ENABLE_INTELLIGENCE_SANDBOX_ROUTES=true throws immediately
+  const sandboxPolicy = resolveSandboxRuntimePolicy({
+    NODE_ENV: process.env.NODE_ENV,
+    ENABLE_INTELLIGENCE_SANDBOX_ROUTES: process.env.ENABLE_INTELLIGENCE_SANDBOX_ROUTES,
+    INTELLIGENCE_SANDBOX_TOKEN: process.env.INTELLIGENCE_SANDBOX_TOKEN,
+  });
+
   const platformGateway = new PlatformDataPlaneGateway(GLOBAL_PLATFORM_CONTROL_PLANE);
+  const platformControlPlaneGateway = new PlatformControlPlaneGateway(GLOBAL_PLATFORM_CONTROL_PLANE, {
+    isProduction: IS_PROD,
+    bootstrapEnabled: process.env.PLATFORM_BOOTSTRAP_ENABLED === 'true',
+    bootstrapToken: process.env.PLATFORM_BOOTSTRAP_TOKEN,
+    resolvePublicModels: () =>
+      platformGateway.resolveCatalogModelsForProject(
+        PHASE10_PUBLIC_MODEL_CATALOG.map((m) => m.modelId)
+      ),
+  });
   const dataFactoryGateway = new DataFactoryGateway(GLOBAL_PLATFORM_CONTROL_PLANE);
   const modelFactoryGateway = new ModelFactoryGateway(GLOBAL_PLATFORM_CONTROL_PLANE, dataFactoryGateway.service);
   const speechSecurityService = new SpeechSecurityService(
@@ -120,6 +131,7 @@ async function startServer() {
   const unifiedProcessingOrchestrator = new UnifiedProcessingOrchestrator({
     localAdapter: new LocalExecutionAdapter({ coreRouter: coreAsrRouter }),
   });
+  const cloudAsrConsentRegistry = new CloudAsrConsentRegistry();
 
   // Preserve Cross-Origin Isolation so SharedArrayBuffer & OPFS SyncAccessHandle remain active
   app.use((_req, res, next) => {
@@ -128,84 +140,141 @@ async function startServer() {
     next();
   });
 
-  app.use(express.json({ limit: '16mb' }));
+  // Mount binary-streaming public transcription route BEFORE global express.json() so raw audio streams
+  // are never buffered in heap or rejected by JSON middleware.
+  app.post('/v1/audio/transcriptions', async (req, res) => {
+    const idempotencyKey =
+      typeof req.headers['idempotency-key'] === 'string'
+        ? req.headers['idempotency-key']
+        : undefined;
 
-  // Server-side Persian ASR transcription endpoint (uses gemini-3.5-transcribe when GEMINI_API_KEY is available)
-  app.post('/api/v1/asr/transcribe', async (req, res) => {
-    const body = req.body as {
-      audioBase64?: unknown;
-      mimeType?: unknown;
+    let parsedOptions: Record<string, unknown> = {};
+    const rawOptionsHeader = req.headers['x-asr-options'];
+    if (typeof rawOptionsHeader === 'string' && rawOptionsHeader.trim().length > 0) {
+      try {
+        const parsed = JSON.parse(rawOptionsHeader);
+        if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+          req.resume();
+          res.status(400).json({
+            error: {
+              code: 'VALIDATION_ERROR',
+              message: 'X-ASR-Options header must decode to a JSON object.',
+              request_id: `req_opts_${Date.now()}`,
+              retryable: false,
+              details: {},
+            },
+          });
+          return;
+        }
+        parsedOptions = parsed as Record<string, unknown>;
+      } catch {
+        req.resume();
+        res.status(400).json({
+          error: {
+            code: 'VALIDATION_ERROR',
+            message: 'X-ASR-Options header contains malformed JSON.',
+            request_id: `req_opts_${Date.now()}`,
+            retryable: false,
+            details: {},
+          },
+        });
+        return;
+      }
+    }
+
+    const abortController = new AbortController();
+    const onAborted = () => abortController.abort();
+    const onResClose = () => {
+      if (!res.writableEnded) {
+        abortController.abort();
+      }
     };
-
-    if (typeof body?.audioBase64 !== 'string' || body.audioBase64.length === 0) {
-      res.status(400).json({ error: 'VALIDATION_ERROR', message: 'audioBase64 is required' });
-      return;
-    }
-
-    const apiKey = process.env.GEMINI_API_KEY;
-    if (!apiKey) {
-      res.status(503).json({
-        error: 'ASR_API_KEY_UNAVAILABLE',
-        messageFa:
-          'کلید سرویس‌دهنده ابری روی سرور تنظیم نشده است؛ برای حفظ شفافیت، بازگشت خودکار پنهان به پردازش محلی انجام نمی‌شود.',
-      });
-      return;
-    }
+    req.on('aborted', onAborted);
+    res.on('close', onResClose);
 
     try {
-      const ai = new GoogleGenAI({
-        apiKey,
-        httpOptions: {
-          headers: {
-            'User-Agent': 'aistudio-build',
-          },
-        },
+      const out = await platformGateway.createTranscription({
+        bearerToken: String(req.headers.authorization ?? ''),
+        idempotencyKey,
+        contentType: typeof req.headers['content-type'] === 'string' ? req.headers['content-type'] : undefined,
+        contentLengthHeader: req.headers['content-length'],
+        audioStream: req,
+        options: parsedOptions,
+        abortSignal: abortController.signal,
       });
-
-      const mimeType =
-        typeof body.mimeType === 'string' && body.mimeType.trim().length > 0
-          ? body.mimeType
-          : 'audio/wav';
-
-      const response = await ai.models.generateContent({
-        model: 'gemini-3.5-transcribe',
-        contents: {
-          parts: [
-            {
-              inlineData: {
-                mimeType,
-                data: body.audioBase64,
-              },
-            },
-            {
-              text:
-                'این فایل صوتی را دقیق و کلمه‌به‌کلمه به متن تبدیل کن. این گفتار چندزبانه (Code-Switching) است: ' +
-                '۱) گفتار اصلی فارسی را همراه با تپق‌ها و کشیدگی‌های گفتاری (مثل اممم، رفتیممم) دقیق پیاده کن. ' +
-                '۲) اگر کلمات یا اصطلاحات انگلیسی و فنی (مانند API, TypeScript, Backend, Docker, WebGPU, LLM, Cloud, Startup) در میان کلام فارسی بیان شدند، آن‌ها را دقیق تشخیص بده و به فرم استاندارد انگلیسی (Latin) یا معادل دقیق بنویس. ' +
-                '۳) اگر عبارات یا واژگان عربی (مانند إن شاء الله، الحمد لله، فی‌الواقع، علی‌ای‌حال، تحقیقاً، دقیقاً) بیان شدند، املای صحیح عربی و تنوین آن‌ها را حفظ کن. فقط متن پیاده‌شده را بدون هیچ توضیح اضافی برگردان.',
-            },
-          ],
-        },
-      });
-
-      const rawText = (response.text ?? '').trim();
-      const transcriptText = rawText
-        .replace(/^```(?:text|txt)?\s*/i, '')
-        .replace(/\s*```$/i, '')
-        .replace(/^["«»]|["«»]$/g, '')
-        .trim();
-      res.json({
-        transcriptText,
-        model: 'gemini-3.5-transcribe-trilingual-fa-en-ar',
-      });
-    } catch (err) {
-      const rawMsg = err instanceof Error ? err.message : 'ASR_UPSTREAM_ERROR';
-      res.status(502).json({
-        error: 'ASR_TRANSCRIPTION_FAILED',
-        message: sanitizePublicErrorOutput(rawMsg),
-      });
+      if (!res.writableEnded) {
+        res.status(out.status).json(out.body);
+      }
+    } finally {
+      req.off('aborted', onAborted);
+      res.off('close', onResClose);
     }
   });
+
+  // Mount Speech Intelligence Sandbox router BEFORE global express.json() so it enforces its strict
+  // 256 KiB route-scoped payload limit (or returns sanitized 404 when disabled / in production).
+  app.use(
+    createSpeechIntelligenceSandboxRouter({
+      gateway: platformGateway,
+      controlPlane: GLOBAL_PLATFORM_CONTROL_PLANE,
+      config: sandboxPolicy,
+    })
+  );
+
+  // Mount Studio Cloud ASR Consent & Binary WAV Router BEFORE global express.json() so raw
+  // audio/wav payloads are strictly validated, capped at 4 MiB, and never JSON-parsed.
+  app.use(
+    createStudioCloudAsrRouter({
+      registry: cloudAsrConsentRegistry,
+      isApiKeyAvailable: () => Boolean(process.env.GEMINI_API_KEY),
+      transcribeWavBytes: async ({ wavBytes, modelId }) => {
+        const apiKey = process.env.GEMINI_API_KEY;
+        if (!apiKey) {
+          throw new Error('ASR_API_KEY_UNAVAILABLE');
+        }
+        const ai = new GoogleGenAI({
+          apiKey,
+          httpOptions: {
+            headers: {
+              'User-Agent': 'aistudio-build',
+            },
+          },
+        });
+        const response = await ai.models.generateContent({
+          model: modelId || STUDIO_CLOUD_MODEL_ID,
+          contents: {
+            parts: [
+              {
+                inlineData: {
+                  mimeType: 'audio/wav',
+                  data: wavBytes.toString('base64'),
+                },
+              },
+              {
+                text:
+                  'این فایل صوتی را دقیق و کلمه‌به‌کلمه به متن تبدیل کن. این گفتار چندزبانه (Code-Switching) است: ' +
+                  '۱) گفتار اصلی فارسی را همراه با تپق‌ها و کشیدگی‌های گفتاری (مثل اممم، رفتیممم) دقیق پیاده کن. ' +
+                  '۲) اگر کلمات یا اصطلاحات انگلیسی و فنی (مانند API, TypeScript, Backend, Docker, WebGPU, LLM, Cloud, Startup) در میان کلام فارسی بیان شدند، آن‌ها را دقیق تشخیص بده و به فرم استاندارد انگلیسی (Latin) یا معادل دقیق بنویس. ' +
+                  '۳) اگر عبارات یا واژگان عربی (مانند إن شاء الله، الحمد لله، فی‌الواقع، علی‌ای‌حال، تحقیقاً، دقیقاً) بیان شدند، املای صحیح عربی و تنوین آن‌ها را حفظ کن. فقط متن پیاده‌شده را بدون هیچ توضیح اضافی برگردان.',
+              },
+            ],
+          },
+        });
+        const rawText = (response.text ?? '').trim();
+        const transcriptText = rawText
+          .replace(/^```(?:text|txt)?\s*/i, '')
+          .replace(/\s*```$/i, '')
+          .replace(/^["«»]|["«»]$/g, '')
+          .trim();
+        return {
+          transcriptText,
+          model: modelId || STUDIO_CLOUD_MODEL_ID,
+        };
+      },
+    }),
+  );
+
+  app.use(express.json({ limit: '16mb' }));
 
   // Public Ed25519 SPKI key endpoint for offline client verification
   app.get('/api/v1/crypto/public-key', (_req, res) => {
@@ -519,39 +588,37 @@ async function startServer() {
   });
 
   // ── Phase 10 Public Product API (`/v1/*`) ─────────────────────────────────
-  app.get('/v1/models', (req, res) => {
-    const out = platformGateway.listPublicModels(String(req.headers.authorization ?? ''));
+  app.get('/v1/models', async (req, res) => {
+    const out = await platformGateway.listPublicModels(String(req.headers.authorization ?? ''));
     res.status(out.status).json(out.body);
   });
 
-  app.get('/v1/models/:id', (req, res) => {
-    const out = platformGateway.getPublicModel(String(req.headers.authorization ?? ''), req.params.id);
+  app.get('/v1/models/:id', async (req, res) => {
+    const out = await platformGateway.getPublicModel(String(req.headers.authorization ?? ''), req.params.id);
     res.status(out.status).json(out.body);
   });
 
   app.post('/v1/audio/estimates', (req, res) => {
-    const body = req.body as { model?: string; duration_seconds?: number; region_id?: string };
+    const body = req.body as { model?: string; duration_seconds?: unknown; region_id?: string };
+    const parsedDuration =
+      body?.duration_seconds === undefined ? 60 : Number(body.duration_seconds);
+    if (!Number.isFinite(parsedDuration) || parsedDuration < 0) {
+      res.status(400).json({
+        error: 'VALIDATION_ERROR',
+        message: 'duration_seconds must be a non-negative finite number',
+      });
+      return;
+    }
     const out = platformGateway.estimateTranscriptionCost({
       bearerToken: String(req.headers.authorization ?? ''),
       modelId: body?.model ?? 'asr-fa-en-v1',
-      durationSeconds: Number(body?.duration_seconds ?? 60),
+      durationSeconds: parsedDuration,
       regionId: body?.region_id,
     });
     res.status(out.status).json(out.body);
   });
 
-  app.post('/v1/audio/transcriptions', (req, res) => {
-    const idempotencyKey =
-      typeof req.headers['idempotency-key'] === 'string'
-        ? req.headers['idempotency-key']
-        : undefined;
-    const out = platformGateway.createTranscription({
-      bearerToken: String(req.headers.authorization ?? ''),
-      idempotencyKey,
-      body: (req.body ?? {}) as Record<string, unknown>,
-    });
-    res.status(out.status).json(out.body);
-  });
+  // NOTE: POST /v1/audio/transcriptions is registered above express.json() for raw binary streaming.
 
   app.get('/v1/audio/transcriptions/:id', (req, res) => {
     const out = platformGateway.getTranscriptionJob({
@@ -585,132 +652,8 @@ async function startServer() {
     res.status(out.status).json(out.body);
   });
 
-  // ── Phase 10 Developer Portal & Commercial Control Plane Routes ───────────
-  app.get('/api/v1/platform/overview', (_req, res) => {
-    res.json({
-      ...GLOBAL_PLATFORM_CONTROL_PLANE.getPortalOverview('org_avapardaz_sandbox'),
-      plans: PHASE10_VERSIONED_PLAN_CATALOG,
-    });
-  });
-
-  app.post('/api/v1/platform/projects', (req, res) => {
-    const body = req.body as { projectName?: string; environment?: ProjectEnvironment };
-    if (!body?.projectName || !body.projectName.trim()) {
-      res.status(400).json({ error: 'VALIDATION_ERROR', message: 'projectName is required' });
-      return;
-    }
-    const prj = GLOBAL_PLATFORM_CONTROL_PLANE.createProject({
-      organizationId: 'org_avapardaz_sandbox',
-      projectName: body.projectName,
-      environment: body.environment ?? 'DEVELOPMENT',
-    });
-    res.status(201).json(prj);
-  });
-
-  app.post('/api/v1/platform/api-keys', (req, res) => {
-    const body = req.body as {
-      projectId?: string;
-      name?: string;
-      scopes?: ApiCredentialScope[];
-      expiresInDays?: number;
-    };
-    const projectId = body?.projectId ?? 'prj_avapardaz_dev_01';
-    try {
-      const issued = GLOBAL_PLATFORM_CONTROL_PLANE.issueApiKey({
-        organizationId: 'org_avapardaz_sandbox',
-        projectId,
-        name: body?.name ?? 'Sandbox Developer Key',
-        scopes: body?.scopes ?? [
-          'audio:transcribe',
-          'audio:stream',
-          'transcripts:read',
-          'models:read',
-          'usage:read',
-        ],
-        expiresInDays: body?.expiresInDays,
-      });
-      res.status(201).json(issued);
-    } catch (err) {
-      res.status(400).json({ error: 'ISSUE_KEY_FAILED', message: sanitizePublicErrorOutput(String(err)) });
-    }
-  });
-
-  app.post('/api/v1/platform/api-keys/:id/rotate', (req, res) => {
-    try {
-      const rotated = GLOBAL_PLATFORM_CONTROL_PLANE.rotateApiKey({
-        credentialId: req.params.id,
-        organizationId: 'org_avapardaz_sandbox',
-        overlapHours: 24,
-      });
-      res.json(rotated);
-    } catch (err) {
-      res.status(400).json({ error: 'ROTATE_KEY_FAILED', message: sanitizePublicErrorOutput(String(err)) });
-    }
-  });
-
-  app.post('/api/v1/platform/api-keys/:id/revoke', (req, res) => {
-    try {
-      const revoked = GLOBAL_PLATFORM_CONTROL_PLANE.revokeApiKey({
-        credentialId: req.params.id,
-        organizationId: 'org_avapardaz_sandbox',
-      });
-      res.json(revoked);
-    } catch (err) {
-      res.status(400).json({ error: 'REVOKE_KEY_FAILED', message: sanitizePublicErrorOutput(String(err)) });
-    }
-  });
-
-  app.post('/api/v1/platform/invoices/issue', (_req, res) => {
-    const inv = GLOBAL_PLATFORM_CONTROL_PLANE.issueMonthlyStatementInvoice('org_avapardaz_sandbox', 0);
-    res.status(201).json(inv);
-  });
-
-  app.post('/api/v1/platform/webhooks', (req, res) => {
-    const body = req.body as { url?: string; eventSubscriptions?: PublicWebhookEventType[] };
-    if (!body?.url || !body.url.trim()) {
-      res.status(400).json({ error: 'VALIDATION_ERROR', message: 'url is required' });
-      return;
-    }
-    const ep = GLOBAL_PLATFORM_CONTROL_PLANE.registerWebhookEndpoint({
-      organizationId: 'org_avapardaz_sandbox',
-      url: body.url,
-      eventSubscriptions: body.eventSubscriptions ?? ['transcription.completed', 'transcription.failed'],
-    });
-    res.status(201).json(ep);
-  });
-
-  app.post('/api/v1/platform/webhooks/test-dispatch', (req, res) => {
-    const body = req.body as { simulateFailure?: boolean };
-    const deliveries = GLOBAL_PLATFORM_CONTROL_PLANE.dispatchWebhookEvent({
-      organizationId: 'org_avapardaz_sandbox',
-      eventType: 'transcription.completed',
-      data: { transcription_id: 'tr_sandbox_test', status: 'completed' },
-      simulateFailureForTesting: Boolean(body?.simulateFailure),
-    });
-    res.json({ deliveries });
-  });
-
-  app.post('/api/v1/platform/webhooks/:deliveryId/replay', (req, res) => {
-    try {
-      const replayed = GLOBAL_PLATFORM_CONTROL_PLANE.replayDeadLetterWebhook(
-        req.params.deliveryId,
-        'org_avapardaz_sandbox'
-      );
-      res.json(replayed);
-    } catch (err) {
-      res.status(404).json({ error: 'REPLAY_FAILED', message: sanitizePublicErrorOutput(String(err)) });
-    }
-  });
-
-  app.post('/api/v1/platform/region-check', (req, res) => {
-    const body = req.body as { regionId?: string; projectId?: string };
-    const check = GLOBAL_PLATFORM_CONTROL_PLANE.validateRegionPolicy({
-      organizationId: 'org_avapardaz_sandbox',
-      projectId: body?.projectId ?? 'prj_avapardaz_dev_01',
-      requestedRegionId: body?.regionId,
-    });
-    res.status(check.allowed ? 200 : 422).json(check);
-  });
+  // ── Phase 10 Authenticated Control Plane Router (`/api/v1/platform/*`) ────
+  app.use(createPlatformControlPlaneHttpRouter(platformControlPlaneGateway));
 
   // ── Phase 11 Public Speech Intelligence API (`/v1/*`) ─────────────────────
   app.get('/v1/capabilities', (req, res) => {
@@ -802,148 +745,8 @@ async function startServer() {
     res.status(out.status).json(out.body);
   });
 
-  // ── Phase 11 Sandbox Studio Routes (Zero-Key Exposure UI Backend) ─────────
-  app.get('/api/v1/intelligence/sandbox/overview', (_req, res) => {
-    res.json({
-      capabilities: PHASE11_CAPABILITY_REGISTRY,
-      telemetry: platformGateway.intelligenceOrchestrator.listTelemetry(),
-      connectors: platformGateway.intelligenceOrchestrator.listConnectors('org_avapardaz_sandbox', 'prj_avapardaz_dev_01'),
-    });
-  });
-
-  app.post('/api/v1/intelligence/sandbox/run-dag', (req, res) => {
-    const body = req.body as {
-      recordingId?: string;
-      segments?: Array<{ segmentId: string; startSec: number; endSec: number; text: string; speakerHint?: string }>;
-      capabilities?: SpeechCapabilityId[];
-      consent?: Partial<GranularProcessingConsent>;
-    };
-    const recordingId = body?.recordingId?.trim() || 'rec_studio_demo_01';
-    const capIds: SpeechCapabilityId[] =
-      body?.capabilities && body.capabilities.length > 0
-        ? body.capabilities
-        : [
-            'speech.diarization',
-            'speech.alignment',
-            'speech.translation',
-            'speech.subtitles',
-            'speech.meeting_intelligence',
-            'speech.conversation_analytics',
-            'speech.semantic_indexing',
-            'speech.structured_extraction',
-          ];
-
-    try {
-      const job = platformGateway.intelligenceOrchestrator.submitIntelligenceJob({
-        organizationId: 'org_avapardaz_sandbox',
-        projectId: 'prj_avapardaz_dev_01',
-        credentialId: 'studio_sandbox_ui',
-        recordingId,
-        language: 'fa-en',
-        durationSec: 12.0,
-        sourceTranscriptSegments:
-          body?.segments && body.segments.length > 0
-            ? body.segments
-            : [
-                {
-                  segmentId: 'seg_1',
-                  startSec: 0.3,
-                  endSec: 4.1,
-                  text: 'سلام، امروز وضعیت سرویس TypeScript و قرارداد PRJ-204 را در آواپرداز بررسی می‌کنیم.',
-                  speakerHint: 'speaker_1',
-                },
-                {
-                  segmentId: 'seg_2',
-                  startSec: 4.2,
-                  endSec: 8.3,
-                  text: 'توافق شد مبلغ 500 USD در تاریخ 2026-11-25 پرداخت شود و باید گزارش جلسه آماده شود.',
-                  speakerHint: 'speaker_2',
-                },
-                {
-                  segmentId: 'seg_3',
-                  startSec: 8.5,
-                  endSec: 11.4,
-                  text: 'آیا حدود یکی دو هفته برای تحویل نهایی زمان کافی داریم؟',
-                  speakerHint: 'speaker_1',
-                },
-              ],
-        consent: body?.consent
-          ? { ...DEFAULT_FULL_SANDBOX_CONSENT, ...body.consent }
-          : DEFAULT_FULL_SANDBOX_CONSENT,
-        capabilities: capIds.map((id) => ({ id })),
-      });
-      const artifacts = platformGateway.intelligenceOrchestrator.getJobArtifacts({
-        organizationId: 'org_avapardaz_sandbox',
-        projectId: 'prj_avapardaz_dev_01',
-        jobId: job.jobId,
-      });
-      res.status(201).json({
-        job,
-        artifacts,
-        telemetry: platformGateway.intelligenceOrchestrator.listTelemetry(),
-      });
-    } catch (err) {
-      res.status(400).json({ error: 'INTELLIGENCE_JOB_FAILED', message: sanitizePublicErrorOutput(String(err)) });
-    }
-  });
-
-  app.post('/api/v1/intelligence/sandbox/search', (req, res) => {
-    const body = req.body as { recordingId?: string; query?: string; speakerId?: string };
-    const results = platformGateway.intelligenceOrchestrator.getSemanticIndex().searchAuthorized({
-      organizationId: 'org_avapardaz_sandbox',
-      projectId: 'prj_avapardaz_dev_01',
-      recordingId: body?.recordingId || undefined,
-      query: body?.query ?? '',
-      speakerId: body?.speakerId || undefined,
-    });
-    res.json({ results });
-  });
-
-  app.post('/api/v1/intelligence/sandbox/realtime-sim', (_req, res) => {
-    const coord = new RealtimeIntelligenceStreamCoordinator('sess_live_intel_01', 0.1);
-    const step1 = coord.emitChunkEvents({
-      asrBaselineLatencyMs: 28,
-      chunkStartSample: 0,
-      chunkEndSample: 16000,
-      partialText: 'امروز سرویس',
-      speakerId: 'speaker_1',
-      enableOptionalIntelligence: true,
-      simulatedOptionalWorkerLatencyMs: 2,
-    });
-    const step2 = coord.emitChunkEvents({
-      asrBaselineLatencyMs: 28,
-      chunkStartSample: 16000,
-      chunkEndSample: 48000,
-      finalText: 'امروز سرویس TypeScript آماده شد.',
-      speakerId: 'speaker_1',
-      enableOptionalIntelligence: true,
-      simulatedOptionalWorkerLatencyMs: 2,
-    });
-    const step3Throttled = coord.emitChunkEvents({
-      asrBaselineLatencyMs: 28,
-      chunkStartSample: 48000,
-      chunkEndSample: 64000,
-      finalText: 'کیفیت صوتی اصلی حفظ شد.',
-      speakerId: 'speaker_2',
-      enableOptionalIntelligence: true,
-      simulatedOptionalWorkerLatencyMs: 35, // Triggers backpressure isolation!
-    });
-    res.json({
-      sessionId: coord.sessionId,
-      events: coord.listOrderedEvents(),
-      asrStreamAliveThroughout: step1.asrStreamAlive && step2.asrStreamAlive && step3Throttled.asrStreamAlive,
-      backpressureTriggeredOnOverload: step3Throttled.throttledOptionalWorkers,
-    });
-  });
-
-  app.delete('/api/v1/intelligence/sandbox/recordings/:recordingId', (req, res) => {
-    const deleted = platformGateway.intelligenceOrchestrator.deleteRecordingAndPropagate({
-      organizationId: 'org_avapardaz_sandbox',
-      projectId: 'prj_avapardaz_dev_01',
-      recordingId: req.params.recordingId,
-    });
-    res.json(deleted);
-  });
+  // NOTE: Phase 11 Speech Intelligence Sandbox routes are guarded & mounted before express.json()
+  // via `createSpeechIntelligenceSandboxRouter(...)`. No unauthenticated sandbox routes exist here.
 
   // ── Phase 12 Public Data Factory API (`/v1/data/*`, `/v1/datasets/*`) ───────
   app.post('/v1/data/sources', (req, res) => {
@@ -966,14 +769,18 @@ async function startServer() {
     res.status(out.status).json(out.body);
   });
 
-  app.post('/v1/data/ingestion-jobs', async (req, res) => {
-    const idemp = typeof req.headers['idempotency-key'] === 'string' ? req.headers['idempotency-key'] : undefined;
-    const out = await dataFactoryGateway.createIngestionJob({
-      bearerToken: String(req.headers.authorization ?? ''),
-      idempotencyKey: idemp,
-      body: (req.body ?? {}) as Parameters<DataFactoryGateway['createIngestionJob']>[0]['body'],
-    });
-    res.status(out.status).json(out.body);
+  app.post('/v1/data/ingestion-jobs', async (req, res, next) => {
+    try {
+      const idemp = typeof req.headers['idempotency-key'] === 'string' ? req.headers['idempotency-key'] : undefined;
+      const out = await dataFactoryGateway.createIngestionJob({
+        bearerToken: String(req.headers.authorization ?? ''),
+        idempotencyKey: idemp,
+        body: (req.body ?? {}) as Parameters<DataFactoryGateway['createIngestionJob']>[0]['body'],
+      });
+      res.status(out.status).json(out.body);
+    } catch (err) {
+      next(err);
+    }
   });
 
   app.get('/v1/data/ingestion-jobs/:jobId', (req, res) => {
@@ -986,28 +793,32 @@ async function startServer() {
     res.status(out.status).json(out.body);
   });
 
-  app.post('/v1/data/recordings', async (req, res) => {
-    const out = await dataFactoryGateway.ingestRecording({
-      bearerToken: String(req.headers.authorization ?? ''),
-      body: (req.body ?? {}) as {
-        sourceId?: string;
-        filename?: string;
-        claimedMimeType?: string;
-        audioBase64?: string;
-        speakerRef?: string;
-        sessionRef?: string;
-        sourceCorpusTag?: string;
-        domainTag?: string;
-        declaredLanguage?: LanguageClassification;
-        licenseId?: string;
-        rightsVerified?: boolean;
-        permissions?: Partial<RightsPermissions>;
-        evaluationAllowed?: boolean;
-        autoNormalizeCanonical?: boolean;
-        channelPolicyOverride?: StereoChannelPolicy;
-      },
-    });
-    res.status(out.status).json(out.body);
+  app.post('/v1/data/recordings', async (req, res, next) => {
+    try {
+      const out = await dataFactoryGateway.ingestRecording({
+        bearerToken: String(req.headers.authorization ?? ''),
+        body: (req.body ?? {}) as {
+          sourceId?: string;
+          filename?: string;
+          claimedMimeType?: string;
+          audioBase64?: string;
+          speakerRef?: string;
+          sessionRef?: string;
+          sourceCorpusTag?: string;
+          domainTag?: string;
+          declaredLanguage?: LanguageClassification;
+          licenseId?: string;
+          rightsVerified?: boolean;
+          permissions?: Partial<RightsPermissions>;
+          evaluationAllowed?: boolean;
+          autoNormalizeCanonical?: boolean;
+          channelPolicyOverride?: StereoChannelPolicy;
+        },
+      });
+      res.status(out.status).json(out.body);
+    } catch (err) {
+      next(err);
+    }
   });
 
   app.get('/v1/data/recordings', (req, res) => {
@@ -1164,56 +975,68 @@ async function startServer() {
   });
 
   // ── Phase 12 Sandbox UI Routes (`/api/v1/data-factory/sandbox/*`) ───────────
-  app.get('/api/v1/data-factory/sandbox/dashboard', async (_req, res) => {
-    await dataFactoryGateway.service.ensureSandboxDemoSeeded('org_avapardaz_sandbox');
-    const tenantId = 'org_avapardaz_sandbox';
-    const recs = dataFactoryGateway.service.listRecordings(tenantId);
-    const datasets = dataFactoryGateway.service.listDatasets(tenantId);
-    const releases = datasets.flatMap((d) => dataFactoryGateway.service.listDatasetReleases(tenantId, d.datasetId));
-    const rights = recs.map((r) => dataFactoryGateway.service.getRightsRecord(tenantId, r.recordingId));
-    const annotationsByRec = Object.fromEntries(
-      recs.map((r) => [r.recordingId, dataFactoryGateway.service.listAnnotationsForRecording(tenantId, r.recordingId)])
-    );
-    const artifactsByRec = Object.fromEntries(
-      recs.map((r) => [r.recordingId, dataFactoryGateway.service.getArtifactsForRecording(tenantId, r.recordingId)])
-    );
-    res.json({
-      dashboard: dataFactoryGateway.service.computeDashboardMetrics(tenantId),
-      sources: dataFactoryGateway.service.listDataSources(tenantId),
-      recordings: recs,
-      rights,
-      datasets,
-      releases,
-      annotationsByRec,
-      artifactsByRec,
-    });
-  });
-
-  app.post('/api/v1/data-factory/sandbox/rights/:recordingId/revoke', async (req, res) => {
-    await dataFactoryGateway.service.ensureSandboxDemoSeeded('org_avapardaz_sandbox');
+  app.get('/api/v1/data-factory/sandbox/dashboard', async (_req, res, next) => {
     try {
-      const report = dataFactoryGateway.service.revokeRecordingRights('org_avapardaz_sandbox', req.params.recordingId);
-      res.json(report);
+      await dataFactoryGateway.service.ensureSandboxDemoSeeded('org_avapardaz_sandbox');
+      const tenantId = 'org_avapardaz_sandbox';
+      const recs = dataFactoryGateway.service.listRecordings(tenantId);
+      const datasets = dataFactoryGateway.service.listDatasets(tenantId);
+      const releases = datasets.flatMap((d) => dataFactoryGateway.service.listDatasetReleases(tenantId, d.datasetId));
+      const rights = recs.map((r) => dataFactoryGateway.service.getRightsRecord(tenantId, r.recordingId));
+      const annotationsByRec = Object.fromEntries(
+        recs.map((r) => [r.recordingId, dataFactoryGateway.service.listAnnotationsForRecording(tenantId, r.recordingId)])
+      );
+      const artifactsByRec = Object.fromEntries(
+        recs.map((r) => [r.recordingId, dataFactoryGateway.service.getArtifactsForRecording(tenantId, r.recordingId)])
+      );
+      res.json({
+        dashboard: dataFactoryGateway.service.computeDashboardMetrics(tenantId),
+        sources: dataFactoryGateway.service.listDataSources(tenantId),
+        recordings: recs,
+        rights,
+        datasets,
+        releases,
+        annotationsByRec,
+        artifactsByRec,
+      });
     } catch (err) {
-      res.status(400).json({ error: 'REVOKE_FAILED', message: sanitizePublicErrorOutput(String(err)) });
+      next(err);
     }
   });
 
-  app.post('/api/v1/data-factory/sandbox/datasets/:datasetId/build', async (req, res) => {
-    await dataFactoryGateway.service.ensureSandboxDemoSeeded('org_avapardaz_sandbox');
+  app.post('/api/v1/data-factory/sandbox/rights/:recordingId/revoke', async (req, res, next) => {
     try {
-      const body = (req.body ?? {}) as { version?: string; releaseType?: DatasetReleaseType };
-      const version = body.version?.trim() || `v1.0.${Date.now() % 10000}`;
-      const built = dataFactoryGateway.service.buildDatasetRelease({
-        tenantId: 'org_avapardaz_sandbox',
-        datasetId: req.params.datasetId,
-        version,
-        releaseType: body.releaseType ?? 'TRAIN',
-        releaseAuthor: 'studio_sandbox_operator',
-      });
-      res.status(201).json(built);
+      await dataFactoryGateway.service.ensureSandboxDemoSeeded('org_avapardaz_sandbox');
+      try {
+        const report = dataFactoryGateway.service.revokeRecordingRights('org_avapardaz_sandbox', req.params.recordingId);
+        res.json(report);
+      } catch (err) {
+        res.status(400).json({ error: 'REVOKE_FAILED', message: sanitizePublicErrorOutput(String(err)) });
+      }
     } catch (err) {
-      res.status(400).json({ error: 'DATASET_BUILD_FAILED', message: sanitizePublicErrorOutput(String(err)) });
+      next(err);
+    }
+  });
+
+  app.post('/api/v1/data-factory/sandbox/datasets/:datasetId/build', async (req, res, next) => {
+    try {
+      await dataFactoryGateway.service.ensureSandboxDemoSeeded('org_avapardaz_sandbox');
+      try {
+        const body = (req.body ?? {}) as { version?: string; releaseType?: DatasetReleaseType };
+        const version = body.version?.trim() || `v1.0.${Date.now() % 10000}`;
+        const built = dataFactoryGateway.service.buildDatasetRelease({
+          tenantId: 'org_avapardaz_sandbox',
+          datasetId: req.params.datasetId,
+          version,
+          releaseType: body.releaseType ?? 'TRAIN',
+          releaseAuthor: 'studio_sandbox_operator',
+        });
+        res.status(201).json(built);
+      } catch (err) {
+        res.status(400).json({ error: 'DATASET_BUILD_FAILED', message: sanitizePublicErrorOutput(String(err)) });
+      }
+    } catch (err) {
+      next(err);
     }
   });
 
@@ -1222,38 +1045,50 @@ async function startServer() {
   app.use(createModelFactoryHttpRouter(modelFactoryGateway));
 
   // ── Phase 13 Sandbox Studio Routes (`/api/v1/model-factory/sandbox/*`) ─────
-  app.get('/api/v1/model-factory/sandbox/overview', async (_req, res) => {
-    await modelFactoryGateway.service.ensureSandboxDemoSeeded('org_avapardaz_sandbox');
-    res.json(modelFactoryGateway.service.getSandboxLifecycleSummary('org_avapardaz_sandbox'));
-  });
-
-  app.post('/api/v1/model-factory/sandbox/deployments/:deploymentId/rollback', async (req, res) => {
-    await modelFactoryGateway.service.ensureSandboxDemoSeeded('org_avapardaz_sandbox');
+  app.get('/api/v1/model-factory/sandbox/overview', async (_req, res, next) => {
     try {
-      const result = modelFactoryGateway.service.rollbackDeployment({
-        tenantId: 'org_avapardaz_sandbox',
-        deploymentId: req.params.deploymentId,
-        actorId: 'studio_sandbox_operator',
-        reason: 'Sandbox emergency rollback verification drill',
-      });
-      res.json(result);
+      await modelFactoryGateway.service.ensureSandboxDemoSeeded('org_avapardaz_sandbox');
+      res.json(modelFactoryGateway.service.getSandboxLifecycleSummary('org_avapardaz_sandbox'));
     } catch (err) {
-      res.status(400).json({ error: 'ROLLBACK_FAILED', message: sanitizePublicErrorOutput(String(err)) });
+      next(err);
     }
   });
 
-  app.post('/api/v1/model-factory/sandbox/models/:modelVersionId/optimize', async (req, res) => {
-    await modelFactoryGateway.service.ensureSandboxDemoSeeded('org_avapardaz_sandbox');
+  app.post('/api/v1/model-factory/sandbox/deployments/:deploymentId/rollback', async (req, res, next) => {
     try {
-      const result = modelFactoryGateway.service.optimizeAndRegisterDerivedVersion({
-        tenantId: 'org_avapardaz_sandbox',
-        parentModelVersionId: req.params.modelVersionId,
-        newVersion: `1.0.0-int8-${Date.now() % 1000}`,
-        technique: 'DYNAMIC_INT8_QUANTIZATION',
-      });
-      res.status(201).json(result);
+      await modelFactoryGateway.service.ensureSandboxDemoSeeded('org_avapardaz_sandbox');
+      try {
+        const result = modelFactoryGateway.service.rollbackDeployment({
+          tenantId: 'org_avapardaz_sandbox',
+          deploymentId: req.params.deploymentId,
+          actorId: 'studio_sandbox_operator',
+          reason: 'Sandbox emergency rollback verification drill',
+        });
+        res.json(result);
+      } catch (err) {
+        res.status(400).json({ error: 'ROLLBACK_FAILED', message: sanitizePublicErrorOutput(String(err)) });
+      }
     } catch (err) {
-      res.status(400).json({ error: 'OPTIMIZE_FAILED', message: sanitizePublicErrorOutput(String(err)) });
+      next(err);
+    }
+  });
+
+  app.post('/api/v1/model-factory/sandbox/models/:modelVersionId/optimize', async (req, res, next) => {
+    try {
+      await modelFactoryGateway.service.ensureSandboxDemoSeeded('org_avapardaz_sandbox');
+      try {
+        const result = modelFactoryGateway.service.optimizeAndRegisterDerivedVersion({
+          tenantId: 'org_avapardaz_sandbox',
+          parentModelVersionId: req.params.modelVersionId,
+          newVersion: `1.0.0-int8-${Date.now() % 1000}`,
+          technique: 'DYNAMIC_INT8_QUANTIZATION',
+        });
+        res.status(201).json(result);
+      } catch (err) {
+        res.status(400).json({ error: 'OPTIMIZE_FAILED', message: sanitizePublicErrorOutput(String(err)) });
+      }
+    } catch (err) {
+      next(err);
     }
   });
 
@@ -1467,7 +1302,7 @@ async function startServer() {
 
   // Sanitized JSON error handler for malformed JSON bodies and unexpected API errors
   app.use(
-    '/api',
+    ['/api', '/v1'],
     (
       err: unknown,
       _req: express.Request,

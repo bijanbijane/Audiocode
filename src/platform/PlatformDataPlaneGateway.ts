@@ -1,10 +1,16 @@
 /**
  * PHASE 10 — PUBLIC API DATA PLANE GATEWAY (`/v1/*`)
- * Bridges authenticated developer requests (REST + Streaming Sessions) with the Control Plane
- * and the independent scientific ASR engines (Phases 4–6) while maintaining strict separation.
+ * Hardened under AVP-PUBLIC-DATAPLANE-REAL-AUDIO-010:
+ * - Accepts strictly streamed binary audio payloads (`audio/wav`, `audio/ogg`, `audio/mpeg`, `audio/flac`, etc.).
+ * - Never trusts client-supplied `audio_duration_ms`, `raw_text_hint`, `sample_id`, or `pcm_base64_preview`.
+ * - Never invokes synthetic corpus lookups or placeholder text generators.
+ * - Derives model availability honestly from `PublicAsrInferenceExecutor.getModelReadiness()`.
+ * - Rejects `long_form_async` honestly with HTTP 501 `ASYNC_EXECUTION_UNAVAILABLE` until a real durable queue exists.
+ * - Releases budget reservations on every inference/validation failure and guarantees temp artifact cleanup in `finally`.
  */
 
 import crypto from 'node:crypto';
+import type { Readable } from 'node:stream';
 import {
   PHASE10_PUBLIC_MODEL_CATALOG,
   PHASE10_VERSIONED_PLAN_CATALOG,
@@ -18,20 +24,11 @@ import type {
   PublicModelCatalogEntry,
   PublicTranscriptionJobRecord,
 } from './PlatformContractsAndSchemas';
-import {
-  INITIAL_VERIFIED_STUDIO_CORPUS,
-} from '../ai-engine/asr/AsrDatasetAndBehavioralBenchmarkEngine';
-import {
-  DomainProfileName,
-  runIndependentAsrTranscription,
-} from '../ai-engine/asr/IndependentAsrModelDevelopmentEngine';
+import type { DomainProfileName } from '../ai-engine/asr/IndependentAsrModelDevelopmentEngine';
 import {
   PHASE5_STREAMING_BACKEND_REGISTRY,
   StreamingSessionGatewayManager,
 } from '../ai-engine/asr/RealTimeStreamingAsrEngine';
-import {
-  makeAdaptiveRoutingDecision,
-} from '../ai-engine/asr/AdaptiveAsrRouterEngine';
 import {
   DEFAULT_FULL_SANDBOX_CONSENT,
   PHASE11_CAPABILITY_REGISTRY,
@@ -44,6 +41,36 @@ import type {
   SpeechArtifactType,
 } from '../intelligence/SpeechIntelligenceContracts';
 import type { TimedSegmentInput } from '../intelligence/DiarizationAlignmentEngine';
+import {
+  ingestPublicAudioStream,
+  PublicAudioIngestError,
+  type PublicAudioArtifact,
+} from './PublicAudioArtifactIngest';
+import type { PublicAsrInferenceExecutor } from './PublicAsrInferenceExecutor';
+import {
+  isSyntheticPlaceholderText,
+  NodePublicAsrInferenceExecutor,
+  PublicInferenceExecutionError,
+} from './NodePublicAsrInferenceExecutor';
+
+const VALID_DOMAIN_PROFILES = new Set<string>([
+  'general',
+  'technology',
+  'business',
+  'real_estate',
+  'education',
+  'medical',
+  'legal',
+]);
+
+const VALID_LANGUAGES = new Set<string>(['auto', 'fa', 'en', 'fa-en']);
+
+const FORBIDDEN_LEGACY_TRANSCRIPTION_FIELDS = [
+  'audio_duration_ms',
+  'raw_text_hint',
+  'sample_id',
+  'pcm_base64_preview',
+] as const;
 
 interface StoredIdempotencyRecord {
   scopedKey: string;
@@ -53,24 +80,64 @@ interface StoredIdempotencyRecord {
   expiresAtMs: number;
 }
 
+export interface CreateBinaryTranscriptionParams {
+  bearerToken: string;
+  idempotencyKey?: string;
+  contentType: string | undefined;
+  contentLengthHeader?: string | number;
+  audioStream: Readable;
+  options?: Record<string, unknown>;
+  maxUploadBytes?: number;
+  decodeTimeoutMs?: number;
+  ffmpegBinaryPath?: string;
+  abortSignal?: AbortSignal;
+}
+
 export class PlatformDataPlaneGateway {
   private readonly jobs = new Map<string, PublicTranscriptionJobRecord>();
   private readonly idempotencyStore = new Map<string, StoredIdempotencyRecord>();
   private readonly streamingGateway = new StreamingSessionGatewayManager(16, 4);
   public readonly intelligenceOrchestrator: SpeechIntelligenceOrchestrator;
+  private readonly inferenceExecutor: PublicAsrInferenceExecutor;
 
-  constructor(private readonly controlPlane: PlatformControlPlaneService) {
+  constructor(
+    private readonly controlPlane: PlatformControlPlaneService,
+    inferenceExecutor?: PublicAsrInferenceExecutor
+  ) {
     this.intelligenceOrchestrator = new SpeechIntelligenceOrchestrator(controlPlane);
+    this.inferenceExecutor = inferenceExecutor ?? new NodePublicAsrInferenceExecutor();
   }
 
-  private hashPayload(body: unknown): string {
-    return crypto.createHash('sha256').update(JSON.stringify(body ?? {}), 'utf8').digest('hex');
+  private hashCanonicalPayload(payload: unknown): string {
+    return crypto.createHash('sha256').update(JSON.stringify(payload ?? {}), 'utf8').digest('hex');
   }
 
-  public listPublicModels(bearerToken: string): {
+  public async resolveCatalogModelWithReadiness(
+    entry: PublicModelCatalogEntry
+  ): Promise<PublicModelCatalogEntry> {
+    const readiness = await this.inferenceExecutor.getModelReadiness(entry.modelId);
+    return {
+      ...entry,
+      version: readiness.modelVersion && readiness.modelVersion !== 'unknown' ? readiness.modelVersion : entry.version,
+      availabilityInCurrentContainer: readiness.availability,
+      timestampsSupported: readiness.ready ? readiness.timestampsSupported : false,
+      diarizationSupported: readiness.ready ? readiness.diarizationSupported : false,
+    };
+  }
+
+  public async resolveCatalogModelsForProject(
+    allowedModels: readonly string[]
+  ): Promise<PublicModelCatalogEntry[]> {
+    const permitted = PHASE10_PUBLIC_MODEL_CATALOG.filter((m) =>
+      allowedModels.includes(m.modelId)
+    );
+    return Promise.all(permitted.map((m) => this.resolveCatalogModelWithReadiness(m)));
+  }
+
+  public async listPublicModels(bearerToken: string): Promise<{
     status: number;
     body: { object: 'list'; data: readonly PublicModelCatalogEntry[] } | PlatformApiErrorEnvelope;
-  } {
+  }> {
     const auth = this.controlPlane.authenticateApiKeyRequest({
       bearerToken,
       requiredScope: 'models:read',
@@ -78,19 +145,17 @@ export class PlatformDataPlaneGateway {
     if (!auth.authenticated) {
       return { status: auth.httpStatus, body: auth.errorEnvelope };
     }
-    const visibleModels = PHASE10_PUBLIC_MODEL_CATALOG.filter((m) =>
-      auth.project.allowedModels.includes(m.modelId)
-    );
+    const visibleModels = await this.resolveCatalogModelsForProject(auth.project.allowedModels);
     return {
       status: 200,
       body: { object: 'list', data: visibleModels },
     };
   }
 
-  public getPublicModel(bearerToken: string, modelId: string): {
+  public async getPublicModel(bearerToken: string, modelId: string): Promise<{
     status: number;
     body: PublicModelCatalogEntry | PlatformApiErrorEnvelope;
-  } {
+  }> {
     const auth = this.controlPlane.authenticateApiKeyRequest({
       bearerToken,
       requiredScope: 'models:read',
@@ -98,10 +163,10 @@ export class PlatformDataPlaneGateway {
     if (!auth.authenticated) {
       return { status: auth.httpStatus, body: auth.errorEnvelope };
     }
-    const model = PHASE10_PUBLIC_MODEL_CATALOG.find(
+    const baseModel = PHASE10_PUBLIC_MODEL_CATALOG.find(
       (m) => m.modelId === modelId && auth.project.allowedModels.includes(m.modelId)
     );
-    if (!model) {
+    if (!baseModel) {
       return {
         status: 404,
         body: buildPlatformErrorEnvelope({
@@ -110,7 +175,8 @@ export class PlatformDataPlaneGateway {
         }),
       };
     }
-    return { status: 200, body: model };
+    const resolved = await this.resolveCatalogModelWithReadiness(baseModel);
+    return { status: 200, body: resolved };
   }
 
   public estimateTranscriptionCost(params: {
@@ -176,64 +242,175 @@ export class PlatformDataPlaneGateway {
   }
 
   /**
-   * Public `POST /v1/audio/transcriptions` supporting Batch & Async Long-Form workflows,
-   * 24h Idempotency-Key deduplication, Region Residency Enforcement, Atomic Budget Reservation,
-   * Adaptive ASR Routing, Authoritative Metering, and Outbound Webhooks.
+   * Public `POST /v1/audio/transcriptions` — Genuine Binary Audio Streaming Pipeline:
+   * Auth -> Option Validation -> Async Mode Guard (501) -> Model Catalog & Readiness Probe (503) ->
+   * Region Policy (422) -> Streaming Ingest + Constrained FFmpeg Decode + Canonical PCM Verification ->
+   * Audio-SHA256 Idempotency Check (409 / replay) -> Atomic Budget Reservation (402) ->
+   * Genuine Inference Execution -> Strict Output Validation -> Authoritative Ledger Commit / Release ->
+   * Webhook Dispatch (success only) -> Guaranteed Temp Artifact Disposal.
    */
-  public createTranscription(params: {
-    bearerToken: string;
-    idempotencyKey?: string;
-    body: {
-      model?: string;
-      language?: 'auto' | 'fa' | 'en' | 'fa-en';
-      timestamps?: boolean;
-      diarization?: boolean;
-      domain_profile?: DomainProfileName;
-      execution_mode?: 'batch' | 'long_form_async';
-      region_id?: string;
-      sample_id?: string;
-      audio_duration_ms?: number;
-      pcm_base64_preview?: string;
-      raw_text_hint?: string;
-      metadata?: Record<string, string>;
-    };
-  }): { status: number; body: unknown } {
+  public async createTranscription(
+    params: CreateBinaryTranscriptionParams
+  ): Promise<{ status: number; body: unknown }> {
     const auth = this.controlPlane.authenticateApiKeyRequest({
       bearerToken: params.bearerToken,
       requiredScope: 'audio:transcribe',
     });
     if (!auth.authenticated) {
+      params.audioStream.resume();
       return { status: auth.httpStatus, body: auth.errorEnvelope };
     }
 
-    // 1. Check 24-hour scoped Idempotency-Key
-    const idempKey = params.idempotencyKey?.trim();
-    const payloadHash = this.hashPayload(params.body);
-    if (idempKey) {
-      const scopedKey = `${auth.organization.id}::POST:/v1/audio/transcriptions::${idempKey}`;
-      const existing = this.idempotencyStore.get(scopedKey);
-      if (existing && existing.expiresAtMs > Date.now()) {
-        if (existing.payloadHash !== payloadHash) {
-          return {
-            status: 409,
-            body: buildPlatformErrorEnvelope({
-              code: 'IDEMPOTENCY_CONFLICT',
-              message: 'Idempotency-Key was reused with a different request payload.',
-            }),
-          };
-        }
-        return { status: existing.httpStatus, body: existing.responseBody };
+    const reqId = `req_${crypto.randomUUID()}`;
+    const rawOpts = params.options ?? {};
+    if (typeof rawOpts !== 'object' || rawOpts === null || Array.isArray(rawOpts)) {
+      params.audioStream.resume();
+      return {
+        status: 400,
+        body: buildPlatformErrorEnvelope({
+          code: 'VALIDATION_ERROR',
+          message: 'Transcription options must be a JSON object.',
+          requestId: reqId,
+        }),
+      };
+    }
+
+    // 1. Strictly reject forbidden client-trusted duration/text/corpus fields
+    for (const forbiddenField of FORBIDDEN_LEGACY_TRANSCRIPTION_FIELDS) {
+      if (Object.prototype.hasOwnProperty.call(rawOpts, forbiddenField) && rawOpts[forbiddenField] !== undefined) {
+        params.audioStream.resume();
+        return {
+          status: 400,
+          body: buildPlatformErrorEnvelope({
+            code: 'VALIDATION_ERROR',
+            message: `Field "${forbiddenField}" is forbidden. Upload raw binary audio; duration and transcript are derived exclusively server-side.`,
+            requestId: reqId,
+          }),
+        };
       }
     }
 
-    const reqId = `req_${crypto.randomUUID()}`;
-    const modelId = params.body?.model ?? 'asr-fa-en-v1';
+    // 2. Validate option schema
+    const modelId = rawOpts.model === undefined ? 'asr-fa-en-v1' : String(rawOpts.model).trim();
+    if (!modelId) {
+      params.audioStream.resume();
+      return {
+        status: 400,
+        body: buildPlatformErrorEnvelope({
+          code: 'VALIDATION_ERROR',
+          message: 'model must be a non-empty string.',
+          requestId: reqId,
+        }),
+      };
+    }
 
-    // 2. Validate Model Catalog & Honest Availability in Container
+    const languageRaw = rawOpts.language === undefined ? 'auto' : String(rawOpts.language);
+    if (!VALID_LANGUAGES.has(languageRaw)) {
+      params.audioStream.resume();
+      return {
+        status: 400,
+        body: buildPlatformErrorEnvelope({
+          code: 'VALIDATION_ERROR',
+          message: `Unsupported language "${languageRaw}". Allowed values: auto, fa, en, fa-en.`,
+          requestId: reqId,
+        }),
+      };
+    }
+    const language = languageRaw as 'auto' | 'fa' | 'en' | 'fa-en';
+
+    const domainProfileRaw = rawOpts.domain_profile === undefined ? 'technology' : String(rawOpts.domain_profile);
+    if (!VALID_DOMAIN_PROFILES.has(domainProfileRaw)) {
+      params.audioStream.resume();
+      return {
+        status: 400,
+        body: buildPlatformErrorEnvelope({
+          code: 'VALIDATION_ERROR',
+          message: `Unsupported domain_profile "${domainProfileRaw}".`,
+          requestId: reqId,
+        }),
+      };
+    }
+    const domainProfile = domainProfileRaw as DomainProfileName;
+
+    const executionModeRaw = rawOpts.execution_mode === undefined ? 'batch' : String(rawOpts.execution_mode);
+    if (executionModeRaw !== 'batch' && executionModeRaw !== 'long_form_async') {
+      params.audioStream.resume();
+      return {
+        status: 400,
+        body: buildPlatformErrorEnvelope({
+          code: 'VALIDATION_ERROR',
+          message: `Unsupported execution_mode "${executionModeRaw}". Allowed values: batch, long_form_async.`,
+          requestId: reqId,
+        }),
+      };
+    }
+
+    // 3. Honest 501 for asynchronous long-form mode (no durable background queue worker in this container)
+    if (executionModeRaw === 'long_form_async') {
+      params.audioStream.resume();
+      return {
+        status: 501,
+        body: buildPlatformErrorEnvelope({
+          code: 'ASYNC_EXECUTION_UNAVAILABLE',
+          message:
+            'execution_mode="long_form_async" is not implemented in this single-node container because no durable background ASR worker queue is provisioned. Use execution_mode="batch".',
+          requestId: reqId,
+          retryable: false,
+        }),
+      };
+    }
+
+    const timestamps = Boolean(rawOpts.timestamps);
+    const diarization = Boolean(rawOpts.diarization);
+    const requestedRegionId = rawOpts.region_id === undefined ? undefined : String(rawOpts.region_id);
+
+    const metadata: Record<string, string> = {};
+    if (rawOpts.metadata !== undefined) {
+      if (typeof rawOpts.metadata !== 'object' || rawOpts.metadata === null || Array.isArray(rawOpts.metadata)) {
+        params.audioStream.resume();
+        return {
+          status: 400,
+          body: buildPlatformErrorEnvelope({
+            code: 'VALIDATION_ERROR',
+            message: 'metadata must be a string-to-string map.',
+            requestId: reqId,
+          }),
+        };
+      }
+      const entries = Object.entries(rawOpts.metadata as Record<string, unknown>);
+      if (entries.length > 16) {
+        params.audioStream.resume();
+        return {
+          status: 400,
+          body: buildPlatformErrorEnvelope({
+            code: 'VALIDATION_ERROR',
+            message: 'metadata may contain at most 16 key/value pairs.',
+            requestId: reqId,
+          }),
+        };
+      }
+      for (const [k, v] of entries) {
+        if (typeof v !== 'string' || k.length > 64 || v.length > 256) {
+          params.audioStream.resume();
+          return {
+            status: 400,
+            body: buildPlatformErrorEnvelope({
+              code: 'VALIDATION_ERROR',
+              message: 'metadata keys (<=64 chars) and values (<=256 chars) must be strings.',
+              requestId: reqId,
+            }),
+          };
+        }
+        metadata[k] = v;
+      }
+    }
+
+    // 4. Model catalog & project authorization check
     const modelEntry = PHASE10_PUBLIC_MODEL_CATALOG.find(
       (m) => m.modelId === modelId && auth.project.allowedModels.includes(m.modelId)
     );
     if (!modelEntry) {
+      params.audioStream.resume();
       return {
         status: 400,
         body: buildPlatformErrorEnvelope({
@@ -244,224 +421,328 @@ export class PlatformDataPlaneGateway {
       };
     }
 
-    if (modelEntry.availabilityInCurrentContainer !== 'AVAILABLE_NOW') {
+    // 5. Hard Region Data Residency Validation
+    const regionCheck = this.controlPlane.validateRegionPolicy({
+      organizationId: auth.organization.id,
+      projectId: auth.project.id,
+      requestedRegionId,
+    });
+    if (!regionCheck.allowed) {
+      params.audioStream.resume();
+      return { status: 422, body: regionCheck.errorEnvelope };
+    }
+
+    // 6. Probe genuine inference readiness BEFORE reserving budget or billing
+    const readiness = await this.inferenceExecutor.getModelReadiness(modelId);
+    if (!readiness.ready) {
+      params.audioStream.resume();
       return {
         status: 503,
         body: buildPlatformErrorEnvelope({
           code: 'PROVIDER_UNAVAILABLE',
-          message: `Model "${modelId}" requires ${modelEntry.availabilityInCurrentContainer} (unavailable in G0_CPU_ONLY runtime).`,
+          message: `Model "${modelId}" cannot execute transcription (${readiness.availability}): ${readiness.reason}`,
+          requestId: reqId,
+          retryable: false,
+          details: {
+            model: modelId,
+            availability: readiness.availability,
+          },
+        }),
+      };
+    }
+
+    // 7. Stream binary upload -> private temp file -> constrained FFmpeg decode -> canonical 16kHz PCM verification
+    let artifact: PublicAudioArtifact | null = null;
+    try {
+      artifact = await ingestPublicAudioStream({
+        audioStream: params.audioStream,
+        contentType: params.contentType,
+        contentLengthHeader: params.contentLengthHeader,
+        maxUploadBytes: params.maxUploadBytes,
+        maxDurationSeconds: modelEntry.maxAudioDurationSec,
+        ffmpegBinaryPath: params.ffmpegBinaryPath,
+        decodeTimeoutMs: params.decodeTimeoutMs,
+        abortSignal: params.abortSignal,
+      });
+
+      // 8. Canonical 24-hour Idempotency check bound to audioSha256 + normalized options
+      const idempKey = params.idempotencyKey?.trim();
+      const canonicalDigest = this.hashCanonicalPayload({
+        audioSha256: artifact.audioSha256,
+        model: modelId,
+        language,
+        timestamps,
+        diarization,
+        domain_profile: domainProfile,
+        execution_mode: 'batch',
+        region_id: regionCheck.region.regionId,
+        metadata,
+      });
+
+      if (idempKey) {
+        const scopedKey = `${auth.organization.id}::POST:/v1/audio/transcriptions::${idempKey}`;
+        const existing = this.idempotencyStore.get(scopedKey);
+        if (existing && existing.expiresAtMs > Date.now()) {
+          if (existing.payloadHash !== canonicalDigest) {
+            return {
+              status: 409,
+              body: buildPlatformErrorEnvelope({
+                code: 'IDEMPOTENCY_CONFLICT',
+                message:
+                  'Idempotency-Key was reused with a different audio payload or transcription option set.',
+                requestId: reqId,
+              }),
+            };
+          }
+          return { status: existing.httpStatus, body: existing.responseBody };
+        }
+      }
+
+      // 9. Atomic Budget & Quota Reservation using strictly server-verified decoded duration
+      const verifiedAudioDurationMs = artifact.durationMs;
+      const reservationRes = this.controlPlane.reserveUsageBudgetAtomically({
+        organizationId: auth.organization.id,
+        projectId: auth.project.id,
+        requestId: reqId,
+        estimatedDurationMs: verifiedAudioDurationMs,
+        modelId,
+      });
+      if (!reservationRes.approved) {
+        return { status: 402, body: reservationRes.errorEnvelope };
+      }
+
+      // 10. Genuine ASR Inference Execution with guaranteed reservation release on failure
+      const transcriptionId = `tr_${crypto.randomUUID()}`;
+      const startWall = performance.now();
+      const stateHistory: Array<{ state: BatchJobLifecycleState; timestampIso: string }> = [
+        { state: 'QUEUED', timestampIso: new Date().toISOString() },
+        { state: 'VALIDATING', timestampIso: new Date().toISOString() },
+        { state: 'PROCESSING', timestampIso: new Date().toISOString() },
+      ];
+
+      const releaseReservationOnFailure = (processingMs: number) => {
+        this.controlPlane.commitAuthoritativeUsageAndLedger({
+          reservationId: reservationRes.reservation.reservationId,
+          usageEventId: `usg_${transcriptionId}`,
+          idempotencyKey: `usage:${reqId}`,
+          credentialId: auth.credential.id,
+          transcriptionId,
+          modelId: modelEntry.modelId,
+          modelVersion: readiness.modelVersion,
+          executionMode: 'batch',
+          verifiedAudioDurationMs,
+          billableDurationMs: 0,
+          processingDurationMs: Math.max(1, processingMs),
+          succeeded: false,
+        });
+      };
+
+      let inferenceResult;
+      try {
+        inferenceResult = await this.inferenceExecutor.transcribe(artifact, {
+          modelId,
+          language,
+          domainProfile,
+          timestamps,
+          diarization,
+          abortSignal: params.abortSignal,
+        });
+      } catch (infErr) {
+        const elapsedMs = Math.round(performance.now() - startWall);
+        releaseReservationOnFailure(elapsedMs);
+        if (infErr instanceof PublicInferenceExecutionError) {
+          return {
+            status: infErr.httpStatus,
+            body: buildPlatformErrorEnvelope({
+              code:
+                infErr.code === 'AUDIO_DECODE_FAILED'
+                  ? 'AUDIO_FORMAT_UNSUPPORTED'
+                  : infErr.code === 'PROVIDER_UNAVAILABLE'
+                    ? 'PROVIDER_UNAVAILABLE'
+                    : 'INTERNAL_ERROR',
+              message: infErr.message,
+              requestId: reqId,
+              retryable: infErr.retryable,
+            }),
+          };
+        }
+        return {
+          status: 500,
+          body: buildPlatformErrorEnvelope({
+            code: 'INTERNAL_ERROR',
+            message: 'ASR inference execution failed unexpectedly.',
+            requestId: reqId,
+            retryable: false,
+          }),
+        };
+      }
+
+      const processingMs = Math.max(1, Math.round(performance.now() - startWall));
+
+      // 11. Strict post-inference validation (provenance, model identity, sample coverage, non-synthetic output)
+      const validResult =
+        inferenceResult.provenance === 'MODEL_INFERENCE' &&
+        inferenceResult.modelId === modelId &&
+        inferenceResult.processedSamples16k === artifact.totalSamples16k &&
+        typeof inferenceResult.normalizedText === 'string' &&
+        inferenceResult.normalizedText.trim().length > 0 &&
+        !isSyntheticPlaceholderText(inferenceResult.normalizedText) &&
+        !isSyntheticPlaceholderText(inferenceResult.rawText);
+
+      if (!validResult) {
+        releaseReservationOnFailure(processingMs);
+        return {
+          status: 502,
+          body: buildPlatformErrorEnvelope({
+            code: 'PROVIDER_UNAVAILABLE',
+            message: 'ASR inference output failed provenance, sample-coverage, or non-synthetic validation.',
+            requestId: reqId,
+            retryable: false,
+          }),
+        };
+      }
+
+      stateHistory.push({ state: 'FINALIZING', timestampIso: new Date().toISOString() });
+      stateHistory.push({ state: 'COMPLETED', timestampIso: new Date().toISOString() });
+
+      // 12. Authoritative Usage Metering & Immutable Financial Commit (ONLY after valid inference)
+      const usageEv = this.controlPlane.commitAuthoritativeUsageAndLedger({
+        reservationId: reservationRes.reservation.reservationId,
+        usageEventId: `usg_${transcriptionId}`,
+        idempotencyKey: `usage:${reqId}`,
+        credentialId: auth.credential.id,
+        transcriptionId,
+        modelId: inferenceResult.modelId,
+        modelVersion: inferenceResult.modelVersion,
+        executionMode: 'batch',
+        verifiedAudioDurationMs,
+        billableDurationMs: verifiedAudioDurationMs,
+        processingDurationMs: processingMs,
+        succeeded: true,
+      });
+
+      const job: PublicTranscriptionJobRecord = {
+        id: transcriptionId,
+        object: 'audio.transcription',
+        organizationId: auth.organization.id,
+        projectId: auth.project.id,
+        credentialId: auth.credential.id,
+        regionId: regionCheck.region.regionId,
+        status: 'COMPLETED',
+        stateHistory,
+        model: inferenceResult.modelId,
+        modelVersion: inferenceResult.modelVersion,
+        language,
+        executionMode: 'batch',
+        text: inferenceResult.normalizedText,
+        rawText: inferenceResult.rawText,
+        segments: inferenceResult.segments,
+        audioSha256: artifact.audioSha256,
+        provenance: 'MODEL_INFERENCE',
+        modelDigestSha256: inferenceResult.modelDigestSha256,
+        processedSamples16k: inferenceResult.processedSamples16k,
+        durationMs: verifiedAudioDurationMs,
+        billableMs: usageEv.billableDurationMs,
+        actualCostMinor: usageEv.actualCostMinor,
+        currency: 'USD',
+        timestampsAvailable: inferenceResult.timestampsAvailable,
+        diarizationAvailable: inferenceResult.diarizationAvailable,
+        metadata,
+        createdAtIso: stateHistory[0].timestampIso,
+        completedAtIso: stateHistory[stateHistory.length - 1].timestampIso,
+      };
+
+      this.jobs.set(job.id, job);
+
+      // 13. Outbound Webhook Notification (ONLY after validated completion)
+      this.controlPlane.dispatchWebhookEvent({
+        organizationId: auth.organization.id,
+        eventType: 'transcription.completed',
+        data: {
+          transcription_id: job.id,
+          status: 'completed',
+          model: job.model,
+          audio_sha256: artifact.audioSha256,
+          duration_ms: job.durationMs,
+          result_url: `/v1/audio/transcriptions/${job.id}/result`,
+        },
+      });
+
+      const publicResponse = {
+        id: job.id,
+        object: job.object,
+        status: job.status.toLowerCase(),
+        model: job.model,
+        model_version: job.modelVersion,
+        model_digest_sha256: inferenceResult.modelDigestSha256,
+        provenance: 'MODEL_INFERENCE' as const,
+        backend_engine: inferenceResult.backendEngine,
+        region_id: job.regionId,
+        language: job.language,
+        text: job.text,
+        raw_text: inferenceResult.rawText,
+        ...(job.segments ? { segments: job.segments } : {}),
+        audio_sha256: artifact.audioSha256,
+        duration_ms: job.durationMs,
+        processed_samples_16k: inferenceResult.processedSamples16k,
+        usage: {
+          audio_seconds: Number((job.durationMs / 1000).toFixed(3)),
+          billable_seconds: Number((job.billableMs / 1000).toFixed(3)),
+          actual_cost_minor_cents: job.actualCostMinor,
+          currency: job.currency,
+        },
+        timestamps_available: job.timestampsAvailable,
+        diarization_available: job.diarizationAvailable,
+        created_at: job.createdAtIso,
+      };
+
+      if (idempKey) {
+        const scopedKey = `${auth.organization.id}::POST:/v1/audio/transcriptions::${idempKey}`;
+        this.idempotencyStore.set(scopedKey, {
+          scopedKey,
+          payloadHash: canonicalDigest,
+          httpStatus: 200,
+          responseBody: publicResponse,
+          expiresAtMs: Date.now() + 86400_000,
+        });
+      }
+
+      return { status: 200, body: publicResponse };
+    } catch (err) {
+      if (err instanceof PublicAudioIngestError) {
+        const mappedCode =
+          err.code === 'AUDIO_DURATION_EXCEEDED'
+            ? 'AUDIO_DURATION_EXCEEDED'
+            : err.code === 'PROVIDER_UNAVAILABLE'
+              ? 'PROVIDER_UNAVAILABLE'
+              : err.code === 'EMPTY_AUDIO_BODY' || err.code === 'PAYLOAD_TOO_LARGE'
+                ? 'VALIDATION_ERROR'
+                : 'AUDIO_FORMAT_UNSUPPORTED';
+        return {
+          status: err.httpStatus,
+          body: buildPlatformErrorEnvelope({
+            code: mappedCode,
+            message: err.message,
+            requestId: reqId,
+            retryable: false,
+            details: { ingest_error_code: err.code },
+          }),
+        };
+      }
+      return {
+        status: 500,
+        body: buildPlatformErrorEnvelope({
+          code: 'INTERNAL_ERROR',
+          message: 'Unexpected error during audio transcription pipeline.',
           requestId: reqId,
           retryable: false,
         }),
       };
+    } finally {
+      if (artifact) {
+        await artifact.dispose();
+      }
     }
-
-    // 3. Hard Region Data Residency Validation
-    const regionCheck = this.controlPlane.validateRegionPolicy({
-      organizationId: auth.organization.id,
-      projectId: auth.project.id,
-      requestedRegionId: params.body?.region_id,
-    });
-    if (!regionCheck.allowed) {
-      return { status: 422, body: regionCheck.errorEnvelope };
-    }
-
-    // 4. Derive server-verified audio duration
-    const sampleCorpusMatch =
-      INITIAL_VERIFIED_STUDIO_CORPUS.find((s) => s.sample_id === params.body?.sample_id) ??
-      INITIAL_VERIFIED_STUDIO_CORPUS[0];
-    const verifiedAudioDurationMs = Math.max(
-      1000,
-      Math.min(
-        modelEntry.maxAudioDurationSec * 1000,
-        Math.round(params.body?.audio_duration_ms ?? sampleCorpusMatch.duration * 1000)
-      )
-    );
-
-    if ((params.body?.audio_duration_ms ?? 0) > modelEntry.maxAudioDurationSec * 1000) {
-      return {
-        status: 400,
-        body: buildPlatformErrorEnvelope({
-          code: 'AUDIO_DURATION_EXCEEDED',
-          message: `Audio duration exceeds model maximum (${modelEntry.maxAudioDurationSec}s).`,
-          requestId: reqId,
-        }),
-      };
-    }
-
-    // 5. Atomic Budget & Quota Reservation BEFORE inference
-    const reservationRes = this.controlPlane.reserveUsageBudgetAtomically({
-      organizationId: auth.organization.id,
-      projectId: auth.project.id,
-      requestId: reqId,
-      estimatedDurationMs: verifiedAudioDurationMs,
-      modelId,
-    });
-    if (!reservationRes.approved) {
-      return { status: 402, body: reservationRes.errorEnvelope };
-    }
-
-    // 6. Data Plane Routing + Scientific Inference (strictly decoupled from billing)
-    const startWall = performance.now();
-    const stateHistory: Array<{ state: BatchJobLifecycleState; timestampIso: string }> = [
-      { state: 'QUEUED', timestampIso: new Date().toISOString() },
-      { state: 'VALIDATING', timestampIso: new Date().toISOString() },
-      { state: 'PROCESSING', timestampIso: new Date().toISOString() },
-    ];
-
-    const domainProfile: DomainProfileName = params.body?.domain_profile ?? 'technology';
-    const routeDecision = makeAdaptiveRoutingDecision({
-      request: {
-        request_id: reqId,
-        tenant_id: auth.organization.id,
-        input: {
-          audio_sha256: sampleCorpusMatch.audio_hash,
-          duration_ms: verifiedAudioDurationMs,
-          sample_rate: 16000,
-          channels: 1,
-          format: 'wav',
-          estimated_snr_db: 26,
-          code_switch_probability: 0.35,
-        },
-        task: {
-          mode: 'batch',
-          language: params.body?.language === 'en' ? 'en' : params.body?.language === 'fa' ? 'fa' : 'auto',
-          domain: domainProfile,
-          diarization: Boolean(params.body?.diarization),
-          timestamps: Boolean(params.body?.timestamps),
-        },
-        routing: {
-          strategy: 'balanced',
-          privacy: 'local_only',
-          allow_external: false,
-          allow_cascade: false,
-          max_engines: 1,
-        },
-        constraints: {
-          max_latency_ms: 4000,
-          max_cost: 0.1,
-          currency: 'USD',
-          min_quality_level: 'MEDIUM',
-        },
-      },
-    });
-
-    const asrOut = runIndependentAsrTranscription({
-      sampleId: sampleCorpusMatch.sample_id,
-      domainProfile,
-      enableNormalization: true,
-      enableDomainAdaptation: true,
-      rawHypothesisOverride: params.body?.raw_text_hint,
-    });
-
-    const processingMs = Math.max(2, Math.round(performance.now() - startWall));
-    stateHistory.push({ state: 'FINALIZING', timestampIso: new Date().toISOString() });
-    stateHistory.push({ state: 'COMPLETED', timestampIso: new Date().toISOString() });
-
-    const transcriptionId = `tr_${crypto.randomUUID()}`;
-    const executionMode = params.body?.execution_mode ?? 'batch';
-
-    // 7. Authoritative Usage Metering & Immutable Financial Commit
-    const usageEv = this.controlPlane.commitAuthoritativeUsageAndLedger({
-      reservationId: reservationRes.reservation.reservationId,
-      usageEventId: `usg_${transcriptionId}`,
-      idempotencyKey: `usage:${reqId}`,
-      credentialId: auth.credential.id,
-      transcriptionId,
-      modelId: modelEntry.modelId,
-      modelVersion: modelEntry.version,
-      executionMode: 'batch',
-      verifiedAudioDurationMs,
-      billableDurationMs: verifiedAudioDurationMs,
-      processingDurationMs: processingMs,
-      succeeded: true,
-    });
-
-    const job: PublicTranscriptionJobRecord = {
-      id: transcriptionId,
-      object: 'audio.transcription',
-      organizationId: auth.organization.id,
-      projectId: auth.project.id,
-      credentialId: auth.credential.id,
-      regionId: regionCheck.region.regionId,
-      status: 'COMPLETED',
-      stateHistory,
-      model: modelEntry.modelId,
-      modelVersion: modelEntry.version,
-      language: params.body?.language ?? 'fa-en',
-      executionMode,
-      text: asrOut.domain_adapted_text,
-      segments: params.body?.timestamps
-        ? [
-            {
-              startMs: 0,
-              endMs: verifiedAudioDurationMs,
-              text: asrOut.domain_adapted_text,
-            },
-          ]
-        : undefined,
-      durationMs: verifiedAudioDurationMs,
-      billableMs: usageEv.billableDurationMs,
-      actualCostMinor: usageEv.actualCostMinor,
-      currency: 'USD',
-      timestampsAvailable: Boolean(params.body?.timestamps && modelEntry.timestampsSupported),
-      diarizationAvailable: Boolean(params.body?.diarization && modelEntry.diarizationSupported),
-      metadata: params.body?.metadata ?? {},
-      createdAtIso: stateHistory[0].timestampIso,
-      completedAtIso: stateHistory[stateHistory.length - 1].timestampIso,
-    };
-
-    this.jobs.set(job.id, job);
-
-    // 8. Outbound Webhook Notification
-    this.controlPlane.dispatchWebhookEvent({
-      organizationId: auth.organization.id,
-      eventType: 'transcription.completed',
-      data: {
-        transcription_id: job.id,
-        status: 'completed',
-        model: job.model,
-        duration_ms: job.durationMs,
-        result_url: `/v1/audio/transcriptions/${job.id}/result`,
-      },
-    });
-
-    const publicResponse = {
-      id: job.id,
-      object: job.object,
-      status: job.status.toLowerCase(),
-      model: job.model,
-      model_version: job.modelVersion,
-      region_id: job.regionId,
-      routed_internal_engine: routeDecision.selected_primary,
-      language: job.language,
-      text: job.text,
-      ...(job.segments ? { segments: job.segments } : {}),
-      duration_ms: job.durationMs,
-      usage: {
-        audio_seconds: Number((job.durationMs / 1000).toFixed(3)),
-        billable_seconds: Number((job.billableMs / 1000).toFixed(3)),
-        actual_cost_minor_cents: job.actualCostMinor,
-        currency: job.currency,
-      },
-      timestamps_available: job.timestampsAvailable,
-      diarization_available: job.diarizationAvailable,
-      created_at: job.createdAtIso,
-    };
-
-    const httpStatus = executionMode === 'long_form_async' ? 202 : 200;
-    if (idempKey) {
-      const scopedKey = `${auth.organization.id}::POST:/v1/audio/transcriptions::${idempKey}`;
-      this.idempotencyStore.set(scopedKey, {
-        scopedKey,
-        payloadHash,
-        httpStatus,
-        responseBody: publicResponse,
-        expiresAtMs: Date.now() + 86400_000,
-      });
-    }
-
-    return { status: httpStatus, body: publicResponse };
   }
 
   public getTranscriptionJob(params: {

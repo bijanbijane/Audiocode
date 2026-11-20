@@ -1,13 +1,12 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
   Activity,
-  CheckCircle2,
   Code2,
   Copy,
   CreditCard,
   Globe2,
   KeyRound,
-  Layers,
+  Lock,
   Play,
   RefreshCw,
   RotateCcw,
@@ -15,6 +14,7 @@ import {
   ShieldCheck,
   Terminal,
   Trash2,
+  Upload,
   Webhook,
   X,
 } from 'lucide-react';
@@ -78,28 +78,68 @@ interface DeveloperPlatformPortalModalProps {
   onClose: () => void;
 }
 
+/**
+ * Build a minimal valid 1-second 16 kHz mono 16-bit PCM WAV Blob for Playground testing
+ * when the user has not selected a local audio file.
+ */
+function createDefaultTestWavBlob(durationSec = 1): Blob {
+  const sampleRate = 16000;
+  const numSamples = Math.max(1600, Math.round(sampleRate * durationSec));
+  const dataBytes = numSamples * 2;
+  const buffer = new ArrayBuffer(44 + dataBytes);
+  const view = new DataView(buffer);
+
+  const writeStr = (offset: number, s: string) => {
+    for (let i = 0; i < s.length; i += 1) {
+      view.setUint8(offset + i, s.charCodeAt(i));
+    }
+  };
+  writeStr(0, 'RIFF');
+  view.setUint32(4, 36 + dataBytes, true);
+  writeStr(8, 'WAVE');
+  writeStr(12, 'fmt ');
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true); // PCM
+  view.setUint16(22, 1, true); // mono
+  view.setUint32(24, sampleRate, true);
+  view.setUint32(28, sampleRate * 2, true);
+  view.setUint16(32, 2, true);
+  view.setUint16(34, 16, true);
+  writeStr(36, 'data');
+  view.setUint32(40, dataBytes, true);
+
+  for (let i = 0; i < numSamples; i += 1) {
+    const sample = Math.sin((2 * Math.PI * 440 * i) / sampleRate) * 0.25;
+    view.setInt16(44 + i * 2, Math.max(-32768, Math.min(32767, Math.round(sample * 32767))), true);
+  }
+  return new Blob([buffer], { type: 'audio/wav' });
+}
+
 export const DeveloperPlatformPortalModal: React.FC<DeveloperPlatformPortalModalProps> = ({
   isOpen,
   onClose,
 }) => {
+  // Strictly in-memory admin control-plane Bearer token — NEVER persisted to storage/URL/logs
+  const [adminBearerToken, setAdminBearerToken] = useState('');
+  const [authStatus, setAuthStatus] = useState<'UNAUTHENTICATED' | 'AUTHENTICATED' | 'FORBIDDEN'>('UNAUTHENTICATED');
+
   const [activeTab, setActiveTab] = useState<PortalTabId>('overview');
   const [overview, setOverview] = useState<PortalOverviewPayload | null>(null);
   const [loading, setLoading] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
 
-  // API Keys & Projects state
+  // API Keys & Projects state (issuedSecretOnce is strictly separate for Data Plane /v1/* calls)
   const [newKeyName, setNewKeyName] = useState('Studio Client Integration Key');
   const [newProjectName, setNewProjectName] = useState('');
   const [issuedSecretOnce, setIssuedSecretOnce] = useState<string | null>(null);
+  const [webhookSigningSecretOnce, setWebhookSigningSecretOnce] = useState<string | null>(null);
   const [copiedKey, setCopiedKey] = useState(false);
 
-  // Interactive API Playground state
+  // Interactive API Playground state (binary audio upload only — zero audio_duration_ms / raw_text_hint)
   const [playgroundModel, setPlaygroundModel] = useState('asr-fa-en-v1');
   const [playgroundIdempKey, setPlaygroundIdempKey] = useState(() => `idemp-${Date.now()}`);
-  const [playgroundDurationMs, setPlaygroundDurationMs] = useState(12500);
-  const [playgroundRawHint, setPlaygroundRawHint] = useState(
-    'امروز سرویس Backend و تایپ اسکریپت را در پلتفرم آوا پرداز اجرا می کنیم'
-  );
+  const [estimateDurationSec, setEstimateDurationSec] = useState(12);
+  const [playgroundAudioFile, setPlaygroundAudioFile] = useState<File | null>(null);
   const [estimateResult, setEstimateResult] = useState<Record<string, unknown> | null>(null);
   const [apiPlayResult, setApiPlayResult] = useState<Record<string, unknown> | null>(null);
   const [sdkLangTab, setSdkLangTab] = useState<'ts' | 'py'>('ts');
@@ -114,14 +154,100 @@ export const DeveloperPlatformPortalModal: React.FC<DeveloperPlatformPortalModal
     message: string;
   } | null>(null);
 
-  const loadOverview = async () => {
+  // Wipe all sensitive tokens from React state immediately on close or unmount
+  useEffect(() => {
+    if (!isOpen) {
+      setAdminBearerToken('');
+      setIssuedSecretOnce(null);
+      setWebhookSigningSecretOnce(null);
+      setOverview(null);
+      setAuthStatus('UNAUTHENTICATED');
+    }
+    return () => {
+      setAdminBearerToken('');
+      setIssuedSecretOnce(null);
+      setWebhookSigningSecretOnce(null);
+    };
+  }, [isOpen]);
+
+  const handleClosePortal = useCallback(() => {
+    setAdminBearerToken('');
+    setIssuedSecretOnce(null);
+    setWebhookSigningSecretOnce(null);
+    setOverview(null);
+    setAuthStatus('UNAUTHENTICATED');
+    onClose();
+  }, [onClose]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') handleClosePortal();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [isOpen, handleClosePortal]);
+
+  /**
+   * Centralized authenticated transport for ALL `/api/v1/platform/*` Control Plane operations.
+   * Refuses calls when adminBearerToken is absent, classifies 401 vs 403 separately,
+   * and never retries failed privileged mutations.
+   */
+  const platformFetch = useCallback(
+    async (
+      path: string,
+      options: { method?: 'GET' | 'POST'; body?: unknown } = {}
+    ): Promise<Response | null> => {
+      const token = adminBearerToken.trim();
+      if (!token) {
+        setAuthStatus('UNAUTHENTICATED');
+        setNotice('برای دسترسی به Control Plane، ابتدا کلید مدیریتی معتبر (Bearer Token) را وارد کنید.');
+        return null;
+      }
+
+      const method = options.method ?? 'GET';
+      const headers: Record<string, string> = {
+        Authorization: `Bearer ${token}`,
+      };
+      if (options.body !== undefined) {
+        headers['Content-Type'] = 'application/json';
+      }
+
+      const res = await fetch(path, {
+        method,
+        headers,
+        credentials: 'same-origin',
+        cache: 'no-store',
+        ...(options.body !== undefined ? { body: JSON.stringify(options.body) } : {}),
+      });
+
+      if (res.status === 401) {
+        setAuthStatus('UNAUTHENTICATED');
+        setNotice('احراز هویت ناموفق (۴۰۱): کلید مدیریتی نامعتبر، منقضی یا باطل شده است.');
+      } else if (res.status === 403) {
+        setAuthStatus('FORBIDDEN');
+        setNotice('دسترسی غیرمجاز (۴۰۳): کلید شما مجوز (Scope) یا نقش کافی برای این عملیات ندارد.');
+      }
+      return res;
+    },
+    [adminBearerToken]
+  );
+
+  const loadOverview = useCallback(async () => {
+    if (!adminBearerToken.trim()) {
+      setAuthStatus('UNAUTHENTICATED');
+      setOverview(null);
+      return;
+    }
     setLoading(true);
     try {
-      const res = await fetch('/api/v1/platform/overview');
+      const res = await platformFetch('/api/v1/platform/overview', { method: 'GET' });
+      if (!res) return;
       if (res.ok) {
         const data = (await res.json()) as PortalOverviewPayload;
         setOverview(data);
-      } else {
+        setAuthStatus('AUTHENTICATED');
+      } else if (res.status !== 401 && res.status !== 403) {
         setNotice(`خطا در بارگذاری نمای کلی پورتال توسعه‌دهندگان (کد ${res.status}).`);
       }
     } catch (err) {
@@ -129,44 +255,33 @@ export const DeveloperPlatformPortalModal: React.FC<DeveloperPlatformPortalModal
     } finally {
       setLoading(false);
     }
-  };
-
-  useEffect(() => {
-    if (isOpen) {
-      void loadOverview();
-    }
-  }, [isOpen]);
-
-  useEffect(() => {
-    if (!isOpen) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [isOpen, onClose]);
+  }, [adminBearerToken, platformFetch]);
 
   if (!isOpen) return null;
 
   const handleIssueApiKey = async () => {
     try {
-      const projectId = overview?.projects[0]?.id ?? 'prj_avapardaz_dev_01';
-      const res = await fetch('/api/v1/platform/api-keys', {
+      const projectId = overview?.projects[0]?.id;
+      if (!projectId) {
+        setNotice('ابتدا با کلید مدیریتی معتبر به پورتال متصل شوید تا پروژه فعال بارگذاری شود.');
+        return;
+      }
+      const res = await platformFetch('/api/v1/platform/api-keys', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
+        body: {
           projectId,
           name: newKeyName,
           scopes: ['audio:transcribe', 'audio:stream', 'transcripts:read', 'models:read', 'usage:read'],
-        }),
+        },
       });
+      if (!res) return;
       if (res.ok) {
         const data = (await res.json()) as { plaintextSecretOnce: string };
         setIssuedSecretOnce(data.plaintextSecretOnce);
         setCopiedKey(false);
         setNotice('کلید جدید صادر شد. مقدار Secret فقط همین یک‌بار نمایش داده می‌شود و در سرور فقط هش HMAC نگهداری می‌شود.');
         await loadOverview();
-      } else {
+      } else if (res.status !== 401 && res.status !== 403) {
         setNotice(`خطا در صدور کلید API (کد ${res.status}).`);
       }
     } catch (err) {
@@ -176,14 +291,18 @@ export const DeveloperPlatformPortalModal: React.FC<DeveloperPlatformPortalModal
 
   const handleRotateKey = async (credId: string) => {
     try {
-      const res = await fetch(`/api/v1/platform/api-keys/${credId}/rotate`, { method: 'POST' });
+      const res = await platformFetch(`/api/v1/platform/api-keys/${encodeURIComponent(credId)}/rotate`, {
+        method: 'POST',
+        body: { overlapHours: 24 },
+      });
+      if (!res) return;
       if (res.ok) {
         const data = (await res.json()) as { plaintextSecretOnce: string };
         setIssuedSecretOnce(data.plaintextSecretOnce);
         setCopiedKey(false);
         setNotice('چرخش کلید انجام شد؛ کلید قبلی با پنجره هم‌پوشانی ۲۴ ساعته فعال می‌ماند.');
         await loadOverview();
-      } else {
+      } else if (res.status !== 401 && res.status !== 403) {
         setNotice(`خطا در چرخش کلید API (کد ${res.status}).`);
       }
     } catch (err) {
@@ -193,11 +312,14 @@ export const DeveloperPlatformPortalModal: React.FC<DeveloperPlatformPortalModal
 
   const handleRevokeKey = async (credId: string) => {
     try {
-      const res = await fetch(`/api/v1/platform/api-keys/${credId}/revoke`, { method: 'POST' });
+      const res = await platformFetch(`/api/v1/platform/api-keys/${encodeURIComponent(credId)}/revoke`, {
+        method: 'POST',
+      });
+      if (!res) return;
       if (res.ok) {
         setNotice('کلید بلافاصله باطل شد و هر درخواست با آن با کد 401 رد می‌شود.');
         await loadOverview();
-      } else {
+      } else if (res.status !== 401 && res.status !== 403) {
         setNotice(`خطا در ابطال کلید API (کد ${res.status}).`);
       }
     } catch (err) {
@@ -209,16 +331,16 @@ export const DeveloperPlatformPortalModal: React.FC<DeveloperPlatformPortalModal
     e.preventDefault();
     if (!newProjectName.trim()) return;
     try {
-      const res = await fetch('/api/v1/platform/projects', {
+      const res = await platformFetch('/api/v1/platform/projects', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ projectName: newProjectName, environment: 'DEVELOPMENT' }),
+        body: { projectName: newProjectName, environment: 'DEVELOPMENT' },
       });
+      if (!res) return;
       if (res.ok) {
         setNewProjectName('');
         setNotice('پروژه جدید با جداسازی محیطی و ردیابی مصرف مستقل ایجاد شد.');
         await loadOverview();
-      } else {
+      } else if (res.status !== 401 && res.status !== 403) {
         setNotice(`خطا در ایجاد پروژه جدید (کد ${res.status}).`);
       }
     } catch (err) {
@@ -228,7 +350,7 @@ export const DeveloperPlatformPortalModal: React.FC<DeveloperPlatformPortalModal
 
   const handleEstimateApiCost = async () => {
     if (!issuedSecretOnce) {
-      setNotice('ابتدا در تب «کلیدها و پروژه‌ها» یک کلید تست بسازید تا درخواست با Bearer Token واقعی ارسال شود.');
+      setNotice('ابتدا در تب «کلیدها و پروژه‌ها» یک کلید تست Data Plane بسازید تا درخواست با Bearer Token واقعی ارسال شود.');
       return;
     }
     try {
@@ -240,7 +362,7 @@ export const DeveloperPlatformPortalModal: React.FC<DeveloperPlatformPortalModal
         },
         body: JSON.stringify({
           model: playgroundModel,
-          duration_seconds: Math.round(playgroundDurationMs / 1000),
+          duration_seconds: Math.max(1, Math.round(estimateDurationSec)),
         }),
       });
       const json = (await res.json().catch(() => ({}))) as Record<string, unknown>;
@@ -259,28 +381,34 @@ export const DeveloperPlatformPortalModal: React.FC<DeveloperPlatformPortalModal
       return;
     }
     try {
+      const uploadBlob: Blob = playgroundAudioFile ?? createDefaultTestWavBlob(1);
+      const contentType = playgroundAudioFile?.type || 'audio/wav';
+      const asrOptions = {
+        model: playgroundModel,
+        language: 'fa-en',
+        timestamps: true,
+        domain_profile: 'technology',
+        execution_mode: 'batch',
+      };
+
       const res = await fetch('/v1/audio/transcriptions', {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json',
+          'Content-Type': contentType,
           Authorization: `Bearer ${issuedSecretOnce}`,
           'Idempotency-Key': playgroundIdempKey,
+          'X-ASR-Options': JSON.stringify(asrOptions),
         },
-        body: JSON.stringify({
-          model: playgroundModel,
-          language: 'fa-en',
-          timestamps: true,
-          domain_profile: 'technology',
-          audio_duration_ms: playgroundDurationMs,
-          raw_text_hint: playgroundRawHint,
-        }),
+        body: uploadBlob,
       });
       const json = (await res.json().catch(() => ({}))) as Record<string, unknown>;
       setApiPlayResult(json);
       if (!res.ok) {
         setNotice(`اجرای درخواست رونویسی API با کد ${res.status} بازگشت.`);
       }
-      await loadOverview();
+      if (adminBearerToken.trim()) {
+        await loadOverview();
+      }
     } catch (err) {
       setNotice(`خطا در اجرای درخواست رونویسی API: ${err instanceof Error ? err.message : String(err)}`);
     }
@@ -288,11 +416,12 @@ export const DeveloperPlatformPortalModal: React.FC<DeveloperPlatformPortalModal
 
   const handleIssueInvoice = async () => {
     try {
-      const res = await fetch('/api/v1/platform/invoices/issue', { method: 'POST' });
+      const res = await platformFetch('/api/v1/platform/invoices/issue', { method: 'POST' });
+      if (!res) return;
       if (res.ok) {
         setNotice('فاکتور تغییرناپذیر با اسنپ‌شات قیمت‌گذاری و هش SHA-256 صادر شد.');
         await loadOverview();
-      } else {
+      } else if (res.status !== 401 && res.status !== 403) {
         setNotice(`خطا در صدور فاکتور (کد ${res.status}).`);
       }
     } catch (err) {
@@ -303,19 +432,24 @@ export const DeveloperPlatformPortalModal: React.FC<DeveloperPlatformPortalModal
   const handleRegisterWebhook = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      const res = await fetch('/api/v1/platform/webhooks', {
+      const res = await platformFetch('/api/v1/platform/webhooks', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
+        body: {
           url: webhookUrl,
           eventSubscriptions: ['transcription.completed', 'transcription.failed'],
-        }),
+        },
       });
+      if (!res) return;
       if (res.ok) {
-        setNotice('نقطه انتهایی Webhook با کلید امضای HMAC-SHA256 ثبت شد.');
+        const data = (await res.json()) as { signingSecretOnce?: string };
+        if (data.signingSecretOnce) {
+          setWebhookSigningSecretOnce(data.signingSecretOnce);
+        }
+        setNotice('نقطه انتهایی Webhook با کلید امضای HMAC-SHA256 ثبت شد (کلید امضا فقط یک‌بار نمایش داده می‌شود).');
         await loadOverview();
-      } else {
-        setNotice(`خطا در ثبت Webhook (کد ${res.status}).`);
+      } else if (res.status !== 401 && res.status !== 403) {
+        const errBody = (await res.json().catch(() => ({}))) as { error?: { message?: string } };
+        setNotice(`خطا در ثبت Webhook (کد ${res.status}): ${errBody.error?.message ?? ''}`);
       }
     } catch (err) {
       setNotice(`خطا در ثبت Webhook: ${err instanceof Error ? err.message : String(err)}`);
@@ -324,19 +458,19 @@ export const DeveloperPlatformPortalModal: React.FC<DeveloperPlatformPortalModal
 
   const handleDispatchWebhook = async (simulateFailure: boolean) => {
     try {
-      const res = await fetch('/api/v1/platform/webhooks/test-dispatch', {
+      const res = await platformFetch('/api/v1/platform/webhooks/test-dispatch', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ simulateFailure }),
+        body: { simulateFailure },
       });
+      if (!res) return;
       if (res.ok) {
         setNotice(
           simulateFailure
             ? 'رویداد تست پس از ۶ تلاش به Dead-Letter Queue منتقل شد.'
-            : 'رویداد امضاشده (t=..., v1=...) ارسال شد.'
+            : 'رویداد امضاشده (t=..., v1=...) در صف ارسال قرار گرفت.'
         );
         await loadOverview();
-      } else {
+      } else if (res.status !== 401 && res.status !== 403) {
         setNotice(`خطا در ارسال رویداد تست Webhook (کد ${res.status}).`);
       }
     } catch (err) {
@@ -346,11 +480,14 @@ export const DeveloperPlatformPortalModal: React.FC<DeveloperPlatformPortalModal
 
   const handleReplayWebhook = async (deliveryId: string) => {
     try {
-      const res = await fetch(`/api/v1/platform/webhooks/${deliveryId}/replay`, { method: 'POST' });
+      const res = await platformFetch(`/api/v1/platform/webhooks/${encodeURIComponent(deliveryId)}/replay`, {
+        method: 'POST',
+      });
+      if (!res) return;
       if (res.ok) {
-        setNotice('رویداد DLQ با حفظ شناسه اصلی Event دوباره ارسال شد.');
+        setNotice('رویداد DLQ با وضعیت RETRY_SCHEDULED برای ارسال مجدد زمان‌بندی شد.');
         await loadOverview();
-      } else {
+      } else if (res.status !== 401 && res.status !== 403) {
         setNotice(`خطا در بازپخش رویداد DLQ (کد ${res.status}).`);
       }
     } catch (err) {
@@ -360,11 +497,11 @@ export const DeveloperPlatformPortalModal: React.FC<DeveloperPlatformPortalModal
 
   const handleTestRegionResidency = async () => {
     try {
-      const res = await fetch('/api/v1/platform/region-check', {
+      const res = await platformFetch('/api/v1/platform/region-check', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ regionId: selectedTestRegion }),
+        body: { regionId: selectedTestRegion },
       });
+      if (!res) return;
       const json = (await res.json().catch(() => ({}))) as {
         allowed?: boolean;
         region?: { regionId: string };
@@ -375,7 +512,7 @@ export const DeveloperPlatformPortalModal: React.FC<DeveloperPlatformPortalModal
           allowed: true,
           message: `منطقه ${json.region?.regionId} مجاز و فعال است (Single-Region G0).`,
         });
-      } else {
+      } else if (res.status !== 401 && res.status !== 403) {
         setRegionCheckResult({
           allowed: false,
           message: `رد شده طبق سیاست اقامت داده (${json.errorEnvelope?.error?.code ?? `HTTP_${res.status}`}): ${json.errorEnvelope?.error?.message ?? 'نامشخص'}`,
@@ -387,20 +524,26 @@ export const DeveloperPlatformPortalModal: React.FC<DeveloperPlatformPortalModal
     }
   };
 
-  const tsSnippet = `import { ASRClient } from "@asr-platform/sdk";
+  const tsSnippet = `import { readFileSync } from "node:fs";
+import { ASRClient } from "@asr-platform/sdk";
 
 const client = new ASRClient({ apiKey: process.env.ASR_API_KEY! });
 const result = await client.audio.transcriptions.create({
+  audio: readFileSync("./sample.wav"),
+  contentType: "audio/wav",
   model: "${playgroundModel}",
   language: "fa-en",
   idempotencyKey: "${playgroundIdempKey}"
 });
 console.log(result.text, result.usage);`;
 
-  const pySnippet = `from asr_platform import ASRClient
+  const pySnippet = `import os
+from asr_platform import ASRClient
 
 client = ASRClient(api_key=os.environ["ASR_API_KEY"])
 result = client.audio.transcriptions.create(
+    audio="./sample.wav",
+    content_type="audio/wav",
     model="${playgroundModel}",
     language="fa-en",
     idempotency_key="${playgroundIdempKey}",
@@ -437,14 +580,15 @@ print(result["text"], result["usage"])`;
             <button
               type="button"
               onClick={() => void loadOverview()}
+              disabled={!adminBearerToken.trim()}
               aria-label="بروزرسانی اطلاعات پورتال"
-              className="p-2 rounded-md border border-[#252F42] bg-[#141B27] text-slate-300 hover:text-white cursor-pointer"
+              className="p-2 rounded-md border border-[#252F42] bg-[#141B27] text-slate-300 hover:text-white cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
             >
               <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
             </button>
             <button
               type="button"
-              onClick={onClose}
+              onClick={handleClosePortal}
               aria-label="بستن پورتال توسعه‌دهندگان"
               className="p-2 rounded-md border border-[#252F42] bg-[#141B27] text-slate-300 hover:text-white cursor-pointer"
             >
@@ -452,6 +596,42 @@ print(result["text"], result["usage"])`;
             </button>
           </div>
         </header>
+
+        {/* Control Plane Admin Credential Bar (In-Memory Only) */}
+        <div className="px-5 py-3 border-b border-[#252F42] bg-[#0C121D] text-xs flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-2 text-slate-300">
+            <Lock className="w-4 h-4 text-sky-400 shrink-0" aria-hidden="true" />
+            <label htmlFor="portal-admin-bearer-input" className="font-semibold whitespace-nowrap">
+              Control Plane Admin Bearer Key
+            </label>
+            <span className="text-slate-400 hidden lg:inline">
+              (فقط در حافظه موقت مرورگر نگهداری و با بستن پنجره پاک می‌شود)
+            </span>
+          </div>
+          <div className="flex items-center gap-2 flex-1 max-w-xl justify-end">
+            <input
+              id="portal-admin-bearer-input"
+              data-testid="input-portal-admin-token"
+              type="password"
+              autoComplete="off"
+              spellCheck={false}
+              value={adminBearerToken}
+              onChange={(e) => setAdminBearerToken(e.target.value)}
+              placeholder="asr_test_... (دارای اسکوپ‌های مدیریتی platform:read / api-keys:manage)"
+              dir="ltr"
+              className="flex-1 min-w-[220px] px-2.5 py-1.5 rounded border border-[#252F42] bg-[#0B0F17] font-mono text-xs text-slate-100"
+            />
+            <button
+              type="button"
+              data-testid="btn-portal-authenticate"
+              disabled={!adminBearerToken.trim() || loading}
+              onClick={() => void loadOverview()}
+              className="px-3 py-1.5 rounded bg-sky-400 text-slate-950 font-semibold hover:bg-sky-300 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed whitespace-nowrap"
+            >
+              اتصال احراز هویت‌شده
+            </button>
+          </div>
+        </div>
 
         {/* Sub-navigation */}
         <nav
@@ -499,6 +679,27 @@ print(result["text"], result["usage"])`;
         )}
 
         <div className="flex-1 overflow-y-auto p-5 space-y-5">
+          {/* Authentication Required Gate when no verified admin session is loaded */}
+          {!overview && activeTab !== 'playground_sdks' && (
+            <section
+              data-testid="portal-auth-required-panel"
+              className="p-6 rounded-lg border border-[#252F42] bg-[#141B27] space-y-2 text-xs text-center"
+            >
+              <Lock className="w-6 h-6 text-sky-400 mx-auto" aria-hidden="true" />
+              <h3 className="text-sm font-semibold text-slate-100">
+                احراز هویت برای دسترسی به Control Plane الزامی است
+              </h3>
+              <p className="text-slate-400 max-w-xl mx-auto">
+                تمامی مسیرهای مدیریتی <code dir="ltr" className="font-mono text-sky-300">/api/v1/platform/*</code> بدون کلید احراز هویت‌شده مسدود هستند. کلید مدیریتی خود را در کادر بالا وارد کرده و «اتصال احراز هویت‌شده» را بزنید.
+              </p>
+              {authStatus === 'FORBIDDEN' && (
+                <p className="text-amber-300">
+                  کلید فعلی شما احراز هویت شد اما دسترسی (RBAC / Scope) لازم برای نمای کلی ندارد (HTTP 403).
+                </p>
+              )}
+            </section>
+          )}
+
           {/* TAB 1: OVERVIEW & PUBLIC MODEL CATALOG */}
           {activeTab === 'overview' && overview && (
             <section className="space-y-4">
@@ -757,22 +958,34 @@ print(result["text"], result["usage"])`;
                     />
                   </div>
                   <div>
-                    <label className="block text-slate-400 mb-1">مدت صوت (ms):</label>
+                    <label className="block text-slate-400 mb-1">مدت تخمینی برای `/v1/audio/estimates` (ثانیه):</label>
                     <input
                       type="number"
-                      value={playgroundDurationMs}
-                      onChange={(e) => setPlaygroundDurationMs(Number(e.target.value))}
+                      min={1}
+                      value={estimateDurationSec}
+                      onChange={(e) => setEstimateDurationSec(Number(e.target.value))}
                       className="w-full px-2.5 py-2 rounded border border-[#252F42] bg-[#0B0F17] font-mono"
                     />
                   </div>
                 </div>
-                <input
-                  type="text"
-                  value={playgroundRawHint}
-                  onChange={(e) => setPlaygroundRawHint(e.target.value)}
-                  aria-label="متن نمونه ورودی تست Data Plane"
-                  className="w-full px-3 py-2 rounded border border-[#252F42] bg-[#0B0F17]"
-                />
+                <div className="flex flex-wrap items-center gap-3 p-3 rounded border border-[#252F42] bg-[#0B0F17]">
+                  <Upload className="w-4 h-4 text-sky-400 shrink-0" aria-hidden="true" />
+                  <label className="text-slate-300">
+                    فایل صوتی باینری برای آپلود مستقیم به <code dir="ltr" className="font-mono">/v1/audio/transcriptions</code>:
+                  </label>
+                  <input
+                    type="file"
+                    accept="audio/*"
+                    data-testid="input-playground-audio-file"
+                    onChange={(e) => setPlaygroundAudioFile(e.target.files?.[0] ?? null)}
+                    className="text-xs text-slate-300"
+                  />
+                  <span className="text-slate-400 font-mono text-[11px]">
+                    {playgroundAudioFile
+                      ? `${playgroundAudioFile.name} (${playgroundAudioFile.size} bytes)`
+                      : 'در صورت انتخاب نکردن فایل، یک WAV آزمایشی ۱ ثانیه‌ای ۱۶kHz ارسال می‌شود'}
+                  </span>
+                </div>
                 <div className="flex flex-wrap gap-2">
                   <button
                     type="button"
@@ -940,6 +1153,26 @@ print(result["text"], result["usage"])`;
                   شبیه‌سازی خطا و انتقال به DLQ
                 </button>
               </form>
+              {webhookSigningSecretOnce && (
+                <div
+                  data-testid="webhook-signing-secret-once-banner"
+                  className="p-3 rounded-lg border border-amber-500/40 bg-amber-500/10 flex flex-wrap items-center justify-between gap-2"
+                >
+                  <div className="space-y-0.5">
+                    <div className="text-amber-300 font-semibold">
+                      کلید امضای Webhook (فقط همین یک‌بار نمایش داده می‌شود):
+                    </div>
+                    <code className="block font-mono text-xs text-white break-all">{webhookSigningSecretOnce}</code>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setWebhookSigningSecretOnce(null)}
+                    className="px-2.5 py-1 rounded border border-amber-500/40 text-amber-200 cursor-pointer"
+                  >
+                    بستن
+                  </button>
+                </div>
+              )}
 
               <div className="overflow-x-auto rounded-lg border border-[#252F42]">
                 <table className="w-full text-right">

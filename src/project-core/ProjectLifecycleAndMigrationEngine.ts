@@ -1,6 +1,7 @@
 import { AssetId } from '../contracts/storage-broker.contract';
 import { ProjectDocument } from '../contracts/project-schema.contract';
 import { SampleRate } from '../contracts/timebase.contract';
+import { HASH_CHUNK_BYTES, IncrementalSha256, sha256Blob } from '../utils/StreamingSha256';
 
 export type RelinkMatchStatus =
   | 'NOT_FOUND'
@@ -43,6 +44,7 @@ export class ProjectLifecycleAndMigrationEngine {
 
   /**
    * Computes fast 3-slice Partial Fingerprint (64KB head + middle + tail) per Section 16.
+   * This is strictly a candidate-screening fingerprint and is never substituted for full SHA-256.
    */
   public static async computePartialFingerprint(file: Blob): Promise<string> {
     const sliceSize = 64 * 1024;
@@ -51,12 +53,17 @@ export class ProjectLifecycleAndMigrationEngine {
     }
 
     const midOffset = Math.floor(file.size / 2) - Math.floor(sliceSize / 2);
-    const head = file.slice(0, sliceSize);
-    const mid = file.slice(midOffset, midOffset + sliceSize);
-    const tail = file.slice(file.size - sliceSize, file.size);
-
-    const combined = new Blob([head, mid, tail]);
-    return this.computeSha256Blob(combined);
+    const hasher = new IncrementalSha256();
+    const windows: readonly [number, number][] = [
+      [0, sliceSize],
+      [midOffset, midOffset + sliceSize],
+      [file.size - sliceSize, file.size],
+    ];
+    for (const [start, end] of windows) {
+      const buf = await file.slice(start, end).arrayBuffer();
+      hasher.update(new Uint8Array(buf));
+    }
+    return hasher.digestHex();
   }
 
   public static async computeFullContentHash(file: Blob): Promise<string> {
@@ -234,10 +241,6 @@ export class ProjectLifecycleAndMigrationEngine {
   }
 
   private static async computeSha256Blob(blob: Blob): Promise<string> {
-    const buffer = await blob.arrayBuffer();
-    const digest = await globalThis.crypto.subtle.digest('SHA-256', buffer);
-    return Array.from(new Uint8Array(digest))
-      .map((b) => b.toString(16).padStart(2, '0'))
-      .join('');
+    return sha256Blob(blob, { chunkSizeBytes: HASH_CHUNK_BYTES });
   }
 }

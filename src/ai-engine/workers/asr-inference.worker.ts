@@ -21,6 +21,11 @@ import { SpeakerTimelineSegment } from '../MultiSpeakerDiarizationAndCrosstalkEn
 import { ChunkedModelManifest } from '../../platform/ChunkedModelDelivery';
 import { TimeMath } from '../../contracts/timebase.contract';
 import { TrackId } from '../../contracts/project-schema.contract';
+import {
+  getSharedMemoryBudgetManager,
+  MemoryBudgetManager,
+  MemoryReservation,
+} from '../../runtime/memory/MemoryBudgetManager';
 import { RawWordPrediction } from '../PersianChunkedAsrWorker';
 
 export interface AsrPipelineExecutionRequest {
@@ -56,22 +61,34 @@ export interface AsrPipelineFinalResult {
 
 /**
  * Section 116: Sequential Background ASR & Diarization Worker Pipeline (VAD -> ASR -> Diarization -> Post-NLP)
- * Enforces Single-Active-Heavy-Model unloading and exact inverse batch-to-timeline Flicks timestamp mapping.
+ * Enforces Single-Active-Heavy-Model unloading, MemoryBudgetManager admission, and exact inverse batch-to-timeline Flicks timestamp mapping.
  */
 export class SequentialPersianAiPipelineRunner {
   private readonly ortProvider: OrtRuntimeProvider;
   private readonly compoundRestorer = new PersianPostAsrSpellingAndCompoundRestorer();
+  private readonly memoryBudgetManager: MemoryBudgetManager;
+  private disposed = false;
 
   constructor(
     customOrtProvider?: OrtRuntimeProvider,
     private readonly opfsRootOverride?: OpfsRootDirectoryLike,
+    memoryBudgetManager?: MemoryBudgetManager,
   ) {
     this.ortProvider = customOrtProvider ?? new WebWorkerOrtRuntimeProvider('/ort/');
+    this.memoryBudgetManager = memoryBudgetManager ?? getSharedMemoryBudgetManager();
+  }
+
+  public isOperational(): boolean {
+    return !this.disposed;
+  }
+
+  public dispose(): void {
+    this.disposed = true;
   }
 
   /**
    * Run full sequential AI pipeline (VAD -> ASR -> Speaker Diarization -> Disfluency)
-   * with immediate model unloading between stages (Single-Active-Heavy-Model Rule)
+   * with immediate model unloading and memory reservation release between stages (Single-Active-Heavy-Model Rule)
    */
   public async runFullSequentialPipeline(
     req: AsrPipelineExecutionRequest,
@@ -84,27 +101,51 @@ export class SequentialPersianAiPipelineRunner {
       abortSignal?: AbortSignal;
     },
   ): Promise<AsrPipelineFinalResult> {
+    if (this.disposed) {
+      throw new Error('ASR_WORKER_OFFLINE: Pipeline runner has been disposed.');
+    }
+    if (callbacks.abortSignal?.aborted) {
+      throw new Error('ASR_JOB_ABORTED_BEFORE_START');
+    }
+
     const startMs = performance.now();
 
     // =========================================================================
     // Stage 1: Load & execute Silero VAD v5 (~2MB) and immediately unload
     // =========================================================================
     callbacks.onStageProgress('VAD', 5);
-    const vadModelBytes = await WebWorkerOrtRuntimeProvider.assembleModelBytesFromOpfsChunks(
-      req.vadManifest,
-      this.opfsRootOverride,
-    );
+    let vadReservation: MemoryReservation | null = null;
     const vadRunner = new SileroVadOnnxRunner(this.ortProvider);
-    await vadRunner.loadModel(vadModelBytes, ['wasm']);
+    let vadSegments: VadSpeechSegment[] = [];
+    try {
+      const vadModelBytes = await WebWorkerOrtRuntimeProvider.assembleModelBytesFromOpfsChunks(
+        req.vadManifest,
+        this.opfsRootOverride,
+        {
+          memoryBudgetManager: this.memoryBudgetManager,
+          onReservation: (res) => {
+            vadReservation = res;
+          },
+          signal: callbacks.abortSignal,
+        },
+      );
+      await vadRunner.loadModel(vadModelBytes, ['wasm']);
 
-    const vadSegments = await vadRunner.detectSpeechSegments(req.pcm16kMono, {
-      startThreshold: 0.5,
-      endThreshold: 0.35,
-      minSpeechMs: 250,
-      minSilenceMs: 120,
-      speechPadMs: 30,
-    });
-    await vadRunner.unloadModel(); // Immediate VAD memory release
+      vadSegments = await vadRunner.detectSpeechSegments(req.pcm16kMono, {
+        startThreshold: 0.5,
+        endThreshold: 0.35,
+        minSpeechMs: 250,
+        minSilenceMs: 120,
+        speechPadMs: 30,
+      });
+    } finally {
+      await vadRunner.unloadModel(); // Immediate VAD memory release
+      this.memoryBudgetManager.release(vadReservation);
+    }
+
+    if (callbacks.abortSignal?.aborted) {
+      throw new Error('ASR_JOB_ABORTED_AT_CHECKPOINT');
+    }
 
     const consolidatedBatches = SileroVadOnnxRunner.buildConsolidatedAsrBatches(
       req.pcm16kMono,
@@ -122,12 +163,7 @@ export class SequentialPersianAiPipelineRunner {
     const startBatchIdx = req.resumeFromBatchIndex ?? 0;
 
     if (consolidatedBatches.length > 0 && startBatchIdx < consolidatedBatches.length) {
-      const asrModelBytes =
-        await WebWorkerOrtRuntimeProvider.assembleModelBytesFromOpfsChunks(
-          req.asrManifest,
-          this.opfsRootOverride,
-        );
-
+      let asrReservation: MemoryReservation | null = null;
       const asrEngine = new UnifiedOnnxPersianAsrEngine(
         this.ortProvider,
         req.asrArchitecture,
@@ -139,14 +175,27 @@ export class SequentialPersianAiPipelineRunner {
         },
       );
 
-      const providers: ('webgpu' | 'wasm')[] =
-        req.preferredBackend === 'webgpu' ? ['webgpu', 'wasm'] : ['wasm'];
-      await asrEngine.loadModels({
-        encoderModelBytesOrPath: asrModelBytes,
-        executionProviders: providers,
-      });
-
       try {
+        const asrModelBytes =
+          await WebWorkerOrtRuntimeProvider.assembleModelBytesFromOpfsChunks(
+            req.asrManifest,
+            this.opfsRootOverride,
+            {
+              memoryBudgetManager: this.memoryBudgetManager,
+              onReservation: (res) => {
+                asrReservation = res;
+              },
+              signal: callbacks.abortSignal,
+            },
+          );
+
+        const providers: ('webgpu' | 'wasm')[] =
+          req.preferredBackend === 'webgpu' ? ['webgpu', 'wasm'] : ['wasm'];
+        await asrEngine.loadModels({
+          encoderModelBytesOrPath: asrModelBytes,
+          executionProviders: providers,
+        });
+
         for (let bIdx = startBatchIdx; bIdx < consolidatedBatches.length; bIdx++) {
           if (callbacks.abortSignal?.aborted) {
             throw new Error('ASR_JOB_ABORTED_AT_CHECKPOINT');
@@ -172,6 +221,7 @@ export class SequentialPersianAiPipelineRunner {
       } finally {
         // Guarantee heavy ASR model unloading from RAM even on cancellation or error
         await asrEngine.unloadModels();
+        this.memoryBudgetManager.release(asrReservation);
       }
     }
 
@@ -180,15 +230,26 @@ export class SequentialPersianAiPipelineRunner {
     // =========================================================================
     let speakerSegments: SpeakerTimelineSegment[] = [];
     if (req.speakerEmbeddingManifest && vadSegments.length > 0) {
+      if (callbacks.abortSignal?.aborted) {
+        throw new Error('ASR_JOB_ABORTED_AT_CHECKPOINT');
+      }
       callbacks.onStageProgress('DIARIZATION', 80);
-      const spkBytes = await WebWorkerOrtRuntimeProvider.assembleModelBytesFromOpfsChunks(
-        req.speakerEmbeddingManifest,
-        this.opfsRootOverride,
-      );
+      let spkReservation: MemoryReservation | null = null;
       const spkRunner = new SpeakerEmbeddingOnnxRunner(this.ortProvider, 'feats', 'B_T_M');
-      await spkRunner.loadModel(spkBytes, ['wasm']);
-
       try {
+        const spkBytes = await WebWorkerOrtRuntimeProvider.assembleModelBytesFromOpfsChunks(
+          req.speakerEmbeddingManifest,
+          this.opfsRootOverride,
+          {
+            memoryBudgetManager: this.memoryBudgetManager,
+            onReservation: (res) => {
+              spkReservation = res;
+            },
+            signal: callbacks.abortSignal,
+          },
+        );
+        await spkRunner.loadModel(spkBytes, ['wasm']);
+
         const frameEmbeddings = await spkRunner.extractEmbeddingsForVadSegments(
           req.pcm16kMono,
           vadSegments,
@@ -199,6 +260,7 @@ export class SequentialPersianAiPipelineRunner {
         );
       } finally {
         await spkRunner.unloadModel();
+        this.memoryBudgetManager.release(spkReservation);
       }
     }
 

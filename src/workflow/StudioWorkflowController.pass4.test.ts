@@ -63,6 +63,7 @@ test('StudioWorkflowController.startRender rejects concurrent duplicate calls wh
         ok: true,
         plan: null,
         output: null,
+        outputArtifact: null,
         outputBytes: new Uint8Array([1, 2, 3, 4]),
         preValidation: {
           phase: 'PRE_RENDER' as const,
@@ -285,4 +286,154 @@ test('StudioWorkflowController.syncTranscriptFromSegments preserves raw baseline
   assert.equal(ctrl.getState().rawTranscriptVersion?.segments[0]?.rawText, 'سلام دنیا');
   assert.equal(ctrl.getActiveTranscriptVersion()?.segments[0]?.editedText, 'سلام، دنیا!');
 });
+
+test('StudioWorkflowController.startRender recovers cleanly to FAILED if renderEngine rejects and allows subsequent renders', async () => {
+  let attempt = 0;
+  const flakyEngine = {
+    render: async () => {
+      attempt += 1;
+      if (attempt === 1) {
+        throw new Error('SIMULATED_IO_CRASH');
+      }
+      return {
+        renderId: 'rnd_recovered',
+        state: 'COMPLETED' as const,
+        ok: true,
+        plan: null,
+        output: null,
+        outputArtifact: null,
+        outputBytes: new Uint8Array([1, 2, 3, 4]),
+        preValidation: {
+          phase: 'PRE_RENDER' as const,
+          passed: true,
+          errorCount: 0,
+          warningCount: 0,
+          failures: [],
+        },
+        postValidation: {
+          phase: 'POST_RENDER' as const,
+          passed: true,
+          errorCount: 0,
+          warningCount: 0,
+          failures: [],
+        },
+        boundaryChecks: [],
+        crossfadeResults: [],
+        checkpoint: null,
+        sourceDurationSec: 1,
+        outputDurationSec: 1,
+        removedDurationSec: 0,
+        wallClockMs: 5,
+        realTimeFactor: 0.01,
+        peakReservedBytes: 1024,
+        sourceImmutableVerified: true,
+        edlImmutableVerified: true,
+        appliedProposalIds: [],
+        failureReason: null,
+      };
+    },
+    resumeFromCheckpoint: async () => {
+      throw new Error('not used');
+    },
+  } as unknown as AudioRenderEngine;
+
+  const ctrl = new StudioWorkflowController({ renderEngine: flakyEngine });
+  const pcm = new Float32Array(48_000);
+  ctrl.openProject({
+    projectId: 'proj_render_recover',
+    projectName: 'Render Recovery Test',
+    sourceAudio: {
+      sourceAudioId: 'src_rec_1',
+      sourceAudioHash: 'hash_rec_1234',
+      fileName: 'test.wav',
+      format: 'wav',
+      sampleRate: 48000,
+      channelCount: 1,
+      bitDepth: 32,
+      totalSamples: pcm.length,
+      durationSec: 1,
+      fileSizeBytes: pcm.byteLength,
+      importStatus: 'VALIDATED',
+      isDemoFixture: false,
+    },
+  });
+
+  await ctrl.analyzeSpeechEventsAndBuildEdl({
+    trackId: 'track-host',
+    pcmMono: pcm,
+    sampleRate: 48000,
+    wordTokens: [],
+  });
+
+  const config = {
+    encoding: 'pcm16' as const,
+    container: 'wav' as const,
+    targetSampleRate: 48000 as const,
+    chunkSizeSamples: 8192,
+    defaultCrossfadeMs: 10,
+  };
+
+  const first = await ctrl.startRender({ pcmChannels: [pcm], config });
+  assert.equal(first, null);
+  assert.equal(ctrl.getState().renderState, 'FAILED');
+  assert.equal(ctrl.getState().exportStatus, 'FAILED');
+  assert.equal(ctrl.getState().exportError, 'SIMULATED_IO_CRASH');
+
+  // Must NOT be permanently locked out from subsequent renders
+  const second = await ctrl.startRender({ pcmChannels: [pcm], config });
+  assert.equal(second?.ok, true);
+  assert.equal(ctrl.getState().renderState, 'COMPLETED');
+  assert.equal(ctrl.getState().exportStatus, 'VALIDATED_READY');
+});
+
+test('TranscriptTransformationEngine.revertCandidateById returns all restoredTokens for multi-token absorbed merges', () => {
+  const engine = new TranscriptTransformationEngine();
+  const doc0 = createPersianTranscriptDocument({
+    documentId: 'doc_multitok_revert',
+    rawAsrText: 'می روم خانه',
+    sampleRate: 48000,
+  });
+
+  const [tok0, tok1] = doc0.tokens;
+  assert.ok(tok0 && tok1);
+
+  const mergeCand: PersianAsrCorrectionCandidate = {
+    candidateId: 'cand_merge_mi_ravam',
+    sourceTranscriptVersion: doc0.version,
+    tokenIds: [tok0.tokenId, tok1.tokenId],
+    originalText: 'می روم',
+    proposedText: 'می‌روم',
+    category: 'ORTHOGRAPHY_READABLE',
+    evidenceStrength: 'STRONG_EVIDENCE',
+    acousticEvidenceAvailable: false,
+    acousticConfidence: null,
+    linguisticEvidence: 'ZWNJ prefix merge',
+    semanticRisk: assessSemanticChangeRisk({
+      originalText: 'می روم',
+      proposedText: 'می‌روم',
+      category: 'ORTHOGRAPHY_READABLE',
+    }),
+    alignmentImpact: 'NONE',
+    epistemicSource: 'DETERMINISTIC_NORMALIZATION',
+    provenanceModule: 'test',
+    sourceStartSample: null,
+    sourceEndSample: null,
+    status: 'PROPOSED',
+  };
+
+  const applied = engine.applyAcceptedCandidate({ document: doc0, candidate: mergeCand });
+  assert.equal(applied.applied, true);
+  assert.equal(applied.document.tokens[0].readableText, 'می‌روم');
+  assert.equal(applied.document.tokens[1].readableText, '');
+
+  const reverted = engine.revertCandidateById(applied.document, mergeCand.candidateId);
+  assert.equal(reverted.reverted, true);
+  assert.deepEqual(reverted.restoredTokens, [
+    { tokenId: tok0.tokenId, readableText: 'می' },
+    { tokenId: tok1.tokenId, readableText: 'روم' },
+  ]);
+  assert.equal(reverted.document.tokens[0].readableText, 'می');
+  assert.equal(reverted.document.tokens[1].readableText, 'روم');
+});
+
 

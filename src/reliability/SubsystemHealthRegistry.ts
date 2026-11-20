@@ -248,29 +248,73 @@ export function createDefaultSubsystemHealthRegistry(
           details: { installed: false },
         };
       }
+      if (!modelManager.getSnapshot().initialized) {
+        await modelManager.initialize();
+      }
       const snap = modelManager.getSnapshot();
       const active = snap.activeModel;
+      if (snap.state === 'MODEL_UNAVAILABLE') {
+        return {
+          status: 'UNAVAILABLE',
+          summaryFa: 'مخزن ذخیره‌سازی محلی مدل (OPFS) در دسترس نیست.',
+          summaryEn: 'Local model OPFS storage repository is unavailable.',
+          details: {
+            installed: false,
+            state: snap.state,
+            storageBackend: snap.storageBackend,
+            runtimeReady: false,
+            errorCode: snap.lastErrorCode,
+          },
+        };
+      }
+      if (snap.state === 'INTEGRITY_FAILURE') {
+        return {
+          status: 'FAILED',
+          summaryFa: 'مدل محلی ذخیره‌شده دچار خرابی یا عدم تطابق SHA-256 است.',
+          summaryEn: 'Stored local ASR model failed integrity verification.',
+          details: {
+            installed: false,
+            verified: false,
+            state: snap.state,
+            storageBackend: snap.storageBackend,
+            runtimeReady: false,
+            errorCode: snap.lastErrorCode,
+          },
+        };
+      }
       if (!active) {
         return {
           status: 'UNAVAILABLE',
           summaryFa: 'هیچ مدل محلی تأییدشده‌ای نصب نشده است.',
           summaryEn: 'No verified local ASR model is installed.',
-          details: { installed: false, state: snap.state },
+          details: {
+            installed: false,
+            state: snap.state,
+            storageBackend: snap.storageBackend,
+            runtimeReady: false,
+          },
         };
       }
       const verification = await modelManager.verifyInstalledActiveModelOffline();
       const verified = verification.ok;
+      const postSnap = modelManager.getSnapshot();
       return {
-        status: verified ? 'HEALTHY' : 'FAILED',
+        status: verified ? 'HEALTHY' : verification.state === 'MODEL_UNAVAILABLE' ? 'UNAVAILABLE' : 'FAILED',
         summaryFa: verified
-          ? `مدل محلی ${active.modelId} (نسخه ${active.version}) با SHA-256 تأیید شده است.`
+          ? postSnap.runtimeReady
+            ? `مدل محلی ${active.modelId} (نسخه ${active.version}) در OPFS تأیید و برای اجرا آماده است.`
+            : `مدل محلی ${active.modelId} (نسخه ${active.version}) در OPFS با SHA-256 تأیید شده است (جلسه ONNX هنوز مقداردهی نشده).`
           : 'تأیید اصالت (SHA-256) مدل نصب‌شده ناموفق بود.',
         summaryEn: verified
-          ? `Local model ${active.modelId} v${active.version} passed SHA-256 verification.`
+          ? postSnap.runtimeReady
+            ? `Local model ${active.modelId} v${active.version} verified in OPFS and runtime-ready.`
+            : `Local model ${active.modelId} v${active.version} stored & SHA-256 verified in OPFS (runtime not yet initialized).`
           : 'Installed local model failed SHA-256 integrity verification.',
         details: {
           installed: true,
           verified,
+          runtimeReady: postSnap.runtimeReady,
+          storageBackend: postSnap.storageBackend,
           modelId: active.modelId,
           version: active.version,
           verificationState: verification.state,

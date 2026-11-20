@@ -12,7 +12,19 @@ import { resampleTo16kMono } from './resampler';
 import { buildSeekTable, StorageBrokerClient } from './storageBroker';
 import { flicksToSeconds, secondsToFlicks } from './timebase';
 import { alignPersianScriptToAudio } from './persianAsrTranscriber';
-import { ingestAudioFileStreaming, StreamingIngestOptions } from './streamingIngest';
+import {
+  createProjectRuntimeResourceLease,
+  ingestAudioFileStreaming,
+  ProjectResourceLeaseSlot,
+  ProjectRuntimeResourceLease,
+  StreamingIngestOptions,
+} from './streamingIngest';
+
+export {
+  createProjectRuntimeResourceLease,
+  ProjectResourceLeaseSlot,
+  type ProjectRuntimeResourceLease,
+};
 
 export interface LoadedStudioProject {
   projectName: string;
@@ -30,6 +42,8 @@ export interface LoadedStudioProject {
     aliasingAttenuationDb: number;
     downsampledLength: number;
   };
+  /** Runtime-only memory reservation ownership handle (never serialized into persistent project documents). */
+  runtimeResourceLease?: ProjectRuntimeResourceLease;
 }
 
 /** Synthesizes formant-rich pseudo-Persian speech syllable bursts */
@@ -425,10 +439,11 @@ export function buildDefaultPersianPodcastProject(): LoadedStudioProject {
 /**
  * Ingests any real uploaded audio file (.wav, .mp3, .ogg, .m4a, .webm)
  * using bounded-memory chunk streaming and OPFS persistence without generating synthetic transcripts.
+ * Production callers must pass explicit broker, memory budget, and mirror options via AudioImportCoordinator.
  */
 export async function ingestUploadedAudioFile(
   file: File,
-  options?: StreamingIngestOptions,
+  options: StreamingIngestOptions = {},
 ): Promise<LoadedStudioProject> {
   return ingestAudioFileStreaming(file, options);
 }

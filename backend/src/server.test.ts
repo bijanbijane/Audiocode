@@ -86,27 +86,41 @@ describe('Section 106: Production Backend Server Bootstrap (Rate Limiter, JWT Ho
     assert.equal(readyRep.getStatus(), 200);
     assert.equal(readyRep.getPayload().status, 'ready');
 
-    // Verify preHandler blocks unauthenticated /api/v1/license/lease
-    const unauthRep = makeReply();
-    await hooks.preHandler[0](
-      { ip: '10.0.0.1', url: '/api/v1/license/lease', headers: {} },
-      unauthRep.reply,
-    );
-    assert.equal(unauthRep.getStatus(), 401);
+    // Verify preHandler blocks unauthenticated requests on all three protected license routes (including query strings)
+    for (const protectedUrl of [
+      '/api/v1/license/lease',
+      '/api/v1/license/lease?source=app',
+      '/api/v1/license/enforce-device-seat',
+      '/api/v1/license/sync-state',
+      '/api/v1/license/sync-state?v=1',
+    ]) {
+      const unauthRep = makeReply();
+      await hooks.preHandler[0](
+        { ip: '10.0.0.1', url: protectedUrl, headers: {} },
+        unauthRep.reply,
+      );
+      assert.equal(unauthRep.getStatus(), 401, `Expected 401 on ${protectedUrl}`);
+    }
 
-    // Verify preHandler accepts valid EdDSA JWT
+    // Verify preHandler accepts valid EdDSA JWT on all protected license routes and attaches authenticatedUserId
     const validJwt = boot.authAndPayment.issueEdDsaJwt({
       sub: 'usr_prod_1',
       email: 'prod@studio.ir',
     });
-    const authReq: ProductionFastifyRequestLike = {
-      ip: '10.0.0.1',
-      url: '/api/v1/license/lease',
-      headers: { authorization: `Bearer ${validJwt}` },
-    };
-    const authRep = makeReply();
-    await hooks.preHandler[0](authReq, authRep.reply);
-    assert.equal(authReq.authenticatedUserId, 'usr_prod_1');
+    for (const protectedUrl of [
+      '/api/v1/license/lease',
+      '/api/v1/license/enforce-device-seat',
+      '/api/v1/license/sync-state?v=1',
+    ]) {
+      const authReq: ProductionFastifyRequestLike = {
+        ip: '10.0.0.1',
+        url: protectedUrl,
+        headers: { authorization: `Bearer ${validJwt}` },
+      };
+      const authRep = makeReply();
+      await hooks.preHandler[0](authReq, authRep.reply);
+      assert.equal(authReq.authenticatedUserId, 'usr_prod_1');
+    }
 
     await boot.shutdown('SIGTERM');
     assert.equal(poolEnded, true);

@@ -62,7 +62,22 @@ export type ModelFactoryOperationId =
   | 'ML_ROLLBACK_DEPLOYMENT'
   | 'ML_READ_GOVERNANCE_AUDIT';
 
-export type ProtectedOperationId = SecurityOperationId | ModelFactoryOperationId;
+export type PlatformControlPlaneOperationId =
+  | 'PLATFORM_READ_OVERVIEW'
+  | 'PLATFORM_CREATE_PROJECT'
+  | 'PLATFORM_ISSUE_API_KEY'
+  | 'PLATFORM_ROTATE_API_KEY'
+  | 'PLATFORM_REVOKE_API_KEY'
+  | 'PLATFORM_ISSUE_INVOICE'
+  | 'PLATFORM_REGISTER_WEBHOOK'
+  | 'PLATFORM_MANAGE_WEBHOOKS'
+  | 'PLATFORM_TEST_WEBHOOKS'
+  | 'PLATFORM_CHECK_REGION';
+
+export type ProtectedOperationId =
+  | SecurityOperationId
+  | ModelFactoryOperationId
+  | PlatformControlPlaneOperationId;
 
 export type AuthorizationReasonCode =
   | 'ALLOWED'
@@ -82,7 +97,7 @@ export interface OperationPolicyRule {
   readonly operation: ProtectedOperationId;
   readonly allowedRoles: readonly OrganizationRole[];
   readonly acceptedScopes: readonly ApiCredentialScope[];
-  readonly category: 'SECURITY' | 'MODEL_FACTORY';
+  readonly category: 'SECURITY' | 'MODEL_FACTORY' | 'PLATFORM';
   readonly mutating: boolean;
 }
 
@@ -244,6 +259,78 @@ export const PLATFORM_AUTHORIZATION_POLICIES: Readonly<
     allowedRoles: ['OWNER', 'ADMIN', 'SECURITY_AUDITOR'],
     acceptedScopes: ['security:audit', 'security:admin', 'models:read'],
     category: 'MODEL_FACTORY',
+    mutating: false,
+  },
+
+  // ── AVP-011: Platform Control Plane Administration Operations (10 protected operations) ──
+  PLATFORM_READ_OVERVIEW: {
+    operation: 'PLATFORM_READ_OVERVIEW',
+    allowedRoles: ['OWNER', 'ADMIN', 'BILLING_ADMIN', 'ANALYST', 'SECURITY_AUDITOR'],
+    acceptedScopes: ['platform:read'],
+    category: 'PLATFORM',
+    mutating: false,
+  },
+  PLATFORM_CREATE_PROJECT: {
+    operation: 'PLATFORM_CREATE_PROJECT',
+    allowedRoles: ['OWNER', 'ADMIN'],
+    acceptedScopes: ['projects:write'],
+    category: 'PLATFORM',
+    mutating: true,
+  },
+  PLATFORM_ISSUE_API_KEY: {
+    operation: 'PLATFORM_ISSUE_API_KEY',
+    allowedRoles: ['OWNER', 'ADMIN'],
+    acceptedScopes: ['api-keys:manage'],
+    category: 'PLATFORM',
+    mutating: true,
+  },
+  PLATFORM_ROTATE_API_KEY: {
+    operation: 'PLATFORM_ROTATE_API_KEY',
+    allowedRoles: ['OWNER', 'ADMIN'],
+    acceptedScopes: ['api-keys:manage'],
+    category: 'PLATFORM',
+    mutating: true,
+  },
+  PLATFORM_REVOKE_API_KEY: {
+    operation: 'PLATFORM_REVOKE_API_KEY',
+    allowedRoles: ['OWNER', 'ADMIN'],
+    acceptedScopes: ['api-keys:manage'],
+    category: 'PLATFORM',
+    mutating: true,
+  },
+  PLATFORM_ISSUE_INVOICE: {
+    operation: 'PLATFORM_ISSUE_INVOICE',
+    allowedRoles: ['OWNER', 'BILLING_ADMIN'],
+    acceptedScopes: ['billing:write'],
+    category: 'PLATFORM',
+    mutating: true,
+  },
+  PLATFORM_REGISTER_WEBHOOK: {
+    operation: 'PLATFORM_REGISTER_WEBHOOK',
+    allowedRoles: ['OWNER', 'ADMIN', 'DEVELOPER'],
+    acceptedScopes: ['webhooks:manage'],
+    category: 'PLATFORM',
+    mutating: true,
+  },
+  PLATFORM_MANAGE_WEBHOOKS: {
+    operation: 'PLATFORM_MANAGE_WEBHOOKS',
+    allowedRoles: ['OWNER', 'ADMIN', 'DEVELOPER'],
+    acceptedScopes: ['webhooks:manage'],
+    category: 'PLATFORM',
+    mutating: true,
+  },
+  PLATFORM_TEST_WEBHOOKS: {
+    operation: 'PLATFORM_TEST_WEBHOOKS',
+    allowedRoles: ['OWNER', 'ADMIN', 'DEVELOPER'],
+    acceptedScopes: ['webhooks:manage'],
+    category: 'PLATFORM',
+    mutating: true,
+  },
+  PLATFORM_CHECK_REGION: {
+    operation: 'PLATFORM_CHECK_REGION',
+    allowedRoles: ['OWNER', 'ADMIN', 'DEVELOPER', 'ANALYST', 'VIEWER', 'SECURITY_AUDITOR'],
+    acceptedScopes: ['projects:read'],
+    category: 'PLATFORM',
     mutating: false,
   },
 });

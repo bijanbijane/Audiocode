@@ -10,7 +10,13 @@ import {
 import { EditDecisionEngine } from '../ai-engine/edit-decision/EditDecisionEngine';
 import { AudioRenderEngine } from './AudioRenderEngine';
 import { createPlanarArrayPcmSource } from './AudioSourceReader';
-import { StreamingByteSink } from './AudioExportWriter';
+import {
+  DEFAULT_MAX_ARTIFACT_READ_BYTES,
+  RenderArtifactReadStreamOptions,
+  StreamingByteSink,
+  validateArtifactRangeRead,
+  validateArtifactStreamOptions,
+} from './AudioExportWriter';
 import { parseWaveContainerBytes } from './AudioRenderValidator';
 import { InMemoryRenderCheckpointStore } from './AudioRenderRecovery';
 import { MemoryBudgetManager } from '../runtime/memory/MemoryBudgetManager';
@@ -103,7 +109,10 @@ function makeFillerToken(params: {
  */
 class PersistentInMemorySink implements StreamingByteSink {
   public readonly persistedExternally = true;
+  public handleClosedCount = 0;
+  public deletedCount = 0;
   private buffer = new Uint8Array(0);
+  private committed = false;
 
   public append(bytes: Uint8Array): void {
     const next = new Uint8Array(this.buffer.byteLength + bytes.byteLength);
@@ -123,15 +132,53 @@ class PersistentInMemorySink implements StreamingByteSink {
   }
 
   public finalizeTempToCommitted(): void {
-    // Persistent file atomically promoted
+    this.committed = true;
   }
 
   public abortAndCleanup(): void {
+    this.deletedCount += 1;
+    this.committed = false;
     this.buffer = new Uint8Array(0);
   }
 
-  public readAllBytes(): Uint8Array {
-    return new Uint8Array(this.buffer);
+  public disposeCommitted(): void {
+    // External committed files close transient handles without deleting committed user data
+    this.handleClosedCount += 1;
+  }
+
+  public async readRange(offset: number, length: number): Promise<Uint8Array> {
+    if (!this.committed) {
+      throw new Error('Cannot read uncommitted persistent sink.');
+    }
+    validateArtifactRangeRead(this.buffer.byteLength, offset, length, DEFAULT_MAX_ARTIFACT_READ_BYTES);
+    const out = new Uint8Array(length);
+    out.set(this.buffer.subarray(offset, offset + length));
+    return out;
+  }
+
+  public openReadStream(options?: RenderArtifactReadStreamOptions): ReadableStream<Uint8Array> {
+    if (!this.committed) {
+      throw new Error('Cannot stream uncommitted persistent sink.');
+    }
+    const { start, end, chunkSizeBytes } = validateArtifactStreamOptions(
+      this.buffer.byteLength,
+      options,
+      DEFAULT_MAX_ARTIFACT_READ_BYTES,
+    );
+    let cursor = start;
+    return new ReadableStream<Uint8Array>({
+      pull: async (controller) => {
+        if (cursor >= end) {
+          controller.close();
+          return;
+        }
+        const toRead = Math.min(chunkSizeBytes, end - cursor);
+        const slice = await this.readRange(cursor, toRead);
+        cursor += slice.byteLength;
+        controller.enqueue(slice);
+        if (cursor >= end) controller.close();
+      },
+    });
   }
 
   public getTotalBytesWritten(): number {
@@ -213,6 +260,8 @@ test('AudioRenderEngine centered crossfade produces monotonic, click-free transi
 
   assert.equal(res.ok, true, res.failureReason);
   assert.equal(res.state, 'COMPLETED');
+  assert.ok(res.outputArtifact);
+  assert.equal(res.outputArtifact.disposed, false);
   assert.ok(res.outputBytes);
   assert.equal(res.output?.totalOutputSamples, res.plan?.expectedOutputSamples);
 
@@ -240,6 +289,8 @@ test('AudioRenderEngine centered crossfade produces monotonic, click-free transi
   // Smooth transition: max sample-to-sample step across 480-sample ramp from -0.5 to +0.5 is ~1/479 (~0.0021)
   assert.ok(maxStep < 0.01, `Expected smooth crossfade step < 0.01, got ${maxStep}`);
   assert.ok(minVal <= -0.49 && maxVal >= 0.49);
+
+  await res.outputArtifact.dispose();
 });
 
 test('AudioRenderEngine genuinely applies length-preserving acoustic boundary shift while preserving exact output sample count', async () => {
@@ -310,6 +361,8 @@ test('AudioRenderEngine genuinely applies length-preserving acoustic boundary sh
   // Exact total output samples must still match plan with 0 drift!
   assert.equal(res.output?.totalOutputSamples, res.plan?.expectedOutputSamples);
   assert.equal(res.postValidation?.passed, true);
+  assert.ok(res.outputArtifact);
+  await res.outputArtifact.dispose();
 });
 
 test('AudioRenderEngine pause and persistent-sink checkpoint resume produces byte-for-byte identical WAV output and hash', async () => {
@@ -429,7 +482,16 @@ test('AudioRenderEngine pause and persistent-sink checkpoint resume produces byt
   assert.equal(resumedResult.ok, true, resumedResult.failureReason);
   assert.equal(resumedResult.state, 'COMPLETED');
   assert.equal(resumedResult.postValidation?.passed, true);
+  assert.ok(resumedResult.outputArtifact);
+  assert.ok(refResult.outputArtifact);
   assert.ok(resumedResult.outputBytes);
   assert.equal(resumedResult.output?.outputHash, refResult.output?.outputHash);
   assert.deepEqual(resumedResult.outputBytes, refResult.outputBytes);
+
+  // Disposing externally persisted artifact closes transient handle without deleting committed file
+  await resumedResult.outputArtifact.dispose();
+  assert.equal(persistentSink.handleClosedCount, 1);
+  assert.equal(persistentSink.deletedCount, 0);
+  assert.equal(persistentSink.getTotalBytesWritten(), resumedResult.output?.fileSizeBytes);
+  await refResult.outputArtifact.dispose();
 });

@@ -8,6 +8,7 @@ import {
   UndoRedoEditMetadata,
 } from '../ai-engine/edit-decision/EditDecisionTypes';
 import { MemoryPressureLevel } from '../runtime/memory/MemoryBudgetManager';
+import type { RenderOutputArtifact } from './RenderOutputArtifact';
 
 export const AUDIO_RENDERER_VERSION = '6.0.0-avp-p06' as const;
 
@@ -305,6 +306,12 @@ export interface AudioRenderResult {
   readonly ok: boolean;
   readonly plan: ImmutableRenderPlan | null;
   readonly output: RenderOutputMetadata | null;
+  /** Canonical range-readable, lifecycle-managed rendered output artifact */
+  readonly outputArtifact: RenderOutputArtifact | null;
+  /**
+   * @deprecated Use `outputArtifact` instead. Populated only for validated outputs <= 8 MiB
+   * when an independent MemoryBudgetManager reservation can be acquired.
+   */
   readonly outputBytes: Uint8Array | null;
   readonly preValidation: RenderValidationReport;
   readonly postValidation: RenderValidationReport | null;

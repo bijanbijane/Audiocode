@@ -10,32 +10,38 @@
  */
 
 import crypto from 'node:crypto';
-import type {
-  ApiCredentialIssuedResponse,
-  ApiCredentialRecord,
-  ApiCredentialScope,
-  AuthoritativeUsageEvent,
-  ImmutableBillingLedgerEntry,
-  ImmutableInvoiceRecord,
-  OrganizationInvitation,
-  OrganizationMembership,
-  OrganizationRole,
-  PlanTierId,
-  PlatformApiErrorEnvelope,
-  PlatformAuditLogEntry,
-  PlatformErrorCode,
-  PlatformOrganization,
-  PlatformPlanCatalogEntry,
-  PlatformProject,
-  PlatformRegionRecord,
-  PlatformUser,
-  PublicModelCatalogEntry,
-  PublicWebhookEventType,
-  TenantSubscriptionRecord,
-  UsageReservationRecord,
-  WebhookDeliveryRecord,
-  WebhookEndpointRecord,
+import {
+  ALL_PLATFORM_SCOPES,
+  ALL_PUBLIC_WEBHOOK_EVENTS,
+  type ApiCredentialIssuedResponse,
+  type ApiCredentialRecord,
+  type ApiCredentialScope,
+  type AuthoritativeUsageEvent,
+  type ImmutableBillingLedgerEntry,
+  type ImmutableInvoiceRecord,
+  type OrganizationInvitation,
+  type OrganizationMembership,
+  type OrganizationRole,
+  type PlanTierId,
+  type PlatformApiErrorEnvelope,
+  type PlatformAuditLogEntry,
+  type PlatformErrorCode,
+  type PlatformOrganization,
+  type PlatformPlanCatalogEntry,
+  type PlatformProject,
+  type PlatformRegionRecord,
+  type PlatformUser,
+  type PublicModelCatalogEntry,
+  type PublicWebhookEventType,
+  type TenantSubscriptionRecord,
+  type UsageReservationRecord,
+  type WebhookDeliveryRecord,
+  type WebhookEndpointRecord,
 } from './PlatformContractsAndSchemas';
+import {
+  MAX_WEBHOOK_ENDPOINTS_PER_ORGANIZATION,
+  validateWebhookEventSubscriptions,
+} from './PlatformWebhookSecurity';
 
 export const PHASE10_VERSIONED_PLAN_CATALOG: readonly PlatformPlanCatalogEntry[] = [
   {
@@ -165,7 +171,7 @@ export const PHASE10_PUBLIC_MODEL_CATALOG: readonly PublicModelCatalogEntry[] = 
     diarizationSupported: true,
     supportedRegions: ['ir-thr-01'],
     runtimeType: 'local_cpu_worker',
-    availabilityInCurrentContainer: 'AVAILABLE_NOW',
+    availabilityInCurrentContainer: 'MODEL_NOT_INSTALLED',
     documentationAnchor: '#model-asr-fa-en-v1',
     retirementDateIso: null,
   },
@@ -183,7 +189,7 @@ export const PHASE10_PUBLIC_MODEL_CATALOG: readonly PublicModelCatalogEntry[] = 
     diarizationSupported: false,
     supportedRegions: ['ir-thr-01'],
     runtimeType: 'local_cpu_worker',
-    availabilityInCurrentContainer: 'AVAILABLE_NOW',
+    availabilityInCurrentContainer: 'MODEL_NOT_INSTALLED',
     documentationAnchor: '#model-asr-fa-en-baseline',
     retirementDateIso: null,
   },
@@ -265,6 +271,112 @@ export const ROLE_PERMISSION_MATRIX: Record<OrganizationRole, readonly string[]>
   VIEWER: ['projects:read', 'usage:read'],
   SECURITY_AUDITOR: ['audit:read', 'keys:read', 'projects:read', 'usage:read'],
 };
+
+/**
+ * Server-side scope delegation ceilings per organization role (AVP-011 §7).
+ * No caller may delegate a scope exceeding their role's permitted delegation boundary.
+ */
+export const ROLE_DELEGATABLE_SCOPES: Readonly<
+  Record<OrganizationRole, ReadonlySet<ApiCredentialScope>>
+> = Object.freeze({
+  OWNER: new Set<ApiCredentialScope>(ALL_PLATFORM_SCOPES),
+  ADMIN: new Set<ApiCredentialScope>(
+    Array.from(ALL_PLATFORM_SCOPES).filter((s) => s !== 'billing:write'),
+  ),
+  BILLING_ADMIN: new Set<ApiCredentialScope>([
+    'platform:read',
+    'billing:read',
+    'billing:write',
+    'usage:read',
+    'projects:read',
+  ]),
+  DEVELOPER: new Set<ApiCredentialScope>([
+    'audio:transcribe',
+    'audio:stream',
+    'audio:read',
+    'transcripts:read',
+    'usage:read',
+    'projects:read',
+    'webhooks:manage',
+    'models:read',
+    'models:write',
+    'models:approve',
+    'models:deploy',
+    'security:read',
+    'security:write',
+    'privacy:write',
+  ]),
+  ANALYST: new Set<ApiCredentialScope>([
+    'platform:read',
+    'projects:read',
+    'usage:read',
+    'models:read',
+    'transcripts:read',
+    'security:read',
+  ]),
+  SECURITY_AUDITOR: new Set<ApiCredentialScope>([
+    'platform:read',
+    'projects:read',
+    'usage:read',
+    'models:read',
+    'security:read',
+    'security:write',
+    'security:audit',
+    'security:admin',
+    'privacy:write',
+  ]),
+  VIEWER: new Set<ApiCredentialScope>([
+    'projects:read',
+    'usage:read',
+    'models:read',
+    'security:read',
+  ]),
+});
+
+export function validateRequestedScopes(
+  rawScopes: unknown,
+):
+  | { readonly valid: true; readonly scopes: ApiCredentialScope[] }
+  | { readonly valid: false; readonly message: string } {
+  if (!Array.isArray(rawScopes) || rawScopes.length === 0) {
+    return { valid: false, message: 'scopes must be a non-empty array of valid platform scopes.' };
+  }
+  const seen = new Set<ApiCredentialScope>();
+  const validated: ApiCredentialScope[] = [];
+  for (const item of rawScopes) {
+    if (typeof item !== 'string' || item.trim() !== item || item.length === 0) {
+      return { valid: false, message: 'Malformed scope entry rejected.' };
+    }
+    if (item === '*') {
+      return { valid: false, message: "Wildcard scope '*' is strictly forbidden." };
+    }
+    if (!ALL_PLATFORM_SCOPES.has(item as ApiCredentialScope)) {
+      return { valid: false, message: `Unknown scope '${item}' rejected.` };
+    }
+    const typed = item as ApiCredentialScope;
+    if (seen.has(typed)) {
+      return { valid: false, message: `Duplicate scope '${typed}' rejected.` };
+    }
+    seen.add(typed);
+    validated.push(typed);
+  }
+  return { valid: true, scopes: validated };
+}
+
+export function validateScopeDelegation(params: {
+  readonly issuerRole: OrganizationRole;
+  readonly requestedScopes: readonly ApiCredentialScope[];
+}): { readonly allowed: true } | { readonly allowed: false; readonly deniedScopes: ApiCredentialScope[] } {
+  const ceiling = ROLE_DELEGATABLE_SCOPES[params.issuerRole];
+  if (!ceiling) {
+    return { allowed: false, deniedScopes: [...params.requestedScopes] };
+  }
+  const denied = params.requestedScopes.filter((s) => !ceiling.has(s));
+  if (denied.length > 0) {
+    return { allowed: false, deniedScopes: denied };
+  }
+  return { allowed: true };
+}
 
 export const WEBHOOK_RETRY_DELAYS_SECONDS = [10, 30, 120, 600, 3600, 21600] as const;
 
@@ -372,6 +484,7 @@ export class PlatformControlPlaneService {
   private readonly usageEvents = new Map<string, AuthoritativeUsageEvent>();
   private readonly ledgerEntries: ImmutableBillingLedgerEntry[] = [];
   private readonly invoices = new Map<string, ImmutableInvoiceRecord>();
+  private readonly invoiceByOrgPeriod = new Map<string, string>();
   private readonly processedPaymentEvents = new Set<string>();
   private readonly webhookEndpoints = new Map<string, WebhookEndpointRecord>();
   private readonly webhookDeliveries: WebhookDeliveryRecord[] = [];
@@ -379,11 +492,34 @@ export class PlatformControlPlaneService {
   private readonly rateLimiter = new ScopedTokenBucketLimiter();
   private invoiceSeq = 1001;
 
-  constructor(options?: { serverPepper?: string }) {
-    this.serverPepper =
-      options?.serverPepper ??
-      process.env.API_KEY_PEPPER ??
-      'avapardaz-local-dev-pepper-configure-secret-in-prod';
+  constructor(options?: { serverPepper?: string; nodeEnv?: string }) {
+    const nodeEnv = (options?.nodeEnv ?? process.env.NODE_ENV ?? 'development')
+      .trim()
+      .toLowerCase();
+    const configuredPepper = options?.serverPepper ?? process.env.API_KEY_PEPPER ?? '';
+    const legacyPlaceholders = new Set([
+      'avapardaz-local-dev-pepper-configure-secret',
+      'avapardaz-local-dev-pepper-configure-secret-in-prod',
+    ]);
+
+    if (nodeEnv === 'production') {
+      if (
+        !configuredPepper ||
+        legacyPlaceholders.has(configuredPepper) ||
+        Buffer.byteLength(configuredPepper, 'utf8') < 32
+      ) {
+        throw new Error(
+          'PRODUCTION_API_KEY_PEPPER_INVALID: API_KEY_PEPPER must be configured with at least 32 bytes of cryptographically random secret material in production.',
+        );
+      }
+      this.serverPepper = configuredPepper;
+    } else if (configuredPepper && !legacyPlaceholders.has(configuredPepper)) {
+      this.serverPepper = configuredPepper;
+    } else {
+      // Development-only process-specific cryptographically random pepper (never hardcoded)
+      this.serverPepper = crypto.randomBytes(32).toString('hex');
+    }
+
     this.seedInitialTenantSandbox();
   }
 
@@ -766,7 +902,7 @@ export class PlatformControlPlaneService {
     this.recordAuditLog({
       organizationId: org.id,
       actorType: 'USER',
-      actorId: params.actorUserId ?? 'usr_studio_owner_01',
+      actorId: params.actorUserId ?? 'system_seed',
       action: 'PROJECT_CREATED',
       resourceType: 'project',
       resourceId: prj.id,
@@ -776,6 +912,55 @@ export class PlatformControlPlaneService {
     return prj;
   }
 
+  public getOrganization(organizationId: string): PlatformOrganization | null {
+    return this.organizations.get(organizationId) ?? null;
+  }
+
+  public getProject(projectId: string): PlatformProject | null {
+    return this.projects.get(projectId) ?? null;
+  }
+
+  public getSubscription(organizationId: string): TenantSubscriptionRecord | null {
+    return this.subscriptions.get(organizationId) ?? null;
+  }
+
+  public getCredentialMetadata(
+    credentialId: string,
+  ): Omit<ApiCredentialRecord, 'secretHash'> | null {
+    const rec = this.credentials.get(credentialId);
+    if (!rec) return null;
+    const { secretHash: _s, ...rest } = rec;
+    return rest;
+  }
+
+  public getWebhookDelivery(deliveryId: string): WebhookDeliveryRecord | null {
+    return this.webhookDeliveries.find((d) => d.deliveryId === deliveryId) ?? null;
+  }
+
+  public hasActiveOwnerKeyWithManageScope(organizationId: string): boolean {
+    const nowMs = Date.now();
+    for (const cred of this.credentials.values()) {
+      if (cred.organizationId !== organizationId) continue;
+      if (cred.revokedAtIso) continue;
+      if (cred.expiresAtIso && new Date(cred.expiresAtIso).getTime() <= nowMs) continue;
+      if (cred.overlapRevokesAtIso && new Date(cred.overlapRevokesAtIso).getTime() <= nowMs) {
+        continue;
+      }
+      if (!cred.scopes.includes('api-keys:manage')) continue;
+      const activeOwnerMemberships = this.memberships.filter(
+        (m) =>
+          m.organizationId === organizationId &&
+          m.userId === cred.principalId &&
+          m.membershipStatus === 'ACTIVE' &&
+          m.role === 'OWNER',
+      );
+      if (activeOwnerMemberships.length === 1) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   public listProjects(organizationId: string): PlatformProject[] {
     return Array.from(this.projects.values()).filter((p) => p.organizationId === organizationId);
   }
@@ -783,6 +968,12 @@ export class PlatformControlPlaneService {
   /**
    * Issues an API credential with public identifier + high-entropy random secret.
    * NEVER stores plaintext secret; returns `plaintextSecretOnce` strictly on creation.
+   *
+   * Security guarantees (AVP-011 §2 & §7):
+   * - Requires an explicit validated `principalId` (no implicit `'usr_studio_owner_01'` default).
+   * - Verifies active user, active organization, unambiguous single ACTIVE membership, and project ownership.
+   * - Validates every scope against `ALL_PLATFORM_SCOPES` (rejects unknown, duplicate, empty, or `'*'`).
+   * - Enforces integer `expiresInDays` within [1, 365] when provided.
    */
   public issueApiKey(params: {
     organizationId: string;
@@ -791,16 +982,98 @@ export class PlatformControlPlaneService {
     scopes: ApiCredentialScope[];
     expiresInDays?: number;
     expiresAtIso?: string | null;
+    requireFiniteExpiration?: boolean;
     allowedIpCidrs?: string[];
-    principalId?: string;
+    principalId: string;
     actorUserId?: string;
+    issuerRole?: OrganizationRole;
   }): ApiCredentialIssuedResponse {
+    const org = this.organizations.get(params.organizationId);
+    if (!org || org.organizationStatus !== 'ACTIVE') {
+      throw new Error('ORGANIZATION_INACTIVE_OR_NOT_FOUND');
+    }
+
     const project = this.projects.get(params.projectId);
     if (!project || project.organizationId !== params.organizationId) {
       throw new Error('TENANT_ISOLATION_DENIED: Project does not belong to organization');
     }
+    if (project.status !== 'ACTIVE') {
+      throw new Error('PROJECT_INACTIVE');
+    }
 
-    const boundPrincipalId = params.principalId ?? params.actorUserId ?? 'usr_studio_owner_01';
+    if (typeof params.principalId !== 'string' || params.principalId.trim().length === 0) {
+      throw new Error('PRINCIPAL_ID_REQUIRED: Explicit validated principalId is mandatory.');
+    }
+    const boundPrincipalId = params.principalId.trim();
+
+    const user = this.users.get(boundPrincipalId);
+    if (!user || user.accountStatus !== 'ACTIVE') {
+      throw new Error('PRINCIPAL_NOT_ACTIVE: Principal does not exist or is not ACTIVE.');
+    }
+
+    const activeMemberships = this.memberships.filter(
+      (m) =>
+        m.organizationId === params.organizationId &&
+        m.userId === boundPrincipalId &&
+        m.membershipStatus === 'ACTIVE',
+    );
+    if (activeMemberships.length !== 1) {
+      throw new Error(
+        'MEMBERSHIP_INVALID: Principal must have exactly one ACTIVE membership in target organization.',
+      );
+    }
+
+    const scopeCheck = validateRequestedScopes(params.scopes);
+    if (!scopeCheck.valid) {
+      throw new Error(`INVALID_SCOPES: ${scopeCheck.message}`);
+    }
+
+    if (params.issuerRole) {
+      const delegation = validateScopeDelegation({
+        issuerRole: params.issuerRole,
+        requestedScopes: scopeCheck.scopes,
+      });
+      if (!delegation.allowed) {
+        throw new Error(
+          `SCOPE_DELEGATION_DENIED: Requested scopes exceed issuer role policy (${delegation.deniedScopes.join(', ')}).`,
+        );
+      }
+    }
+
+    let expiresAtIso: string | null;
+    if (params.expiresAtIso !== undefined) {
+      if (params.expiresAtIso === null) {
+        if (params.requireFiniteExpiration) {
+          throw new Error('INVALID_EXPIRATION: Indefinite credential expiration is not permitted.');
+        }
+        expiresAtIso = null;
+      } else {
+        const parsedMs = new Date(params.expiresAtIso).getTime();
+        if (!Number.isFinite(parsedMs)) {
+          throw new Error('INVALID_EXPIRATION: Malformed expiresAtIso timestamp.');
+        }
+        expiresAtIso = new Date(parsedMs).toISOString();
+      }
+    } else if (params.expiresInDays !== undefined) {
+      if (
+        typeof params.expiresInDays !== 'number' ||
+        !Number.isInteger(params.expiresInDays) ||
+        params.expiresInDays < 1 ||
+        params.expiresInDays > 365
+      ) {
+        throw new Error(
+          'INVALID_EXPIRATION: expiresInDays must be an integer between 1 and 365.',
+        );
+      }
+      expiresAtIso = new Date(Date.now() + params.expiresInDays * 86400_000).toISOString();
+    } else {
+      if (params.requireFiniteExpiration) {
+        throw new Error(
+          'INVALID_EXPIRATION: expiresInDays (integer 1..365) is required for issued credentials.',
+        );
+      }
+      expiresAtIso = null;
+    }
 
     const prefix: 'asr_live' | 'asr_test' =
       project.environment === 'PRODUCTION' ? 'asr_live' : 'asr_test';
@@ -810,13 +1083,6 @@ export class PlatformControlPlaneService {
     const secretHash = this.hashSecretWithPepper(rawSecret);
 
     const nowIso = new Date().toISOString();
-    const expiresAtIso =
-      params.expiresAtIso !== undefined
-        ? params.expiresAtIso
-        : params.expiresInDays && params.expiresInDays > 0
-          ? new Date(Date.now() + params.expiresInDays * 86400_000).toISOString()
-          : null;
-
     const record: ApiCredentialRecord = {
       id: `cred_${crypto.randomBytes(6).toString('hex')}`,
       organizationId: params.organizationId,
@@ -827,7 +1093,7 @@ export class PlatformControlPlaneService {
       secretHash,
       keyPrefix: prefix,
       environment: project.environment,
-      scopes: [...params.scopes],
+      scopes: [...scopeCheck.scopes],
       allowedIpCidrs: params.allowedIpCidrs ?? [],
       expiresAtIso,
       overlapRevokesAtIso: null,
@@ -839,10 +1105,11 @@ export class PlatformControlPlaneService {
     this.credentials.set(record.id, record);
     this.credentialsByPublicId.set(record.publicIdentifier, record);
 
+    const actorId = params.actorUserId ?? boundPrincipalId;
     this.recordAuditLog({
       organizationId: params.organizationId,
       actorType: 'USER',
-      actorId: boundPrincipalId,
+      actorId,
       action: 'API_KEY_ISSUED',
       resourceType: 'api_credential',
       resourceId: record.id,
@@ -864,14 +1131,17 @@ export class PlatformControlPlaneService {
   }
 
   /**
-   * Key Rotation with configurable overlap (default 24 hours).
-   * Old credential remains active until `overlapRevokesAtIso` expires.
+   * Atomic Key Rotation (AVP-011 §8):
+   * Creates and verifies the replacement credential FIRST (preserving principal, project,
+   * environment, IP restrictions, scopes, and exact expiration), and ONLY THEN sets the
+   * old credential's overlap-revocation timestamp.
    */
   public rotateApiKey(params: {
     credentialId: string;
     organizationId: string;
     overlapHours?: number;
     actorUserId?: string;
+    issuerRole?: OrganizationRole;
   }): ApiCredentialIssuedResponse {
     const existing = this.credentials.get(params.credentialId);
     if (!existing || existing.organizationId !== params.organizationId) {
@@ -880,24 +1150,45 @@ export class PlatformControlPlaneService {
     if (existing.revokedAtIso) {
       throw new Error('CREDENTIAL_ALREADY_REVOKED');
     }
+    const nowMs = Date.now();
+    if (existing.expiresAtIso && new Date(existing.expiresAtIso).getTime() <= nowMs) {
+      throw new Error('CREDENTIAL_EXPIRED');
+    }
+    if (existing.overlapRevokesAtIso && new Date(existing.overlapRevokesAtIso).getTime() <= nowMs) {
+      throw new Error('CREDENTIAL_OVERLAP_EXPIRED');
+    }
 
     const overlapHours = params.overlapHours ?? 24;
-    existing.overlapRevokesAtIso = new Date(Date.now() + overlapHours * 3600_000).toISOString();
+    if (typeof overlapHours !== 'number' || !Number.isFinite(overlapHours) || overlapHours < 0 || overlapHours > 24) {
+      throw new Error('INVALID_OVERLAP_HOURS: overlapHours must be a finite number between 0 and 24.');
+    }
 
+    const actorId = params.actorUserId ?? existing.principalId;
+
+    // Step 4-6: Issue replacement FIRST, preserving principal, project, IP restrictions, scopes, and exact expiration.
     const replacement = this.issueApiKey({
       organizationId: existing.organizationId,
       projectId: existing.projectId,
       principalId: existing.principalId,
       name: `${existing.name} (Rotated)`,
-      scopes: existing.scopes,
-      allowedIpCidrs: existing.allowedIpCidrs,
-      actorUserId: params.actorUserId ?? existing.principalId,
+      scopes: [...existing.scopes],
+      allowedIpCidrs: [...existing.allowedIpCidrs],
+      expiresAtIso: existing.expiresAtIso,
+      actorUserId: actorId,
+      issuerRole: params.issuerRole,
     });
+
+    if (!this.credentials.has(replacement.credential.id)) {
+      throw new Error('CREDENTIAL_ROTATION_PERSISTENCE_FAILED');
+    }
+
+    // Step 7: Only AFTER replacement succeeded, schedule overlap expiration on old key
+    existing.overlapRevokesAtIso = new Date(Date.now() + overlapHours * 3600_000).toISOString();
 
     this.recordAuditLog({
       organizationId: existing.organizationId,
       actorType: 'USER',
-      actorId: params.actorUserId ?? 'usr_studio_owner_01',
+      actorId,
       action: 'API_KEY_ROTATED',
       resourceType: 'api_credential',
       resourceId: existing.id,
@@ -921,7 +1212,7 @@ export class PlatformControlPlaneService {
     this.recordAuditLog({
       organizationId: existing.organizationId,
       actorType: 'USER',
-      actorId: params.actorUserId ?? 'usr_studio_owner_01',
+      actorId: params.actorUserId ?? existing.principalId,
       action: 'API_KEY_REVOKED',
       resourceType: 'api_credential',
       resourceId: existing.id,
@@ -1420,13 +1711,34 @@ export class PlatformControlPlaneService {
   }
 
   /**
-   * Issues an immutable invoice snapshot (Section 11.8 & 20.11).
-   * Subsequent plan price changes never mutate an already issued invoice.
+   * Issues an immutable invoice snapshot (Section 11.8 & 20.11 & AVP-011 §11).
+   * Idempotent per (organizationId, billingPeriod): concurrent or repeated requests for the
+   * same billing period return the original immutable snapshot without creating duplicates.
    */
-  public issueMonthlyStatementInvoice(organizationId: string, taxBasisPoints = 0): ImmutableInvoiceRecord {
+  public issueMonthlyStatementInvoice(
+    organizationId: string,
+    taxBasisPoints = 0,
+    options?: { actorUserId?: string; billingPeriodKey?: string },
+  ): ImmutableInvoiceRecord {
     const sub = this.subscriptions.get(organizationId);
     if (!sub) throw new Error('SUBSCRIPTION_NOT_FOUND');
     const plan = PHASE10_VERSIONED_PLAN_CATALOG.find((p) => p.planId === sub.planId)!;
+
+    if (!Number.isInteger(taxBasisPoints) || taxBasisPoints < 0 || taxBasisPoints > 5000) {
+      throw new Error('INVALID_TAX_BASIS_POINTS');
+    }
+
+    const periodKey =
+      options?.billingPeriodKey ??
+      `${sub.currentPeriodStartIso.slice(0, 10)}_${sub.currentPeriodEndIso.slice(0, 10)}`;
+    const orgPeriodKey = `${organizationId}::${periodKey}`;
+    const existingInvoiceId = this.invoiceByOrgPeriod.get(orgPeriodKey);
+    if (existingInvoiceId) {
+      const existing = this.invoices.get(existingInvoiceId);
+      if (existing) {
+        return existing;
+      }
+    }
 
     const committedEvents = Array.from(this.usageEvents.values()).filter(
       (e) => e.organizationId === organizationId && e.meteringState === 'COMMITTED'
@@ -1480,6 +1792,19 @@ export class PlatformControlPlaneService {
     };
 
     this.invoices.set(invoice.invoiceId, invoice);
+    this.invoiceByOrgPeriod.set(orgPeriodKey, invoice.invoiceId);
+    if (options?.actorUserId) {
+      this.recordAuditLog({
+        organizationId,
+        actorType: 'USER',
+        actorId: options.actorUserId,
+        action: 'INVOICE_ISSUED',
+        resourceType: 'invoice',
+        resourceId: invoice.invoiceId,
+        outcome: 'ALLOWED',
+        reason: `InvoiceNumber=${invoice.invoiceNumber}, TotalMinor=${invoice.totalMinor}, Period=${periodKey}`,
+      });
+    }
     return invoice;
   }
 
@@ -1572,19 +1897,37 @@ export class PlatformControlPlaneService {
     };
   }
 
-  // ── Webhook Platform (Section 13) ─────────────────────────────────────────
+  // ── Webhook Platform (Section 13 & AVP-011 §10) ───────────────────────────
   public registerWebhookEndpoint(params: {
     organizationId: string;
     url: string;
     eventSubscriptions: PublicWebhookEventType[];
     actorId?: string;
   }): WebhookEndpointRecord {
+    const eventsValidation = validateWebhookEventSubscriptions(params.eventSubscriptions);
+    if (!eventsValidation.valid) {
+      throw new Error(`INVALID_WEBHOOK_EVENTS: ${eventsValidation.message}`);
+    }
+
+    const trimmedUrl = params.url.trim();
+    const orgEndpoints = Array.from(this.webhookEndpoints.values()).filter(
+      (e) => e.organizationId === params.organizationId,
+    );
+    if (orgEndpoints.some((e) => e.url === trimmedUrl)) {
+      throw new Error('WEBHOOK_ENDPOINT_DUPLICATE: Endpoint URL is already registered for this organization.');
+    }
+    if (orgEndpoints.length >= MAX_WEBHOOK_ENDPOINTS_PER_ORGANIZATION) {
+      throw new Error(
+        `WEBHOOK_ENDPOINT_LIMIT_EXCEEDED: Maximum ${MAX_WEBHOOK_ENDPOINTS_PER_ORGANIZATION} webhook endpoints per organization.`,
+      );
+    }
+
     const signingSecret = `whsec_${crypto.randomBytes(24).toString('hex')}`;
     const ep: WebhookEndpointRecord = {
       endpointId: `wh_${crypto.randomBytes(6).toString('hex')}`,
       organizationId: params.organizationId,
-      url: params.url.trim(),
-      eventSubscriptions: params.eventSubscriptions,
+      url: trimmedUrl,
+      eventSubscriptions: eventsValidation.events,
       signingSecret,
       active: true,
       createdAtIso: new Date().toISOString(),
@@ -1593,7 +1936,7 @@ export class PlatformControlPlaneService {
     this.recordAuditLog({
       organizationId: params.organizationId,
       actorType: 'USER',
-      actorId: params.actorId ?? 'usr_studio_owner_01',
+      actorId: params.actorId ?? 'system_seed',
       action: 'WEBHOOK_ENDPOINT_REGISTERED',
       resourceType: 'webhook_endpoint',
       resourceId: ep.endpointId,
@@ -1649,6 +1992,7 @@ export class PlatformControlPlaneService {
     eventType: PublicWebhookEventType;
     data: Record<string, unknown>;
     simulateFailureForTesting?: boolean;
+    verifiedHttpStatus?: number | null;
   }): WebhookDeliveryRecord[] {
     const endpoints = Array.from(this.webhookEndpoints.values()).filter(
       (e) =>
@@ -1669,8 +2013,11 @@ export class PlatformControlPlaneService {
 
     for (const ep of endpoints) {
       const signatureHeader = this.signWebhookPayload(ep.signingSecret, nowSec, payloadJson);
-      const isLocalSandboxUrl = ep.url.includes('.local');
       const failed = Boolean(params.simulateFailureForTesting);
+      const actualHttpStatus =
+        typeof params.verifiedHttpStatus === 'number' ? params.verifiedHttpStatus : null;
+      const genuinelyDelivered =
+        !failed && actualHttpStatus !== null && actualHttpStatus >= 200 && actualHttpStatus < 300;
 
       const rec: WebhookDeliveryRecord = {
         deliveryId: `whd_${crypto.randomUUID()}`,
@@ -1680,21 +2027,24 @@ export class PlatformControlPlaneService {
         organizationId: params.organizationId,
         attemptNumber: failed ? 6 : 1,
         maxAttempts: WEBHOOK_RETRY_DELAYS_SECONDS.length,
-        status: failed ? 'DEAD_LETTER' : isLocalSandboxUrl ? 'DELIVERED' : 'RETRY_SCHEDULED',
-        httpStatus: failed ? 503 : isLocalSandboxUrl ? 200 : null,
+        status: failed
+          ? 'DEAD_LETTER'
+          : genuinelyDelivered
+            ? 'DELIVERED'
+            : 'RETRY_SCHEDULED',
+        httpStatus: failed ? 503 : genuinelyDelivered ? actualHttpStatus : null,
         signatureHeader,
         payloadJson,
-        nextRetryAtIso: failed
-          ? null
-          : isLocalSandboxUrl
-          ? null
-          : new Date(Date.now() + WEBHOOK_RETRY_DELAYS_SECONDS[0] * 1000).toISOString(),
+        nextRetryAtIso:
+          failed || genuinelyDelivered
+            ? null
+            : new Date(Date.now() + WEBHOOK_RETRY_DELAYS_SECONDS[0] * 1000).toISOString(),
         lastErrorSafe: failed
           ? 'HTTP 503 after 6 attempts (moved to Dead-Letter Queue)'
-          : isLocalSandboxUrl
-          ? null
-          : 'External outbound delivery queued (requires live network worker)',
-        deliveredAtIso: !failed && isLocalSandboxUrl ? new Date().toISOString() : null,
+          : genuinelyDelivered
+            ? null
+            : 'Outbound webhook delivery scheduled (awaiting real HTTP 2xx acknowledgement from delivery worker)',
+        deliveredAtIso: genuinelyDelivered ? new Date().toISOString() : null,
         createdAtIso: new Date().toISOString(),
       };
       this.webhookDeliveries.push(rec);
@@ -1703,27 +2053,55 @@ export class PlatformControlPlaneService {
     return created;
   }
 
-  public replayDeadLetterWebhook(deliveryId: string, organizationId: string): WebhookDeliveryRecord {
+  /**
+   * Honest DLQ Replay (AVP-011 §10):
+   * Verifies tenant ownership and DEAD_LETTER status, then enqueues a new RETRY_SCHEDULED
+   * attempt with a valid nextRetryAtIso. NEVER fabricates DELIVERED without an actual HTTP 2xx response.
+   */
+  public replayDeadLetterWebhook(
+    deliveryId: string,
+    organizationId: string,
+    actorUserId?: string,
+  ): WebhookDeliveryRecord {
     const target = this.webhookDeliveries.find(
       (d) => d.deliveryId === deliveryId && d.organizationId === organizationId
     );
     if (!target) throw new Error('TENANT_ISOLATION_DENIED: Delivery not found in organization');
+    if (target.status !== 'DEAD_LETTER') {
+      throw new Error('WEBHOOK_DELIVERY_NOT_DEAD_LETTER: Only DEAD_LETTER deliveries may be replayed.');
+    }
     const ep = this.webhookEndpoints.get(target.endpointId);
-    if (!ep) throw new Error('WEBHOOK_ENDPOINT_NOT_FOUND');
+    if (!ep || ep.organizationId !== organizationId) {
+      throw new Error('WEBHOOK_ENDPOINT_NOT_FOUND');
+    }
 
     const nowSec = Math.floor(Date.now() / 1000);
+    const nowIso = new Date().toISOString();
     const replayed: WebhookDeliveryRecord = {
       ...target,
       deliveryId: `whd_${crypto.randomUUID()}`,
       attemptNumber: 1,
-      status: 'DELIVERED',
-      httpStatus: 200,
+      status: 'RETRY_SCHEDULED',
+      httpStatus: null,
       signatureHeader: this.signWebhookPayload(ep.signingSecret, nowSec, target.payloadJson),
-      lastErrorSafe: null,
-      deliveredAtIso: new Date().toISOString(),
-      createdAtIso: new Date().toISOString(),
+      nextRetryAtIso: new Date(Date.now() + WEBHOOK_RETRY_DELAYS_SECONDS[0] * 1000).toISOString(),
+      lastErrorSafe: 'Replay scheduled for outbound delivery worker (not yet acknowledged)',
+      deliveredAtIso: null,
+      createdAtIso: nowIso,
     };
     this.webhookDeliveries.push(replayed);
+    if (actorUserId) {
+      this.recordAuditLog({
+        organizationId,
+        actorType: 'USER',
+        actorId: actorUserId,
+        action: 'WEBHOOK_DELIVERY_REPLAY_SCHEDULED',
+        resourceType: 'webhook_delivery',
+        resourceId: replayed.deliveryId,
+        outcome: 'ALLOWED',
+        reason: `OriginalDeliveryId=${target.deliveryId}, EventId=${target.eventId}`,
+      });
+    }
     return replayed;
   }
 

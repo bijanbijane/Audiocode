@@ -9,9 +9,17 @@ export interface ExecutionModeStorageLike {
 
 export interface ExecutionModePreferenceSnapshot {
   readonly preferredMode: ExecutionMode;
+  /** Pure UI execution-mode preference; NEVER constitutes a cloud data-sharing consent grant. */
+  readonly preferredModeSelected: ExecutionMode;
   readonly persisted: boolean;
   readonly updatedAtIso: string;
+  /**
+   * @deprecated Pure UI mode preference flag retained for backward compatibility.
+   * NEVER represents a data-sharing consent grant; cloud dispatch always requires a fresh
+   * one-time consent grant bound to exact audio bytes and range.
+   */
   readonly explicitCloudOptInConfirmed: boolean;
+  readonly isDataSharingConsentGrant: false;
 }
 
 /**
@@ -19,12 +27,13 @@ export interface ExecutionModePreferenceSnapshot {
  *
  * - LOCAL is ALWAYS the initial default.
  * - CLOUD requires explicit user/configuration selection (`explicitCloudOptIn: true`).
+ * - Stores ONLY UI execution-mode preference; NEVER persists or restores cloud data-sharing
+ *   consent grants, receipt IDs, or audio transfer permissions across sessions.
  * - Changing preference affects NEW jobs only; active jobs keep their snapshotted mode.
- * - Uses browser localStorage when available, without adding any new persistence dependency.
  */
 export class ExecutionModePreferenceStore {
   private preferredMode: ExecutionMode = 'LOCAL';
-  private explicitCloudOptInConfirmed = false;
+  private preferredModeSelected: ExecutionMode = 'LOCAL';
   private updatedAtIso: string = new Date().toISOString();
   private persisted = false;
   private readonly storage: ExecutionModeStorageLike | null;
@@ -53,15 +62,19 @@ export class ExecutionModePreferenceStore {
       if (!raw) return;
       const parsed = JSON.parse(raw) as {
         preferredMode?: unknown;
+        preferredModeSelected?: unknown;
         explicitCloudOptInConfirmed?: unknown;
         updatedAtIso?: unknown;
       };
-      if (parsed.preferredMode === 'CLOUD' && parsed.explicitCloudOptInConfirmed === true) {
+      const persistedCloudPref =
+        parsed.preferredMode === 'CLOUD' &&
+        (parsed.preferredModeSelected === 'CLOUD' || parsed.explicitCloudOptInConfirmed === true);
+      if (persistedCloudPref) {
         this.preferredMode = 'CLOUD';
-        this.explicitCloudOptInConfirmed = true;
+        this.preferredModeSelected = 'CLOUD';
       } else {
         this.preferredMode = 'LOCAL';
-        this.explicitCloudOptInConfirmed = false;
+        this.preferredModeSelected = 'LOCAL';
       }
       if (typeof parsed.updatedAtIso === 'string') {
         this.updatedAtIso = parsed.updatedAtIso;
@@ -69,16 +82,18 @@ export class ExecutionModePreferenceStore {
       this.persisted = true;
     } catch {
       this.preferredMode = 'LOCAL';
-      this.explicitCloudOptInConfirmed = false;
+      this.preferredModeSelected = 'LOCAL';
     }
   }
 
   public getSnapshot(): ExecutionModePreferenceSnapshot {
     return Object.freeze({
       preferredMode: this.preferredMode,
+      preferredModeSelected: this.preferredModeSelected,
       persisted: this.persisted,
       updatedAtIso: this.updatedAtIso,
-      explicitCloudOptInConfirmed: this.explicitCloudOptInConfirmed,
+      explicitCloudOptInConfirmed: this.preferredModeSelected === 'CLOUD',
+      isDataSharingConsentGrant: false as const,
     });
   }
 
@@ -97,16 +112,17 @@ export class ExecutionModePreferenceStore {
     }
 
     this.preferredMode = mode;
-    this.explicitCloudOptInConfirmed = mode === 'CLOUD';
+    this.preferredModeSelected = mode;
     this.updatedAtIso = new Date().toISOString();
 
     if (this.storage) {
       try {
+        // Persist UI mode preference ONLY — never consent grants, receipts, or sharing permissions.
         this.storage.setItem(
           this.storageKey,
           JSON.stringify({
             preferredMode: this.preferredMode,
-            explicitCloudOptInConfirmed: this.explicitCloudOptInConfirmed,
+            preferredModeSelected: this.preferredModeSelected,
             updatedAtIso: this.updatedAtIso,
           }),
         );

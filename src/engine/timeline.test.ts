@@ -1,5 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { Readable } from 'node:stream';
+import { NodePublicAsrInferenceExecutor } from '../platform/NodePublicAsrInferenceExecutor';
 import {
   applyBatchRecommendationsAtomically,
   applySyncSafeCut,
@@ -1285,9 +1287,68 @@ test('Phases 7-9: From-scratch NO-GO, FastConformer/CTC/Hybrid loss, Security Au
   assert.equal(rolledBack.stagePercent, 0);
 });
 
-test('Phase 10A: Identity invitations, API key one-time secret, 24h overlap rotation, revocation, cross-project isolation & Data Residency', () => {
+function buildTestPcm16WavBuffer(durationSec: number, freqHz = 440): Buffer {
+  const sampleRate = 16000;
+  const numSamples = Math.round(sampleRate * durationSec);
+  const dataBytes = numSamples * 2;
+  const buf = Buffer.alloc(44 + dataBytes);
+  buf.write('RIFF', 0, 'ascii');
+  buf.writeUInt32LE(36 + dataBytes, 4);
+  buf.write('WAVE', 8, 'ascii');
+  buf.write('fmt ', 12, 'ascii');
+  buf.writeUInt32LE(16, 16);
+  buf.writeUInt16LE(1, 20);
+  buf.writeUInt16LE(1, 22);
+  buf.writeUInt32LE(sampleRate, 24);
+  buf.writeUInt32LE(sampleRate * 2, 28);
+  buf.writeUInt16LE(2, 32);
+  buf.writeUInt16LE(16, 34);
+  buf.write('data', 36, 'ascii');
+  buf.writeUInt32LE(dataBytes, 40);
+  for (let i = 0; i < numSamples; i += 1) {
+    const v = Math.sin((2 * Math.PI * freqHz * i) / sampleRate) * 0.25;
+    buf.writeInt16LE(Math.round(v * 32767), 44 + i * 2);
+  }
+  return buf;
+}
+
+function createVerifiedTestAsrExecutor(): NodePublicAsrInferenceExecutor {
+  return new NodePublicAsrInferenceExecutor([
+    {
+      modelId: 'asr-fa-en-v1',
+      modelVersion: '1.0.0-test-verified',
+      modelDigestSha256: 'a'.repeat(64),
+      backendEngine: 'test_verified_onnx_runner',
+      integrityVerified: true,
+      runtimeReady: true,
+      timestampsSupported: true,
+      diarizationSupported: false,
+      transcribeWindow: async ({ pcm16kMono, windowStartSample, windowEndSample }) => {
+        // Compute genuine acoustic RMS energy from decoded samples
+        let sumSq = 0;
+        for (let i = 0; i < pcm16kMono.length; i += 1) {
+          sumSq += pcm16kMono[i] * pcm16kMono[i];
+        }
+        const rms = Math.sqrt(sumSq / Math.max(1, pcm16kMono.length));
+        const text = rms > 0.01 ? 'سلام امروز سرویس آواپرداز آماده است' : 'سکوت صوتی کوتاه';
+        return {
+          rawText: text,
+          segments: [
+            {
+              startMs: Math.round((windowStartSample * 1000) / 16000),
+              endMs: Math.round((windowEndSample * 1000) / 16000),
+              text,
+            },
+          ],
+        };
+      },
+    },
+  ]);
+}
+
+test('Phase 10A: Identity invitations, API key one-time secret, 24h overlap rotation, revocation, cross-project isolation & Data Residency', async () => {
   const cp = new PlatformControlPlaneService();
-  const gw = new PlatformDataPlaneGateway(cp);
+  const gw = new PlatformDataPlaneGateway(cp, createVerifiedTestAsrExecutor());
 
   // 1. Invitation 72h & single-use guarantee
   const inv = cp.createInvitation({
@@ -1318,6 +1379,7 @@ test('Phase 10A: Identity invitations, API key one-time secret, 24h overlap rota
   const issued = cp.issueApiKey({
     organizationId: 'org_avapardaz_sandbox',
     projectId: 'prj_avapardaz_dev_01',
+    principalId: 'usr_studio_owner_01',
     name: 'Key Alpha',
     scopes: ['audio:transcribe', 'transcripts:read', 'models:read'],
   });
@@ -1332,17 +1394,23 @@ test('Phase 10A: Identity invitations, API key one-time secret, 24h overlap rota
   });
   assert.equal(streamDenied.status, 403);
 
+  const wav1s = buildTestPcm16WavBuffer(1);
+
   // 4. GPU-gated model honestly returns 503 PROVIDER_UNAVAILABLE in G0_CPU_ONLY
-  const gpuBlocked = gw.createTranscription({
+  const gpuBlocked = await gw.createTranscription({
     bearerToken: issued.plaintextSecretOnce,
-    body: { model: 'qwen3-asr-1.7b-fa', audio_duration_ms: 5000 },
+    contentType: 'audio/wav',
+    audioStream: Readable.from([wav1s]),
+    options: { model: 'qwen3-asr-1.7b-fa' },
   });
   assert.equal(gpuBlocked.status, 503);
 
   // 5. Data Residency hard block on prohibited region (`eu-central-01`)
-  const regDenied = gw.createTranscription({
+  const regDenied = await gw.createTranscription({
     bearerToken: issued.plaintextSecretOnce,
-    body: { model: 'asr-fa-en-v1', region_id: 'eu-central-01', audio_duration_ms: 5000 },
+    contentType: 'audio/wav',
+    audioStream: Readable.from([wav1s]),
+    options: { model: 'asr-fa-en-v1', region_id: 'eu-central-01' },
   });
   assert.equal(regDenied.status, 422);
 
@@ -1355,15 +1423,18 @@ test('Phase 10A: Identity invitations, API key one-time secret, 24h overlap rota
   const keyB = cp.issueApiKey({
     organizationId: 'org_avapardaz_sandbox',
     projectId: prjB.id,
+    principalId: 'usr_studio_owner_01',
     name: 'Key Project B',
     scopes: ['transcripts:read'],
   });
   assert.ok(keyB.plaintextSecretOnce.startsWith('asr_live_'));
 
-  const okJob = gw.createTranscription({
+  const okJob = await gw.createTranscription({
     bearerToken: issued.plaintextSecretOnce,
     idempotencyKey: 'idemp-cross-1',
-    body: { model: 'asr-fa-en-v1', audio_duration_ms: 12000 },
+    contentType: 'audio/wav',
+    audioStream: Readable.from([wav1s]),
+    options: { model: 'asr-fa-en-v1' },
   });
   assert.equal(okJob.status, 200);
   const jobId = (okJob.body as { id: string }).id;
@@ -1380,21 +1451,22 @@ test('Phase 10A: Identity invitations, API key one-time secret, 24h overlap rota
     organizationId: 'org_avapardaz_sandbox',
     overlapHours: 24,
   });
-  assert.equal(gw.listPublicModels(issued.plaintextSecretOnce).status, 200);
-  assert.equal(gw.listPublicModels(rotated.plaintextSecretOnce).status, 200);
+  assert.equal((await gw.listPublicModels(issued.plaintextSecretOnce)).status, 200);
+  assert.equal((await gw.listPublicModels(rotated.plaintextSecretOnce)).status, 200);
   cp.revokeApiKey({
     credentialId: issued.credential.id,
     organizationId: 'org_avapardaz_sandbox',
   });
-  assert.equal(gw.listPublicModels(issued.plaintextSecretOnce).status, 401);
+  assert.equal((await gw.listPublicModels(issued.plaintextSecretOnce)).status, 401);
 });
 
 test('Phase 10B: Idempotency-Key deduplication, integer billing ledger reconciliation, immutable invoices, webhook DLQ & TypeScript SDK', async () => {
   const cp = new PlatformControlPlaneService();
-  const gw = new PlatformDataPlaneGateway(cp);
+  const gw = new PlatformDataPlaneGateway(cp, createVerifiedTestAsrExecutor());
   const key = cp.issueApiKey({
     organizationId: 'org_avapardaz_sandbox',
     projectId: 'prj_avapardaz_dev_01',
+    principalId: 'usr_studio_owner_01',
     name: 'Billing SDK Key',
     scopes: ['audio:transcribe', 'transcripts:read', 'models:read', 'audio:stream'],
   });
@@ -1408,24 +1480,35 @@ test('Phase 10B: Idempotency-Key deduplication, integer billing ledger reconcili
   assert.equal(calc.overageMinutes, 2);
   assert.equal(calc.overageChargeMinor, 20);
 
-  // 2. Same Idempotency-Key returns same job without double billing; different payload throws 409
-  const r1 = gw.createTranscription({
+  const wav1s = buildTestPcm16WavBuffer(1, 440);
+  const wav2s = buildTestPcm16WavBuffer(2, 660);
+
+  // 2. Same Idempotency-Key + same audio returns same job without double billing; different audio returns 409
+  const r1 = await gw.createTranscription({
     bearerToken: key.plaintextSecretOnce,
     idempotencyKey: 'idem-same-key',
-    body: { model: 'asr-fa-en-v1', audio_duration_ms: 15000 },
+    contentType: 'audio/wav',
+    audioStream: Readable.from([wav1s]),
+    options: { model: 'asr-fa-en-v1' },
   });
-  const r2 = gw.createTranscription({
+  const r2 = await gw.createTranscription({
     bearerToken: key.plaintextSecretOnce,
     idempotencyKey: 'idem-same-key',
-    body: { model: 'asr-fa-en-v1', audio_duration_ms: 15000 },
+    contentType: 'audio/wav',
+    audioStream: Readable.from([wav1s]),
+    options: { model: 'asr-fa-en-v1' },
   });
+  assert.equal(r1.status, 200);
+  assert.equal(r2.status, 200);
   assert.equal((r1.body as { id: string }).id, (r2.body as { id: string }).id);
   assert.equal(cp.getPortalOverview('org_avapardaz_sandbox').usageEvents.length, 1);
 
-  const conflict = gw.createTranscription({
+  const conflict = await gw.createTranscription({
     bearerToken: key.plaintextSecretOnce,
     idempotencyKey: 'idem-same-key',
-    body: { model: 'asr-fa-en-v1', audio_duration_ms: 30000 },
+    contentType: 'audio/wav',
+    audioStream: Readable.from([wav2s]),
+    options: { model: 'asr-fa-en-v1' },
   });
   assert.equal(conflict.status, 409);
 
@@ -1473,7 +1556,7 @@ test('Phase 10B: Idempotency-Key deduplication, integer billing ledger reconcili
   });
   assert.equal(pspReplay.duplicateReplay, true);
 
-  // 5. Outbound Webhook Signing + DLQ + Replay
+  // 5. Outbound Webhook Signing + DLQ + Honest Replay (RETRY_SCHEDULED, never synthetic DELIVERED)
   const dlqItems = cp.dispatchWebhookEvent({
     organizationId: 'org_avapardaz_sandbox',
     eventType: 'transcription.completed',
@@ -1482,19 +1565,32 @@ test('Phase 10B: Idempotency-Key deduplication, integer billing ledger reconcili
   });
   assert.equal(dlqItems[0].status, 'DEAD_LETTER');
   const replayed = cp.replayDeadLetterWebhook(dlqItems[0].deliveryId, 'org_avapardaz_sandbox');
-  assert.equal(replayed.status, 'DELIVERED');
+  assert.equal(replayed.status, 'RETRY_SCHEDULED');
+  assert.equal(replayed.httpStatus, null);
+  assert.ok(replayed.nextRetryAtIso !== null);
 
-  // 6. TypeScript SDK (`ASRClient`) wired via custom fetch against PlatformDataPlaneGateway
+  // 6. TypeScript SDK (`ASRClient`) wired via custom fetch against PlatformDataPlaneGateway with real binary WAV
   const sdk = new ASRClient({
     apiKey: key.plaintextSecretOnce,
     baseUrl: 'https://api.local',
     fetchImpl: async (input, init) => {
       const url = String(input);
-      const auth = String((init?.headers as Record<string, string>)?.Authorization ?? '');
-      const idemp = (init?.headers as Record<string, string>)?.['Idempotency-Key'];
-      const parsedBody = init?.body ? JSON.parse(String(init.body)) : {};
+      const hdrs = (init?.headers ?? {}) as Record<string, string>;
+      const auth = String(hdrs.Authorization ?? '');
+      const idemp = hdrs['Idempotency-Key'];
+      const contentType = hdrs['Content-Type'];
+      const parsedOptions = hdrs['X-ASR-Options'] ? JSON.parse(hdrs['X-ASR-Options']) : {};
+      const rawBuf = init?.body instanceof Uint8Array
+        ? Buffer.from(init.body)
+        : Buffer.alloc(0);
       const out = url.endsWith('/v1/audio/transcriptions')
-        ? gw.createTranscription({ bearerToken: auth, idempotencyKey: idemp, body: parsedBody })
+        ? await gw.createTranscription({
+            bearerToken: auth,
+            idempotencyKey: idemp,
+            contentType,
+            audioStream: Readable.from([rawBuf]),
+            options: parsedOptions,
+          })
         : { status: 404, body: { error: { code: 'NOT_FOUND' } } };
       return new Response(JSON.stringify(out.body), {
         status: out.status,
@@ -1503,12 +1599,15 @@ test('Phase 10B: Idempotency-Key deduplication, integer billing ledger reconcili
     },
   });
   const sdkResult = await sdk.audio.transcriptions.create({
+    audio: new Uint8Array(wav1s),
+    contentType: 'audio/wav',
     model: 'asr-fa-en-v1',
     language: 'fa-en',
     idempotencyKey: 'sdk-test-01',
-    audio_duration_ms: 8000,
   });
   assert.equal(sdkResult.status, 'completed');
+  assert.equal(sdkResult.provenance, 'MODEL_INFERENCE');
+  assert.equal(sdkResult.duration_ms, 1000);
   assert.equal(typeof sdkResult.text, 'string');
 });
 

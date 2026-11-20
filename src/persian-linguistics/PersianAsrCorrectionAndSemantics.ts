@@ -477,6 +477,10 @@ export class TranscriptTransformationEngine {
     readonly document: PersianTranscriptDocument;
     readonly revertedTokenId: string | null;
     readonly restoredReadableText: string | null;
+    readonly restoredTokens: ReadonlyArray<{
+      readonly tokenId: string;
+      readonly readableText: string;
+    }>;
   } {
     let matchIdx = -1;
     for (let i = this.appliedHistory.length - 1; i >= 0; i--) {
@@ -491,6 +495,7 @@ export class TranscriptTransformationEngine {
         document,
         revertedTokenId: null,
         restoredReadableText: null,
+        restoredTokens: [],
       };
     }
 
@@ -517,12 +522,20 @@ export class TranscriptTransformationEngine {
       return tok;
     });
 
-    const affectedTokenIds = [entry.tokenId, ...(entry.absorbedSnapshots ?? []).map((s) => s.tokenId)];
+    const restoredTokens = [
+      { tokenId: entry.tokenId, readableText: entry.previousReadable },
+      ...(entry.absorbedSnapshots ?? []).map((s) => ({
+        tokenId: s.tokenId,
+        readableText: s.previousReadable,
+      })),
+    ];
+    const affectedTokenIds = restoredTokens.map((t) => t.tokenId);
     const nextVersion = document.version + 1;
     return {
       reverted: true,
       revertedTokenId: entry.tokenId,
       restoredReadableText: entry.previousReadable,
+      restoredTokens,
       document: {
         ...document,
         version: nextVersion,

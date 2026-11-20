@@ -39,6 +39,7 @@ export type ApiCredentialScope =
   | 'transcripts:read'
   | 'usage:read'
   | 'projects:read'
+  | 'projects:write'
   | 'webhooks:manage'
   | 'models:read'
   | 'models:write'
@@ -48,14 +49,44 @@ export type ApiCredentialScope =
   | 'security:write'
   | 'security:audit'
   | 'security:admin'
-  | 'privacy:write';
+  | 'privacy:write'
+  | 'platform:read'
+  | 'api-keys:manage'
+  | 'billing:read'
+  | 'billing:write';
+
+export const ALL_PLATFORM_SCOPES: ReadonlySet<ApiCredentialScope> = new Set<ApiCredentialScope>([
+  'audio:transcribe',
+  'audio:stream',
+  'audio:read',
+  'transcripts:read',
+  'usage:read',
+  'projects:read',
+  'projects:write',
+  'webhooks:manage',
+  'models:read',
+  'models:write',
+  'models:approve',
+  'models:deploy',
+  'security:read',
+  'security:write',
+  'security:audit',
+  'security:admin',
+  'privacy:write',
+  'platform:read',
+  'api-keys:manage',
+  'billing:read',
+  'billing:write',
+]);
 
 export type PlatformErrorCode =
   | 'AUTHENTICATION_FAILED'
   | 'AUTHORIZATION_DENIED'
   | 'INSUFFICIENT_SCOPE'
+  | 'STEP_UP_AUTHENTICATION_REQUIRED'
   | 'VALIDATION_ERROR'
   | 'RESOURCE_NOT_FOUND'
+  | 'CONFLICT'
   | 'TENANT_ISOLATION_DENIED'
   | 'AUDIO_FORMAT_UNSUPPORTED'
   | 'AUDIO_DURATION_EXCEEDED'
@@ -66,6 +97,8 @@ export type PlatformErrorCode =
   | 'BUDGET_EXCEEDED'
   | 'RATE_LIMITED'
   | 'PROVIDER_UNAVAILABLE'
+  | 'SERVICE_UNAVAILABLE'
+  | 'ASYNC_EXECUTION_UNAVAILABLE'
   | 'TRANSCRIPTION_FAILED'
   | 'REQUEST_TIMEOUT'
   | 'IDEMPOTENCY_CONFLICT'
@@ -355,6 +388,25 @@ export interface WebhookDeliveryRecord {
 
 export type PublicModelReleaseState = 'PREVIEW' | 'BETA' | 'STABLE' | 'DEPRECATED' | 'RETIRED';
 
+export type PublicModelAvailability =
+  | 'AVAILABLE_NOW'
+  | 'MODEL_NOT_INSTALLED'
+  | 'MODEL_NOT_READY'
+  | 'MODEL_INTEGRITY_FAILURE'
+  | 'REQUIRES_GPU_WORKER'
+  | 'REQUIRES_API_KEY';
+
+export const ALL_PUBLIC_WEBHOOK_EVENTS: ReadonlySet<PublicWebhookEventType> =
+  new Set<PublicWebhookEventType>([
+    'transcription.completed',
+    'transcription.failed',
+    'streaming.session.completed',
+    'usage.threshold_reached',
+    'invoice.issued',
+    'payment.failed',
+    'model.deprecated',
+  ]);
+
 export interface PublicModelCatalogEntry {
   modelId: string;
   displayName: string;
@@ -369,7 +421,7 @@ export interface PublicModelCatalogEntry {
   diarizationSupported: boolean;
   supportedRegions: string[];
   runtimeType: 'local_cpu_worker' | 'self_hosted_gpu_vllm' | 'optional_external_cloud';
-  availabilityInCurrentContainer: 'AVAILABLE_NOW' | 'REQUIRES_GPU_WORKER' | 'REQUIRES_API_KEY';
+  availabilityInCurrentContainer: PublicModelAvailability;
   documentationAnchor: string;
   retirementDateIso: string | null;
 }
@@ -410,12 +462,18 @@ export interface PublicTranscriptionJobRecord {
   stateHistory: Array<{ state: BatchJobLifecycleState; timestampIso: string }>;
   model: string;
   modelVersion: string;
+  modelSha256?: string;
+  executionBackend?: string;
   language: 'fa' | 'en' | 'fa-en' | 'auto';
   executionMode: 'batch' | 'long_form_async';
   text: string | null;
-  segments?: Array<{ startMs: number; endMs: number; text: string }>;
+  rawTranscript?: string | null;
+  normalizedTranscript?: string | null;
+  segments?: Array<{ startMs: number; endMs: number; text: string; confidence?: number }>;
+  calibratedConfidence?: number | null;
   durationMs: number;
   billableMs: number;
+  processingDurationMs?: number;
   actualCostMinor: number;
   currency: 'USD';
   timestampsAvailable: boolean;

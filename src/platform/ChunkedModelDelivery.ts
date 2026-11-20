@@ -4,6 +4,12 @@
  * (with in-memory fallback for non-OPFS contexts) so interrupted downloads resume from the exact next chunk.
  */
 
+import {
+  formatModelChunkFileName,
+  StoredModelArtifactManifest,
+  validateStoredModelArtifactManifest,
+} from '../lifecycle/ModelRepositoryContracts';
+
 export interface ModelChunkDescriptor {
   readonly index: number;
   readonly url: string;
@@ -16,6 +22,31 @@ export interface ChunkedModelManifest {
   readonly version: string;
   readonly totalBytes: number;
   readonly chunks: ModelChunkDescriptor[];
+  readonly storageDirectory?: string;
+  readonly sha256Hex?: string;
+}
+
+/**
+ * Generates a runtime-consumable ChunkedModelManifest from a committed OPFS
+ * StoredModelArtifactManifest, preserving exact chunk order, sizes, and digests.
+ */
+export function createChunkedModelManifestFromStoredArtifact(
+  manifest: StoredModelArtifactManifest,
+): ChunkedModelManifest {
+  const validated = validateStoredModelArtifactManifest(manifest);
+  return {
+    modelId: validated.modelId,
+    version: validated.version,
+    totalBytes: validated.totalBytes,
+    storageDirectory: validated.storageDirectory,
+    sha256Hex: validated.sha256Hex,
+    chunks: validated.chunks.map((c) => ({
+      index: c.index,
+      url: `opfs://ai-models/${validated.storageDirectory}/${formatModelChunkFileName(c.index)}`,
+      sha256Hex: c.sha256Hex,
+      byteLength: c.byteLength,
+    })),
+  };
 }
 
 export interface ChunkDownloadProgress {

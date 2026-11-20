@@ -70,6 +70,30 @@ export type AssetStorageLifecycleState =
   | 'abandoned'
   | 'failed';
 
+export type IngestTransactionState =
+  | 'INITIALIZING'
+  | 'WRITING'
+  | 'VERIFYING'
+  | 'COMMITTED'
+  | 'ABORTING'
+  | 'ABORTED'
+  | 'FAILED';
+
+export interface IngestTransactionSnapshot {
+  readonly transactionId: string;
+  readonly assetId: string;
+  readonly state: IngestTransactionState;
+  readonly expectedBlockCount: number;
+  readonly successfullyPersistedBlockCount: number;
+  readonly persistedBlockIndexes: readonly number[];
+  readonly failedBlockIndexes: readonly number[];
+  readonly persistedBytes: number;
+  readonly expectedBytes: number;
+  readonly commitTimestamp: number | null;
+  readonly primaryFailureReason?: string;
+  readonly rollbackError?: string;
+}
+
 export interface PersistedAudioAssetManifest {
   readonly assetId: string;
   readonly fileName: string;
@@ -110,6 +134,7 @@ export interface AudioAsset {
   storageLifecycle?: AssetStorageLifecycleState;
   storageBackend?: string;
   blockSizeSamples?: number;
+  ingestTransaction?: IngestTransactionSnapshot;
 }
 
 export type ClipKind = 'speech' | 'room-tone-fill';

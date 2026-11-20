@@ -1,7 +1,23 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { encodeAndValidateWavExport } from './storageBroker';
-import { ingestAudioFileStreaming, parseWavHeaderStreaming } from './streamingIngest';
+import {
+  BrokerWorkerLike,
+  encodeAndValidateWavExport,
+  StorageBrokerClient,
+  WritePcmBlockResult,
+} from './storageBroker';
+import {
+  IngestAbortedError,
+  ingestAudioFileStreaming,
+  IngestTransactionError,
+  IngestTransactionTracker,
+  parseWavHeaderStreaming,
+  StreamingIngestBroker,
+} from './streamingIngest';
+import {
+  OpfsDirectoryLike,
+  WorkerBrokerRequest,
+} from './workerStorageCore';
 import {
   detectLongPauses,
   detectPitchPlateauSegments,
@@ -22,7 +38,13 @@ import {
 } from './persianAsrTranscriber';
 import { buildSyntheticMicRecordingPcm } from './audioFixtures';
 import { secondsToFlicks } from './timebase';
-import { PersianWordToken, Track } from '../contracts/v1_2';
+import {
+  IngestTransactionSnapshot,
+  PersistedAudioAssetManifest,
+  PersianWordToken,
+  StorageBrokerTelemetry,
+  Track,
+} from '../contracts/v1_2';
 import { buildPeakPyramid, StreamingPeakPyramidBuilder } from './peakPyramid';
 import { renderTimelineRangeToPcm, streamingChunkedRender } from './audioPlayback';
 import { applySyncSafeCut, determineSyncSafeEditMode } from './timeline';
@@ -72,6 +94,7 @@ import { PersianChapterAndTopicSegmenter } from '../ai-engine/PersianChapterAndT
 import { PersianProsodicPunctuationRestorer } from '../ai-engine/PersianProsodicPunctuationRestorer';
 import { PersianShowNotesAndTextRankEngine } from '../ai-engine/PersianShowNotesAndTextRankEngine';
 import { AudioExportWriter, BoundedChunkedByteSink } from '../audio-renderer/AudioExportWriter';
+import { createCommittedRenderArtifact } from '../audio-renderer/RenderOutputArtifact';
 import { PersianDisfluencyEngine } from '../ai-engine/PersianDisfluencyEngine';
 import { PersianSemanticRepetitionEngine } from '../ai-engine/PersianSemanticRepetitionEngine';
 import { PersianPhoneticTranscriptSearchEngine } from '../ai-engine/PersianPhoneticTranscriptSearchEngine';
@@ -2044,12 +2067,18 @@ test('AudioRenderPlanner and AudioRenderValidator resist NaN crossfade config an
   await writer.writePlanarChunk([chunk], 48000);
   const meta = await writer.finalize();
 
-  const postReport = AudioRenderValidator.validatePostRender({
+  const artifact = createCommittedRenderArtifact({
+    sink,
+    artifactId: meta.artifactId,
+    sizeBytes: meta.fileSizeBytes,
+  });
+  const postReport = await AudioRenderValidator.validatePostRenderArtifact({
     plan: planRes.plan,
     outputMetadata: meta,
-    outputBytes: sink.readAllBytes(),
+    artifact,
     maxAllowedClippedSamples: Number.NaN,
   });
+  await artifact.dispose();
   assert.equal(postReport.passed, false);
   assert.equal(
     postReport.failures.some((f) => f.code === 'UNEXPECTED_CLIPPING'),
@@ -3429,8 +3458,10 @@ test('ReleaseReadinessGate, useAudioStudioController helpers, SharedRingBuffer, 
   await writer.begin();
   await writer.writePlanarChunk([new Float32Array(4800).fill(0.1)], 4800);
   await writer.finalize();
+  const gateBytes = await sink.readRange(0, sink.getTotalBytesWritten());
+  sink.disposeCommitted();
   const gateRep = evaluateRenderedAudioSignalQuality({
-    bytes: sink.readAllBytes(),
+    bytes: gateBytes,
     expectedSampleRate: 48000,
     expectedChannelCount: 1,
     expectedSamplesPerChannel: 1000,
@@ -3701,4 +3732,1127 @@ test('50. planAsrTranscriptionChunks and shiftTokensAndRecommendationsByOffset p
   assert.equal(shifted.recommendations[0].range.startFlicks, secondsToFlicks(61.2));
   assert.equal(shifted.recommendations[0].boundary.snappedRange.startFlicks, secondsToFlicks(61.2));
 });
+
+// ============================================================================
+// AVP-INGEST-TRANSACTION-001 — Atomic OPFS Ingestion Integrity & Rollback Tests
+// ============================================================================
+
+function createDeterministicMultiBlockWavFile(params?: {
+  sampleRate?: number;
+  durationSec?: number;
+  fileName?: string;
+}): { file: File; pcm: Float32Array; sampleRate: number; totalSamples: number } {
+  const sampleRate = params?.sampleRate ?? 16_000;
+  const durationSec = params?.durationSec ?? 3.5; // With chunkSeconds=1 => 4 blocks (1s, 1s, 1s, 0.5s)
+  const totalSamples = Math.round(sampleRate * durationSec);
+  const pcm = new Float32Array(totalSamples);
+  for (let i = 0; i < totalSamples; i++) {
+    pcm[i] = Math.sin((2 * Math.PI * 220 * i) / sampleRate) * 0.35;
+  }
+  const encoded = encodeAndValidateWavExport([pcm], sampleRate);
+  const file = new File([encoded.blob], params?.fileName ?? 'atomic-ingest-test.wav', {
+    type: 'audio/wav',
+  });
+  return { file, pcm, sampleRate, totalSamples };
+}
+
+interface InjectedIngestBrokerHooks {
+  readonly opfsAvailable?: boolean;
+  readonly onWriteChunk?: (params: {
+    assetId: string;
+    chunkIndex: number;
+    byteLength: number;
+    defaultResult: WritePcmBlockResult;
+  }) => Promise<WritePcmBlockResult> | WritePcmBlockResult;
+  readonly onFinalize?: (params: {
+    assetId: string;
+    manifest: PersistedAudioAssetManifest;
+  }) => Promise<PersistedAudioAssetManifest | null> | PersistedAudioAssetManifest | null;
+  readonly onGetReadyManifest?: (params: {
+    assetId: string;
+    manifest: PersistedAudioAssetManifest | null;
+  }) => Promise<PersistedAudioAssetManifest | null> | PersistedAudioAssetManifest | null;
+  readonly onAbort?: (params: {
+    assetId: string;
+    reason: string;
+    targetState: 'abandoned' | 'failed';
+  }) => Promise<void> | void;
+}
+
+function createInjectedIngestBroker(hooks: InjectedIngestBrokerHooks = {}) {
+  const opfsAvailable = hooks.opfsAvailable ?? true;
+  const manifests = new Map<string, PersistedAudioAssetManifest>();
+  const chunks = new Map<string, Map<number, ArrayBuffer>>();
+  const writtenChunkIndexes: number[] = [];
+  const abortCalls: Array<{ assetId: string; reason: string; targetState: 'abandoned' | 'failed' }> = [];
+  let finalizeCalls = 0;
+  let beginCalls = 0;
+
+  const telemetry = (): StorageBrokerTelemetry => ({
+    opfsSupported: opfsAvailable,
+    syncAccessHandleSupported: false,
+    persistentStorageGranted: opfsAvailable ? true : null,
+    quotaUsedBytes: 0,
+    quotaTotalBytes: 1024 * 1024 * 1024,
+    persistenceAvailable: opfsAvailable,
+    persistenceStatus: opfsAvailable ? 'OPFS-Writable' : 'OPFS-Unavailable',
+    activeLeases: [],
+    cacheStats: {
+      usedBytes: 0,
+      maxBytes: 24 * 1024 * 1024,
+      cachedBlocks: 0,
+      hits: 0,
+      misses: 0,
+      evictions: 0,
+    },
+    workerCacheStats: null,
+    totalAudioCacheBudgetBytes: 32 * 1024 * 1024,
+    lockConflictsPrevented: 0,
+    disposed: false,
+    recoveredAssetCount: 0,
+    cleanedAbandonedCount: 0,
+  });
+
+  const broker: StreamingIngestBroker = {
+    isDisposed: () => false,
+    getTelemetry: telemetry,
+    async beginAssetIngest(manifest) {
+      beginCalls++;
+      if (!opfsAvailable) {
+        return {
+          manifest: { ...manifest, state: 'ingesting' },
+          persisted: false,
+          backend: 'OPFS-Unavailable',
+        };
+      }
+      const stored: PersistedAudioAssetManifest = {
+        ...manifest,
+        state: 'ingesting',
+      };
+      manifests.set(manifest.assetId, stored);
+      chunks.set(manifest.assetId, new Map());
+      return {
+        manifest: stored,
+        persisted: true,
+        backend: 'OPFS-Writable',
+      };
+    },
+    async writeAssetChunk(assetId, chunkIndex, data) {
+      writtenChunkIndexes.push(chunkIndex);
+      const byteLength = data.byteLength;
+      const defaultResult: WritePcmBlockResult = {
+        persisted: opfsAvailable,
+        backend: opfsAvailable ? 'OPFS-Writable' : 'OPFS-Unavailable',
+        bytesWritten: opfsAvailable ? byteLength : 0,
+        cachedInMainLru: true,
+        blockIndex: chunkIndex,
+      };
+      const result = hooks.onWriteChunk
+        ? await hooks.onWriteChunk({ assetId, chunkIndex, byteLength, defaultResult })
+        : defaultResult;
+
+      if (opfsAvailable && result.persisted) {
+        let assetChunks = chunks.get(assetId);
+        if (!assetChunks) {
+          assetChunks = new Map();
+          chunks.set(assetId, assetChunks);
+        }
+        const bytes =
+          data instanceof Float32Array
+            ? new Uint8Array(data.buffer, data.byteOffset, data.byteLength)
+            : new Uint8Array(data);
+        const copy = new Uint8Array(bytes.byteLength);
+        copy.set(bytes);
+        assetChunks.set(chunkIndex, copy.buffer);
+        const cur = manifests.get(assetId);
+        if (cur) {
+          manifests.set(assetId, { ...cur, updatedAtMs: Date.now() });
+        }
+      }
+      return result;
+    },
+    async finalizeAsset(assetId, patch) {
+      finalizeCalls++;
+      const cur = manifests.get(assetId);
+      if (!cur) return null;
+      const now = Date.now();
+      const finalized: PersistedAudioAssetManifest = {
+        ...cur,
+        ...(patch ?? {}),
+        assetId,
+        state: 'ready',
+        updatedAtMs: now,
+        finalizedAtMs: now,
+      };
+      manifests.set(assetId, finalized);
+      if (hooks.onFinalize) {
+        const overridden = await hooks.onFinalize({ assetId, manifest: finalized });
+        if (overridden) {
+          manifests.set(assetId, overridden);
+        }
+        return overridden;
+      }
+      return finalized;
+    },
+    async abortAssetIngest(assetId, reason, targetState = 'failed') {
+      abortCalls.push({ assetId, reason, targetState });
+      chunks.delete(assetId);
+      const cur = manifests.get(assetId);
+      if (cur) {
+        manifests.set(assetId, {
+          ...cur,
+          state: targetState,
+          errorMessage: reason,
+          updatedAtMs: Date.now(),
+          finalizedAtMs: null,
+        });
+      }
+      if (hooks.onAbort) {
+        await hooks.onAbort({ assetId, reason, targetState });
+      }
+    },
+    async getReadyAssetManifest(assetId) {
+      const cur = manifests.get(assetId) ?? null;
+      const ready = cur && cur.state === 'ready' ? cur : null;
+      if (hooks.onGetReadyManifest) {
+        return hooks.onGetReadyManifest({ assetId, manifest: ready });
+      }
+      return ready;
+    },
+    async streamReadRange(assetId, startSample, length, blockSizeSamples, fallbackSource) {
+      const out = new Float32Array(length);
+      const assetChunks = chunks.get(assetId);
+      if (assetChunks && assetChunks.size > 0) {
+        const firstBlock = Math.floor(startSample / blockSizeSamples);
+        const lastBlock = Math.floor((startSample + length - 1) / blockSizeSamples);
+        let written = 0;
+        for (let b = firstBlock; b <= lastBlock; b++) {
+          const buf = assetChunks.get(b);
+          if (!buf) continue;
+          const view = new Float32Array(buf);
+          const blockStart = b * blockSizeSamples;
+          const sliceStart = Math.max(0, startSample - blockStart);
+          const sliceEnd = Math.min(view.length, startSample + length - blockStart);
+          if (sliceEnd > sliceStart) {
+            out.set(view.subarray(sliceStart, sliceEnd), written);
+            written += sliceEnd - sliceStart;
+          }
+        }
+        return out;
+      }
+      if (fallbackSource) {
+        const end = Math.min(fallbackSource.length, startSample + length);
+        if (end > startSample) {
+          out.set(fallbackSource.subarray(startSample, end), 0);
+        }
+      }
+      return out;
+    },
+  };
+
+  return {
+    broker,
+    manifests,
+    chunks,
+    writtenChunkIndexes,
+    abortCalls,
+    getFinalizeCalls: () => finalizeCalls,
+    getBeginCalls: () => beginCalls,
+  };
+}
+
+function createInMemoryOpfsRoot(): OpfsDirectoryLike {
+  const createDir = (): OpfsDirectoryLike => {
+    const files = new Map<string, ArrayBuffer>();
+    const dirs = new Map<string, OpfsDirectoryLike>();
+    return {
+      async getFileHandle(name, options) {
+        if (!files.has(name)) {
+          if (!options?.create) {
+            throw new Error(`NotFoundError: ${name}`);
+          }
+          files.set(name, new ArrayBuffer(0));
+        }
+        return {
+          async createWritable() {
+            return {
+              async write(data: ArrayBuffer | string) {
+                if (typeof data === 'string') {
+                  const encoded = new TextEncoder().encode(data);
+                  files.set(name, encoded.buffer.slice(encoded.byteOffset, encoded.byteOffset + encoded.byteLength));
+                } else {
+                  files.set(name, data.slice(0));
+                }
+              },
+              async close() {},
+            };
+          },
+          async getFile() {
+            const data = files.get(name);
+            if (!data) throw new Error(`NotFoundError: ${name}`);
+            return {
+              size: data.byteLength,
+              async arrayBuffer() {
+                return data.slice(0);
+              },
+              async text() {
+                return new TextDecoder().decode(new Uint8Array(data));
+              },
+            };
+          },
+        };
+      },
+      async getDirectoryHandle(name, options) {
+        let sub = dirs.get(name);
+        if (!sub) {
+          if (!options?.create) {
+            throw new Error(`NotFoundError: dir ${name}`);
+          }
+          sub = createDir();
+          dirs.set(name, sub);
+        }
+        return sub;
+      },
+      async removeEntry(name) {
+        files.delete(name);
+        dirs.delete(name);
+      },
+      async *entries() {
+        for (const name of files.keys()) {
+          yield [name, { kind: 'file' as const, name }];
+        }
+        for (const name of dirs.keys()) {
+          yield [name, { kind: 'directory' as const, name }];
+        }
+      },
+    };
+  };
+  return createDir();
+}
+
+function createRealBackedStorageBroker(root: OpfsDirectoryLike): StorageBrokerClient {
+  class CoreBackedWorker implements BrokerWorkerLike {
+    onmessage: ((event: MessageEvent) => void) | null = null;
+    onerror: ((event: ErrorEvent | { message?: string }) => void) | null = null;
+    onmessageerror: ((event: MessageEvent) => void) | null = null;
+    private readonly core = new WorkerStorageCore(async () => root);
+
+    postMessage(message: unknown): void {
+      const req = message as WorkerBrokerRequest;
+      void this.core
+        .handleMessage(req)
+        .then(({ payload }) => {
+          this.onmessage?.({ data: { id: req.id, ok: true, payload } } as MessageEvent);
+        })
+        .catch((err) => {
+          this.onmessage?.({
+            data: {
+              id: req.id,
+              ok: false,
+              error: err instanceof Error ? err.message : String(err),
+            },
+          } as MessageEvent);
+        });
+    }
+
+    terminate(): void {}
+  }
+
+  return new StorageBrokerClient({
+    workerFactory: () => new CoreBackedWorker(),
+  });
+}
+
+test('51. Atomic ingest: all blocks persist successfully -> COMMITTED with exact accounting and ready manifest', async () => {
+  const { file, totalSamples, sampleRate } = createDeterministicMultiBlockWavFile();
+  const harness = createInjectedIngestBroker();
+  const states: string[] = [];
+
+  const loaded = await ingestAudioFileStreaming(file, {
+    broker: harness.broker,
+    chunkSeconds: 1,
+    onTransactionChange: (snap) => states.push(snap.state),
+  });
+
+  const asset = Object.values(loaded.assets)[0];
+  assert.equal(asset.storageLifecycle, 'ready');
+  assert.equal(asset.storageBackend, 'OPFS-Writable');
+  assert.ok(asset.ingestTransaction, 'Expected ingestTransaction snapshot on committed asset');
+  assert.equal(asset.ingestTransaction.state, 'COMMITTED');
+  assert.equal(asset.ingestTransaction.expectedBlockCount, 4);
+  assert.equal(asset.ingestTransaction.successfullyPersistedBlockCount, 4);
+  assert.deepEqual(asset.ingestTransaction.persistedBlockIndexes, [0, 1, 2, 3]);
+  assert.deepEqual(asset.ingestTransaction.failedBlockIndexes, []);
+  assert.equal(asset.ingestTransaction.expectedBytes, totalSamples * Float32Array.BYTES_PER_ELEMENT);
+  assert.equal(asset.ingestTransaction.persistedBytes, totalSamples * Float32Array.BYTES_PER_ELEMENT);
+  assert.equal(typeof asset.ingestTransaction.commitTimestamp, 'number');
+  assert.equal(harness.getFinalizeCalls(), 1);
+  assert.equal(harness.abortCalls.length, 0);
+  assert.equal(states[0], 'INITIALIZING');
+  assert.ok(states.includes('WRITING'));
+  assert.ok(states.includes('VERIFYING'));
+  assert.equal(states[states.length - 1], 'COMMITTED');
+
+  const readyManifest = await harness.broker.getReadyAssetManifest(asset.id);
+  assert.ok(readyManifest);
+  assert.equal(readyManifest.state, 'ready');
+  assert.equal(readyManifest.totalBlocks, 4);
+  assert.equal(readyManifest.totalSamples, totalSamples);
+  assert.equal(readyManifest.sampleRate, sampleRate);
+});
+
+test('52. Atomic ingest: first block fails -> FAILED + deterministic rollback with zero ready manifest', async () => {
+  const { file } = createDeterministicMultiBlockWavFile();
+  const harness = createInjectedIngestBroker({
+    onWriteChunk: ({ chunkIndex, defaultResult }) =>
+      chunkIndex === 0 ? { ...defaultResult, persisted: false, bytesWritten: 0 } : defaultResult,
+  });
+
+  await assert.rejects(
+    ingestAudioFileStreaming(file, { broker: harness.broker, chunkSeconds: 1 }),
+    (err: unknown) => {
+      assert.ok(err instanceof IngestTransactionError);
+      assert.equal(err.code, 'INGEST_CHUNK_PERSISTENCE_FAILED');
+      assert.equal(err.transaction.state, 'FAILED');
+      assert.deepEqual(err.transaction.failedBlockIndexes, [0]);
+      assert.deepEqual(err.transaction.persistedBlockIndexes, []);
+      assert.equal(err.transaction.commitTimestamp, null);
+      return true;
+    },
+  );
+
+  assert.equal(harness.getFinalizeCalls(), 0);
+  assert.equal(harness.abortCalls.length, 1);
+  assert.deepEqual(harness.writtenChunkIndexes, [0]);
+  const assetId = harness.abortCalls[0].assetId;
+  assert.equal(harness.chunks.has(assetId), false);
+  assert.equal(await harness.broker.getReadyAssetManifest(assetId), null);
+  assert.equal(harness.manifests.get(assetId)?.state, 'failed');
+});
+
+test('53. Atomic ingest: middle block fails -> FAILED + rollback cleans prior persisted blocks', async () => {
+  const { file } = createDeterministicMultiBlockWavFile();
+  const harness = createInjectedIngestBroker({
+    onWriteChunk: ({ chunkIndex, defaultResult }) =>
+      chunkIndex === 1 ? { ...defaultResult, persisted: false, bytesWritten: 0 } : defaultResult,
+  });
+
+  await assert.rejects(
+    ingestAudioFileStreaming(file, { broker: harness.broker, chunkSeconds: 1 }),
+    (err: unknown) => {
+      assert.ok(err instanceof IngestTransactionError);
+      assert.equal(err.code, 'INGEST_CHUNK_PERSISTENCE_FAILED');
+      assert.equal(err.transaction.state, 'FAILED');
+      assert.deepEqual(err.transaction.persistedBlockIndexes, [0]);
+      assert.deepEqual(err.transaction.failedBlockIndexes, [1]);
+      return true;
+    },
+  );
+
+  assert.equal(harness.getFinalizeCalls(), 0);
+  assert.equal(harness.abortCalls.length, 1);
+  assert.deepEqual(harness.writtenChunkIndexes, [0, 1]);
+  const assetId = harness.abortCalls[0].assetId;
+  assert.equal(harness.chunks.has(assetId), false);
+  assert.equal(await harness.broker.getReadyAssetManifest(assetId), null);
+});
+
+test('54. Atomic ingest: final block fails -> FAILED + rollback cleans all earlier blocks and blocks finalization', async () => {
+  const { file } = createDeterministicMultiBlockWavFile();
+  const harness = createInjectedIngestBroker({
+    onWriteChunk: ({ chunkIndex, defaultResult }) =>
+      chunkIndex === 3 ? { ...defaultResult, persisted: false, bytesWritten: 0 } : defaultResult,
+  });
+
+  await assert.rejects(
+    ingestAudioFileStreaming(file, { broker: harness.broker, chunkSeconds: 1 }),
+    (err: unknown) => {
+      assert.ok(err instanceof IngestTransactionError);
+      assert.equal(err.code, 'INGEST_CHUNK_PERSISTENCE_FAILED');
+      assert.equal(err.transaction.state, 'FAILED');
+      assert.deepEqual(err.transaction.persistedBlockIndexes, [0, 1, 2]);
+      assert.deepEqual(err.transaction.failedBlockIndexes, [3]);
+      return true;
+    },
+  );
+
+  assert.equal(harness.getFinalizeCalls(), 0);
+  assert.equal(harness.abortCalls.length, 1);
+  const assetId = harness.abortCalls[0].assetId;
+  assert.equal(harness.chunks.has(assetId), false);
+  assert.equal(await harness.broker.getReadyAssetManifest(assetId), null);
+});
+
+test('55. Atomic ingest: one block returns fewer bytes than expected -> FAILED + rollback', async () => {
+  const { file } = createDeterministicMultiBlockWavFile();
+  const harness = createInjectedIngestBroker({
+    onWriteChunk: ({ chunkIndex, byteLength, defaultResult }) =>
+      chunkIndex === 2
+        ? { ...defaultResult, persisted: true, bytesWritten: byteLength - 64 }
+        : defaultResult,
+  });
+
+  await assert.rejects(
+    ingestAudioFileStreaming(file, { broker: harness.broker, chunkSeconds: 1 }),
+    (err: unknown) => {
+      assert.ok(err instanceof IngestTransactionError);
+      assert.equal(err.code, 'INGEST_CHUNK_BYTE_MISMATCH');
+      assert.equal(err.transaction.state, 'FAILED');
+      assert.deepEqual(err.transaction.failedBlockIndexes, [2]);
+      return true;
+    },
+  );
+
+  assert.equal(harness.getFinalizeCalls(), 0);
+  assert.equal(harness.abortCalls.length, 1);
+  assert.equal(await harness.broker.getReadyAssetManifest(harness.abortCalls[0].assetId), null);
+});
+
+test('56. Atomic ingest: duplicate block acknowledgement -> FAILED + rollback (and StorageBrokerClient rejects duplicate block writes)', async () => {
+  const { file } = createDeterministicMultiBlockWavFile();
+  const harness = createInjectedIngestBroker({
+    onWriteChunk: ({ chunkIndex, defaultResult }) =>
+      chunkIndex === 1 ? { ...defaultResult, blockIndex: 0 } : defaultResult,
+  });
+
+  await assert.rejects(
+    ingestAudioFileStreaming(file, { broker: harness.broker, chunkSeconds: 1 }),
+    (err: unknown) => {
+      assert.ok(err instanceof IngestTransactionError);
+      assert.equal(err.code, 'INGEST_DUPLICATE_BLOCK_ACK');
+      assert.equal(err.transaction.state, 'FAILED');
+      assert.deepEqual(err.transaction.failedBlockIndexes, [1]);
+      return true;
+    },
+  );
+  assert.equal(harness.getFinalizeCalls(), 0);
+  assert.equal(harness.abortCalls.length, 1);
+
+  // Also verify StorageBrokerClient itself rejects duplicate block index writes and invalidates the transaction
+  const root = createInMemoryOpfsRoot();
+  const realBroker = createRealBackedStorageBroker(root);
+  await realBroker.init();
+  const now = Date.now();
+  const manifest: PersistedAudioAssetManifest = {
+    assetId: 'asset-dup-block-check',
+    fileName: 'dup.wav',
+    mimeType: 'audio/wav',
+    fileSizeBytes: 1024,
+    contentSha256: 'sha256:dup-block-check',
+    sampleRate: 16_000,
+    channels: 1,
+    totalSamples: 1024,
+    blockSizeSamples: 512,
+    totalBlocks: 2,
+    bytesPerSample: Float32Array.BYTES_PER_ELEMENT,
+    state: 'ingesting',
+    createdAtMs: now,
+    updatedAtMs: now,
+    finalizedAtMs: null,
+  };
+  await realBroker.beginAssetIngest(manifest);
+  const first = await realBroker.writeAssetChunk(manifest.assetId, 0, new Float32Array(512));
+  assert.equal(first.persisted, true);
+  assert.equal(first.blockIndex, 0);
+
+  await assert.rejects(
+    realBroker.writeAssetChunk(manifest.assetId, 0, new Float32Array(512)),
+    /BROKER_DUPLICATE_BLOCK_WRITE/,
+  );
+  await assert.rejects(
+    realBroker.finalizeAsset(manifest.assetId),
+    /failed|cannot be finalized/i,
+  );
+  realBroker.dispose();
+});
+
+test('57. Atomic ingest: missing block before finalization -> finalization rejected on both tracker and StorageBrokerClient', async () => {
+  // 1) Transaction tracker refuses VERIFYING when a block is missing
+  const tracker = new IngestTransactionTracker({
+    assetId: 'asset-missing-block',
+    expectedBlockCount: 3,
+    expectedBytes: 3 * 512 * 4,
+    totalSamples: 3 * 512,
+    blockSizeSamples: 512,
+  });
+  tracker.beginWriting();
+  tracker.acknowledgeBlockWrite({
+    expectedBlockIndex: 0,
+    expectedChunkBytes: 512 * 4,
+    result: {
+      persisted: true,
+      backend: 'OPFS-Writable',
+      bytesWritten: 512 * 4,
+      cachedInMainLru: true,
+      blockIndex: 0,
+    },
+  });
+  tracker.acknowledgeBlockWrite({
+    expectedBlockIndex: 2,
+    expectedChunkBytes: 512 * 4,
+    result: {
+      persisted: true,
+      backend: 'OPFS-Writable',
+      bytesWritten: 512 * 4,
+      cachedInMainLru: true,
+      blockIndex: 2,
+    },
+  });
+  assert.throws(
+    () => tracker.enterVerifying(),
+    (err: unknown) =>
+      err instanceof IngestTransactionError && err.code === 'INGEST_INCOMPLETE_PERSISTENCE',
+  );
+
+  // 2) StorageBrokerClient rejects finalizeAsset when block 1 of [0,1,2] is missing
+  const root = createInMemoryOpfsRoot();
+  const realBroker = createRealBackedStorageBroker(root);
+  await realBroker.init();
+  const now = Date.now();
+  const manifest: PersistedAudioAssetManifest = {
+    assetId: 'asset-missing-broker',
+    fileName: 'missing.wav',
+    mimeType: 'audio/wav',
+    fileSizeBytes: 6144,
+    contentSha256: 'sha256:missing-broker',
+    sampleRate: 16_000,
+    channels: 1,
+    totalSamples: 1536,
+    blockSizeSamples: 512,
+    totalBlocks: 3,
+    bytesPerSample: Float32Array.BYTES_PER_ELEMENT,
+    state: 'ingesting',
+    createdAtMs: now,
+    updatedAtMs: now,
+    finalizedAtMs: null,
+  };
+  await realBroker.beginAssetIngest(manifest);
+  await realBroker.writeAssetChunk(manifest.assetId, 0, new Float32Array(512));
+  await realBroker.writeAssetChunk(manifest.assetId, 2, new Float32Array(512));
+
+  await assert.rejects(
+    realBroker.finalizeAsset(manifest.assetId),
+    /BROKER_INCOMPLETE_BLOCKS/,
+  );
+  assert.equal(await realBroker.getReadyAssetManifest(manifest.assetId), null);
+  // Once failed, transaction cannot later be finalized even if block 1 is attempted
+  await assert.rejects(
+    realBroker.writeAssetChunk(manifest.assetId, 1, new Float32Array(512)),
+    /not active|failed/i,
+  );
+  await assert.rejects(
+    realBroker.finalizeAsset(manifest.assetId),
+    /failed|cannot be finalized/i,
+  );
+  realBroker.dispose();
+});
+
+test('58. Atomic ingest: manifest reports incorrect block count -> FAILED + rollback', async () => {
+  const { file } = createDeterministicMultiBlockWavFile();
+  const harness = createInjectedIngestBroker({
+    onGetReadyManifest: ({ manifest }) =>
+      manifest ? { ...manifest, totalBlocks: manifest.totalBlocks - 1 } : null,
+  });
+
+  await assert.rejects(
+    ingestAudioFileStreaming(file, { broker: harness.broker, chunkSeconds: 1 }),
+    (err: unknown) => {
+      assert.ok(err instanceof IngestTransactionError);
+      assert.equal(err.code, 'INGEST_MANIFEST_VALIDATION_FAILED');
+      assert.equal(err.transaction.state, 'FAILED');
+      return true;
+    },
+  );
+  assert.equal(harness.abortCalls.length, 1);
+  assert.equal(harness.chunks.has(harness.abortCalls[0].assetId), false);
+});
+
+test('59. Atomic ingest: manifest reports incorrect sample count -> FAILED + rollback', async () => {
+  const { file } = createDeterministicMultiBlockWavFile();
+  const harness = createInjectedIngestBroker({
+    onGetReadyManifest: ({ manifest }) =>
+      manifest ? { ...manifest, totalSamples: manifest.totalSamples - 128 } : null,
+  });
+
+  await assert.rejects(
+    ingestAudioFileStreaming(file, { broker: harness.broker, chunkSeconds: 1 }),
+    (err: unknown) => {
+      assert.ok(err instanceof IngestTransactionError);
+      assert.equal(err.code, 'INGEST_MANIFEST_VALIDATION_FAILED');
+      assert.equal(err.transaction.state, 'FAILED');
+      return true;
+    },
+  );
+  assert.equal(harness.abortCalls.length, 1);
+  assert.equal(harness.chunks.has(harness.abortCalls[0].assetId), false);
+});
+
+test('60. Atomic ingest: final manifest remains ingesting -> FAILED + rollback', async () => {
+  const { file } = createDeterministicMultiBlockWavFile();
+  const harness = createInjectedIngestBroker({
+    onFinalize: ({ manifest }) => ({ ...manifest, state: 'ingesting' }),
+    onGetReadyManifest: ({ assetId }) => harness.manifests.get(assetId) ?? null,
+  });
+
+  await assert.rejects(
+    ingestAudioFileStreaming(file, { broker: harness.broker, chunkSeconds: 1 }),
+    (err: unknown) => {
+      assert.ok(err instanceof IngestTransactionError);
+      assert.equal(err.code, 'INGEST_MANIFEST_VALIDATION_FAILED');
+      assert.equal(err.transaction.state, 'FAILED');
+      return true;
+    },
+  );
+  assert.equal(harness.abortCalls.length, 1);
+  assert.equal(harness.manifests.get(harness.abortCalls[0].assetId)?.state, 'failed');
+});
+
+test('61. Atomic ingest: finalization throws unexpectedly -> FAILED + rollback preserving original exception', async () => {
+  const { file } = createDeterministicMultiBlockWavFile();
+  const boom = new Error('Simulated OPFS manifest flush I/O failure');
+  const harness = createInjectedIngestBroker({
+    onFinalize: () => {
+      throw boom;
+    },
+  });
+
+  await assert.rejects(
+    ingestAudioFileStreaming(file, { broker: harness.broker, chunkSeconds: 1 }),
+    (err: unknown) => {
+      assert.equal(err, boom, 'Original finalization exception must be preserved verbatim');
+      const annotated = err as Error & {
+        transaction?: IngestTransactionSnapshot;
+        rollbackError?: unknown;
+      };
+      assert.equal(annotated.transaction?.state, 'FAILED');
+      assert.equal(annotated.transaction?.commitTimestamp, null);
+      return true;
+    },
+  );
+  assert.equal(harness.abortCalls.length, 1);
+  assert.equal(harness.chunks.has(harness.abortCalls[0].assetId), false);
+});
+
+test('62. Atomic ingest: rollback throws -> original primary error is preserved verbatim and rollback error recorded separately', async () => {
+  const { file } = createDeterministicMultiBlockWavFile();
+  const primaryErr = new Error('Primary write failure on block 2: disk full');
+  const rollbackErr = new Error('Secondary rollback error: OPFS handle locked');
+  const harness = createInjectedIngestBroker({
+    onWriteChunk: ({ chunkIndex, defaultResult }) => {
+      if (chunkIndex === 2) {
+        throw primaryErr;
+      }
+      return defaultResult;
+    },
+    onAbort: () => {
+      throw rollbackErr;
+    },
+  });
+
+  await assert.rejects(
+    ingestAudioFileStreaming(file, { broker: harness.broker, chunkSeconds: 1 }),
+    (err: unknown) => {
+      assert.equal(err, primaryErr, 'Primary write exception must not be masked by rollback failure');
+      const annotated = err as Error & {
+        transaction?: IngestTransactionSnapshot;
+        rollbackError?: unknown;
+      };
+      assert.equal(annotated.rollbackError, rollbackErr);
+      assert.match(
+        annotated.transaction?.rollbackError ?? '',
+        /Secondary rollback error: OPFS handle locked/,
+      );
+      assert.equal(annotated.transaction?.state, 'FAILED');
+      assert.deepEqual(annotated.transaction?.failedBlockIndexes, [2]);
+      return true;
+    },
+  );
+  assert.equal(harness.abortCalls.length, 1);
+  assert.equal(harness.getFinalizeCalls(), 0);
+});
+
+test('63. Atomic ingest: OPFS unavailable initially -> valid complete memory fallback without marking OPFS persisted', async () => {
+  const { file, pcm, totalSamples } = createDeterministicMultiBlockWavFile();
+  const harness = createInjectedIngestBroker({ opfsAvailable: false });
+
+  const loaded = await ingestAudioFileStreaming(file, {
+    broker: harness.broker,
+    chunkSeconds: 1,
+    retainFallbackWhenOpfsUnavailable: true,
+  });
+
+  const asset = Object.values(loaded.assets)[0];
+  assert.equal(asset.storageLifecycle, undefined);
+  assert.equal(asset.storageBackend, 'Memory-Bounded-Fallback');
+  assert.equal(asset.ingestTransaction, undefined);
+  assert.equal(harness.getFinalizeCalls(), 0);
+  assert.equal(harness.writtenChunkIndexes.length, 0);
+
+  const assembled = loaded.pcmSources[asset.id];
+  assert.ok(assembled instanceof Float32Array);
+  assert.equal(assembled.length, totalSamples);
+  // Spot-check sample integrity across first, middle, and final blocks
+  assert.ok(Math.abs(assembled[100] - pcm[100]) < 1e-3);
+  assert.ok(Math.abs(assembled[24_000] - pcm[24_000]) < 1e-3);
+  assert.ok(Math.abs(assembled[totalSamples - 10] - pcm[totalSamples - 10]) < 1e-3);
+});
+
+test('64. Atomic ingest: OPFS unavailable with memory fallback disabled -> explicit storage failure', async () => {
+  const { file } = createDeterministicMultiBlockWavFile();
+  const harness = createInjectedIngestBroker({ opfsAvailable: false });
+
+  await assert.rejects(
+    ingestAudioFileStreaming(file, {
+      broker: harness.broker,
+      chunkSeconds: 1,
+      retainFallbackWhenOpfsUnavailable: false,
+    }),
+    (err: unknown) => {
+      assert.ok(err instanceof IngestTransactionError);
+      assert.equal(err.code, 'INGEST_STORAGE_UNAVAILABLE');
+      assert.equal(err.transaction.state, 'FAILED');
+      return true;
+    },
+  );
+  assert.equal(harness.getFinalizeCalls(), 0);
+});
+
+test('65. Atomic ingest: AbortSignal fires during persistence -> ABORTED + rollback', async () => {
+  const { file } = createDeterministicMultiBlockWavFile();
+  const controller = new AbortController();
+  const seenStates: IngestTransactionSnapshot['state'][] = [];
+  const harness = createInjectedIngestBroker({
+    onWriteChunk: ({ chunkIndex, defaultResult }) => {
+      if (chunkIndex === 1) {
+        controller.abort();
+      }
+      return defaultResult;
+    },
+  });
+
+  await assert.rejects(
+    ingestAudioFileStreaming(file, {
+      broker: harness.broker,
+      chunkSeconds: 1,
+      abortSignal: controller.signal,
+      onTransactionChange: (snap) => seenStates.push(snap.state),
+    }),
+    (err: unknown) => {
+      assert.ok(err instanceof IngestAbortedError);
+      assert.equal(err.code, 'INGEST_ABORTED');
+      assert.equal(err.transaction?.state, 'ABORTED');
+      return true;
+    },
+  );
+
+  assert.equal(harness.getFinalizeCalls(), 0);
+  assert.equal(harness.abortCalls.length, 1);
+  assert.equal(harness.abortCalls[0].targetState, 'abandoned');
+  assert.equal(harness.chunks.has(harness.abortCalls[0].assetId), false);
+  assert.equal(await harness.broker.getReadyAssetManifest(harness.abortCalls[0].assetId), null);
+  assert.ok(seenStates.includes('ABORTING'));
+  assert.equal(seenStates[seenStates.length - 1], 'ABORTED');
+});
+
+test('66. StorageBrokerClient: concurrent duplicate finalization yields exactly one commit, idempotent abort, and rejects conflicting active begins', async () => {
+  const root = createInMemoryOpfsRoot();
+  const broker = createRealBackedStorageBroker(root);
+  await broker.init();
+
+  const now = Date.now();
+  const manifest: PersistedAudioAssetManifest = {
+    assetId: 'asset-concurrent-finalize',
+    fileName: 'concurrent.wav',
+    mimeType: 'audio/wav',
+    fileSizeBytes: 8192,
+    contentSha256: 'sha256:concurrent-finalize',
+    sampleRate: 16_000,
+    channels: 1,
+    totalSamples: 2048,
+    blockSizeSamples: 1024,
+    totalBlocks: 2,
+    bytesPerSample: Float32Array.BYTES_PER_ELEMENT,
+    state: 'ingesting',
+    createdAtMs: now,
+    updatedAtMs: now,
+    finalizedAtMs: null,
+  };
+
+  const beginRes = await broker.beginAssetIngest(manifest);
+  assert.equal(beginRes.persisted, true);
+
+  // Conflicting active begin for same assetId must be rejected unambiguously
+  await assert.rejects(
+    broker.beginAssetIngest(manifest),
+    /BROKER_TRANSACTION_CONFLICT/,
+  );
+
+  const w0 = await broker.writeAssetChunk(manifest.assetId, 0, new Float32Array(1024).fill(0.1));
+  const w1 = await broker.writeAssetChunk(manifest.assetId, 1, new Float32Array(1024).fill(0.2));
+  assert.equal(w0.persisted, true);
+  assert.equal(w1.persisted, true);
+
+  // Fire two concurrent finalizeAsset calls for the same asset
+  const results = await Promise.allSettled([
+    broker.finalizeAsset(manifest.assetId),
+    broker.finalizeAsset(manifest.assetId),
+  ]);
+
+  const fulfilled = results.filter((r) => r.status === 'fulfilled');
+  const rejected = results.filter((r) => r.status === 'rejected');
+  assert.equal(fulfilled.length, 1, 'Expected exactly one successful commit');
+  assert.equal(rejected.length, 1, 'Expected second concurrent finalization to be rejected');
+  assert.equal(
+    (fulfilled[0] as PromiseFulfilledResult<PersistedAudioAssetManifest | null>).value?.state,
+    'ready',
+  );
+  assert.match(
+    String((rejected[0] as PromiseRejectedResult).reason),
+    /BROKER_ALREADY_COMMITTED/,
+  );
+
+  const readyManifest = await broker.getReadyAssetManifest(manifest.assetId);
+  assert.ok(readyManifest);
+  assert.equal(readyManifest.state, 'ready');
+  assert.equal(readyManifest.totalBlocks, 2);
+
+  // Verify idempotent abortAssetIngest on a second asset
+  const abortManifest: PersistedAudioAssetManifest = {
+    ...manifest,
+    assetId: 'asset-idempotent-abort',
+  };
+  await broker.beginAssetIngest(abortManifest);
+  await broker.writeAssetChunk(abortManifest.assetId, 0, new Float32Array(1024).fill(0.5));
+  await broker.abortAssetIngest(abortManifest.assetId, 'first abort', 'failed');
+  await broker.abortAssetIngest(abortManifest.assetId, 'second idempotent abort', 'failed');
+  assert.equal(await broker.getReadyAssetManifest(abortManifest.assetId), null);
+  await assert.rejects(
+    broker.finalizeAsset(abortManifest.assetId),
+    /failed|cannot be finalized/i,
+  );
+
+  broker.dispose();
+});
+
+test('67. Memory fallback retention: OPFS-committed ingest retains zero resident fallback PCM, while non-OPFS fallback transfers exact lease ownership', async () => {
+  const { file, totalSamples } = createDeterministicMultiBlockWavFile();
+  const { MemoryBudgetManager } = await import('../runtime/memory/MemoryBudgetManager');
+  const { AVAPARDAZ_MEMORY_POLICY } = await import('../runtime/memory/MemoryPolicy');
+
+  // OPFS available: zero resident fallback PCM, zero lingering reservations, no fallback lease
+  const opfsBudget = new MemoryBudgetManager(AVAPARDAZ_MEMORY_POLICY);
+  const opfsHarness = createInjectedIngestBroker({ opfsAvailable: true });
+  const opfsLoaded = await ingestAudioFileStreaming(file, {
+    broker: opfsHarness.broker,
+    memoryBudgetManager: opfsBudget,
+    chunkSeconds: 1,
+  });
+  assert.equal(Object.keys(opfsLoaded.pcmSources).length, 0);
+  assert.equal(opfsLoaded.runtimeResourceLease, undefined);
+  assert.equal(opfsBudget.getSnapshot().accountedBytes, 0);
+  assert.equal(opfsBudget.getSnapshot().reservationCount, 0);
+
+  // OPFS unavailable: single resident PCM buffer + exact reservation transferred to runtimeResourceLease
+  const memBudget = new MemoryBudgetManager(AVAPARDAZ_MEMORY_POLICY);
+  const memHarness = createInjectedIngestBroker({ opfsAvailable: false });
+  const memLoaded = await ingestAudioFileStreaming(file, {
+    broker: memHarness.broker,
+    memoryBudgetManager: memBudget,
+    chunkSeconds: 1,
+  });
+  const assetId = Object.keys(memLoaded.assets)[0];
+  const expectedBytes = totalSamples * Float32Array.BYTES_PER_ELEMENT;
+  assert.equal(memLoaded.pcmSources[assetId]?.length, totalSamples);
+  assert.equal(memBudget.getSnapshot().accountedBytes, expectedBytes);
+  assert.ok(memLoaded.runtimeResourceLease);
+  assert.equal(memLoaded.runtimeResourceLease.disposed, false);
+
+  memLoaded.runtimeResourceLease.dispose();
+  assert.equal(memLoaded.runtimeResourceLease.disposed, true);
+  assert.equal(memBudget.getSnapshot().accountedBytes, 0);
+  assert.equal(memBudget.getSnapshot().reservationCount, 0);
+});
+
+test('68. Render artifact lifecycle hardening: engine retains sink reservations until artifact disposal and workflow controller releases previous artifacts on replacement', async () => {
+  const { MemoryBudgetManager } = await import('../runtime/memory/MemoryBudgetManager');
+  const { AVAPARDAZ_MEMORY_POLICY } = await import('../runtime/memory/MemoryPolicy');
+  const budget = new MemoryBudgetManager(AVAPARDAZ_MEMORY_POLICY);
+  const ctrl = new StudioWorkflowController({ memoryBudgetManager: budget });
+
+  const sampleRate = 48_000 as const;
+  const pcm = new Float32Array(sampleRate);
+  for (let i = 0; i < pcm.length; i++) {
+    pcm[i] = 0.25 * Math.sin((2 * Math.PI * 330 * i) / sampleRate);
+  }
+
+  ctrl.openProject({
+    projectId: 'proj_art_hardening_1',
+    projectName: 'Artifact Hardening 1',
+    sourceAudio: {
+      sourceAudioId: 'src_art_1',
+      sourceAudioHash: 'sha256:art-hardening-1',
+      fileName: 'art1.wav',
+      format: 'wav',
+      sampleRate,
+      channelCount: 1,
+      bitDepth: 32,
+      totalSamples: pcm.length,
+      durationSec: 1,
+      fileSizeBytes: pcm.byteLength,
+      importStatus: 'VALIDATED',
+      isDemoFixture: false,
+    },
+  });
+
+  await ctrl.analyzeSpeechEventsAndBuildEdl({
+    trackId: 'track-main',
+    pcmMono: pcm,
+    sampleRate,
+    wordTokens: [],
+  });
+
+  const firstRes = await ctrl.startRender({
+    pcmChannels: [pcm],
+    config: { encoding: 'pcm16', container: 'wav', chunkSizeSamples: 8192 },
+    nowMs: 1000,
+  });
+  assert.equal(firstRes?.ok, true);
+  assert.ok(firstRes?.outputArtifact);
+  const firstArtifact = firstRes.outputArtifact;
+  assert.equal(firstArtifact.disposed, false);
+  assert.equal(firstArtifact.lifecycleState, 'ACTIVE_IN_WORKFLOW');
+  assert.ok(budget.getSnapshot().accountedBytes >= firstArtifact.sizeBytes);
+
+  // Starting a second render must dispose the first artifact before replacing it
+  const secondRes = await ctrl.startRender({
+    pcmChannels: [pcm],
+    config: { encoding: 'pcm24', container: 'wav', chunkSizeSamples: 8192 },
+    nowMs: 2000,
+  });
+  assert.equal(firstArtifact.disposed, true);
+  await assert.rejects(() => firstArtifact.readRange(0, 44));
+  assert.equal(secondRes?.ok, true);
+  assert.ok(secondRes?.outputArtifact);
+  const secondArtifact = secondRes.outputArtifact;
+  assert.equal(secondArtifact.disposed, false);
+
+  // Switching project must dispose the second artifact and release all reservations
+  ctrl.openProject({
+    projectId: 'proj_art_hardening_2',
+    projectName: 'Artifact Hardening 2',
+    sourceAudio: null,
+  });
+  assert.equal(secondArtifact.disposed, true);
+  assert.equal(ctrl.getState().lastRenderResult, null);
+  assert.equal(budget.getSnapshot().accountedBytes, 0);
+  assert.equal(budget.getSnapshot().reservationCount, 0);
+
+  ctrl.dispose();
+});
+
+test('69. Application upload-to-OPFS integration: single real-backed StorageBrokerClient, awaited init, atomic commit, active PCM mirror, failure isolation, and truthful memory-only fallback', async () => {
+  const { importAudioProject } = await import('../workflow/AudioImportCoordinator');
+  const { MemoryBudgetManager } = await import('../runtime/memory/MemoryBudgetManager');
+  const { AVAPARDAZ_MEMORY_POLICY } = await import('../runtime/memory/MemoryPolicy');
+  const { ProjectResourceLeaseSlot } = await import('./streamingIngest');
+
+  const { file, totalSamples } = createDeterministicMultiBlockWavFile();
+  const root = createInMemoryOpfsRoot();
+  const broker = createRealBackedStorageBroker(root);
+  const budget = new MemoryBudgetManager(AVAPARDAZ_MEMORY_POLICY);
+  const leaseSlot = new ProjectResourceLeaseSlot();
+
+  // Start init asynchronously and immediately invoke importAudioProject with the barrier
+  const brokerReady = broker.init();
+  const loaded = await importAudioProject(file, {
+    broker,
+    brokerReady,
+    memoryBudgetManager: budget,
+    retainActivePcmMirror: true,
+    chunkSeconds: 1,
+  });
+
+  const assetId = Object.keys(loaded.assets)[0];
+  const asset = loaded.assets[assetId];
+  assert.ok(asset);
+  assert.equal(asset.storageLifecycle, 'ready');
+  assert.ok(
+    asset.storageBackend === 'OPFS-SyncAccessHandle' ||
+      asset.storageBackend === 'OPFS-Writable',
+    `Expected authoritative OPFS backend, got ${String(asset.storageBackend)}`,
+  );
+  assert.equal(asset.ingestTransaction?.state, 'COMMITTED');
+  assert.equal(
+    asset.ingestTransaction?.successfullyPersistedBlockCount,
+    asset.seekTable.length,
+  );
+
+  // Ready manifest in real OPFS root matches all 7 mandatory invariants
+  const readyManifest = await broker.getReadyAssetManifest(assetId);
+  assert.ok(readyManifest);
+  assert.equal(readyManifest.assetId, asset.id);
+  assert.equal(readyManifest.state, 'ready');
+  assert.equal(readyManifest.contentSha256, asset.contentHash);
+  assert.equal(readyManifest.totalSamples, asset.exactSampleCount);
+  assert.equal(readyManifest.totalBlocks, asset.seekTable.length);
+  assert.equal(readyManifest.bytesPerSample, Float32Array.BYTES_PER_ELEMENT);
+  assert.equal(readyManifest.blockSizeSamples, asset.blockSizeSamples);
+
+  // Active PCM mirror is populated and accounted for exact totalSamples * 4 bytes (OPFS disk not counted)
+  const expectedRamBytes = totalSamples * Float32Array.BYTES_PER_ELEMENT;
+  assert.equal(loaded.pcmSources[assetId]?.length, totalSamples);
+  assert.ok(loaded.runtimeResourceLease && !loaded.runtimeResourceLease.disposed);
+  assert.equal(budget.getSnapshot().accountedBytes, expectedRamBytes);
+  leaseSlot.replaceWith(loaded.runtimeResourceLease);
+
+  // Injected storage failure during a subsequent upload MUST preserve the previous active project & lease
+  const failingHarness = createInjectedIngestBroker({
+    opfsAvailable: true,
+    onWriteChunk: async ({ chunkIndex, defaultResult }) =>
+      chunkIndex === 1
+        ? { ...defaultResult, persisted: false, bytesWritten: 0, backend: 'OPFS-Unavailable' }
+        : defaultResult,
+  });
+  await assert.rejects(() =>
+    importAudioProject(file, {
+      broker: failingHarness.broker,
+      brokerReady: Promise.resolve(failingHarness.broker.getTelemetry()),
+      memoryBudgetManager: budget,
+      retainActivePcmMirror: true,
+      chunkSeconds: 1,
+    }),
+  );
+  assert.equal(loaded.runtimeResourceLease.disposed, false);
+  assert.equal(budget.getSnapshot().accountedBytes, expectedRamBytes);
+  assert.equal(failingHarness.abortCalls.length, 1);
+
+  // Truthful memory-only fallback when OPFS is genuinely unavailable
+  const fallbackBudget = new MemoryBudgetManager(AVAPARDAZ_MEMORY_POLICY);
+  const unavailableBroker = new StorageBrokerClient(); // No worker/OPFS in Node environment
+  const unavailableReady = unavailableBroker.init();
+  const fallbackLoaded = await importAudioProject(file, {
+    broker: unavailableBroker,
+    brokerReady: unavailableReady,
+    memoryBudgetManager: fallbackBudget,
+    retainActivePcmMirror: true,
+    chunkSeconds: 1,
+  });
+  const fbAssetId = Object.keys(fallbackLoaded.assets)[0];
+  const fbAsset = fallbackLoaded.assets[fbAssetId];
+  assert.notEqual(fbAsset.storageLifecycle, 'ready');
+  assert.equal(fbAsset.storageBackend, 'Memory-Bounded-Fallback');
+  assert.equal(fallbackLoaded.pcmSources[fbAssetId]?.length, totalSamples);
+  assert.equal(fallbackBudget.getSnapshot().accountedBytes, expectedRamBytes);
+
+  fallbackLoaded.runtimeResourceLease?.dispose();
+  assert.equal(fallbackBudget.getSnapshot().accountedBytes, 0);
+  unavailableBroker.dispose();
+
+  leaseSlot.clear();
+  assert.equal(budget.getSnapshot().accountedBytes, 0);
+  broker.dispose();
+});
+
+
+
 

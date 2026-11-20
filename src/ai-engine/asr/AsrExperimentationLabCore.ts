@@ -1,12 +1,9 @@
-import { AcousticProfile } from '../../contracts/v1_2';
 import { resampleTo16kMono } from '../../engine/resampler';
 import {
-  alignPersianScriptToAudio,
-  buildOfflineAcousticSegmentedTranscript,
-  extractAcousticSpeechBursts,
-  optimizeAndAnalyzeTrilingualAsrTranscript,
-} from '../../engine/persianAsrTranscriber';
-import { MultilingualCodeSwitchAndArabicEngine } from './MultilingualCodeSwitchAndArabicEngine';
+  createLocalEngineDescriptor,
+  LabLocalInferenceAdapter,
+  LabLocalInferenceAdapterOptions,
+} from './LabLocalInferenceAdapter';
 
 export const LAB_EVALUATION_ALGORITHM_VERSION = 'Norm-FA-v1.0-Levenshtein';
 
@@ -21,12 +18,28 @@ export type AsrLabEngineId =
 
 export type EngineExecutionStatus =
   | 'SUCCESS'
+  | 'MODEL_NOT_INSTALLED'
+  | 'MODEL_NOT_READY'
   | 'MISSING_API_KEY'
   | 'WORKER_OFFLINE'
   | 'TIMEOUT'
   | 'NETWORK_ERROR'
   | 'API_ERROR'
   | 'EMPTY_RESPONSE';
+
+export type HypothesisProvenance =
+  | 'MODEL_INFERENCE'
+  | 'DETERMINISTIC_TEST_FIXTURE'
+  | 'ACOUSTIC_SEGMENTATION'
+  | 'FORCED_ALIGNMENT'
+  | 'NONE';
+
+export interface VerifiedModelIdentity {
+  readonly modelId: string | null;
+  readonly modelVersion: string | null;
+  readonly modelSha256: string | null;
+  readonly architecture: string | null;
+}
 
 export type CostEstimateLabel =
   | 'FREE_LOCAL_EXECUTION'
@@ -39,9 +52,13 @@ export interface AsrEngineRegistryDescriptor {
   readonly version: string;
   readonly vendorOrFamily: string;
   readonly deploymentKind: 'LOCAL_IN_PROCESS' | 'COMMERCIAL_CLOUD_API' | 'SELF_HOSTED_GPU_WORKER';
+  readonly architecture?: string | null;
   readonly supportsPersian: boolean;
   readonly supportsEnglish: boolean;
   readonly supportsCodeSwitching: boolean;
+  readonly supportsTranscription: boolean;
+  readonly supportsForcedAlignment: boolean;
+  readonly supportsSpeechSegmentation: boolean;
   readonly supportsBatch: boolean;
   readonly supportsStreaming: boolean;
   readonly officialPricePerHourUsd: number;
@@ -49,29 +66,20 @@ export interface AsrEngineRegistryDescriptor {
 }
 
 export const PHASE1_ENGINE_REGISTRY: readonly AsrEngineRegistryDescriptor[] = [
-  {
-    engineId: 'avapardaz-local-ctc-dsp',
-    displayName: 'Avapardaz Local CTC Viterbi + Trilingual DSP',
-    version: '1.2.0-local',
-    vendorOrFamily: 'آواپرداز (موتور محلی بدون نیاز به API خارجی)',
-    deploymentKind: 'LOCAL_IN_PROCESS',
-    supportsPersian: true,
-    supportsEnglish: true,
-    supportsCodeSwitching: true,
-    supportsBatch: true,
-    supportsStreaming: true,
-    officialPricePerHourUsd: 0.0,
-    requiredEnvVar: null,
-  },
+  createLocalEngineDescriptor(),
   {
     engineId: 'elevenlabs-scribe-v3',
     displayName: 'ElevenLabs Scribe v3',
     version: 'scribe_v3 (2026-11)',
     vendorOrFamily: 'ElevenLabs Commercial API',
     deploymentKind: 'COMMERCIAL_CLOUD_API',
+    architecture: 'COMMERCIAL_CLOUD_ASR',
     supportsPersian: true,
     supportsEnglish: true,
     supportsCodeSwitching: true,
+    supportsTranscription: true,
+    supportsForcedAlignment: false,
+    supportsSpeechSegmentation: false,
     supportsBatch: true,
     supportsStreaming: false,
     officialPricePerHourUsd: 0.30,
@@ -83,9 +91,13 @@ export const PHASE1_ENGINE_REGISTRY: readonly AsrEngineRegistryDescriptor[] = [
     version: 'nova-3-multilingual (2026-10)',
     vendorOrFamily: 'Deepgram Commercial API',
     deploymentKind: 'COMMERCIAL_CLOUD_API',
+    architecture: 'COMMERCIAL_CLOUD_ASR',
     supportsPersian: true,
     supportsEnglish: true,
     supportsCodeSwitching: true,
+    supportsTranscription: true,
+    supportsForcedAlignment: false,
+    supportsSpeechSegmentation: false,
     supportsBatch: true,
     supportsStreaming: true,
     officialPricePerHourUsd: 0.26,
@@ -97,9 +109,13 @@ export const PHASE1_ENGINE_REGISTRY: readonly AsrEngineRegistryDescriptor[] = [
     version: 'gpt-transcribe (2026)',
     vendorOrFamily: 'OpenAI Speech-to-Text API',
     deploymentKind: 'COMMERCIAL_CLOUD_API',
+    architecture: 'COMMERCIAL_CLOUD_ASR',
     supportsPersian: true,
     supportsEnglish: true,
     supportsCodeSwitching: true,
+    supportsTranscription: true,
+    supportsForcedAlignment: false,
+    supportsSpeechSegmentation: false,
     supportsBatch: true,
     supportsStreaming: false,
     officialPricePerHourUsd: 0.36,
@@ -111,9 +127,13 @@ export const PHASE1_ENGINE_REGISTRY: readonly AsrEngineRegistryDescriptor[] = [
     version: 'Qwen3-ASR-1.7B',
     vendorOrFamily: 'Alibaba Qwen Open-Source (GPU Worker)',
     deploymentKind: 'SELF_HOSTED_GPU_WORKER',
+    architecture: 'QWEN3_ASR_LLM',
     supportsPersian: true,
     supportsEnglish: true,
     supportsCodeSwitching: true,
+    supportsTranscription: true,
+    supportsForcedAlignment: false,
+    supportsSpeechSegmentation: false,
     supportsBatch: true,
     supportsStreaming: true,
     officialPricePerHourUsd: 0.0,
@@ -125,9 +145,13 @@ export const PHASE1_ENGINE_REGISTRY: readonly AsrEngineRegistryDescriptor[] = [
     version: 'whisper-large-v3-turbo (51866 vocab)',
     vendorOrFamily: 'OpenAI Open-Source MIT (GPU Worker)',
     deploymentKind: 'SELF_HOSTED_GPU_WORKER',
+    architecture: 'WHISPER_SEQ2SEQ',
     supportsPersian: true,
     supportsEnglish: true,
     supportsCodeSwitching: true,
+    supportsTranscription: true,
+    supportsForcedAlignment: false,
+    supportsSpeechSegmentation: false,
     supportsBatch: true,
     supportsStreaming: false,
     officialPricePerHourUsd: 0.0,
@@ -139,9 +163,13 @@ export const PHASE1_ENGINE_REGISTRY: readonly AsrEngineRegistryDescriptor[] = [
     version: 'gemini-2.5-flash',
     vendorOrFamily: 'Google GenAI API',
     deploymentKind: 'COMMERCIAL_CLOUD_API',
+    architecture: 'MULTIMODAL_CLOUD_ASR',
     supportsPersian: true,
     supportsEnglish: true,
     supportsCodeSwitching: true,
+    supportsTranscription: true,
+    supportsForcedAlignment: false,
+    supportsSpeechSegmentation: false,
     supportsBatch: true,
     supportsStreaming: false,
     officialPricePerHourUsd: 0.18,
@@ -194,14 +222,44 @@ export interface AsrPairEvaluationReport {
   readonly normalizedMetrics: SingleTierMetricBreakdown;
 }
 
+/**
+ * Pure inference configuration passed to ASR provider adapters.
+ * MUST NEVER contain reference transcripts, expected gold outputs, or reference-derived hints.
+ */
 export interface EngineAdapterConfig {
   readonly expectedLanguage: 'fa' | 'en' | 'fa-en-mixed' | 'auto';
   readonly mode: 'batch' | 'live';
   readonly keyterms: readonly string[];
   readonly contextPrompt?: string;
   readonly timeoutMs?: number;
-  /** Optional acoustic Hint/Script for local CTC Forced Aligner mode when evaluating alignment accuracy */
-  readonly localAcousticCandidateScript?: string;
+  readonly isFrozenTestSample?: boolean;
+}
+
+export interface AsrInferenceRequest {
+  readonly audio: AudioIngestionValidationReport;
+  readonly config: EngineAdapterConfig;
+  readonly signal: AbortSignal;
+  readonly experimentId: string;
+}
+
+export interface AsrInferenceWordPrediction {
+  readonly word: string;
+  readonly normalizedWord: string;
+  readonly startSec: number;
+  readonly endSec: number;
+  readonly confidence: number;
+}
+
+export interface AsrAdapterExecutionOutput {
+  readonly status: EngineExecutionStatus;
+  readonly rawTranscript: string;
+  readonly normalizedTranscript?: string;
+  readonly words?: readonly AsrInferenceWordPrediction[];
+  readonly meanConfidence?: number | null;
+  readonly hypothesisProvenance?: HypothesisProvenance;
+  readonly modelIdentity?: VerifiedModelIdentity;
+  readonly errorMessage?: string;
+  readonly isMockTestOnly?: boolean;
 }
 
 export interface EngineExperimentRunResult {
@@ -209,6 +267,9 @@ export interface EngineExperimentRunResult {
   readonly engineName: string;
   readonly engineVersion: string;
   readonly status: EngineExecutionStatus;
+  readonly hypothesisProvenance: HypothesisProvenance;
+  readonly modelIdentity: VerifiedModelIdentity;
+  readonly eligibleForAccuracyLeaderboard: boolean;
   /** True ONLY inside isolated unit tests; NEVER reported as a real engine run in dashboard */
   readonly isMockTestOnly: boolean;
   readonly config: EngineAdapterConfig;
@@ -218,6 +279,8 @@ export interface EngineExperimentRunResult {
   readonly rtf: number;
   readonly rawOutputText: string;
   readonly normalizedOutputText: string;
+  readonly words?: readonly AsrInferenceWordPrediction[];
+  readonly meanConfidence?: number | null;
   readonly evaluation: AsrPairEvaluationReport | null;
   readonly costUsd: number;
   readonly costLabel: CostEstimateLabel;
@@ -243,15 +306,7 @@ export interface AsrLabExperimentRecord {
 
 export interface AsrProviderAdapter {
   readonly descriptor: AsrEngineRegistryDescriptor;
-  transcribe(params: {
-    audio: AudioIngestionValidationReport;
-    config: EngineAdapterConfig;
-  }): Promise<{
-    status: EngineExecutionStatus;
-    rawTranscript: string;
-    errorMessage?: string;
-    isMockTestOnly?: boolean;
-  }>;
+  transcribe(request: AsrInferenceRequest): Promise<AsrAdapterExecutionOutput>;
 }
 
 const PERSIAN_ZWNJ_PREFIXES = new Set(['می', 'نمی']);
@@ -269,6 +324,15 @@ const PERSIAN_ZWNJ_SUFFIXES = new Set([
   'شان',
 ]);
 
+const SYNTHETIC_PLACEHOLDER_OUTPUT_RE = /(?:^|\s)(?:بخشِ_\d+|\[?بخش_گفتار_\d+\]?)(?:\s|$)/;
+
+const EMPTY_MODEL_IDENTITY: VerifiedModelIdentity = Object.freeze({
+  modelId: null,
+  modelVersion: null,
+  modelSha256: null,
+  architecture: null,
+});
+
 /**
  * Redacts any accidental secret, Bearer token, or API key pattern from logs and error strings.
  */
@@ -278,6 +342,39 @@ export function sanitizeSecretsFromText(input: string): string {
     .replace(/Bearer\s+[A-Za-z0-9\-._~+/]+=*/gi, 'Bearer [REDACTED_SECRET]')
     .replace(/\b(sk|xi|dg|AIza)[A-Za-z0-9\-_]{10,}\b/g, '[REDACTED_API_KEY]')
     .replace(/(api[_-]?key|token|secret)\s*[:=]\s*["']?[^\s"',]+/gi, '$1=[REDACTED]');
+}
+
+/**
+ * Constructs a clean, frozen inference config containing ONLY permitted inference fields,
+ * guaranteeing that no reference transcript or extraneous property can leak to adapters.
+ * For frozen test samples, strips keyterms and contextPrompt to prevent test-set adaptation.
+ */
+export function buildIsolatedInferenceConfig(
+  rawConfig: EngineAdapterConfig,
+): EngineAdapterConfig {
+  const isFrozen = Boolean(rawConfig.isFrozenTestSample);
+  const cleanKeyterms = isFrozen
+    ? []
+    : Array.isArray(rawConfig.keyterms)
+      ? rawConfig.keyterms
+          .filter((k): k is string => typeof k === 'string' && k.trim().length > 0)
+          .map((k) => k.trim())
+      : [];
+  const cleanPrompt =
+    !isFrozen && typeof rawConfig.contextPrompt === 'string' && rawConfig.contextPrompt.trim().length > 0
+      ? rawConfig.contextPrompt.trim()
+      : undefined;
+
+  return Object.freeze({
+    expectedLanguage: rawConfig.expectedLanguage,
+    mode: rawConfig.mode,
+    keyterms: Object.freeze(cleanKeyterms),
+    ...(cleanPrompt !== undefined ? { contextPrompt: cleanPrompt } : {}),
+    ...(typeof rawConfig.timeoutMs === 'number' && Number.isFinite(rawConfig.timeoutMs)
+      ? { timeoutMs: Math.max(10, Math.trunc(rawConfig.timeoutMs)) }
+      : {}),
+    ...(isFrozen ? { isFrozenTestSample: true } : {}),
+  });
 }
 
 /**
@@ -307,7 +404,7 @@ export function computeDeterministicAudioSha256(bytes: Uint8Array): string {
   let h6 = 0x1f83d9ab;
   let h7 = 0x5be0cd19;
 
-  // Sample up to first 64KB + middle + tail for fast synchronous hashing on large buffers, or full buffer if <= 128KB
+  // Sample up to first 64KB + tail for fast synchronous hashing on large buffers, or full buffer if <= 128KB
   const maxHashLen = 131072;
   let sampleBytes = bytes;
   if (bytes.length > maxHashLen) {
@@ -467,7 +564,6 @@ export function validateAndPreprocessAudioForLab(params: {
     };
   }
 
-  // Check for corrupted NaN/Infinity samples without mutating the original input array
   for (let i = 0; i < ch0.length; i += Math.max(1, Math.floor(ch0.length / 5000))) {
     if (!Number.isFinite(ch0[i])) {
       return {
@@ -496,7 +592,6 @@ export function validateAndPreprocessAudioForLab(params: {
   const rawByteView = new Uint8Array(ch0.buffer, ch0.byteOffset, ch0.byteLength);
   const audioSha256 = computeDeterministicAudioSha256(rawByteView);
 
-  // Perform REAL signal resampling to 16,000 Hz Mono (never just relabeling the sample rate!)
   const resampled = resampleTo16kMono(
     channelsPcm.map((c) => new Float32Array(c)),
     sampleRate,
@@ -539,41 +634,26 @@ export function validateAndPreprocessAudioForLab(params: {
 
 /**
  * Norm-FA-v1.0: Canonical Persian & English Unicode Normalization Policy.
- * Handles:
- * - Unicode NFC normalization
- * - Arabic Kaf/Yeh unification (ك -> ک, ي/ى/ئ -> ی)
- * - Persian (۰-۹) and Arabic-Indic (٠-٩) digits to canonical ASCII (0-9)
- * - ZWNJ (\u200c) normalization & Persian verbal prefix/suffix canonical joining
- * - Arabic diacritics/harakat stripping (including Tanwin اً -> ا)
- * - Punctuation stripping
  */
 export function normalizePersianEnglishForEval(text: string): string {
   if (!text) return '';
 
   let s = text.normalize('NFC');
 
-  // 1. Arabic Kaf / Yeh / Alef variants to standard Persian
   s = s
-    .replace(/[\u0643\u06ac\u06ad\u06ae]/g, '\u06a9') // ك -> ک
-    .replace(/[\u064a\u0649\u0626]/g, '\u06cc') // ي / ى / ئ -> ی
-    .replace(/[\u0623\u0625\u0622]/g, '\u0627') // أ / إ / آ -> ا
-    .replace(/[\u0629\u06c0]/g, '\u0647'); // ة / ۀ -> ه
+    .replace(/[\u0643\u06ac\u06ad\u06ae]/g, '\u06a9')
+    .replace(/[\u064a\u0649\u0626]/g, '\u06cc')
+    .replace(/[\u0623\u0625\u0622]/g, '\u0627')
+    .replace(/[\u0629\u06c0]/g, '\u0647');
 
-  // 2. Persian (۰-۹) and Arabic-Indic (٠-٩) digits to ASCII 0-9
   s = s
     .replace(/[\u06F0-\u06F9]/g, (d) => String(d.charCodeAt(0) - 0x06f0))
     .replace(/[\u0660-\u0669]/g, (d) => String(d.charCodeAt(0) - 0x0660));
 
-  // 3. Remove Arabic diacritics / harakat / tatweel (\u064B-\u065F, \u0670, \u0654, \u0640)
   s = s.replace(/[\u064B-\u065F\u0670\u0654\u0640]/g, '');
-
-  // 4. Replace ZWNJ (\u200c) and zero-width marks with space so prefix/suffix rule merges them uniformly
   s = s.replace(/[\u200b-\u200f\u202a-\u202e]+/g, ' ');
-
-  // 5. Remove punctuation marks (Persian, Arabic, Latin)
   s = s.replace(/[،؛.؟!?:«»"'()[\]{}\-_/\\|,@#$%^&*+=~`<>]+/g, ' ');
 
-  // 6. Tokenize, lowercase Latin, and unify Persian prefix/suffix attachment
   const rawTokens = s
     .split(/\s+/)
     .map((t) => t.trim().toLowerCase())
@@ -607,7 +687,7 @@ function computeLevenshteinAlignmentCounts<T>(
   const m = hypSeq.length;
 
   const dp: Int32Array[] = Array.from({ length: n + 1 }, () => new Int32Array(m + 1));
-  const op: Uint8Array[] = Array.from({ length: n + 1 }, () => new Uint8Array(m + 1)); // 0=hit, 1=sub, 2=del, 3=ins
+  const op: Uint8Array[] = Array.from({ length: n + 1 }, () => new Uint8Array(m + 1));
 
   for (let i = 1; i <= n; i++) {
     dp[i][0] = i;
@@ -730,100 +810,26 @@ export function evaluateTranscriptAgainstReference(
 }
 
 /**
- * Built-in Local Adapter 1: Avapardaz Local CTC Viterbi + Trilingual DSP Engine
- * Executes 100% locally in-process on the standardized 16kHz Mono PCM signal without any external API key.
+ * Local ASR Provider Adapter (AVP-ASR-GOLD-REFERENCE-ISOLATION-009).
+ * Delegates strictly to `LabLocalInferenceAdapter` backed by an initialized, verified local
+ * ONNX neural model runtime. Never injects reference text, never runs forced alignment, and
+ * never fabricates placeholder words when no neural model is installed or ready.
  */
-export class AvapardazLocalCtcDspAdapter implements AsrProviderAdapter {
-  public readonly descriptor = PHASE1_ENGINE_REGISTRY[0];
-
-  public async transcribe(params: {
-    audio: AudioIngestionValidationReport;
-    config: EngineAdapterConfig;
-  }): Promise<{
-    status: EngineExecutionStatus;
-    rawTranscript: string;
-    errorMessage?: string;
-    isMockTestOnly?: boolean;
-  }> {
-    const { audio, config } = params;
-    const pcm16k = audio.standardizedPcm16k;
-
-    const acousticProfile: AcousticProfile = {
-      assetId: `lab-${audio.audioSha256.slice(0, 12)}`,
-      noiseFloorDbfs: Math.min(-36, audio.rmsDbfs - 14),
-      roomToneRms: 0.008,
-      roomToneSample: pcm16k.subarray(0, Math.min(pcm16k.length, 16000)),
-      sampleRate: 16000,
-    };
-
-    const bursts = extractAcousticSpeechBursts(pcm16k, 16000, acousticProfile);
-    if (bursts.length === 0 && audio.rmsDbfs < -55) {
-      return {
-        status: 'EMPTY_RESPONSE',
-        rawTranscript: '',
-        errorMessage: 'سیگنال صوتی فاقد انرژی گفتار بالاتر از کف نویز اتاق است.',
-      };
-    }
-
-    const baseScript =
-      config.localAcousticCandidateScript && config.localAcousticCandidateScript.trim().length > 0
-        ? config.localAcousticCandidateScript.trim()
-        : buildOfflineAcousticSegmentedTranscript(pcm16k, 16000, acousticProfile);
-
-    const aligned = alignPersianScriptToAudio({
-      pcm: pcm16k,
-      sampleRate: 16000,
-      trackId: 'lab-track-1',
-      speakerName: 'گوینده',
-      rawTranscriptText: baseScript,
-      acousticProfile,
-      alignmentSource: 'ASR',
-    });
-
-    const optimized = optimizeAndAnalyzeTrilingualAsrTranscript({
-      tokens: aligned.tokens,
-      pcm: pcm16k,
-      sampleRate: 16000,
-      englishRenderMode: 'LATIN_TECHNICAL',
-      preserveArabicOrthography: true,
-    });
-
-    // Apply any matching keyterms from config via phonetic skeleton matching
-    const keytermMap = new Map<string, string>();
-    for (const kt of config.keyterms) {
-      const skel = MultilingualCodeSwitchAndArabicEngine.toCrossScriptPhoneticSkeleton(kt);
-      if (skel.length >= 2) keytermMap.set(skel, kt);
-    }
-
-    const words = optimized.tokens.map((t) => {
-      const skel = MultilingualCodeSwitchAndArabicEngine.toCrossScriptPhoneticSkeleton(
-        t.displayText,
-      );
-      return keytermMap.get(skel) ?? t.displayText;
-    });
-
-    const rawTranscript = words.join(' ').trim();
-    if (!rawTranscript) {
-      return {
-        status: 'EMPTY_RESPONSE',
-        rawTranscript: '',
-        errorMessage: 'خروجی موتور پس از پردازش خالی بود.',
-      };
-    }
-
-    return {
-      status: 'SUCCESS',
-      rawTranscript,
-      isMockTestOnly: false,
-    };
+export class AvapardazLocalCtcDspAdapter extends LabLocalInferenceAdapter {
+  constructor(options?: LabLocalInferenceAdapterOptions) {
+    super(options);
   }
 }
 
+export { createLocalEngineDescriptor, LabLocalInferenceAdapter } from './LabLocalInferenceAdapter';
+export type {
+  LabLocalInferenceAdapterOptions,
+  LocalModelRuntimeBinding,
+} from './LabLocalInferenceAdapter';
+
 /**
  * Remote / Cloud Provider Adapter that queries the server-side `/api/v1/lab/provider-transcribe` endpoint
- * (which checks real server environment variables `ELEVENLABS_API_KEY`, `DEEPGRAM_API_KEY`, `OPENAI_API_KEY`,
- * `GEMINI_API_KEY`, `QWEN3_ASR_WORKER_URL`, `WHISPER_WORKER_URL`) or reports honest `MISSING_API_KEY` / `WORKER_OFFLINE`
- * without ever fabricating vendor outputs.
+ * or reports honest `MISSING_API_KEY` / `WORKER_OFFLINE` without fabricating vendor outputs.
  */
 export class ServerBackedProviderAdapter implements AsrProviderAdapter {
   constructor(
@@ -832,32 +838,33 @@ export class ServerBackedProviderAdapter implements AsrProviderAdapter {
       engineId: AsrLabEngineId;
       audio: AudioIngestionValidationReport;
       config: EngineAdapterConfig;
-    }) => Promise<{
-      status: EngineExecutionStatus;
-      rawTranscript: string;
-      errorMessage?: string;
-      isMockTestOnly?: boolean;
-    }>,
+      signal: AbortSignal;
+      experimentId: string;
+    }) => Promise<AsrAdapterExecutionOutput>,
   ) {}
 
-  public async transcribe(params: {
-    audio: AudioIngestionValidationReport;
-    config: EngineAdapterConfig;
-  }): Promise<{
-    status: EngineExecutionStatus;
-    rawTranscript: string;
-    errorMessage?: string;
-    isMockTestOnly?: boolean;
-  }> {
+  public async transcribe(request: AsrInferenceRequest): Promise<AsrAdapterExecutionOutput> {
+    if (request.signal.aborted) {
+      return {
+        status: 'TIMEOUT',
+        rawTranscript: '',
+        hypothesisProvenance: 'NONE',
+        modelIdentity: EMPTY_MODEL_IDENTITY,
+        errorMessage: 'درخواست پیش از ارسال لغو یا منقضی شد.',
+        isMockTestOnly: false,
+      };
+    }
+
     if (this.customTransport) {
       return this.customTransport({
         engineId: this.descriptor.engineId,
-        audio: params.audio,
-        config: params.config,
+        audio: request.audio,
+        config: request.config,
+        signal: request.signal,
+        experimentId: request.experimentId,
       });
     }
 
-    // Check if running in Node.js without a live browser fetch context
     if (typeof window === 'undefined') {
       const envKey = this.descriptor.requiredEnvVar;
       const envVal = envKey ? process.env[envKey] : undefined;
@@ -868,6 +875,8 @@ export class ServerBackedProviderAdapter implements AsrProviderAdapter {
               ? 'WORKER_OFFLINE'
               : 'MISSING_API_KEY',
           rawTranscript: '',
+          hypothesisProvenance: 'NONE',
+          modelIdentity: EMPTY_MODEL_IDENTITY,
           errorMessage:
             this.descriptor.deploymentKind === 'SELF_HOSTED_GPU_WORKER'
               ? `آدرس سرور GPU (${envKey}) در متغیرهای محیطی تنظیم نشده است.`
@@ -878,40 +887,64 @@ export class ServerBackedProviderAdapter implements AsrProviderAdapter {
     }
 
     try {
-      const controller = new AbortController();
-      const timeoutMs = params.config.timeoutMs ?? 15000;
-      const timer = setTimeout(() => controller.abort(), timeoutMs);
-
       const response = await fetch('/api/v1/lab/provider-transcribe', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           engineId: this.descriptor.engineId,
-          audioSha256: params.audio.audioSha256,
-          durationSec: params.audio.durationSec,
-          expectedLanguage: params.config.expectedLanguage,
-          keyterms: params.config.keyterms,
-          contextPrompt: params.config.contextPrompt,
+          experimentId: request.experimentId,
+          audioSha256: request.audio.audioSha256,
+          durationSec: request.audio.durationSec,
+          expectedLanguage: request.config.expectedLanguage,
+          keyterms: request.config.keyterms,
+          contextPrompt: request.config.contextPrompt,
         }),
-        signal: controller.signal,
+        signal: request.signal,
       });
-      clearTimeout(timer);
 
       const data = await response.json();
+      const status: EngineExecutionStatus =
+        data.status ?? (response.ok ? 'SUCCESS' : 'API_ERROR');
+      const rawTranscript = typeof data.rawTranscript === 'string' ? data.rawTranscript : '';
       return {
-        status: data.status ?? (response.ok ? 'SUCCESS' : 'API_ERROR'),
-        rawTranscript: data.rawTranscript ?? '',
+        status,
+        rawTranscript,
+        hypothesisProvenance:
+          status === 'SUCCESS' && rawTranscript.trim().length > 0
+            ? 'MODEL_INFERENCE'
+            : 'NONE',
+        modelIdentity:
+          status === 'SUCCESS'
+            ? {
+                modelId: this.descriptor.engineId,
+                modelVersion: this.descriptor.version,
+                modelSha256: null,
+                architecture: this.descriptor.architecture ?? 'REMOTE_ASR',
+              }
+            : EMPTY_MODEL_IDENTITY,
         errorMessage: data.errorMessage
           ? sanitizeSecretsFromText(String(data.errorMessage))
           : undefined,
         isMockTestOnly: false,
       };
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      if (msg.includes('abort') || msg.includes('Timeout')) {
+      if (request.signal.aborted) {
         return {
           status: 'TIMEOUT',
           rawTranscript: '',
+          hypothesisProvenance: 'NONE',
+          modelIdentity: EMPTY_MODEL_IDENTITY,
+          errorMessage: 'مهلت زمانی (Timeout) ارتباط با سرویس به پایان رسید.',
+          isMockTestOnly: false,
+        };
+      }
+      const msg = err instanceof Error ? err.message : String(err);
+      if (/abort|timeout/i.test(msg)) {
+        return {
+          status: 'TIMEOUT',
+          rawTranscript: '',
+          hypothesisProvenance: 'NONE',
+          modelIdentity: EMPTY_MODEL_IDENTITY,
           errorMessage: 'مهلت زمانی (Timeout) ارتباط با سرویس به پایان رسید.',
           isMockTestOnly: false,
         };
@@ -922,6 +955,8 @@ export class ServerBackedProviderAdapter implements AsrProviderAdapter {
             ? 'WORKER_OFFLINE'
             : 'MISSING_API_KEY',
         rawTranscript: '',
+        hypothesisProvenance: 'NONE',
+        modelIdentity: EMPTY_MODEL_IDENTITY,
         errorMessage: sanitizeSecretsFromText(
           this.descriptor.deploymentKind === 'SELF_HOSTED_GPU_WORKER'
             ? `سرور GPU (${this.descriptor.requiredEnvVar}) در دسترس نیست.`
@@ -934,9 +969,9 @@ export class ServerBackedProviderAdapter implements AsrProviderAdapter {
 }
 
 /**
- * Executes a reproducible multi-engine ASR experiment over an identical validated audio input.
- * Guarantees fault isolation: if any engine fails, times out, or lacks an API key, other engines
- * continue executing uninterrupted.
+ * Executes a reproducible multi-engine ASR experiment over an identical validated audio input
+ * with strict ground-truth isolation, per-engine AbortController timeout/cancellation, and
+ * 7-gate accuracy leaderboard admission control.
  */
 export async function runAsrLabExperiment(params: {
   experimentId?: string;
@@ -945,6 +980,8 @@ export async function runAsrLabExperiment(params: {
   selectedEngineIds: readonly AsrLabEngineId[];
   config: EngineAdapterConfig;
   customAdapters?: ReadonlyMap<AsrLabEngineId, AsrProviderAdapter>;
+  localAdapterOptions?: LabLocalInferenceAdapterOptions;
+  signal?: AbortSignal;
 }): Promise<AsrLabExperimentRecord> {
   const {
     experimentId = `EXP-${Date.now()}-${params.audio.audioSha256.slice(0, 6)}`,
@@ -953,22 +990,31 @@ export async function runAsrLabExperiment(params: {
     selectedEngineIds,
     config,
     customAdapters,
+    localAdapterOptions,
+    signal: experimentSignal,
   } = params;
 
+  // Gate A — Valid input
   if (!audio.isValid) {
     throw new Error(
       `INVALID_AUDIO_FOR_EXPERIMENT: ${audio.errorCode ?? 'UNKNOWN'} - ${audio.errorMessageFa ?? ''}`,
     );
   }
 
+  // Gate B — Independent reference (remains strictly inside evaluator scope; never exposed to adapters)
   if (!referenceTranscriptRaw || !referenceTranscriptRaw.trim()) {
     throw new Error(
       'MISSING_REFERENCE_TRANSCRIPT: متن مرجع تاییدشده توسط انسان برای اجرای آزمایش الزامی است.',
     );
   }
 
+  const isolatedConfig = buildIsolatedInferenceConfig(config);
+
   const defaultAdapters = new Map<AsrLabEngineId, AsrProviderAdapter>();
-  defaultAdapters.set('avapardaz-local-ctc-dsp', new AvapardazLocalCtcDspAdapter());
+  defaultAdapters.set(
+    'avapardaz-local-ctc-dsp',
+    new AvapardazLocalCtcDspAdapter(localAdapterOptions),
+  );
   for (const desc of PHASE1_ENGINE_REGISTRY.slice(1)) {
     defaultAdapters.set(desc.engineId, new ServerBackedProviderAdapter(desc));
   }
@@ -984,54 +1030,152 @@ export async function runAsrLabExperiment(params: {
 
     const startPerf = performance.now();
     const startTimestampIso = new Date().toISOString();
-    const timeoutMs = config.timeoutMs ?? 15000;
+    const timeoutMs = isolatedConfig.timeoutMs ?? 15000;
 
     let status: EngineExecutionStatus = 'API_ERROR';
     let rawOutputText = '';
+    let adapterNormalizedText: string | undefined;
+    let words: readonly AsrInferenceWordPrediction[] | undefined;
+    let meanConfidence: number | null | undefined;
+    let hypothesisProvenance: HypothesisProvenance = 'NONE';
+    let modelIdentity: VerifiedModelIdentity = EMPTY_MODEL_IDENTITY;
     let errorMessage: string | undefined;
     let isMockTestOnly = false;
+
+    const engineController = new AbortController();
+    let timedOut = false;
+    let externallyCancelled = false;
+    let finalized = false;
+
+    const onExperimentAbort = () => {
+      externallyCancelled = true;
+      if (!engineController.signal.aborted) {
+        engineController.abort(experimentSignal?.reason ?? new Error('EXPERIMENT_CANCELLED'));
+      }
+    };
+
+    if (experimentSignal) {
+      if (experimentSignal.aborted) {
+        onExperimentAbort();
+      } else {
+        experimentSignal.addEventListener('abort', onExperimentAbort, { once: true });
+      }
+    }
+
+    let timeoutHandle: ReturnType<typeof setTimeout> | null = null;
+    let onEngineAbort: (() => void) | null = null;
 
     try {
       if (!adapter) {
         status = 'API_ERROR';
         errorMessage = `آداپتور موتور ${engineId} یافت نشد.`;
+      } else if (engineController.signal.aborted) {
+        status = timedOut ? 'TIMEOUT' : 'API_ERROR';
+        errorMessage = externallyCancelled
+          ? 'اجرای آزمایش پیش از شروع لغو شد.'
+          : `مهلت زمانی پردازش (${timeoutMs}ms) به پایان رسید.`;
       } else {
-        const timeoutPromise = new Promise<{
-          status: EngineExecutionStatus;
-          rawTranscript: string;
-          errorMessage?: string;
-          isMockTestOnly?: boolean;
-        }>((resolve) => {
-          setTimeout(() => {
+        const abortRacePromise = new Promise<AsrAdapterExecutionOutput>((resolve) => {
+          onEngineAbort = () => {
             resolve({
-              status: 'TIMEOUT',
+              status: timedOut ? 'TIMEOUT' : 'API_ERROR',
               rawTranscript: '',
-              errorMessage: `مهلت زمانی پردازش (${timeoutMs}ms) به پایان رسید.`,
+              hypothesisProvenance: 'NONE',
+              modelIdentity: EMPTY_MODEL_IDENTITY,
+              errorMessage: timedOut
+                ? `مهلت زمانی پردازش (${timeoutMs}ms) به پایان رسید.`
+                : 'اجرای آزمایش توسط کاربر لغو شد.',
+              isMockTestOnly: false,
             });
-          }, timeoutMs);
+          };
+          engineController.signal.addEventListener('abort', onEngineAbort, { once: true });
         });
 
-        const res = await Promise.race([
-          adapter.transcribe({ audio, config }),
-          timeoutPromise,
-        ]);
+        timeoutHandle = setTimeout(() => {
+          timedOut = true;
+          if (!engineController.signal.aborted) {
+            engineController.abort(new Error(`ASR_ENGINE_TIMEOUT_${timeoutMs}ms`));
+          }
+        }, timeoutMs);
 
-        status = res.status;
-        rawOutputText = (res.rawTranscript ?? '').trim();
-        isMockTestOnly = Boolean(res.isMockTestOnly);
-        errorMessage = res.errorMessage
-          ? sanitizeSecretsFromText(res.errorMessage)
-          : undefined;
+        // Strictly pass ONLY { audio, config: isolatedConfig, signal, experimentId } — ZERO reference data!
+        const adapterPromise = adapter.transcribe({
+          audio,
+          config: isolatedConfig,
+          signal: engineController.signal,
+          experimentId,
+        });
+        // Prevent unhandled rejection if adapter rejects after timeout/cancellation
+        adapterPromise.catch(() => {});
 
-        if (status === 'SUCCESS' && rawOutputText.length === 0) {
-          status = 'EMPTY_RESPONSE';
-          errorMessage = 'پاسخ دریافتی از موتور خالی بود.';
+        const res = await Promise.race([adapterPromise, abortRacePromise]);
+        finalized = true;
+
+        if (timedOut) {
+          status = 'TIMEOUT';
+          rawOutputText = '';
+          hypothesisProvenance = 'NONE';
+          modelIdentity = EMPTY_MODEL_IDENTITY;
+          errorMessage = `مهلت زمانی پردازش (${timeoutMs}ms) به پایان رسید.`;
+        } else if (externallyCancelled) {
+          status = 'API_ERROR';
+          rawOutputText = '';
+          hypothesisProvenance = 'NONE';
+          modelIdentity = EMPTY_MODEL_IDENTITY;
+          errorMessage = 'اجرای آزمایش لغو شد.';
+        } else {
+          status = res.status;
+          rawOutputText = (res.rawTranscript ?? '').trim();
+          adapterNormalizedText = res.normalizedTranscript;
+          words = res.words;
+          meanConfidence = res.meanConfidence;
+          isMockTestOnly = Boolean(res.isMockTestOnly);
+          hypothesisProvenance =
+            res.hypothesisProvenance ??
+            (status === 'SUCCESS'
+              ? isMockTestOnly
+                ? 'DETERMINISTIC_TEST_FIXTURE'
+                : 'MODEL_INFERENCE'
+              : 'NONE');
+          modelIdentity = res.modelIdentity ?? EMPTY_MODEL_IDENTITY;
+          errorMessage = res.errorMessage
+            ? sanitizeSecretsFromText(res.errorMessage)
+            : undefined;
+
+          // Gate C — Real hypothesis (reject empty or synthetic placeholder outputs)
+          if (status === 'SUCCESS' && rawOutputText.length === 0) {
+            status = 'EMPTY_RESPONSE';
+            hypothesisProvenance = 'NONE';
+            errorMessage = 'پاسخ دریافتی از موتور خالی بود.';
+          } else if (
+            status === 'SUCCESS' &&
+            SYNTHETIC_PLACEHOLDER_OUTPUT_RE.test(rawOutputText)
+          ) {
+            status = 'EMPTY_RESPONSE';
+            rawOutputText = '';
+            hypothesisProvenance = 'NONE';
+            errorMessage = 'خروجی ساختگی بخش‌بندی صوتی به عنوان تشخیص گفتار معتبر رد شد.';
+          }
         }
       }
     } catch (err) {
-      status = 'API_ERROR';
-      const rawErr = err instanceof Error ? err.message : String(err);
-      errorMessage = sanitizeSecretsFromText(rawErr);
+      if (!finalized) {
+        status = timedOut ? 'TIMEOUT' : 'API_ERROR';
+        hypothesisProvenance = 'NONE';
+        modelIdentity = EMPTY_MODEL_IDENTITY;
+        const rawErr = err instanceof Error ? err.message : String(err);
+        errorMessage = sanitizeSecretsFromText(rawErr);
+      }
+    } finally {
+      if (timeoutHandle !== null) {
+        clearTimeout(timeoutHandle);
+      }
+      if (onEngineAbort) {
+        engineController.signal.removeEventListener('abort', onEngineAbort);
+      }
+      if (experimentSignal) {
+        experimentSignal.removeEventListener('abort', onExperimentAbort);
+      }
     }
 
     const endPerf = performance.now();
@@ -1042,12 +1186,32 @@ export async function runAsrLabExperiment(params: {
     );
 
     const normalizedOutputText =
-      status === 'SUCCESS' ? normalizePersianEnglishForEval(rawOutputText) : '';
+      status === 'SUCCESS' && rawOutputText.length > 0
+        ? adapterNormalizedText ?? normalizePersianEnglishForEval(rawOutputText)
+        : '';
 
-    const evaluation =
-      status === 'SUCCESS'
-        ? evaluateTranscriptAgainstReference(referenceTranscriptRaw, rawOutputText)
-        : null;
+    // Gate D, F, G — Genuine provenance + verified model identity + no false leaderboard admission
+    const hasVerifiedModelIdentity =
+      descriptor.deploymentKind === 'LOCAL_IN_PROCESS'
+        ? Boolean(
+            modelIdentity.modelId &&
+              modelIdentity.modelVersion &&
+              modelIdentity.modelSha256 &&
+              modelIdentity.architecture,
+          )
+        : Boolean(modelIdentity.modelId && modelIdentity.modelVersion);
+
+    const eligibleForAccuracyLeaderboard =
+      status === 'SUCCESS' &&
+      hypothesisProvenance === 'MODEL_INFERENCE' &&
+      !isMockTestOnly &&
+      rawOutputText.length > 0 &&
+      hasVerifiedModelIdentity;
+
+    // Gate E — Reference evaluation ONLY after inference output finalized and all gates pass
+    const evaluation = eligibleForAccuracyLeaderboard
+      ? evaluateTranscriptAgainstReference(referenceTranscriptRaw, rawOutputText)
+      : null;
 
     let costUsd = 0;
     let costLabel: CostEstimateLabel = 'NOT_BILLED_FAILED_RUN';
@@ -1066,16 +1230,21 @@ export async function runAsrLabExperiment(params: {
     return {
       engineId: descriptor.engineId,
       engineName: descriptor.displayName,
-      engineVersion: descriptor.version,
+      engineVersion: modelIdentity.modelVersion ?? descriptor.version,
       status,
+      hypothesisProvenance,
+      modelIdentity,
+      eligibleForAccuracyLeaderboard,
       isMockTestOnly,
-      config,
+      config: isolatedConfig,
       startTimestampIso,
       endTimestampIso,
       processingTimeMs,
       rtf,
       rawOutputText,
       normalizedOutputText,
+      words,
+      meanConfidence,
       evaluation,
       costUsd,
       costLabel,
@@ -1098,7 +1267,7 @@ export async function runAsrLabExperiment(params: {
     originalSampleRate: audio.originalSampleRate,
     originalChannels: audio.originalChannels,
     standardizedSampleRate: 16000,
-    expectedLanguage: config.expectedLanguage,
+    expectedLanguage: isolatedConfig.expectedLanguage,
     referenceTranscriptRaw: referenceTranscriptRaw.trim(),
     referenceTranscriptNormalized: normalizePersianEnglishForEval(referenceTranscriptRaw),
     evaluationAlgorithmVersion: LAB_EVALUATION_ALGORITHM_VERSION,

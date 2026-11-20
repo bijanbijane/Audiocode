@@ -7,7 +7,9 @@ import {
   Download,
   HardDrive,
   RefreshCw,
+  RotateCcw,
   ShieldAlert,
+  ShieldCheck,
   Trash2,
   Upload,
   WifiOff,
@@ -16,15 +18,18 @@ import {
 import {
   AppUpdateAndShellManager,
   AVAPARDAZ_VERSION_CONTRACT,
-  InMemoryModelChunkStorage,
+  deriveModelIdentityFromFileName,
   LocalModelLifecycleManager,
+  MAX_SAFE_MODEL_FILE_BYTES,
+  MODEL_CHUNK_SIZE_BYTES,
+  OpfsModelChunkStorage,
   PersistedProjectEnvelope,
   ProjectBackupAndRestore,
   ShellOfflineVerificationReport,
   StorageAndDiagnosticsManager,
   StorageBreakdownReport,
 } from '../lifecycle';
-import { computeSha256Hex } from '../security/LocalPrivacyPolicy';
+import { sha256Blob } from '../utils/StreamingSha256';
 import {
   createDefaultSubsystemHealthRegistry,
   getSharedDiagnosticLogger,
@@ -68,10 +73,34 @@ export const LifecycleManagementModal: React.FC<LifecycleManagementModalProps> =
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [backupMode, setBackupMode] = useState<'METADATA_ONLY' | 'COMPLETE_PACKAGE'>('METADATA_ONLY');
   const [diagJsonPreview, setDiagJsonPreview] = useState<string>('');
+  const [isInstallingModel, setIsInstallingModel] = useState(false);
+  const [installProgressPct, setInstallProgressPct] = useState<number | null>(null);
+  const [modelTick, setModelTick] = useState(0);
 
   useEffect(() => {
     setActiveTab(initialTab);
   }, [initialTab, isOpen]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    let active = true;
+    if (!modelManager.getSnapshot().initialized) {
+      modelManager
+        .initialize()
+        .then(() => {
+          if (active) {
+            setModelTick((t) => t + 1);
+            onModelStateChanged();
+          }
+        })
+        .catch(() => {
+          if (active) setModelTick((t) => t + 1);
+        });
+    }
+    return () => {
+      active = false;
+    };
+  }, [isOpen, modelManager, onModelStateChanged]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -84,48 +113,152 @@ export const LifecycleManagementModal: React.FC<LifecycleManagementModalProps> =
 
   if (!isOpen) return null;
 
+  // Read snapshot after any modelTick update
+  void modelTick;
   const modelSnap = modelManager.getSnapshot();
 
   const handleImportLocalOnnxModel = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    e.target.value = '';
+    const inputEl = e.currentTarget;
+    const file = inputEl.files?.[0];
     if (!file) return;
+
+    setIsInstallingModel(true);
+    setInstallProgressPct(0);
+    setStatusMessage(null);
+
     try {
-      const bytes = new Uint8Array(await file.arrayBuffer());
-      const sha = await computeSha256Hex(bytes);
+      if (!/\.onnx$/i.test(file.name)) {
+        setStatusMessage(
+          isFa
+            ? `فایل «${file.name}» پسوند معتبر .onnx ندارد.`
+            : `File "${file.name}" must have a .onnx extension.`,
+        );
+        return;
+      }
+
+      if (file.size <= 0) {
+        setStatusMessage(
+          isFa
+            ? 'فایل مدل انتخاب‌شده خالی است (۰ بایت) و نصب نشد.'
+            : 'Selected ONNX model file is empty (0 bytes) and was rejected.',
+        );
+        return;
+      }
+
+      if (file.size > MAX_SAFE_MODEL_FILE_BYTES) {
+        setStatusMessage(
+          isFa
+            ? 'حجم فایل مدل از سقف مجاز ۲ گیگابایت بیشتر است.'
+            : 'Selected model file exceeds the 2 GiB maximum size limit.',
+        );
+        return;
+      }
+
+      const identity = deriveModelIdentityFromFileName(file.name);
+
+      // Strictly streaming SHA-256 over bounded <= 1 MiB slices (NEVER file.arrayBuffer())
+      const sha = await sha256Blob(file, {
+        chunkSizeBytes: MODEL_CHUNK_SIZE_BYTES,
+      });
+
       const res = await modelManager.installOrUpdateFromStream({
         manifest: {
-          modelId: file.name.replace(/\.onnx$/i, '') || 'local-persian-asr',
-          modelVersion: '1.0.0-local',
+          modelId: identity.modelId,
+          modelVersion: identity.modelVersion,
           architecture: 'FASTCONFORMER_CTC',
-          fileName: file.name,
-          expectedByteLength: bytes.byteLength,
+          fileName: identity.safeFileName,
+          expectedByteLength: file.size,
           expectedSha256Hex: sha,
         },
         stream: {
           supportsRangeResume: false,
           async fetchRange(start: number, end: number) {
-            return bytes.subarray(start, end);
+            const sliceBuffer = await file.slice(start, end).arrayBuffer();
+            return new Uint8Array(sliceBuffer);
           },
         },
+        chunkSizeBytes: MODEL_CHUNK_SIZE_BYTES,
         sourceOrigin: 'local-user-file',
         license: 'User-supplied local ONNX weights',
+        onProgress: (pct) => {
+          setInstallProgressPct(pct);
+        },
       });
+
+      setModelTick((t) => t + 1);
       if (res.ok) {
-        await modelManager.verifyInstalledActiveModelOffline();
         setStatusMessage(
           isFa
-            ? `مدل محلی «${file.name}» با SHA-256 تأیید و ثبت شد.`
-            : `Local model "${file.name}" verified with SHA-256 and registered.`,
+            ? `مدل محلی «${file.name}» به‌صورت تکه‌ای در OPFS ذخیره و با SHA-256 تأیید شد (وضعیت: MODEL_AVAILABLE — آماده بارگذاری در موتور ONNX).`
+            : `Local model "${file.name}" persisted to OPFS and SHA-256 verified (state: MODEL_AVAILABLE — runtime session not yet initialized).`,
         );
         onModelStateChanged();
       } else {
-        setStatusMessage(res.snapshot.lastError ?? 'Model installation failed.');
+        setStatusMessage(
+          res.snapshot.lastError ??
+            (isFa ? 'نصب مدل محلی ناموفق بود.' : 'Local model installation failed.'),
+        );
+        onModelStateChanged();
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       setStatusMessage(
         isFa ? `خطا در نصب فایل مدل محلی: ${msg}` : `Failed to install local model: ${msg}`,
+      );
+      setModelTick((t) => t + 1);
+    } finally {
+      inputEl.value = '';
+      setIsInstallingModel(false);
+      setInstallProgressPct(null);
+    }
+  };
+
+  const handleVerifyModelOffline = async () => {
+    try {
+      const res = await modelManager.verifyInstalledActiveModelOffline();
+      setModelTick((t) => t + 1);
+      if (res.ok) {
+        setStatusMessage(
+          isFa
+            ? `راستی‌آزمایی تکه‌به‌تکه OPFS و SHA-256 مدل با موفقیت انجام شد (${res.state}).`
+            : `Incremental OPFS chunk & SHA-256 offline verification passed (${res.state}).`,
+        );
+      } else {
+        setStatusMessage(
+          res.error ??
+            (isFa ? 'تأیید اصالت مدل محلی ناموفق بود.' : 'Offline model verification failed.'),
+        );
+      }
+      onModelStateChanged();
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setStatusMessage(
+        isFa ? `خطا در راستی‌آزمایی مدل: ${msg}` : `Offline model verification error: ${msg}`,
+      );
+    }
+  };
+
+  const handleRollbackModel = async () => {
+    try {
+      const res = await modelManager.rollbackToPreviousVerifiedModel();
+      setModelTick((t) => t + 1);
+      if (res.ok && res.snapshot.activeModel) {
+        setStatusMessage(
+          isFa
+            ? `بازگشت ایمن به مدل قبلی تأییدشده (${res.snapshot.activeModel.modelId} v${res.snapshot.activeModel.version}) پس از بررسی کامل SHA-256 انجام شد.`
+            : `Rolled back cleanly to previous verified model (${res.snapshot.activeModel.modelId} v${res.snapshot.activeModel.version}) after full SHA-256 verification.`,
+        );
+        onModelStateChanged();
+      } else {
+        setStatusMessage(
+          res.snapshot.lastError ??
+            (isFa ? 'بازگشت به مدل قبلی ممکن نبود.' : 'Rollback to previous verified model failed.'),
+        );
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setStatusMessage(
+        isFa ? `خطا در بازگشت به مدل قبلی: ${msg}` : `Rollback error: ${msg}`,
       );
     }
   };
@@ -133,10 +266,11 @@ export const LifecycleManagementModal: React.FC<LifecycleManagementModalProps> =
   const handleRemoveModel = async () => {
     try {
       await modelManager.removeActiveModel();
+      setModelTick((t) => t + 1);
       setStatusMessage(
         isFa
-          ? 'مدل محلی حذف شد. تمام پروژه‌ها و فایل‌های صوتی کاربر دست‌نخورده باقی ماندند.'
-          : 'Local model removed. All user projects and audio files remain untouched.',
+          ? 'مدل محلی از OPFS حذف شد. تمام پروژه‌ها و فایل‌های صوتی کاربر دست‌نخورده باقی ماندند.'
+          : 'Local model removed from OPFS. All user projects and audio files remain untouched.',
       );
       onModelStateChanged();
     } catch (err) {
@@ -217,10 +351,11 @@ export const LifecycleManagementModal: React.FC<LifecycleManagementModalProps> =
   const handleSafeCleanup = async () => {
     try {
       const cleanedPartial = await modelManager.cleanupInvalidPartialDownloads();
+      setModelTick((t) => t + 1);
       setStatusMessage(
         isFa
-          ? `پاک‌سازی ایمن انجام شد (${cleanedPartial} فایل نیمه‌کاره حذف شد؛ هیچ پروژه یا صوت کاربری لمس نشد).`
-          : `Safe cleanup completed (${cleanedPartial} partial download(s) removed; user projects untouched).`,
+          ? `پاک‌سازی ایمن OPFS انجام شد (${cleanedPartial} دایرکتوری موقت یا یتیم حذف شد؛ مدل فعال، مدل قبلی و پروژه‌های کاربر لمس نشدند).`
+          : `Safe OPFS cleanup completed (${cleanedPartial} temporary/orphan artifact(s) removed; active/previous models and user projects untouched).`,
       );
       await handleInspectStorage();
     } catch (err) {
@@ -291,6 +426,13 @@ export const LifecycleManagementModal: React.FC<LifecycleManagementModalProps> =
     const bundle = {
       localOnlyNotice: 'Privacy-safe local diagnostics only. Zero audio/transcript content included.',
       appVersion: AVAPARDAZ_VERSION_CONTRACT.appVersion,
+      modelRepository: {
+        storageBackend: modelSnap.storageBackend,
+        state: modelSnap.state,
+        runtimeReady: modelSnap.runtimeReady,
+        activeModelId: modelSnap.activeModel?.modelId ?? null,
+        activeModelVersion: modelSnap.activeModel?.version ?? null,
+      },
       memory: {
         accountedBytes: memSnap.accountedBytes,
         highWaterMarkBytes: memSnap.highWaterMarkBytes,
@@ -312,6 +454,34 @@ export const LifecycleManagementModal: React.FC<LifecycleManagementModalProps> =
     { id: 'diagnostics', label: isFa ? 'عیب‌یابی و کارایی' : 'Diagnostics & Perf', icon: <ShieldAlert className="w-3.5 h-3.5" /> },
   ];
 
+  const describeModelState = () => {
+    if (!modelSnap.initialized) {
+      return isFa ? 'در حال بازیابی و راستی‌آزمایی مخزن OPFS...' : 'Initializing OPFS model repository...';
+    }
+    switch (modelSnap.state) {
+      case 'MODEL_READY':
+        return isFa
+          ? 'مدل در OPFS با SHA-256 تأیید شده و جلسه استنتاج ONNX آماده است.'
+          : 'Model verified in OPFS and ONNX inference runtime is initialized.';
+      case 'MODEL_AVAILABLE':
+        return isFa
+          ? 'مدل به‌صورت ماندگار در OPFS ذخیره و با SHA-256 تأیید شده است (جلسه استنتاج ONNX هنوز مقداردهی نشده است).'
+          : 'Model durably stored in OPFS and SHA-256 verified (ONNX inference runtime not yet initialized).';
+      case 'INTEGRITY_FAILURE':
+        return isFa
+          ? 'خطای اصالت (SHA-256) یا خرابی قطعات OPFS شناسایی شد؛ مدل فعال نشد.'
+          : 'OPFS integrity/SHA-256 failure detected; model was not activated.';
+      case 'MODEL_UNAVAILABLE':
+        return isFa
+          ? 'فضای ذخیره‌سازی OPFS در دسترس نیست یا سهمیه کافی وجود ندارد.'
+          : 'OPFS model repository unavailable or storage quota exceeded.';
+      default:
+        return isFa
+          ? 'هیچ مدل وزن محلی (.onnx) نصب نشده است. آواپرداز هرگز از سرویس ابری پنهان یا خروجی ساختگی استفاده نمی‌کند.'
+          : 'No local ONNX weights are installed. Avapardaz never falls back to hidden cloud endpoints or fake inference.';
+    }
+  };
+
   return (
     <div
       className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4"
@@ -330,7 +500,7 @@ export const LifecycleManagementModal: React.FC<LifecycleManagementModalProps> =
                 : 'Local Product Lifecycle, Subsystem Health & Diagnostics'}
             </h2>
             <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5 font-mono" dir="ltr">
-              v{AVAPARDAZ_VERSION_CONTRACT.appVersion} · Schema v{AVAPARDAZ_VERSION_CONTRACT.projectSchemaVersion} · 100% Local-First
+              v{AVAPARDAZ_VERSION_CONTRACT.appVersion} · Schema v{AVAPARDAZ_VERSION_CONTRACT.projectSchemaVersion} · OPFS Model Repository · 100% Local-First
             </p>
           </div>
           <button
@@ -366,40 +536,92 @@ export const LifecycleManagementModal: React.FC<LifecycleManagementModalProps> =
         {/* Body */}
         <div className="p-5 overflow-y-auto flex-1 space-y-4 text-xs">
           {statusMessage && (
-            <div className="rounded border border-sky-500/30 bg-sky-500/10 px-3 py-2 text-sky-900 dark:text-sky-200">
+            <div
+              data-testid="lifecycle-status-message"
+              className="rounded border border-sky-500/30 bg-sky-500/10 px-3 py-2 text-sky-900 dark:text-sky-200"
+            >
               {statusMessage}
             </div>
           )}
 
           {activeTab === 'model' && (
             <div className="space-y-3">
-              <div className="rounded border border-slate-200 dark:border-[#252F42] bg-slate-50 dark:bg-[#0E131D] p-3.5 space-y-1.5">
-                <div className="font-semibold">
-                  {isFa ? 'وضعیت فعلی مدل محلی:' : 'Current Local Model State:'}{' '}
-                  <span className="font-mono text-amber-600 dark:text-amber-400">{modelSnap.state}</span>
+              <div className="rounded border border-slate-200 dark:border-[#252F42] bg-slate-50 dark:bg-[#0E131D] p-3.5 space-y-2">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="font-semibold">
+                    {isFa ? 'وضعیت فعلی مدل محلی:' : 'Current Local Model State:'}{' '}
+                    <span
+                      data-testid="model-lifecycle-state"
+                      className="font-mono text-amber-600 dark:text-amber-400"
+                    >
+                      {modelSnap.state}
+                    </span>
+                  </div>
+                  <div className="font-mono text-[11px] text-slate-500 dark:text-slate-400" dir="ltr">
+                    Storage: {modelSnap.storageBackend} · Runtime Ready: {String(modelSnap.runtimeReady)}
+                  </div>
                 </div>
-                {modelSnap.activeModel ? (
-                  <div className="font-mono text-[11px] text-slate-600 dark:text-slate-400 space-y-0.5" dir="ltr">
-                    <div>Model: {modelSnap.activeModel.modelId} (v{modelSnap.activeModel.version})</div>
-                    <div>Size: {(modelSnap.activeModel.fileSizeBytes / (1024 * 1024)).toFixed(2)} MB</div>
+
+                <p className="text-slate-600 dark:text-slate-400">{describeModelState()}</p>
+
+                {modelSnap.activeModel && (
+                  <div
+                    data-testid="model-active-info"
+                    className="font-mono text-[11px] text-slate-700 dark:text-slate-300 space-y-0.5 pt-1 border-t border-slate-200 dark:border-[#252F42]"
+                    dir="ltr"
+                  >
+                    <div>
+                      Active Model: {modelSnap.activeModel.modelId} (v{modelSnap.activeModel.version}) ·{' '}
+                      {modelSnap.activeModel.architecture}
+                    </div>
+                    <div>
+                      File: {modelSnap.activeModel.fileName} · Size:{' '}
+                      {(modelSnap.activeModel.fileSizeBytes / (1024 * 1024)).toFixed(2)} MB (
+                      {modelSnap.activeModel.fileSizeBytes} B)
+                    </div>
+                    <div>OPFS Dir: ai-models/{modelSnap.activeModel.storageDirectory}</div>
                     <div>SHA-256: {modelSnap.activeModel.verifiedSha256Hex}</div>
                   </div>
-                ) : (
-                  <p className="text-slate-600 dark:text-slate-400">
-                    {isFa
-                      ? 'هیچ مدل وزن محلی (.onnx) نصب نشده است. آواپرداز هرگز از سرویس ابری پنهان یا خروجی ساختگی استفاده نمی‌کند.'
-                      : 'No local ONNX weights are installed. Avapardaz never falls back to hidden cloud endpoints or fake inference.'}
-                  </p>
+                )}
+
+                {modelSnap.previousVerifiedModel && (
+                  <div
+                    data-testid="model-previous-info"
+                    className="font-mono text-[11px] text-slate-500 dark:text-slate-400 space-y-0.5 pt-2 border-t border-slate-200 dark:border-[#252F42]"
+                    dir="ltr"
+                  >
+                    <div>
+                      Previous Verified Model (Rollback Ready): {modelSnap.previousVerifiedModel.modelId} (v
+                      {modelSnap.previousVerifiedModel.version})
+                    </div>
+                    <div>Previous SHA-256: {modelSnap.previousVerifiedModel.verifiedSha256Hex}</div>
+                  </div>
+                )}
+
+                {isInstallingModel && installProgressPct !== null && (
+                  <div className="pt-1 font-mono text-[11px] text-amber-500" dir="ltr">
+                    Streaming chunks to OPFS & verifying SHA-256... {installProgressPct}%
+                  </div>
                 )}
               </div>
 
               <div className="flex flex-wrap items-center gap-2">
                 <label className="inline-flex items-center gap-1.5 px-3 py-2 rounded-md bg-amber-400 text-slate-950 font-semibold hover:bg-amber-300 cursor-pointer">
                   <Upload className="w-3.5 h-3.5" />
-                  <span>{isFa ? 'وارد کردن فایل مدل محلی (.onnx)' : 'Import Local ONNX Model'}</span>
+                  <span>
+                    {isInstallingModel
+                      ? isFa
+                        ? 'در حال نصب تکه‌ای...'
+                        : 'Streaming to OPFS...'
+                      : isFa
+                        ? 'وارد کردن فایل مدل محلی (.onnx)'
+                        : 'Import Local ONNX Model'}
+                  </span>
                   <input
+                    data-testid="model-onnx-file-input"
                     type="file"
                     accept=".onnx,application/octet-stream"
+                    disabled={isInstallingModel}
                     onChange={handleImportLocalOnnxModel}
                     className="hidden"
                   />
@@ -408,6 +630,34 @@ export const LifecycleManagementModal: React.FC<LifecycleManagementModalProps> =
                 {modelSnap.activeModel && (
                   <button
                     type="button"
+                    data-testid="btn-verify-model-offline"
+                    disabled={isInstallingModel}
+                    onClick={handleVerifyModelOffline}
+                    className="inline-flex items-center gap-1.5 px-3 py-2 rounded-md border border-emerald-500/40 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-500/10 cursor-pointer"
+                  >
+                    <ShieldCheck className="w-3.5 h-3.5" />
+                    <span>{isFa ? 'راستی‌آزمایی آفلاین OPFS' : 'Verify OPFS Integrity'}</span>
+                  </button>
+                )}
+
+                {modelSnap.previousVerifiedModel && (
+                  <button
+                    type="button"
+                    data-testid="btn-rollback-model"
+                    disabled={isInstallingModel}
+                    onClick={handleRollbackModel}
+                    className="inline-flex items-center gap-1.5 px-3 py-2 rounded-md border border-amber-500/40 text-amber-700 dark:text-amber-300 hover:bg-amber-500/10 cursor-pointer"
+                  >
+                    <RotateCcw className="w-3.5 h-3.5" />
+                    <span>{isFa ? 'بازگشت به مدل قبلی تأییدشده' : 'Rollback to Previous Model'}</span>
+                  </button>
+                )}
+
+                {modelSnap.activeModel && (
+                  <button
+                    type="button"
+                    data-testid="btn-remove-model"
+                    disabled={isInstallingModel}
                     onClick={handleRemoveModel}
                     className="inline-flex items-center gap-1.5 px-3 py-2 rounded-md border border-rose-500/40 text-rose-600 dark:text-rose-300 hover:bg-rose-500/10 cursor-pointer"
                   >
@@ -620,6 +870,16 @@ export const LifecycleManagementModal: React.FC<LifecycleManagementModalProps> =
   );
 };
 
+let sharedLocalModelLifecycleManager: LocalModelLifecycleManager | null = null;
+
+/**
+ * Production singleton LocalModelLifecycleManager backed strictly by durable `OpfsModelChunkStorage`.
+ */
 export function createSharedLocalModelLifecycleManager(): LocalModelLifecycleManager {
-  return new LocalModelLifecycleManager(new InMemoryModelChunkStorage());
+  if (!sharedLocalModelLifecycleManager) {
+    sharedLocalModelLifecycleManager = new LocalModelLifecycleManager(
+      new OpfsModelChunkStorage(),
+    );
+  }
+  return sharedLocalModelLifecycleManager;
 }

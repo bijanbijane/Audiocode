@@ -15,10 +15,99 @@ import {
   RIFF_WAV_MAX_DATA_BYTES,
 } from './AudioRenderTypes';
 
+export const DEFAULT_MAX_ARTIFACT_READ_BYTES = 1024 * 1024; // 1 MiB
+
+export interface RenderArtifactReadStreamOptions {
+  readonly start?: number;
+  readonly end?: number;
+  readonly chunkSizeBytes?: number;
+}
+
+/**
+ * Bounded, range-addressable reader contract for committed render outputs.
+ * Prevents unbounded full-file allocations during validation and export streaming.
+ */
+export interface RenderArtifactReader {
+  readonly sizeBytes: number;
+
+  readRange(
+    offset: number,
+    length: number,
+  ): Promise<Uint8Array>;
+
+  openReadStream(options?: RenderArtifactReadStreamOptions): ReadableStream<Uint8Array>;
+}
+
+export function validateArtifactRangeRead(
+  sizeBytes: number,
+  offset: number,
+  length: number,
+  maxReadWindowBytes = DEFAULT_MAX_ARTIFACT_READ_BYTES,
+): void {
+  if (!Number.isSafeInteger(sizeBytes) || sizeBytes < 0) {
+    throw new RangeError(`Invalid artifact sizeBytes: ${String(sizeBytes)}.`);
+  }
+  if (!Number.isSafeInteger(maxReadWindowBytes) || maxReadWindowBytes <= 0) {
+    throw new RangeError(`Invalid maxReadWindowBytes: ${String(maxReadWindowBytes)}.`);
+  }
+  if (typeof offset !== 'number' || !Number.isSafeInteger(offset) || offset < 0) {
+    throw new RangeError(`Invalid readRange offset: ${String(offset)}.`);
+  }
+  if (typeof length !== 'number' || !Number.isSafeInteger(length) || length < 0) {
+    throw new RangeError(`Invalid readRange length: ${String(length)}.`);
+  }
+  if (length > maxReadWindowBytes) {
+    throw new RangeError(
+      `Requested readRange length (${length} B) exceeds maximum window (${maxReadWindowBytes} B).`,
+    );
+  }
+  const end = offset + length;
+  if (!Number.isSafeInteger(end) || offset > sizeBytes || end > sizeBytes) {
+    throw new RangeError(
+      `Requested range [${offset}, ${offset} + ${length}) exceeds artifact size (${sizeBytes} B).`,
+    );
+  }
+}
+
+export function validateArtifactStreamOptions(
+  sizeBytes: number,
+  options?: RenderArtifactReadStreamOptions,
+  maxReadWindowBytes = DEFAULT_MAX_ARTIFACT_READ_BYTES,
+): { readonly start: number; readonly end: number; readonly chunkSizeBytes: number } {
+  if (!Number.isSafeInteger(sizeBytes) || sizeBytes < 0) {
+    throw new RangeError(`Invalid artifact sizeBytes: ${String(sizeBytes)}.`);
+  }
+  if (!Number.isSafeInteger(maxReadWindowBytes) || maxReadWindowBytes <= 0) {
+    throw new RangeError(`Invalid maxReadWindowBytes: ${String(maxReadWindowBytes)}.`);
+  }
+  const start = options?.start ?? 0;
+  const end = options?.end ?? sizeBytes;
+  const chunkSizeBytes = options?.chunkSizeBytes ?? maxReadWindowBytes;
+
+  if (typeof start !== 'number' || !Number.isSafeInteger(start) || start < 0 || start > sizeBytes) {
+    throw new RangeError(`Invalid stream start offset: ${String(start)} (size=${sizeBytes}).`);
+  }
+  if (typeof end !== 'number' || !Number.isSafeInteger(end) || end < start || end > sizeBytes) {
+    throw new RangeError(`Invalid stream end offset: ${String(end)} (start=${start}, size=${sizeBytes}).`);
+  }
+  if (
+    typeof chunkSizeBytes !== 'number' ||
+    !Number.isSafeInteger(chunkSizeBytes) ||
+    chunkSizeBytes <= 0 ||
+    chunkSizeBytes > maxReadWindowBytes
+  ) {
+    throw new RangeError(
+      `Invalid stream chunkSizeBytes: ${String(chunkSizeBytes)} (max=${maxReadWindowBytes}).`,
+    );
+  }
+
+  return { start, end, chunkSizeBytes };
+}
+
 /**
  * Abstract streaming byte sink so AudioExportWriter can write incrementally to
  * OPFS / FileSystemWritableFileStream, temp disk storage, or a bounded chunked buffer
- * without ever building a giant single PCM array in JS memory.
+ * without ever building a giant single contiguous output array in JS memory.
  */
 export interface StreamingByteSink {
   readonly persistedExternally: boolean;
@@ -26,8 +115,17 @@ export interface StreamingByteSink {
   append(bytes: Uint8Array): Promise<void> | void;
   finalizeTempToCommitted(): Promise<void> | void;
   abortAndCleanup(): Promise<void> | void;
-  readAllBytes(): Promise<Uint8Array> | Uint8Array;
   getTotalBytesWritten(): number;
+  readRange(offset: number, length: number): Promise<Uint8Array>;
+  openReadStream(options?: RenderArtifactReadStreamOptions): ReadableStream<Uint8Array>;
+  /** Optional zero-concatenation Blob creation from committed backing storage */
+  createBlob?(contentType: string): Promise<Blob>;
+  /**
+   * Optional idempotent disposal for committed sinks.
+   * In-memory sinks release retained chunks and memory reservations;
+   * externally persisted sinks close transient handles without deleting committed user files.
+   */
+  disposeCommitted?(): Promise<void> | void;
 }
 
 export class ExportWriteFailureError extends Error {
@@ -42,38 +140,57 @@ export class ExportWriteFailureError extends Error {
 
 /**
  * Bounded chunked in-memory byte sink governed by MemoryBudgetManager and optional quota.
- * Uses a staging flag so partial/aborted writes are never exposed as finalized artifacts.
+ * Uses explicit staging/commit/disposal boundaries so uncommitted, aborted, or disposed
+ * outputs are never readable and chunk reservations remain active for the exact lifetime
+ * of the retained chunks.
  */
 export class BoundedChunkedByteSink implements StreamingByteSink {
   public readonly persistedExternally = false;
   private readonly budget: MemoryBudgetManager;
   private readonly maxQuotaBytes: number | null;
-  private readonly chunks: Uint8Array[] = [];
+  private readonly maxReadWindowBytes: number;
+  private readonly chunks: Uint8Array<ArrayBuffer>[] = [];
+  private readonly chunkOffsets: number[] = [];
   private readonly reservations: MemoryReservation[] = [];
 
   private totalBytes = 0;
   private committed = false;
   private aborted = false;
+  private disposed = false;
 
   constructor(options?: {
     readonly memoryBudgetManager?: MemoryBudgetManager;
     readonly maxQuotaBytes?: number;
+    readonly maxReadWindowBytes?: number;
   }) {
     this.budget = options?.memoryBudgetManager ?? getSharedMemoryBudgetManager();
     this.maxQuotaBytes =
-      typeof options?.maxQuotaBytes === 'number' ? options.maxQuotaBytes : null;
+      typeof options?.maxQuotaBytes === 'number' &&
+      Number.isFinite(options.maxQuotaBytes) &&
+      options.maxQuotaBytes >= 0
+        ? Math.trunc(options.maxQuotaBytes)
+        : null;
+    const rawMaxRead = options?.maxReadWindowBytes ?? DEFAULT_MAX_ARTIFACT_READ_BYTES;
+    if (!Number.isSafeInteger(rawMaxRead) || rawMaxRead <= 0) {
+      throw new RangeError(`Invalid maxReadWindowBytes: ${String(rawMaxRead)}.`);
+    }
+    this.maxReadWindowBytes = rawMaxRead;
   }
 
   public append(bytes: Uint8Array): void {
-    if (this.aborted) {
-      throw new ExportWriteFailureError('WRITE_IO_FAILURE', 'Cannot append to aborted export sink.');
+    if (this.aborted || this.disposed) {
+      throw new ExportWriteFailureError('WRITE_IO_FAILURE', 'Cannot append to aborted or disposed export sink.');
     }
     if (this.committed) {
       throw new ExportWriteFailureError('WRITE_IO_FAILURE', 'Cannot append to finalized export sink.');
     }
     if (bytes.byteLength === 0) return;
 
-    if (this.maxQuotaBytes !== null && this.totalBytes + bytes.byteLength > this.maxQuotaBytes) {
+    const nextTotal = this.totalBytes + bytes.byteLength;
+    if (!Number.isSafeInteger(nextTotal)) {
+      throw new ExportWriteFailureError('WRITE_IO_FAILURE', 'Export byte length overflowed safe integer range.');
+    }
+    if (this.maxQuotaBytes !== null && nextTotal > this.maxQuotaBytes) {
       throw new ExportWriteFailureError(
         'OUTPUT_QUOTA_EXCEEDED',
         `Write of ${bytes.byteLength} B exceeds export quota (${this.maxQuotaBytes} B).`,
@@ -86,46 +203,62 @@ export class BoundedChunkedByteSink implements StreamingByteSink {
       bytes: bytes.byteLength,
       priority: 'normal',
     });
-    this.reservations.push(reservation);
 
-    const copy = new Uint8Array(bytes.byteLength);
-    copy.set(bytes);
-    this.chunks.push(copy);
-    this.totalBytes += copy.byteLength;
+    try {
+      const copy = new Uint8Array(bytes.byteLength);
+      copy.set(bytes);
+      this.reservations.push(reservation);
+      this.chunkOffsets.push(this.totalBytes);
+      this.chunks.push(copy);
+      this.totalBytes = nextTotal;
+    } catch (err) {
+      this.budget.release(reservation);
+      throw err;
+    }
   }
 
   public writeAt(offset: number, bytes: Uint8Array): void {
-    if (this.aborted) {
-      throw new ExportWriteFailureError('WRITE_IO_FAILURE', 'Cannot writeAt on aborted export sink.');
+    if (this.aborted || this.disposed) {
+      throw new ExportWriteFailureError('WRITE_IO_FAILURE', 'Cannot writeAt on aborted or disposed export sink.');
     }
-    if (offset < 0 || offset + bytes.byteLength > this.totalBytes) {
+    if (this.committed) {
+      throw new ExportWriteFailureError('WRITE_IO_FAILURE', 'Cannot writeAt on finalized export sink.');
+    }
+    if (
+      typeof offset !== 'number' ||
+      !Number.isSafeInteger(offset) ||
+      offset < 0 ||
+      !Number.isSafeInteger(offset + bytes.byteLength) ||
+      offset + bytes.byteLength > this.totalBytes
+    ) {
       throw new ExportWriteFailureError(
         'WRITE_IO_FAILURE',
         `writeAt(${offset}, ${bytes.byteLength}) out of bounds for size ${this.totalBytes}.`,
       );
     }
+    if (bytes.byteLength === 0) return;
 
     let remaining = bytes.byteLength;
     let srcPos = 0;
-    let cursor = 0;
+    let idx = this.findChunkIndex(offset);
 
-    for (const chunk of this.chunks) {
-      const chunkEnd = cursor + chunk.byteLength;
-      if (offset + srcPos < chunkEnd) {
-        const localStart = offset + srcPos - cursor;
-        const writable = Math.min(remaining, chunk.byteLength - localStart);
-        chunk.set(bytes.subarray(srcPos, srcPos + writable), localStart);
-        srcPos += writable;
-        remaining -= writable;
-        if (remaining === 0) break;
-      }
-      cursor = chunkEnd;
+    while (remaining > 0 && idx >= 0 && idx < this.chunks.length) {
+      const chunk = this.chunks[idx];
+      const localStart = offset + srcPos - this.chunkOffsets[idx];
+      const writable = Math.min(remaining, chunk.byteLength - localStart);
+      chunk.set(bytes.subarray(srcPos, srcPos + writable), localStart);
+      srcPos += writable;
+      remaining -= writable;
+      idx++;
     }
   }
 
   public finalizeTempToCommitted(): void {
-    if (this.aborted) {
-      throw new ExportWriteFailureError('WRITE_IO_FAILURE', 'Cannot finalize an aborted sink.');
+    if (this.aborted || this.disposed) {
+      throw new ExportWriteFailureError('WRITE_IO_FAILURE', 'Cannot finalize an aborted or disposed sink.');
+    }
+    if (this.committed) {
+      throw new ExportWriteFailureError('WRITE_IO_FAILURE', 'Export sink is already finalized.');
     }
     this.committed = true;
   }
@@ -133,39 +266,158 @@ export class BoundedChunkedByteSink implements StreamingByteSink {
   public abortAndCleanup(): void {
     this.aborted = true;
     this.committed = false;
-    this.chunks.length = 0;
-    this.totalBytes = 0;
-    for (const r of this.reservations) {
-      this.budget.release(r);
-    }
-    this.reservations.length = 0;
+    this.disposed = true;
+    this.clearChunksAndReleaseReservations();
   }
 
-  public readAllBytes(): Uint8Array {
-    if (!this.committed || this.aborted) {
+  public disposeCommitted(): void {
+    if (this.disposed) return;
+    this.disposed = true;
+    this.committed = false;
+    this.clearChunksAndReleaseReservations();
+  }
+
+  public async readRange(offset: number, length: number): Promise<Uint8Array> {
+    this.assertReadable();
+    validateArtifactRangeRead(this.totalBytes, offset, length, this.maxReadWindowBytes);
+    if (length === 0) {
+      return new Uint8Array(0);
+    }
+
+    const out = new Uint8Array(length);
+    let idx = this.findChunkIndex(offset);
+    let remaining = length;
+    let outPos = 0;
+    let currentOffset = offset;
+
+    while (remaining > 0 && idx >= 0 && idx < this.chunks.length) {
+      const chunk = this.chunks[idx];
+      const localStart = currentOffset - this.chunkOffsets[idx];
+      const readable = Math.min(remaining, chunk.byteLength - localStart);
+      out.set(chunk.subarray(localStart, localStart + readable), outPos);
+      outPos += readable;
+      currentOffset += readable;
+      remaining -= readable;
+      idx++;
+    }
+
+    if (remaining !== 0) {
       throw new ExportWriteFailureError(
         'WRITE_IO_FAILURE',
-        'Attempted to read uncommitted or aborted temporary artifact.',
+        `BoundedChunkedByteSink range read underflow (${remaining} B unread).`,
       );
     }
-    const merged = new Uint8Array(this.totalBytes);
-    let offset = 0;
-    for (const chunk of this.chunks) {
-      merged.set(chunk, offset);
-      offset += chunk.byteLength;
-    }
-    return merged;
+
+    return out;
+  }
+
+  public openReadStream(options?: RenderArtifactReadStreamOptions): ReadableStream<Uint8Array> {
+    this.assertReadable();
+    const { start, end, chunkSizeBytes } = validateArtifactStreamOptions(
+      this.totalBytes,
+      options,
+      this.maxReadWindowBytes,
+    );
+
+    let cursor = start;
+    return new ReadableStream<Uint8Array>({
+      pull: async (controller) => {
+        if (cursor >= end) {
+          controller.close();
+          return;
+        }
+        try {
+          const toRead = Math.min(chunkSizeBytes, end - cursor);
+          const slice = await this.readRange(cursor, toRead);
+          cursor += slice.byteLength;
+          controller.enqueue(slice);
+          if (cursor >= end) {
+            controller.close();
+          }
+        } catch (err) {
+          controller.error(err);
+        }
+      },
+    });
+  }
+
+  public async createBlob(contentType = 'audio/wav'): Promise<Blob> {
+    this.assertReadable();
+    return new Blob(this.chunks as BlobPart[], { type: contentType });
   }
 
   public getTotalBytesWritten(): number {
     return this.totalBytes;
   }
 
-  public releaseMemoryReservations(): void {
+  public getRetainedChunkCount(): number {
+    return this.chunks.length;
+  }
+
+  public getActiveReservationCount(): number {
+    return this.reservations.length;
+  }
+
+  public getActiveReservedBytes(): number {
+    let total = 0;
     for (const r of this.reservations) {
-      this.budget.release(r);
+      total += r.bytes;
     }
-    this.reservations.length = 0;
+    return total;
+  }
+
+  public isCommitted(): boolean {
+    return this.committed && !this.aborted && !this.disposed;
+  }
+
+  public isDisposed(): boolean {
+    return this.disposed || this.aborted;
+  }
+
+  private assertReadable(): void {
+    if (!this.committed || this.aborted || this.disposed) {
+      throw new ExportWriteFailureError(
+        'WRITE_IO_FAILURE',
+        'Attempted to read uncommitted, aborted, or disposed render artifact.',
+      );
+    }
+  }
+
+  private findChunkIndex(offset: number): number {
+    let lo = 0;
+    let hi = this.chunks.length - 1;
+    while (lo <= hi) {
+      const mid = (lo + hi) >>> 1;
+      const start = this.chunkOffsets[mid];
+      const end = start + this.chunks[mid].byteLength;
+      if (offset < start) {
+        hi = mid - 1;
+      } else if (offset >= end) {
+        lo = mid + 1;
+      } else {
+        return mid;
+      }
+    }
+    return -1;
+  }
+
+  private clearChunksAndReleaseReservations(): void {
+    this.chunks.length = 0;
+    this.chunkOffsets.length = 0;
+    this.totalBytes = 0;
+
+    const toRelease = this.reservations.splice(0, this.reservations.length);
+    let firstError: unknown = null;
+    for (const r of toRelease) {
+      try {
+        this.budget.release(r);
+      } catch (err) {
+        if (firstError === null) firstError = err;
+      }
+    }
+    if (firstError !== null) {
+      throw firstError;
+    }
   }
 }
 

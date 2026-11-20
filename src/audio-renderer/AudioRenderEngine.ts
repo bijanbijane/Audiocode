@@ -19,6 +19,11 @@ import { AudioRenderValidator } from './AudioRenderValidator';
 import { AudioSegmentAssembler } from './AudioSegmentAssembler';
 import { AudioSourceReader } from './AudioSourceReader';
 import {
+  CommittedRenderOutputArtifact,
+  createCommittedRenderArtifact,
+  materializeCompatibilityOutputBytes,
+} from './RenderOutputArtifact';
+import {
   AudioRenderRequest,
   AudioRenderResult,
   RenderCheckpoint,
@@ -117,6 +122,7 @@ export class AudioRenderEngine {
         ok: false,
         plan: null,
         output: null,
+        outputArtifact: null,
         outputBytes: null,
         preValidation,
         postValidation: null,
@@ -175,6 +181,9 @@ export class AudioRenderEngine {
     let reader: AudioSourceReader | null = null;
     let sink: StreamingByteSink | null = null;
     let writer: AudioExportWriter | null = null;
+    let outputArtifact: CommittedRenderOutputArtifact | null = null;
+    let artifactOwnershipTransferred = false;
+    let preservePersistentSinkOnPause = false;
 
     try {
       emitState('QUEUED', 'صف‌بندی درخواست رندر غیرمخرب', 0);
@@ -414,6 +423,8 @@ export class AudioRenderEngine {
         // always abort & clean up on explicit cancellation or non-persistent RAM sinks.
         if (assembly.status === 'CANCELLED' || !sink.persistedExternally) {
           await writer.abort();
+        } else {
+          preservePersistentSinkOnPause = true;
         }
 
         emitState(
@@ -433,6 +444,7 @@ export class AudioRenderEngine {
           ok: false,
           plan,
           output: null,
+          outputArtifact: null,
           outputBytes: null,
           preValidation,
           postValidation: null,
@@ -462,6 +474,7 @@ export class AudioRenderEngine {
           ok: false,
           plan,
           output: null,
+          outputArtifact: null,
           outputBytes: null,
           preValidation,
           postValidation: null,
@@ -493,7 +506,14 @@ export class AudioRenderEngine {
       );
 
       const outputMetadata = await writer.finalize(Date.now());
-      const outputBytes = await sink.readAllBytes();
+
+      outputArtifact = createCommittedRenderArtifact({
+        sink,
+        artifactId: outputMetadata.artifactId,
+        sizeBytes: outputMetadata.fileSizeBytes,
+        memoryBudgetManager: this.budget,
+      });
+      outputArtifact.markValidating();
 
       emitState(
         'VALIDATING_OUTPUT',
@@ -506,10 +526,10 @@ export class AudioRenderEngine {
         plan.retainedSegments.length,
       );
 
-      const postValidation = AudioRenderValidator.validatePostRender({
+      const postValidation = await AudioRenderValidator.validatePostRenderArtifact({
         plan,
         outputMetadata,
-        outputBytes,
+        artifact: outputArtifact,
       });
 
       const wallClockMs = Math.max(0, Date.now() - startWallMs);
@@ -519,6 +539,13 @@ export class AudioRenderEngine {
           : null;
 
       if (!postValidation.passed) {
+        try {
+          await outputArtifact.dispose();
+        } catch {
+          // Ensure cleanup errors never mask post-render validation failure
+        }
+        outputArtifact = null;
+
         emitState(
           'FAILED_VALIDATION',
           `اعتبارسنجی خروجی ناموفق بود (${postValidation.errorCount} خطا)`,
@@ -535,6 +562,7 @@ export class AudioRenderEngine {
           ok: false,
           plan,
           output: outputMetadata,
+          outputArtifact: null,
           outputBytes: null, // Block unvalidated output from being treated as valid deliverable
           preValidation,
           postValidation,
@@ -557,9 +585,20 @@ export class AudioRenderEngine {
         };
       }
 
+      outputArtifact.markValidatedReady();
+
+      // Populate deprecated compatibility field ONLY when <= 8 MiB and budget grants an independent lease.
+      const compatOutputBytes = await materializeCompatibilityOutputBytes(
+        outputArtifact,
+        this.budget,
+      );
+
       if (checkpointToResume) {
         await this.checkpointStore.deleteCheckpoint(checkpointToResume.checkpointId);
       }
+
+      const transferredArtifact = outputArtifact;
+      artifactOwnershipTransferred = true;
 
       emitState(
         'COMPLETED',
@@ -578,7 +617,8 @@ export class AudioRenderEngine {
         ok: true,
         plan,
         output: outputMetadata,
-        outputBytes,
+        outputArtifact: transferredArtifact,
+        outputBytes: compatOutputBytes,
         preValidation,
         postValidation,
         boundaryChecks: assembly.boundaryChecks,
@@ -598,7 +638,14 @@ export class AudioRenderEngine {
         appliedProposalIds: [...plan.approvedProposalIds],
       };
     } catch (err) {
-      if (writer) {
+      if (outputArtifact && !artifactOwnershipTransferred) {
+        try {
+          await outputArtifact.dispose();
+        } catch {
+          // ignore cleanup failure
+        }
+        outputArtifact = null;
+      } else if (writer) {
         try {
           await writer.abort();
         } catch {
@@ -636,8 +683,20 @@ export class AudioRenderEngine {
       });
     } finally {
       reader?.dispose();
-      if (sink instanceof BoundedChunkedByteSink) {
-        sink.releaseMemoryReservations();
+      if (!artifactOwnershipTransferred) {
+        if (outputArtifact) {
+          try {
+            await outputArtifact.dispose();
+          } catch {
+            // ignore cleanup failure in finally
+          }
+        } else if (sink instanceof BoundedChunkedByteSink && !preservePersistentSinkOnPause) {
+          try {
+            sink.abortAndCleanup();
+          } catch {
+            // ignore cleanup failure in finally
+          }
+        }
       }
       this.activeRenderIds.delete(renderId);
     }
@@ -659,6 +718,7 @@ export class AudioRenderEngine {
       ok: false,
       plan: params.plan,
       output: null,
+      outputArtifact: null,
       outputBytes: null,
       preValidation: params.preValidation,
       postValidation: null,

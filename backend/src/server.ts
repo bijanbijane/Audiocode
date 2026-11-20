@@ -5,6 +5,11 @@ import {
   PlatformBackendServices,
 } from './PlatformBackendServices';
 import { BackendAuthAndPaymentService } from './BackendAuthAndPaymentService';
+import { BackendLicenseAndModelRevocationService } from './BackendLicenseAndModelRevocationService';
+import {
+  extractUrlPathname,
+  isProtectedLicenseRoute,
+} from './license/DeviceSeatEnforcementService';
 
 /**
  * In-memory Sliding-Window Rate Limiter for brute-force and CDN abuse protection
@@ -112,7 +117,8 @@ export async function bootstrapBackendServer(deps?: {
   // 1. Global Sliding-Window Rate Limiting Hook
   fastify.addHook('onRequest', async (request, reply) => {
     const clientIp = request.ip;
-    const isAuthRoute = request.url.startsWith('/api/v1/auth/');
+    const pathname = extractUrlPathname(request.url);
+    const isAuthRoute = pathname.startsWith('/api/v1/auth/');
     const limit = isAuthRoute ? 15 : 180; // Stricter limit on auth routes
     if (!rateLimiter.isAllowed(`${clientIp}:${isAuthRoute ? 'auth' : 'api'}`, limit, 60_000)) {
       return reply.status(429).send({
@@ -137,9 +143,14 @@ export async function bootstrapBackendServer(deps?: {
     enableServerSideAsrInference: env.ENABLE_CLOUD_ASR === 'true',
   });
 
+  const revocationService = new BackendLicenseAndModelRevocationService(
+    pgPool,
+    env.ADMIN_API_SECRET_KEY ?? '',
+  );
+
   // 2. EdDSA JWT Authentication Middleware for protected license endpoints
   fastify.addHook('preHandler', async (request, reply) => {
-    if (!request.url.startsWith('/api/v1/license/')) return;
+    if (!isProtectedLicenseRoute(request.url)) return;
     const authHeader = request.headers.authorization;
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
       return reply.status(401).send({ error: 'MISSING_BEARER_TOKEN' });
@@ -147,7 +158,10 @@ export async function bootstrapBackendServer(deps?: {
     try {
       const token = authHeader.slice(7).trim();
       const claims = authAndPayment.verifyEdDsaJwt(token);
-      request.authenticatedUserId = claims.sub;
+      if (typeof claims.sub !== 'string' || claims.sub.trim().length === 0) {
+        return reply.status(401).send({ error: 'INVALID_OR_EXPIRED_TOKEN' });
+      }
+      request.authenticatedUserId = claims.sub.trim();
     } catch {
       return reply.status(401).send({ error: 'INVALID_OR_EXPIRED_TOKEN' });
     }
@@ -156,6 +170,7 @@ export async function bootstrapBackendServer(deps?: {
   // 3. Register service routes
   authAndPayment.registerRoutes(fastify);
   platformServices.registerAllRoutes(fastify);
+  revocationService.registerRoutes(fastify);
 
   // 4. Container Liveness & Readiness Probes
   fastify.get('/healthz', async () => ({

@@ -42,6 +42,16 @@ export class OnnxPersianAsrAndVadAdapter implements AsrModelRunnerAdapter {
     );
   }
 
+  /** True strictly when a real ONNX inference runner is bound to this adapter. */
+  public isReady(): boolean {
+    return typeof this.inferenceRunner === 'function';
+  }
+
+  /** True strictly when a real decoder/inference runner is configured. */
+  public hasDecoderConfiguration(): boolean {
+    return typeof this.inferenceRunner === 'function';
+  }
+
   /**
    * Lightweight speech-band energy + Zero-Crossing Rate VAD over 30ms frames @ 16kHz.
    */

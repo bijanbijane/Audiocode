@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Activity,
   AlertTriangle,
@@ -17,11 +17,13 @@ import {
   X,
 } from 'lucide-react';
 import {
+  AsrLabEngineId,
   AsrLabExperimentRecord,
   PHASE1_ENGINE_REGISTRY,
   runAsrLabExperiment,
   validateAndPreprocessAudioForLab,
 } from '../ai-engine/asr/AsrExperimentationLabCore';
+import type { LocalModelLifecycleManager } from '../lifecycle/LocalModelLifecycleManager';
 import {
   assignZeroLeakageDatasetSplits,
   classifyTranscriptErrorsIntoTaxonomy,
@@ -84,6 +86,7 @@ interface AsrResearchLabModalProps {
   studioPcm: Float32Array | null;
   studioSampleRate: number;
   referenceTranscript: string;
+  modelManager?: LocalModelLifecycleManager;
 }
 
 export const AsrResearchLabModal: React.FC<AsrResearchLabModalProps> = ({
@@ -92,11 +95,12 @@ export const AsrResearchLabModal: React.FC<AsrResearchLabModalProps> = ({
   studioPcm,
   studioSampleRate,
   referenceTranscript,
+  modelManager,
 }) => {
   const [activeTab, setActiveTab] = useState<LabTabId>('benchmark');
 
   // ── Tab 1: Phase 1–3 Multi-Engine Benchmark & Error Taxonomy ──────────────
-  const [selectedEngines, setSelectedEngines] = useState<string[]>([
+  const [selectedEngines, setSelectedEngines] = useState<AsrLabEngineId[]>([
     'avapardaz-local-ctc-dsp',
     'gemini-audio-asr',
     'elevenlabs-scribe-v3',
@@ -105,6 +109,7 @@ export const AsrResearchLabModal: React.FC<AsrResearchLabModalProps> = ({
   const [normMode, setNormMode] = useState<'fa_strict_v1' | 'fa_relaxed_v1'>('fa_strict_v1');
   const [isRunningExp, setIsRunningExp] = useState(false);
   const [expResult, setExpResult] = useState<AsrLabExperimentRecord | null>(null);
+  const benchmarkAbortRef = useRef<AbortController | null>(null);
 
   // ── Tab 3: Phase 4 Independent Model RC1 ──────────────────────────────────
   const [domainProfile, setDomainProfile] = useState<DomainProfileName>('technology');
@@ -196,12 +201,20 @@ export const AsrResearchLabModal: React.FC<AsrResearchLabModalProps> = ({
   }));
 
   useEffect(() => {
-    if (!isOpen) return;
+    if (!isOpen) {
+      benchmarkAbortRef.current?.abort();
+      benchmarkAbortRef.current = null;
+      return;
+    }
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') onClose();
     };
     window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
+    return () => {
+      window.removeEventListener('keydown', onKey);
+      benchmarkAbortRef.current?.abort();
+      benchmarkAbortRef.current = null;
+    };
   }, [isOpen, onClose]);
 
   // Derived analytics
@@ -299,6 +312,9 @@ export const AsrResearchLabModal: React.FC<AsrResearchLabModalProps> = ({
   if (!isOpen) return null;
 
   const handleRunBenchmark = async () => {
+    benchmarkAbortRef.current?.abort();
+    const controller = new AbortController();
+    benchmarkAbortRef.current = controller;
     setIsRunningExp(true);
     setBenchmarkError(null);
     try {
@@ -308,26 +324,37 @@ export const AsrResearchLabModal: React.FC<AsrResearchLabModalProps> = ({
         channelsPcm: [pcm],
         sampleRate: studioSampleRate || 48000,
       });
+      // Strictly isolate referenceTranscriptRaw inside the evaluator — NEVER pass reference text into EngineAdapterConfig.
       const res = await runAsrLabExperiment({
         audio: audioReport,
         referenceTranscriptRaw:
           referenceTranscript.trim() || INITIAL_VERIFIED_STUDIO_CORPUS[0].transcript_raw,
-        selectedEngineIds: selectedEngines as any,
+        selectedEngineIds: selectedEngines,
         config: {
           expectedLanguage: 'fa-en-mixed',
           mode: 'batch',
-          keyterms: ['آواپرداز', 'TypeScript', 'Backend', 'FastConformer'],
-          localAcousticCandidateScript:
-            referenceTranscript.trim() || INITIAL_VERIFIED_STUDIO_CORPUS[0].transcript_raw,
+          timeoutMs: 15000,
+          isFrozenTestSample: true,
         },
+        localAdapterOptions: {
+          modelManager,
+        },
+        signal: controller.signal,
       });
       setExpResult(res);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       setBenchmarkError(`خطا در اجرای بنچمارک ASR: ${msg}`);
     } finally {
+      if (benchmarkAbortRef.current === controller) {
+        benchmarkAbortRef.current = null;
+      }
       setIsRunningExp(false);
     }
+  };
+
+  const handleCancelBenchmark = () => {
+    benchmarkAbortRef.current?.abort();
   };
 
   const handleDownloadBenchmarkJson = () => {
@@ -518,7 +545,12 @@ export const AsrResearchLabModal: React.FC<AsrResearchLabModalProps> = ({
   const activeCkpt = GLOBAL_PHASE4_CHECKPOINT_MANAGER.getActiveCheckpoint();
 
   const localEvalNorm = expResult?.engineResults.find(
-    (r) => r.engineId === 'avapardaz-local-ctc-dsp' && r.rawOutputText
+    (r) =>
+      r.engineId === 'avapardaz-local-ctc-dsp' &&
+      r.status === 'SUCCESS' &&
+      r.eligibleForAccuracyLeaderboard &&
+      r.evaluation !== null &&
+      r.rawOutputText.trim().length > 0,
   );
   const localNormReport =
     localEvalNorm && expResult
@@ -540,14 +572,14 @@ export const AsrResearchLabModal: React.FC<AsrResearchLabModalProps> = ({
         })
       : [];
   const pairedStats =
-    localEvalNorm && expResult
+    localEvalNorm && expResult && localNormReport
       ? runPairedBootstrapAndHolmBonferroni({
           comparisons: [
             {
               engineAId: 'avapardaz-local-ctc-dsp',
               engineBId: 'raw-unnormalized-baseline',
               metricName: 'cer',
-              pairedSampleScoresA: [localNormReport?.cer ?? 0.02],
+              pairedSampleScoresA: [localNormReport.cer],
               pairedSampleScoresB: [0.18],
             },
           ],
@@ -667,6 +699,16 @@ export const AsrResearchLabModal: React.FC<AsrResearchLabModalProps> = ({
                       <Sparkles className="w-3.5 h-3.5" aria-hidden="true" />
                       <span>{isRunningExp ? 'در حال اجرا...' : 'اجرای آزمایش بنچمارک'}</span>
                     </button>
+                    {isRunningExp && (
+                      <button
+                        type="button"
+                        data-testid="btn-cancel-benchmark"
+                        onClick={handleCancelBenchmark}
+                        className="inline-flex items-center gap-1 px-3 py-2 rounded-md text-xs border border-rose-500/40 bg-rose-500/15 text-rose-200 hover:bg-rose-500/25 cursor-pointer"
+                      >
+                        <span>لغو</span>
+                      </button>
+                    )}
                     {expResult && (
                       <button
                         type="button"
@@ -709,11 +751,12 @@ export const AsrResearchLabModal: React.FC<AsrResearchLabModalProps> = ({
               {expResult && (
                 <div className="space-y-4">
                   <div className="overflow-x-auto rounded-lg border border-[#252F42]">
-                    <table className="w-full text-right text-xs">
+                    <table className="w-full text-right text-xs" data-testid="benchmark-results-table">
                       <thead className="bg-[#111827] text-slate-300 border-b border-[#252F42]">
                         <tr>
-                          <th className="p-2.5">موتور</th>
+                          <th className="p-2.5">موتور / هویت مدل</th>
                           <th className="p-2.5">وضعیت اجرا</th>
+                          <th className="p-2.5">منشأ فرضیه</th>
                           <th className="p-2.5">CER نرمال</th>
                           <th className="p-2.5">WER نرمال</th>
                           <th className="p-2.5">RTF / زمان (ms)</th>
@@ -722,21 +765,47 @@ export const AsrResearchLabModal: React.FC<AsrResearchLabModalProps> = ({
                       </thead>
                       <tbody className="divide-y divide-[#252F42] bg-[#0B0F17]">
                         {expResult.engineResults.map((res) => (
-                          <tr key={res.engineId}>
-                            <td className="p-2.5 font-medium text-slate-100">{res.engineName}</td>
+                          <tr key={res.engineId} data-testid={`benchmark-row-${res.engineId}`}>
+                            <td className="p-2.5">
+                              <div className="font-medium text-slate-100">{res.engineName}</div>
+                              {res.modelIdentity.modelId && (
+                                <div className="text-[10px] font-mono text-slate-400">
+                                  {res.modelIdentity.modelId}@{res.modelIdentity.modelVersion ?? 'unknown'}
+                                  {res.modelIdentity.architecture ? ` · ${res.modelIdentity.architecture}` : ''}
+                                  {res.modelIdentity.modelSha256
+                                    ? ` · sha256:${res.modelIdentity.modelSha256.slice(0, 12)}`
+                                    : ''}
+                                </div>
+                              )}
+                              {res.errorMessage && (
+                                <div className="text-[11px] text-amber-300/90 mt-0.5">
+                                  {res.errorMessage}
+                                </div>
+                              )}
+                            </td>
                             <td className="p-2.5 font-mono">
                               <span
+                                data-testid={`benchmark-status-${res.engineId}`}
                                 className={
-                                  res.status === 'SUCCESS' ? 'text-emerald-400' : 'text-amber-300'
+                                  res.status === 'SUCCESS'
+                                    ? 'text-emerald-400'
+                                    : res.status === 'MODEL_NOT_INSTALLED' || res.status === 'MODEL_NOT_READY'
+                                      ? 'text-rose-300'
+                                      : 'text-amber-300'
                                 }
                               >
                                 {res.status}
                               </span>
                             </td>
-                            <td className="p-2.5 font-mono">
+                            <td className="p-2.5 font-mono text-[11px] text-slate-300">
+                              <span data-testid={`benchmark-provenance-${res.engineId}`}>
+                                {res.hypothesisProvenance}
+                              </span>
+                            </td>
+                            <td className="p-2.5 font-mono" data-testid={`benchmark-cer-${res.engineId}`}>
                               {res.evaluation ? `${res.evaluation.normalizedMetrics.cerPercent}%` : '—'}
                             </td>
-                            <td className="p-2.5 font-mono">
+                            <td className="p-2.5 font-mono" data-testid={`benchmark-wer-${res.engineId}`}>
                               {res.evaluation ? `${res.evaluation.normalizedMetrics.werPercent}%` : '—'}
                             </td>
                             <td className="p-2.5 font-mono">
@@ -751,8 +820,42 @@ export const AsrResearchLabModal: React.FC<AsrResearchLabModalProps> = ({
                     </table>
                   </div>
 
+                  {/* Honest local ASR status & raw vs normalized transcript disclosure */}
+                  {expResult.engineResults
+                    .filter((r) => r.engineId === 'avapardaz-local-ctc-dsp')
+                    .map((localRes) =>
+                      localRes.status === 'MODEL_NOT_INSTALLED' || localRes.status === 'MODEL_NOT_READY' ? (
+                        <div
+                          key={localRes.engineId}
+                          data-testid="lab-local-model-unavailable-notice"
+                          className="p-3.5 rounded-lg border border-amber-500/40 bg-amber-500/10 text-xs text-amber-200 space-y-1"
+                        >
+                          <div className="font-semibold">
+                            موتور محلی آماده استنتاج مستقل نیست ({localRes.status}) — هیچ نتیجه CER/WER ساختگی محاسبه نشد.
+                          </div>
+                          <div className="text-amber-200/80">
+                            {localRes.errorMessage ?? 'برای اجرای بنچمارک واقعی، ابتدا مدل ONNX تأییدشده را از بخش مدیریت مدل نصب و بارگذاری کنید.'}
+                          </div>
+                        </div>
+                      ) : localRes.status === 'SUCCESS' ? (
+                        <div
+                          key={localRes.engineId}
+                          className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs"
+                        >
+                          <div className="p-3 rounded-lg border border-[#252F42] bg-[#0B0F17] space-y-1">
+                            <div className="text-slate-400">خروجی خام مدل محلی (`rawOutputText`)</div>
+                            <div className="text-slate-100">{localRes.rawOutputText}</div>
+                          </div>
+                          <div className="p-3 rounded-lg border border-[#252F42] bg-[#0B0F17] space-y-1">
+                            <div className="text-amber-300">خروجی نرمال‌شده (`normalizedOutputText`)</div>
+                            <div className="text-slate-100">{localRes.normalizedOutputText}</div>
+                          </div>
+                        </div>
+                      ) : null,
+                    )}
+
                   {localNormReport && (
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4" data-testid="lab-local-accuracy-details">
                       <div className="p-3.5 rounded-lg border border-[#252F42] bg-[#141B27] space-y-2">
                         <h4 className="text-xs font-semibold text-amber-300">
                           تاکسونومی ۳۶گرهی خطا (TAXONOMY-V1.0) و معیارهای {normMode}

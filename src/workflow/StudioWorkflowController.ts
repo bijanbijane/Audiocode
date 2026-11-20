@@ -19,8 +19,10 @@ import {
   AudioRenderEngine,
   AudioRenderResult,
   ChunkedPcmSource,
+  CommittedRenderOutputArtifact,
   RenderCheckpoint,
   RenderLifecycleState,
+  RenderOutputArtifact,
   RenderProgressSnapshot,
   createPlanarArrayPcmSource,
 } from '../audio-renderer';
@@ -34,6 +36,7 @@ import { flicksToSeconds } from '../engine/timebase';
 
 export type LocalAsrLifecycleState =
   | 'MODEL_NOT_INSTALLED'
+  | 'MODEL_AVAILABLE'
   | 'MODEL_INTEGRITY_FAILURE'
   | 'RUNTIME_UNAVAILABLE'
   | 'MODEL_LOADING'
@@ -223,6 +226,14 @@ export function computeOfflineReadiness(params: {
   readonly storageAvailable: boolean;
 }): OfflineReadinessSnapshot {
   const localModelInstalled =
+    params.asrState === 'MODEL_AVAILABLE' ||
+    params.asrState === 'MODEL_READY' ||
+    params.asrState === 'INFERENCE_RUNNING' ||
+    params.asrState === 'TRANSCRIPTION_COMPLETED' ||
+    params.asrState === 'NO_SPEECH_DETECTED' ||
+    params.asrState === 'TRANSCRIPTION_CANCELLED';
+
+  const localRuntimeReady =
     params.asrState === 'MODEL_READY' ||
     params.asrState === 'INFERENCE_RUNNING' ||
     params.asrState === 'TRANSCRIPTION_COMPLETED' ||
@@ -230,7 +241,7 @@ export function computeOfflineReadiness(params: {
     params.asrState === 'TRANSCRIPTION_CANCELLED';
 
   const offlineReadyForEditing = params.runtimeAvailable;
-  const offlineReadyForLocalAsr = params.runtimeAvailable && localModelInstalled;
+  const offlineReadyForLocalAsr = params.runtimeAvailable && localRuntimeReady;
 
   let summaryFa = 'تدوین و رندر آفلاین آماده است؛ مدل محلی ASR نصب نشده است.';
   let summaryEn = 'Offline editing & rendering ready; local ASR model not installed.';
@@ -241,6 +252,9 @@ export function computeOfflineReadiness(params: {
   } else if (offlineReadyForLocalAsr) {
     summaryFa = 'کاملاً آماده اجرای آفلاین (تدوین، مدل محلی ASR و رندر).';
     summaryEn = 'Fully offline-ready (editing, local ASR model, and rendering).';
+  } else if (localModelInstalled) {
+    summaryFa = 'مدل محلی در OPFS ذخیره و تأیید شده است؛ موتور استنتاج هنوز بارگذاری نشده است.';
+    summaryEn = 'Local model stored & verified in OPFS; inference runtime not yet initialized.';
   }
 
   return {
@@ -388,7 +402,9 @@ export class StudioWorkflowController {
   private activeEventAbort: AbortController | null = null;
   private activeRenderAbort: AbortController | null = null;
   private activeAsrAbort: AbortController | null = null;
+  private activeRenderArtifact: RenderOutputArtifact | null = null;
   private pauseRenderRequested = false;
+  private disposed = false;
 
   constructor(options?: {
     readonly memoryBudgetManager?: MemoryBudgetManager;
@@ -469,6 +485,39 @@ export class StudioWorkflowController {
     }
   }
 
+  private async disposeArtifactSafely(
+    artifact: RenderOutputArtifact | null | undefined,
+  ): Promise<void> {
+    if (!artifact) return;
+    try {
+      await artifact.dispose();
+    } catch {
+      // Artifact.dispose() guarantees all remaining owned resources were released before throwing.
+    }
+  }
+
+  /**
+   * Centralized replacement helper ensuring no path can overwrite or clear
+   * `lastRenderResult` without deterministically disposing the previous artifact.
+   * For in-memory artifacts, reservation release executes synchronously before returning.
+   */
+  private replaceOwnedRenderArtifact(nextArtifact: RenderOutputArtifact | null): Promise<void> {
+    const previousArtifact = this.activeRenderArtifact;
+    if (nextArtifact && !nextArtifact.disposed) {
+      if (nextArtifact instanceof CommittedRenderOutputArtifact) {
+        nextArtifact.markActiveInWorkflow();
+      }
+      this.activeRenderArtifact = nextArtifact;
+    } else {
+      this.activeRenderArtifact = null;
+    }
+
+    if (previousArtifact && previousArtifact !== nextArtifact) {
+      return this.disposeArtifactSafely(previousArtifact);
+    }
+    return Promise.resolve();
+  }
+
   public setLocale(locale: WorkflowLocale): void {
     this.setState({ locale });
   }
@@ -493,6 +542,7 @@ export class StudioWorkflowController {
     readonly nowMs?: number;
   }): void {
     this.cancelAllInFlightOperations();
+    void this.replaceOwnedRenderArtifact(null);
     const nextGen = this.state.sessionGeneration + 1;
     const nowMs =
       typeof params.nowMs === 'number' && Number.isFinite(params.nowMs) && params.nowMs >= 0
@@ -860,8 +910,6 @@ export class StudioWorkflowController {
     const src = this.state.sourceAudio;
     if (!edl || !src) return { ok: false, failure: null };
 
-    const activeTr = this.getActiveTranscriptVersion()?.versionId ?? edl.transcriptVersion;
-
     const result =
       params.action === 'APPROVE'
         ? EditDecisionEngine.approveProposal(edl, params.proposalId, {
@@ -962,6 +1010,9 @@ export class StudioWorkflowController {
     readonly resumeCheckpoint?: RenderCheckpoint | null;
     readonly nowMs?: number;
   }): Promise<AudioRenderResult | null> {
+    if (this.disposed) {
+      return null;
+    }
     if (
       this.state.renderState === 'QUEUED' ||
       this.state.renderState === 'RENDERING' ||
@@ -994,12 +1045,25 @@ export class StudioWorkflowController {
 
     const activeTr = this.getActiveTranscriptVersion()?.versionId ?? edl.transcriptVersion;
 
+    // Dispose any previously retained render artifact and clear lastRenderResult before starting.
+    const previousDisposal = this.replaceOwnedRenderArtifact(null);
+
     this.setState({
       renderState: 'QUEUED',
+      lastRenderResult: null,
       exportStatus: 'IDLE',
       exportError: null,
       exportSavedFileName: null,
     });
+
+    await previousDisposal;
+
+    if (gen !== this.state.sessionGeneration || this.disposed || abortCtrl.signal.aborted) {
+      if (this.activeRenderAbort === abortCtrl) {
+        this.activeRenderAbort = null;
+      }
+      return null;
+    }
 
     let lastProgressEmitState: RenderLifecycleState | null = null;
     let lastProgressEmitPct: number | null = null;
@@ -1016,7 +1080,7 @@ export class StudioWorkflowController {
       shouldPauseUser: () => this.pauseRenderRequested,
       nowMs: params.nowMs,
       onProgress: (snap: RenderProgressSnapshot) => {
-        if (gen !== this.state.sessionGeneration) return;
+        if (gen !== this.state.sessionGeneration || this.disposed) return;
         const nowWall = Date.now();
         const isSameRenderingState =
           snap.state === 'RENDERING' && lastProgressEmitState === 'RENDERING';
@@ -1042,7 +1106,8 @@ export class StudioWorkflowController {
         ? await this.renderEngine.resumeFromCheckpoint(request, params.resumeCheckpoint)
         : await this.renderEngine.render(request);
 
-      if (gen !== this.state.sessionGeneration) {
+      if (gen !== this.state.sessionGeneration || this.disposed) {
+        await this.disposeArtifactSafely(result.outputArtifact);
         return null;
       }
 
@@ -1053,6 +1118,14 @@ export class StudioWorkflowController {
             ? 'FAILED'
             : 'IDLE';
 
+      const nextArtifact =
+        result.ok && result.postValidation?.passed ? result.outputArtifact : null;
+      if (!nextArtifact && result.outputArtifact) {
+        await this.disposeArtifactSafely(result.outputArtifact);
+      }
+
+      await this.replaceOwnedRenderArtifact(nextArtifact);
+
       this.setState({
         renderState: result.state,
         lastRenderResult: result,
@@ -1062,6 +1135,18 @@ export class StudioWorkflowController {
       });
 
       return result;
+    } catch (err) {
+      if (gen === this.state.sessionGeneration && !this.disposed) {
+        await this.replaceOwnedRenderArtifact(null);
+        const message = err instanceof Error ? err.message : String(err);
+        this.setState({
+          renderState: 'FAILED',
+          lastRenderResult: null,
+          exportStatus: 'FAILED',
+          exportError: message,
+        });
+      }
+      return null;
     } finally {
       if (this.activeRenderAbort === abortCtrl) {
         this.activeRenderAbort = null;
@@ -1112,7 +1197,25 @@ export class StudioWorkflowController {
   }
 
   public dispose(): void {
+    if (this.disposed) {
+      this.listeners.clear();
+      return;
+    }
+    this.disposed = true;
     this.cancelAllInFlightOperations();
+    void this.replaceOwnedRenderArtifact(null);
+    const memSnap = this.budget.getSnapshot();
+    this.state = {
+      ...this.state,
+      sessionGeneration: this.state.sessionGeneration + 1,
+      renderProgress: null,
+      lastRenderResult: null,
+      recoverableCheckpoint: null,
+      exportStatus: 'IDLE',
+      memoryPressure: memSnap.pressureLevel,
+      memoryAccountedBytes: memSnap.accountedBytes,
+      memoryHardLimitBytes: memSnap.hardLimitBytes,
+    };
     this.listeners.clear();
   }
 }

@@ -1,10 +1,12 @@
 openapi: 3.1.0
 info:
   title: Independent Persian-English ASR Platform Public API
-  version: 1.0.0
+  version: 1.1.0
   description: >
-    Provider-independent commercial ASR API with multi-tenant isolation, scoped API keys,
-    24h idempotency, region residency enforcement, and atomic usage metering.
+    Provider-independent commercial ASR API with binary audio streaming ingestion,
+    server-derived canonical 16 kHz PCM duration metering, multi-tenant isolation,
+    scoped API keys, 24h audio-digest idempotency, region residency enforcement,
+    and atomic usage metering.
 servers:
   - url: http://localhost:3000
     description: Local Development Gateway
@@ -31,16 +33,48 @@ components:
             retryable: { type: boolean }
             retry_after_seconds: { type: integer }
             details: { type: object }
+    TranscriptionOptionsHeader:
+      type: object
+      description: JSON-encoded transcription options passed in the X-ASR-Options header. Client-supplied audio_duration_ms, raw_text_hint, sample_id, and pcm_base64_preview are forbidden.
+      additionalProperties: false
+      properties:
+        model:
+          type: string
+          default: asr-fa-en-v1
+        language:
+          type: string
+          enum: [auto, fa, en, fa-en]
+          default: auto
+        timestamps:
+          type: boolean
+          default: false
+        diarization:
+          type: boolean
+          default: false
+        domain_profile:
+          type: string
+          enum: [general, technology, business, real_estate, education, medical, legal]
+          default: technology
+        execution_mode:
+          type: string
+          enum: [batch, long_form_async]
+          default: batch
+        region_id:
+          type: string
+        metadata:
+          type: object
+          additionalProperties:
+            type: string
 paths:
   /v1/models:
     get:
-      summary: List project-permitted public ASR models
+      summary: List project-permitted public ASR models with live runtime readiness
       responses:
         "200":
-          description: Curated public model catalog without internal research artifacts
+          description: Curated public model catalog reflecting real runtime model installation and readiness
   /v1/models/{id}:
     get:
-      summary: Retrieve single public model capability record
+      summary: Retrieve single public model capability record with live readiness
       parameters:
         - in: path
           name: id
@@ -57,20 +91,48 @@ paths:
         "422": { description: REGION_UNAVAILABLE if prohibited region requested }
   /v1/audio/transcriptions:
     post:
-      summary: Create batch or async long-form transcription job
+      summary: Create batch transcription from a streamed binary audio upload
+      description: >
+        Accepts raw binary audio streams (WAV, OGG/Opus, MP3, FLAC, M4A, WebM) and decodes server-side
+        to canonical 16 kHz mono float32le PCM via FFmpeg. JSON bodies and client-supplied duration/text
+        hints are rejected. Execution mode `long_form_async` returns 501 ASYNC_EXECUTION_UNAVAILABLE
+        when no durable asynchronous worker queue is attached.
       parameters:
         - in: header
           name: Idempotency-Key
           required: false
           schema: { type: string }
+        - in: header
+          name: X-ASR-Options
+          required: false
+          description: JSON-encoded TranscriptionOptionsHeader object
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          audio/wav:
+            schema: { type: string, format: binary }
+          audio/ogg:
+            schema: { type: string, format: binary }
+          audio/mpeg:
+            schema: { type: string, format: binary }
+          audio/flac:
+            schema: { type: string, format: binary }
+          application/octet-stream:
+            schema: { type: string, format: binary }
       responses:
-        "200": { description: Completed synchronous batch transcription }
-        "202": { description: Accepted asynchronous long-form job }
+        "200": { description: Completed synchronous batch transcription with provenance=MODEL_INFERENCE }
+        "400": { description: VALIDATION_ERROR, EMPTY_AUDIO_BODY, MODEL_UNAVAILABLE, or AUDIO_DURATION_EXCEEDED }
+        "401": { description: UNAUTHENTICATED }
         "402": { description: BUDGET_EXCEEDED or QUOTA_EXCEEDED }
-        "409": { description: IDEMPOTENCY_CONFLICT }
-        "422": { description: REGION_UNAVAILABLE }
+        "403": { description: INSUFFICIENT_SCOPE or TENANT_ISOLATION_DENIED }
+        "409": { description: IDEMPOTENCY_CONFLICT when reused with a different audio SHA-256 or option set }
+        "413": { description: PAYLOAD_TOO_LARGE when upload exceeds maximum byte limit }
+        "415": { description: AUDIO_FORMAT_UNSUPPORTED when JSON or non-audio Content-Type is sent }
+        "422": { description: AUDIO_DECODE_FAILED or REGION_UNAVAILABLE }
         "429": { description: RATE_LIMITED }
-        "503": { description: PROVIDER_UNAVAILABLE when GPU worker absent }
+        "501": { description: ASYNC_EXECUTION_UNAVAILABLE when execution_mode=long_form_async is requested without a durable async queue }
+        "503": { description: PROVIDER_UNAVAILABLE when verified ASR model weights or GPU worker are not ready }
   /v1/audio/transcriptions/{id}:
     get:
       summary: Retrieve transcription job status and metadata (tenant isolated)

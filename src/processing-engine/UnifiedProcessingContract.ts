@@ -24,6 +24,16 @@ export type UnifiedProcessingErrorCode =
   | 'INVALID_PROCESSING_REQUEST'
   | 'UNSUPPORTED_AUDIO_FORMAT'
   | 'LOCAL_RUNTIME_UNAVAILABLE'
+  | 'LOCAL_MODEL_NOT_INSTALLED'
+  | 'LOCAL_MODEL_NOT_READY'
+  | 'LOCAL_MODEL_INTEGRITY_FAILURE'
+  | 'LOCAL_MODEL_ARCHITECTURE_UNSUPPORTED'
+  | 'CLOUD_CONSENT_REQUIRED'
+  | 'CLOUD_CONSENT_EXPIRED'
+  | 'CLOUD_CONSENT_RESOURCE_MISMATCH'
+  | 'CLOUD_SELECTION_REQUIRED'
+  | 'CLOUD_SELECTION_EXCEEDS_LIMIT'
+  | 'EXTERNAL_RESULT_PENDING_REVIEW'
   | 'CLOUD_PROVIDER_UNAVAILABLE'
   | 'PROVIDER_AUTHENTICATION_FAILED'
   | 'PROVIDER_TIMEOUT'
@@ -168,6 +178,9 @@ export interface ExecutionProvenance {
   readonly providerId: string;
   readonly modelId: string | null;
   readonly modelVersion: string | null;
+  readonly modelSha256?: string | null;
+  readonly consentIdUsed?: string | null;
+  readonly requiresUserReview?: boolean;
   readonly isGenuineNeuralModel: boolean;
   readonly contractVersion: typeof UNIFIED_PROCESSING_CONTRACT_VERSION;
   readonly configVersion: typeof UNIFIED_PROCESSING_CONFIG_VERSION;
@@ -253,6 +266,56 @@ const DEFAULT_ERROR_MESSAGES: Record<
   LOCAL_RUNTIME_UNAVAILABLE: {
     en: 'The required local ASR runtime or verified neural weights are unavailable on this device.',
     fa: 'موتور پردازش محلی یا وزن‌های عصبی تأییدشده روی این دستگاه در دسترس نیست.',
+    retryable: false,
+  },
+  LOCAL_MODEL_NOT_INSTALLED: {
+    en: 'No verified local ONNX ASR model is installed on this device.',
+    fa: 'هیچ مدل محلی ONNX تأییدشده‌ای روی این دستگاه نصب نشده است.',
+    retryable: false,
+  },
+  LOCAL_MODEL_NOT_READY: {
+    en: 'The local ONNX ASR model is installed but the inference worker or decoder configuration is not ready.',
+    fa: 'مدل محلی نصب شده است اما نشست استنتاج یا پیکربندی دیکدر آماده نیست.',
+    retryable: false,
+  },
+  LOCAL_MODEL_INTEGRITY_FAILURE: {
+    en: 'Local ONNX model SHA-256 or manifest integrity verification failed.',
+    fa: 'بررسی اصالت SHA-256 یا مانیفست مدل محلی ناموفق بود.',
+    retryable: false,
+  },
+  LOCAL_MODEL_ARCHITECTURE_UNSUPPORTED: {
+    en: 'The installed local ONNX model architecture or required tokenizer/decoder assets are unsupported.',
+    fa: 'معماری مدل محلی یا فایل‌های دیکدر و واژه‌نامه آن پشتیبانی نمی‌شود.',
+    retryable: false,
+  },
+  CLOUD_CONSENT_REQUIRED: {
+    en: 'Fresh explicit one-time user consent is required before transmitting selected audio to Cloud ASR.',
+    fa: 'پیش از ارسال قطعه صوتی انتخاب‌شده به سرویس ابری، تأیید صریح و یک‌بارمصرف کاربر الزامی است.',
+    retryable: false,
+  },
+  CLOUD_CONSENT_EXPIRED: {
+    en: 'The one-time Cloud ASR consent grant has expired and must be re-confirmed.',
+    fa: 'اعتبار زمانی مجوز یک‌بارمصرف ارسال صوت به ابر منقضی شده است و باید دوباره تأیید شود.',
+    retryable: false,
+  },
+  CLOUD_CONSENT_RESOURCE_MISMATCH: {
+    en: 'The submitted audio bytes, selection range, or model do not match the approved Cloud consent grant.',
+    fa: 'بایت‌های صوتی، بازه انتخابی یا مدل درخواستی با رضایت تأییدشده کاربر مطابقت ندارد.',
+    retryable: false,
+  },
+  CLOUD_SELECTION_REQUIRED: {
+    en: 'Cloud ASR requires an explicit track waveform selection and never uploads full files automatically.',
+    fa: 'برای اجرای ASR ابری، انتخاب دقیق بازه روی موج صوت یک ترک الزامی است و فایل کامل ارسال نمی‌شود.',
+    retryable: false,
+  },
+  CLOUD_SELECTION_EXCEEDS_LIMIT: {
+    en: 'The selected audio range exceeds the 120-second maximum permitted for Cloud ASR.',
+    fa: 'طول بازه صوتی انتخاب‌شده از سقف مجاز ۱۲۰ ثانیه برای سرویس ابری بیشتر است.',
+    retryable: false,
+  },
+  EXTERNAL_RESULT_PENDING_REVIEW: {
+    en: 'External Cloud ASR output requires explicit user review before modifying the transcript.',
+    fa: 'خروجی دریافتی از سرویس ابری پیش از اعمال روی متن پروژه نیازمند بررسی و تأیید صریح کاربر است.',
     retryable: false,
   },
   CLOUD_PROVIDER_UNAVAILABLE: {
@@ -536,13 +599,31 @@ export function validateUnifiedProcessingResultEnvelope(
   if (!e.normalizedByProfile || typeof e.normalizedByProfile !== 'object') return false;
   const norm = e.normalizedByProfile as Record<string, unknown>;
   if (norm.RAW_UNMODIFIED !== e.rawModelOutput) return false;
+  if (
+    e.confidenceStatus !== 'CALIBRATED' &&
+    e.confidenceStatus !== 'UNAVAILABLE_UNCALIBRATED'
+  ) {
+    return false;
+  }
+  if (e.confidenceStatus === 'UNAVAILABLE_UNCALIBRATED' && e.calibratedConfidence !== null) {
+    return false;
+  }
+  if (
+    e.timestampGranularity !== 'RECORDING' &&
+    e.timestampGranularity !== 'SEGMENT' &&
+    e.timestampGranularity !== 'WORD' &&
+    e.timestampGranularity !== 'UNAVAILABLE'
+  ) {
+    return false;
+  }
   if (!Array.isArray(e.segments)) return false;
+  if (e.timestampGranularity === 'UNAVAILABLE' && e.segments.length > 0) return false;
   if (!e.provenance || typeof e.provenance !== 'object') return false;
   const prov = e.provenance as Record<string, unknown>;
   if (prov.jobId !== expectedJobId) return false;
   if (prov.selectedExecutionMode !== expectedExecutionMode) return false;
   if (typeof prov.actualAdapterId !== 'string' || prov.actualAdapterId.length === 0) return false;
-  if (typeof prov.fallbackUsed !== 'boolean') return false;
+  if (prov.fallbackUsed !== false) return false;
   return true;
 }
 

@@ -5,6 +5,7 @@ export * from './AudioBoundaryProcessor';
 export * from './AudioCrossfadeProcessor';
 export * from './AudioSegmentAssembler';
 export * from './AudioExportWriter';
+export * from './RenderOutputArtifact';
 export * from './AudioRenderValidator';
 export * from './AudioRenderRecovery';
 export * from './AudioRenderEngine';

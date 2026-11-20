@@ -132,12 +132,26 @@ describe('Section 133: Whisper Beam Search Temp Fallback, Music Filter & Advisor
 
   it('4. AdvisoryLockCoordinator skips execution cleanly when another backend replica holds the lock', async () => {
     let taskExecuted = false;
+    let clientReleased = false;
+    let directPoolQueryCount = 0;
+
     const mockDb: PgPoolLike = {
-      async query<TRow>(sql: string) {
-        if (sql.includes('pg_try_advisory_lock')) {
-          return { rows: [{ acquired: false }] as unknown as TRow[], rowCount: 1 };
-        }
+      async query() {
+        directPoolQueryCount++;
         return { rows: [], rowCount: 0 };
+      },
+      async connect() {
+        return {
+          async query<TRow>(sql: string) {
+            if (sql.includes('pg_try_advisory_lock')) {
+              return { rows: [{ acquired: false }] as unknown as TRow[], rowCount: 1 };
+            }
+            return { rows: [], rowCount: 0 };
+          },
+          release() {
+            clientReleased = true;
+          },
+        };
       },
     };
 
@@ -148,5 +162,7 @@ describe('Section 133: Whisper Beam Search Temp Fallback, Music Filter & Advisor
 
     expect(res.lockAcquired).toBe(false);
     expect(taskExecuted).toBe(false);
+    expect(clientReleased).toBe(true);
+    expect(directPoolQueryCount).toBe(0);
   });
 });
