@@ -21,7 +21,7 @@ import {
   DEFAULT_FULL_SANDBOX_CONSENT,
   PHASE11_CAPABILITY_REGISTRY,
 } from './CapabilityRegistryAndOrchestrator';
-import { RealtimeIntelligenceStreamCoordinator } from './RealtimeIntelligenceStream';
+import { RealtimeIntelligenceStreamCoordinator } from './MeetingAnalyticsSearchEngine';
 import type {
   GranularProcessingConsent,
   SpeechCapabilityId,
@@ -997,7 +997,7 @@ export function createSpeechIntelligenceSandboxRouter(params: {
 
   // 5. DELETE /api/v1/intelligence/sandbox/recordings/:recordingId
   router.delete('/api/v1/intelligence/sandbox/recordings/:recordingId', (req, res) => {
-    const ctx = (req as Request & { sandboxContext: SandboxAccessContext }).sandboxContext;
+    const ctx = (req as unknown as Request & { sandboxContext: SandboxAccessContext }).sandboxContext;
     const recCheck = validateRecordingIdStrict(req.params.recordingId);
     if (!recCheck.ok) {
       sendSanitizedError(res, 400, 'VALIDATION_ERROR', recCheck.message);

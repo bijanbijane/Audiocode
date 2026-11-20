@@ -315,10 +315,11 @@ export const RenderExportModal: React.FC<RenderExportModalProps> = ({
                 {isFa ? 'قالب خروجی صوتی' : 'Audio Export Format'}
               </span>
               <select
+                dir="ltr"
                 value={format}
                 onChange={(e) => setFormat(e.target.value as RenderFormatPreset)}
                 disabled={isRendering}
-                className="w-full rounded-md border border-slate-300 dark:border-[#252F42] bg-slate-50 dark:bg-[#0E131D] px-3 py-2 text-xs"
+                className="w-full rounded-md border border-slate-300 dark:border-[#252F42] bg-slate-50 dark:bg-[#0E131D] px-3 py-2 text-xs text-left"
               >
                 <option value="WAV_PCM16">WAV PCM 16-bit (Standard)</option>
                 <option value="WAV_PCM24">WAV PCM 24-bit (Broadcast)</option>
@@ -332,10 +333,11 @@ export const RenderExportModal: React.FC<RenderExportModalProps> = ({
                 {isFa ? 'نرخ نمونه‌برداری خروجی' : 'Target Sample Rate'}
               </span>
               <select
+                dir="ltr"
                 value={sampleRate}
                 onChange={(e) => setSampleRate(Number(e.target.value) as SampleRate)}
                 disabled={isRendering}
-                className="w-full rounded-md border border-slate-300 dark:border-[#252F42] bg-slate-50 dark:bg-[#0E131D] px-3 py-2 text-xs font-mono"
+                className="w-full rounded-md border border-slate-300 dark:border-[#252F42] bg-slate-50 dark:bg-[#0E131D] px-3 py-2 text-xs font-mono text-left"
               >
                 <option value={16000}>16000 Hz</option>
                 <option value={44100}>44100 Hz</option>

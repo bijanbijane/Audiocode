@@ -122,14 +122,14 @@ export const DspFrequencyResponseGraph: React.FC<DspFrequencyResponseGraphProps>
       data-comp-gr-db={liveCurve.passbandReductionDb}
       data-effective-1khz-db={liveCurve.effectiveAt1kHzDb}
       data-50hz-gain-db={liveCurve.effectiveAt50HzDb}
-      className="px-4 py-3 border-b border-[#252F42] bg-[#0E131D]/65 space-y-2.5"
+      className="px-4 py-3 border-b border-slate-200 dark:border-[#252F42] bg-slate-50 dark:bg-[#0E131D]/65 space-y-2.5"
     >
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex flex-wrap items-baseline gap-2">
-          <h3 className="text-xs font-semibold text-slate-100">
+          <h3 className="text-xs font-semibold text-slate-900 dark:text-slate-100">
             منحنی لحظه‌ای پاسخ فرکانسی (۲۰Hz – ۲۰kHz)
           </h3>
-          <span className="text-[11px] text-slate-400">
+          <span className="text-[11px] text-slate-600 dark:text-slate-400">
             {isGestureActive || hasUncommittedDiff
               ? 'نمایش زنده حین تغییر (مقایسه با مرجع ثبت‌شده)'
               : 'پاسخ فیلتر بالاگذر و کاهش پویای کمپرسور'}
@@ -137,12 +137,12 @@ export const DspFrequencyResponseGraph: React.FC<DspFrequencyResponseGraphProps>
         </div>
 
         <div className="flex items-center gap-2 text-[11px]">
-          <span className="text-slate-400">سطح ورودی مرجع:</span>
+          <span className="text-slate-600 dark:text-slate-400">سطح ورودی مرجع:</span>
           <div
             dir="ltr"
             role="group"
             aria-label="سطح سیگنال مرجع کمپرسور"
-            className="inline-flex items-center p-0.5 rounded bg-[#0B0F17] border border-[#252F42]"
+            className="inline-flex items-center p-0.5 rounded bg-slate-100 dark:bg-[#0B0F17] border border-slate-300 dark:border-[#252F42]"
           >
             {REF_INPUT_OPTIONS.map((lvl) => (
               <button
@@ -153,7 +153,7 @@ export const DspFrequencyResponseGraph: React.FC<DspFrequencyResponseGraphProps>
                 className={`px-2 py-0.5 rounded font-mono tabular-nums transition-colors cursor-pointer whitespace-nowrap ${
                   referenceInputDb === lvl
                     ? 'bg-amber-400 text-slate-950 font-semibold'
-                    : 'text-slate-400 hover:text-slate-200'
+                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
                 }`}
               >
                 {lvl} dBFS
@@ -313,36 +313,36 @@ export const DspFrequencyResponseGraph: React.FC<DspFrequencyResponseGraphProps>
 
       {/* Legend & Tabular Telemetry Strip */}
       <div className="flex flex-wrap items-center justify-between gap-2 text-[11px]">
-        <div className="flex flex-wrap items-center gap-2.5 text-slate-300">
+        <div className="flex flex-wrap items-center gap-2.5 text-slate-700 dark:text-slate-300">
           <span className="inline-flex items-center gap-1.5 whitespace-nowrap">
-            <span className="w-3 h-0.5 bg-amber-400 inline-block" aria-hidden="true" />
+            <span className="w-3 h-0.5 bg-amber-500 dark:bg-amber-400 inline-block" aria-hidden="true" />
             <span>پاسخ موثر</span>
           </span>
           <span className="inline-flex items-center gap-1.5 whitespace-nowrap">
-            <span className="w-3 h-0.5 border-t border-dashed border-sky-400 inline-block" aria-hidden="true" />
+            <span className="w-3 h-0.5 border-t border-dashed border-sky-600 dark:border-sky-400 inline-block" aria-hidden="true" />
             <span>فیلتر بالاگذر</span>
           </span>
           {eqPath && (
-            <span className="inline-flex items-center gap-1.5 text-emerald-300 whitespace-nowrap">
-              <span className="w-3 h-0.5 border-t border-dashed border-emerald-400 inline-block" aria-hidden="true" />
+            <span className="inline-flex items-center gap-1.5 text-emerald-700 dark:text-emerald-300 whitespace-nowrap">
+              <span className="w-3 h-0.5 border-t border-dashed border-emerald-600 dark:border-emerald-400 inline-block" aria-hidden="true" />
               <span>EQ ۸ بانده</span>
             </span>
           )}
         </div>
 
-        <div dir="ltr" className="flex flex-wrap items-center gap-2 font-mono tabular-nums text-slate-300">
-          <span data-testid="dsp-graph-readout-hpf" className="text-sky-300">
+        <div dir="ltr" className="flex flex-wrap items-center gap-2 font-mono tabular-nums text-slate-700 dark:text-slate-300">
+          <span data-testid="dsp-graph-readout-hpf" className="text-sky-700 dark:text-sky-300">
             HPF -3dB: {ephemeralParams.highPassHz}Hz
           </span>
-          <span className="text-slate-600" aria-hidden="true">·</span>
+          <span className="text-slate-400 dark:text-slate-600" aria-hidden="true">·</span>
           <span data-testid="dsp-graph-readout-50hz">
             50Hz: {formatSignedDb(liveCurve.effectiveAt50HzDb)}
           </span>
-          <span className="text-slate-600" aria-hidden="true">·</span>
-          <span data-testid="dsp-graph-readout-gr" className="text-amber-300">
+          <span className="text-slate-400 dark:text-slate-600" aria-hidden="true">·</span>
+          <span data-testid="dsp-graph-readout-gr" className="text-amber-700 dark:text-amber-300">
             Comp GR: {liveCurve.passbandReductionDb.toFixed(1)}dB
           </span>
-          <span className="text-slate-600" aria-hidden="true">·</span>
+          <span className="text-slate-400 dark:text-slate-600" aria-hidden="true">·</span>
           <span data-testid="dsp-graph-readout-1khz">
             1kHz: {formatSignedDb(liveCurve.effectiveAt1kHzDb)}
           </span>

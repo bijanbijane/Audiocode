@@ -102,7 +102,8 @@ export type PlatformErrorCode =
   | 'TRANSCRIPTION_FAILED'
   | 'REQUEST_TIMEOUT'
   | 'IDEMPOTENCY_CONFLICT'
-  | 'REGION_UNAVAILABLE';
+  | 'REGION_UNAVAILABLE'
+  | 'INTERNAL_ERROR';
 
 export interface PlatformApiErrorEnvelope {
   error: {
@@ -355,8 +356,10 @@ export type PublicWebhookEventType =
   | 'quota.exceeded'
   | 'subscription.updated'
   | 'invoice.created'
+  | 'invoice.issued'
   | 'invoice.paid'
-  | 'payment.failed';
+  | 'payment.failed'
+  | 'model.deprecated';
 
 export interface WebhookEndpointRecord {
   endpointId: string;
@@ -467,9 +470,14 @@ export interface PublicTranscriptionJobRecord {
   language: 'fa' | 'en' | 'fa-en' | 'auto';
   executionMode: 'batch' | 'long_form_async';
   text: string | null;
+  rawText?: string | null;
   rawTranscript?: string | null;
   normalizedTranscript?: string | null;
   segments?: Array<{ startMs: number; endMs: number; text: string; confidence?: number }>;
+  audioSha256?: string;
+  provenance?: 'MODEL_INFERENCE';
+  modelDigestSha256?: string;
+  processedSamples16k?: number;
   calibratedConfidence?: number | null;
   durationMs: number;
   billableMs: number;

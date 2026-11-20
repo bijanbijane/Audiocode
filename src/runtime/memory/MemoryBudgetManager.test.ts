@@ -277,3 +277,120 @@ test('measureTypedArrayListBackingBytes captures subarray backing retention and 
     assert.equal(measureTypedArrayListBackingBytes([view]), null);
   }
 });
+
+test('MT-07: Duplicate active allocation ID is rejected without mutating accounted bytes', async () => {
+  const { DuplicateMemoryAllocationIdError } = await import('./MemoryBudgetManager');
+  const mgr = new MemoryBudgetManager();
+  const r1 = mgr.reserve({
+    id: 'chunk-window-001',
+    owner: 'ingest-worker',
+    category: 'decoded-audio',
+    bytes: 4 * MiB,
+  });
+  assert.equal(r1.id, 'chunk-window-001');
+  assert.equal(mgr.getUsedBytes(), 4 * MiB);
+
+  assert.throws(
+    () =>
+      mgr.reserve({
+        id: 'chunk-window-001',
+        owner: 'ingest-worker',
+        category: 'decoded-audio',
+        bytes: 4 * MiB,
+      }),
+    DuplicateMemoryAllocationIdError,
+  );
+  assert.equal(mgr.getUsedBytes(), 4 * MiB);
+  assert.equal(mgr.getCategoryUsage('decoded-audio'), 4 * MiB);
+
+  // After release, reusing the same ID is valid
+  assert.equal(mgr.release('chunk-window-001'), true);
+  assert.equal(mgr.getUsedBytes(), 0);
+  const r2 = mgr.reserve({
+    id: 'chunk-window-001',
+    owner: 'ingest-worker',
+    category: 'decoded-audio',
+    bytes: 2 * MiB,
+  });
+  assert.equal(mgr.getUsedBytes(), 2 * MiB);
+  mgr.release(r2);
+});
+
+test('MT-08 & MT-09: Double release and unknown ID release never cause negative underflow', () => {
+  const mgr = new MemoryBudgetManager();
+  const res = mgr.reserve({
+    id: 'audio-block-1',
+    owner: 'cache',
+    category: 'audio-cache',
+    bytes: 8 * MiB,
+  });
+  assert.equal(mgr.release(res), true);
+  assert.equal(mgr.release(res), false);
+  assert.equal(mgr.release('audio-block-1'), false);
+  assert.equal(mgr.release('does-not-exist'), false);
+  assert.equal(mgr.getUsedBytes(), 0);
+  assert.equal(mgr.getCategoryUsage('audio-cache'), 0);
+});
+
+test('MT-11, MT-12 & MT-13: Concurrent allocations, worker release reconciliation, and cancellation cleanup leave zero leaks', async () => {
+  const mgr = new MemoryBudgetManager();
+  const workers = Array.from({ length: 16 }, (_, idx) =>
+    Promise.resolve().then(() => {
+      const res = mgr.reserve({
+        id: `worker-task-${idx}`,
+        owner: idx % 2 === 0 ? 'io-worker' : 'export-worker',
+        category: idx % 2 === 0 ? 'decoded-audio' : 'render-export-buffers',
+        bytes: 16 * MiB,
+        releasable: true,
+      });
+      return res;
+    }),
+  );
+
+  const reservations = await Promise.all(workers);
+  assert.equal(mgr.getUsedBytes(), 16 * 16 * MiB);
+  assert.equal(mgr.getActiveAllocations().length, 16);
+
+  // Worker release reconciliation (MT-12): release all io-worker reservations atomically
+  const reclaimedIo = mgr.releaseByOwner('io-worker');
+  assert.equal(reclaimedIo, 8 * 16 * MiB);
+  assert.equal(mgr.getCategoryUsage('decoded-audio'), 0);
+
+  // Cancellation cleanup (MT-13): simulate aborted export releasing remaining allocations
+  for (const res of reservations) {
+    mgr.release(res);
+  }
+  assert.equal(mgr.getUsedBytes(), 0);
+  assert.equal(mgr.getActiveAllocations().length, 0);
+});
+
+test('MT-14: Leak detection surfaces unreleased allocations older than threshold deterministically', () => {
+  let fakeNow = 1_000_000;
+  const mgr = new MemoryBudgetManager(AVAPARDAZ_MEMORY_POLICY, { now: () => fakeNow });
+
+  const oldRes = mgr.reserve({
+    id: 'stale-buffer',
+    owner: 'stuck-task',
+    category: 'asr-feature-buffers',
+    bytes: 12 * MiB,
+  });
+
+  fakeNow += 60_000;
+  const freshRes = mgr.reserve({
+    id: 'fresh-buffer',
+    owner: 'active-task',
+    category: 'asr-input-windows',
+    bytes: 4 * MiB,
+  });
+
+  fakeNow += 5_000;
+  const leaks = mgr.detectLeaks(30_000);
+  assert.equal(leaks.length, 1);
+  assert.equal(leaks[0].reservation.id, oldRes.id);
+  assert.equal(leaks[0].ageMs, 65_000);
+
+  mgr.release(oldRes);
+  mgr.release(freshRes);
+  assert.equal(mgr.detectLeaks(0).length, 0);
+});
+

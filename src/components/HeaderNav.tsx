@@ -24,7 +24,7 @@ export const HeaderNav: React.FC<HeaderNavProps> = ({
   ];
 
   return (
-    <header className="flex items-center justify-between gap-4 sm:gap-8 px-4 sm:px-6 py-3.5 border-b border-slate-200 dark:border-[#252F42] bg-white dark:bg-[#0B0F17]">
+    <header className="flex flex-wrap sm:flex-nowrap items-center justify-between gap-x-4 gap-y-2 sm:gap-8 px-4 sm:px-6 py-3 border-b border-slate-200 dark:border-[#252F42] bg-white dark:bg-[#0B0F17]">
       {/* Zone 1: Single-element Brand Wordmark */}
       <a
         href="#top"
@@ -37,8 +37,11 @@ export const HeaderNav: React.FC<HeaderNavProps> = ({
         {isFa ? 'آواپرداز' : 'Avapardaz'}
       </a>
 
-      {/* Zone 2: Clean single-line navigation links */}
-      <nav aria-label={isFa ? 'بخش‌های استودیو' : 'Studio sections'} className="flex items-center gap-4 sm:gap-6 overflow-x-auto">
+      {/* Zone 2: Clean single-line navigation links (wraps cleanly to full row on mobile) */}
+      <nav
+        aria-label={isFa ? 'بخش‌های استودیو' : 'Studio sections'}
+        className="order-3 w-full sm:order-none sm:w-auto flex items-center gap-4 sm:gap-6 pt-2 sm:pt-0 border-t sm:border-t-0 border-slate-100 dark:border-[#1E2738] overflow-x-auto"
+      >
         {navItems.map((item) => {
           const isActive = activeTab === item.id;
           return (
@@ -47,7 +50,7 @@ export const HeaderNav: React.FC<HeaderNavProps> = ({
               type="button"
               onClick={() => onSelectTab(item.id)}
               aria-current={isActive ? 'page' : undefined}
-              className={`py-1 text-sm font-medium whitespace-nowrap shrink-0 border-b-2 transition-colors cursor-pointer ${
+              className={`py-1 text-xs sm:text-sm font-medium whitespace-nowrap shrink-0 border-b-2 transition-colors cursor-pointer ${
                 isActive
                   ? 'text-amber-600 dark:text-amber-400 border-amber-500 dark:border-amber-400'
                   : 'text-slate-600 dark:text-slate-400 border-transparent hover:text-slate-900 dark:hover:text-slate-100'

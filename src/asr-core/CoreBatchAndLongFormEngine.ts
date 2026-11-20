@@ -122,7 +122,11 @@ export class CoreBatchAndLongFormEngine {
     const cfg: LongFormConfig = { ...DEFAULT_LONG_FORM_CONFIG, ...params.config };
     const { pcm16k, languageHint = 'auto', warnings = [] } = params;
     const sha256 =
-      params.audioSha256 ?? crypto.createHash('sha256').update(Buffer.from(pcm16k.buffer)).digest('hex');
+      params.audioSha256 ??
+      crypto
+        .createHash('sha256')
+        .update(Buffer.from(pcm16k.buffer, pcm16k.byteOffset, pcm16k.byteLength))
+        .digest('hex');
 
     const maxSegmentDurationSec =
       Number.isFinite(cfg.maxSegmentDurationSec) && cfg.maxSegmentDurationSec >= 2.0

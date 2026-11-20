@@ -1,12 +1,17 @@
-# Pinned Dependencies Lockfile — Track Qwen3-ASR Training (CUDA G1/G2 Environment Only)
+# AVAPARDAZ PHASE-06 — Pinned Dependencies Lockfile (Official qwen-asr SFT Track)
+# Resolves the broken Phase-4 lockfile conflict (transformers==4.51.3 + nonexistent qwen-asr==0.2.1).
+# Target script: https://github.com/QwenLM/Qwen3-ASR/blob/main/finetuning/qwen3_asr_sft.py
+# Environment: Isolated Python 3.11+ venv on CUDA G1/G2/G3 machine.
+# WARNING: Do NOT mix this environment with transformers>=5.13.0 (see requirements-qwen-hf-native.lock).
+
 torch==2.5.1
 torchaudio==2.5.1
-transformers==4.51.3
-accelerate==1.2.1
-peft==0.14.0
+qwen-asr==0.0.6
+transformers==4.57.6
+accelerate==1.12.0
 datasets==3.2.0
-qwen-asr==0.2.1
 soundfile==0.13.0
 librosa==0.10.2.post1
 jiwer==3.1.0
 pyyaml==6.0.2
+safetensors==0.4.5

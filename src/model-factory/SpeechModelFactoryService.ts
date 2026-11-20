@@ -925,6 +925,14 @@ export class SpeechModelFactoryService {
     technique: OptimizationExperimentRecord['technique'];
   }): { optimization: OptimizationExperimentRecord; optimizedModel: ModelVersionRecord } {
     const parent = this.getModelVersion(params.tenantId, params.parentModelVersionId);
+    const dup = [...this.modelVersions.values()].find(
+      (m) => m.tenantId === params.tenantId && m.modelId === parent.modelId && m.version === params.newVersion
+    );
+    if (dup) {
+      throw new Error(
+        `IMMUTABLE_MODEL_VERSION_CONFLICT: ${parent.modelId}@${params.newVersion} already exists; publish a new version.`
+      );
+    }
     const parentWeights = this.weightsStore.get(parent.modelVersionId);
     if (!parentWeights) throw new Error('PARENT_WEIGHTS_MISSING');
 
@@ -1479,6 +1487,23 @@ export class SpeechModelFactoryService {
     featureDriftPsi: number;
     cerDeltaPp?: number | null;
   }): ModelMonitoringSnapshot {
+    if (
+      typeof params.p95LatencyMs !== 'number' ||
+      !Number.isFinite(params.p95LatencyMs) ||
+      params.p95LatencyMs < 0 ||
+      typeof params.failureRatePct !== 'number' ||
+      !Number.isFinite(params.failureRatePct) ||
+      params.failureRatePct < 0 ||
+      params.failureRatePct > 100 ||
+      typeof params.featureDriftPsi !== 'number' ||
+      !Number.isFinite(params.featureDriftPsi) ||
+      params.featureDriftPsi < 0 ||
+      (params.cerDeltaPp !== undefined &&
+        params.cerDeltaPp !== null &&
+        (typeof params.cerDeltaPp !== 'number' || !Number.isFinite(params.cerDeltaPp)))
+    ) {
+      throw new Error('VALIDATION_ERROR: Monitoring metrics must be finite numbers within valid ranges.');
+    }
     const mv = this.getModelVersion(params.tenantId, params.modelVersionId);
     const existing = this.monitoringTelemetry.get(mv.modelVersionId);
     const dep = [...this.deployments.values()].find(

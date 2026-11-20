@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import { EnterpriseApiKeyAndQuotaManager } from '../auth/EnterpriseApiKeyAndQuotaManager';
 import {
   LocalAgreement2StreamStabilizer,
@@ -34,6 +35,8 @@ export class LiveWsAsrSessionController {
   private silenceStreakSamples = 0;
 
   private readonly maxPendingChunksQueue = 16; // Backpressure cap: max 16 queued chunks
+  private readonly maxBinaryFrameBytes = 256 * 1024; // 256 KiB (~8s of 16kHz Int16 PCM) single-frame OOM guard
+  private readonly maxCommittedWordsHistory = 32; // Endpointing only inspects recent tail words
   private readonly quotaChargeIntervalSamples = 16000 * 5; // Deduct quota in 5-second intervals
 
   constructor(
@@ -51,6 +54,16 @@ export class LiveWsAsrSessionController {
    */
   public async handleIncomingInt16BinaryFrame(rawBytes: Uint8Array): Promise<void> {
     if (this.isClosed || rawBytes.byteLength === 0) return;
+
+    if (rawBytes.byteLength > this.maxBinaryFrameBytes) {
+      this.emit({
+        type: 'ERROR',
+        code: 'FRAME_TOO_LARGE',
+        messageFa: 'حجم بسته صوتی بیش از سقف مجاز ۲۵۶ کیلوبایت است.',
+      });
+      this.closeSession(1009, 'FRAME_TOO_LARGE');
+      return;
+    }
 
     if (this.bufferedPcm16kChunks.length >= this.maxPendingChunksQueue) {
       this.emit({ type: 'BACKPRESSURE_WARNING', droppedOrPaused: true });
@@ -132,6 +145,11 @@ export class LiveWsAsrSessionController {
         for (const w of update.newlyCommittedWords) {
           this.committedWordsHistory.push(w.word);
         }
+        if (this.committedWordsHistory.length > this.maxCommittedWordsHistory) {
+          this.committedWordsHistory = this.committedWordsHistory.slice(
+            -this.maxCommittedWordsHistory
+          );
+        }
 
         if (
           update.newlyCommittedWords.length > 0 ||
@@ -157,6 +175,13 @@ export class LiveWsAsrSessionController {
           }
         }
       }
+    } catch {
+      this.emit({
+        type: 'ERROR',
+        code: 'STREAM_INFERENCE_ERROR',
+        messageFa: 'خطای داخلی در پردازش جریان زنده گفتار رخ داد.',
+      });
+      this.closeSession(1011, 'STREAM_INFERENCE_ERROR');
     } finally {
       this.isProcessingQueue = false;
     }
@@ -164,6 +189,11 @@ export class LiveWsAsrSessionController {
 
   public async finalizeAndClose(): Promise<void> {
     if (this.isClosed) return;
+    // Mark closed immediately before async quota deduction to block re-entrant frames or double billing
+    this.isClosed = true;
+    this.bufferedPcm16kChunks = [];
+    this.pendingOddByte = null;
+
     if (this.accumulatedUnbilledSamples > 0) {
       const remSec = Math.max(1, Math.ceil(this.accumulatedUnbilledSamples / 16000));
       this.accumulatedUnbilledSamples = 0;
@@ -171,13 +201,23 @@ export class LiveWsAsrSessionController {
         .consumeAudioQuotaAtomically(this.enterpriseKeyId, remSec)
         .catch(() => {});
     }
-    this.closeSession(1000, 'CLIENT_CLOSED');
+    try {
+      this.socket.close(1000, 'CLIENT_CLOSED');
+    } catch {
+      // Socket already closed by peer
+    }
   }
 
   private closeSession(code: number, reason: string): void {
+    if (this.isClosed) return;
     this.isClosed = true;
     this.bufferedPcm16kChunks = [];
-    this.socket.close(code, reason);
+    this.pendingOddByte = null;
+    try {
+      this.socket.close(code, reason);
+    } catch {
+      // Socket already closed by peer
+    }
   }
 
   private isChunkSilence(chunk: Float32Array): boolean {
@@ -189,7 +229,11 @@ export class LiveWsAsrSessionController {
 
   private emit(evt: LiveWsOutgoingEvent): void {
     if (!this.isClosed) {
-      this.socket.send(JSON.stringify(evt));
+      try {
+        this.socket.send(JSON.stringify(evt));
+      } catch {
+        this.closeSession(1011, 'SOCKET_SEND_FAILED');
+      }
     }
   }
 }
@@ -227,7 +271,7 @@ export class WebSocketLiveAsrGateway {
         throw new Error('QUOTA_EXHAUSTED');
       }
 
-      const sessionId = `ws_asr_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+      const sessionId = `ws_asr_${Date.now()}_${crypto.randomBytes(8).toString('hex')}`;
       params.socket.send(
         JSON.stringify({
           type: 'SESSION_READY',

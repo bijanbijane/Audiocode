@@ -178,6 +178,30 @@ export class SpeechSecurityGateway {
     });
     if (!auth.ok) return auth.response;
 
+    const sampleRateHz = params.body?.sampleRateHz ?? 16000;
+    const channels = params.body?.channels ?? 1;
+    const durationSeconds = params.body?.durationSeconds ?? 1;
+    if (
+      typeof sampleRateHz !== 'number' ||
+      !Number.isFinite(sampleRateHz) ||
+      sampleRateHz <= 0 ||
+      typeof channels !== 'number' ||
+      !Number.isFinite(channels) ||
+      channels <= 0 ||
+      typeof durationSeconds !== 'number' ||
+      !Number.isFinite(durationSeconds) ||
+      durationSeconds <= 0
+    ) {
+      return {
+        status: 400,
+        body: buildPlatformErrorEnvelope({
+          code: 'VALIDATION_ERROR',
+          message: 'sampleRateHz, channels, and durationSeconds must be finite positive numbers.',
+          requestId: auth.context.requestId,
+        }),
+      };
+    }
+
     const rawBytes =
       typeof params.body?.base64Bytes === 'string'
         ? Uint8Array.from(Buffer.from(params.body.base64Bytes, 'base64'))
@@ -187,9 +211,9 @@ export class SpeechSecurityGateway {
       actorId: auth.context.principalId,
       filename: typeof params.body?.filename === 'string' ? params.body.filename : 'upload.wav',
       bytes: rawBytes,
-      sampleRateHz: typeof params.body?.sampleRateHz === 'number' ? params.body.sampleRateHz : 16000,
-      channels: typeof params.body?.channels === 'number' ? params.body.channels : 1,
-      durationSeconds: typeof params.body?.durationSeconds === 'number' ? params.body.durationSeconds : 1,
+      sampleRateHz,
+      channels,
+      durationSeconds,
     });
     return { status: result.accepted ? 200 : 422, body: result };
   }
@@ -307,13 +331,28 @@ export class SpeechSecurityGateway {
     });
     if (!auth.ok) return auth.response;
 
+    const rawConfig = params.body?.config;
+    if (
+      rawConfig !== undefined &&
+      (rawConfig === null || typeof rawConfig !== 'object' || Array.isArray(rawConfig))
+    ) {
+      return {
+        status: 400,
+        body: buildPlatformErrorEnvelope({
+          code: 'VALIDATION_ERROR',
+          message: 'config must be a JSON object when provided.',
+          requestId: auth.context.requestId,
+        }),
+      };
+    }
+
     try {
       const deriv = this.service.createPiiDerivative({
         tenantId: auth.context.organizationId,
         recordingId,
         originalTranscript:
           typeof params.body?.originalTranscript === 'string' ? params.body.originalTranscript : '',
-        config: params.body?.config,
+        config: rawConfig,
         actorId: auth.context.principalId,
       });
       return { status: 201, body: deriv };

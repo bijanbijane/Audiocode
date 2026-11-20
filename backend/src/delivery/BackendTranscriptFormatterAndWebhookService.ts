@@ -24,7 +24,8 @@ export class BackendTranscriptFormatterAndWebhookService {
    * Formats seconds as SRT timestamp `HH:MM:SS,mmm`.
    */
   public static formatSrtTimestamp(seconds: number): string {
-    const clampedMs = Math.max(0, Math.round(seconds * 1000));
+    const safeSec = Number.isFinite(seconds) ? seconds : 0;
+    const clampedMs = Math.max(0, Math.round(safeSec * 1000));
     const hours = Math.floor(clampedMs / 3_600_000);
     const minutes = Math.floor((clampedMs % 3_600_000) / 60_000);
     const secs = Math.floor((clampedMs % 60_000) / 1000);
@@ -45,7 +46,8 @@ export class BackendTranscriptFormatterAndWebhookService {
    * Formats seconds as bracketed clock timestamp `[HH:MM:SS]`.
    */
   public static formatClockTimestamp(seconds: number): string {
-    const totalSecs = Math.max(0, Math.floor(seconds));
+    const safeSec = Number.isFinite(seconds) ? seconds : 0;
+    const totalSecs = Math.max(0, Math.floor(safeSec));
     const hours = Math.floor(totalSecs / 3600);
     const minutes = Math.floor((totalSecs % 3600) / 60);
     const secs = totalSecs % 60;
@@ -91,20 +93,25 @@ export class BackendTranscriptFormatterAndWebhookService {
     maxCharsPerLine: number = 42,
     maxCueDurationSec: number = 6.0
   ): string {
-    if (words.length === 0) return '';
+    if (!Array.isArray(words) || words.length === 0) return '';
+    const safeMaxChars =
+      Number.isFinite(maxCharsPerLine) && maxCharsPerLine >= 8 ? Math.floor(maxCharsPerLine) : 42;
+    const safeMaxDuration =
+      Number.isFinite(maxCueDurationSec) && maxCueDurationSec > 0 ? maxCueDurationSec : 6.0;
 
     const cues: { startSec: number; endSec: number; text: string }[] = [];
     let currentWords: DeliverableWordToken[] = [];
 
     const flushCue = () => {
       if (currentWords.length === 0) return;
-      const startSec = currentWords[0].startSec;
-      const endSec = Math.max(startSec + 0.2, currentWords[currentWords.length - 1].endSec);
+      const startSec = Number.isFinite(currentWords[0].startSec) ? currentWords[0].startSec : 0;
+      const lastEnd = currentWords[currentWords.length - 1].endSec;
+      const endSec = Math.max(startSec + 0.2, Number.isFinite(lastEnd) ? lastEnd : startSec);
       const tokenStrings = currentWords.map((w) => w.word);
       cues.push({
         startSec,
         endSec,
-        text: this.wrapSubtitleLines(tokenStrings, maxCharsPerLine),
+        text: this.wrapSubtitleLines(tokenStrings, safeMaxChars),
       });
       currentWords = [];
     };
@@ -125,8 +132,8 @@ export class BackendTranscriptFormatterAndWebhookService {
       if (
         speakerChanged ||
         silenceGap >= 0.85 ||
-        candidateDuration > maxCueDurationSec ||
-        candidateChars > maxCharsPerLine * 2
+        candidateDuration > safeMaxDuration ||
+        candidateChars > safeMaxChars * 2
       ) {
         flushCue();
       }
@@ -202,6 +209,15 @@ export class BackendTranscriptFormatterAndWebhookService {
     webhookSecret: string,
     timestampUnixSec: number = Math.floor(Date.now() / 1000)
   ): SignedWebhookHeaders {
+    if (
+      typeof rawJsonBody !== 'string' ||
+      typeof webhookSecret !== 'string' ||
+      webhookSecret.length === 0 ||
+      !Number.isSafeInteger(timestampUnixSec) ||
+      timestampUnixSec <= 0
+    ) {
+      throw new Error('WEBHOOK_INVALID_SIGNING_PARAMS');
+    }
     const canonicalString = `${timestampUnixSec}.${rawJsonBody}`;
     const hmacHex = crypto
       .createHmac('sha256', webhookSecret)
@@ -227,13 +243,31 @@ export class BackendTranscriptFormatterAndWebhookService {
     nowUnixSec: number = Math.floor(Date.now() / 1000),
     maxClockSkewSec: number = 300
   ): { valid: boolean; reason?: 'INVALID_TIMESTAMP' | 'TIMESTAMP_EXPIRED_REPLAY_BLOCKED' | 'SIGNATURE_MISMATCH' } {
+    if (typeof timestampHeader !== 'string' || !/^[1-9]\d{0,14}$/.test(timestampHeader)) {
+      return { valid: false, reason: 'INVALID_TIMESTAMP' };
+    }
     const ts = Number(timestampHeader);
-    if (!Number.isInteger(ts) || ts <= 0) {
+    if (
+      !Number.isSafeInteger(ts) ||
+      ts <= 0 ||
+      !Number.isFinite(nowUnixSec) ||
+      !Number.isFinite(maxClockSkewSec) ||
+      maxClockSkewSec < 0
+    ) {
       return { valid: false, reason: 'INVALID_TIMESTAMP' };
     }
 
     if (Math.abs(nowUnixSec - ts) > maxClockSkewSec) {
       return { valid: false, reason: 'TIMESTAMP_EXPIRED_REPLAY_BLOCKED' };
+    }
+
+    if (
+      typeof rawJsonBody !== 'string' ||
+      typeof signatureHeader !== 'string' ||
+      typeof webhookSecret !== 'string' ||
+      webhookSecret.length === 0
+    ) {
+      return { valid: false, reason: 'SIGNATURE_MISMATCH' };
     }
 
     const expected = this.signWebhookPayload(rawJsonBody, webhookSecret, ts)['X-PAudio-Signature-256'];

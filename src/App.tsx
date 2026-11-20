@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Play,
   Pause,
@@ -39,8 +39,14 @@ import { SpeechSecurityModal } from './components/SpeechSecurityModal';
 import { AuditionTransportBar, WaveformSelectionState } from './components/AuditionTransportBar';
 import { AuditionSideDock } from './components/AuditionSideDock';
 import { WorkflowStageBar } from './components/WorkflowStageBar';
+import { CompanionConnectionDiagnostic } from './components/CompanionConnectionDiagnostic';
 import { EdlReviewPanel } from './components/EdlReviewPanel';
 import { RenderExportModal } from './components/RenderExportModal';
+import {
+  loadConfiguredCompanionEndpoint,
+  saveConfiguredCompanionEndpoint,
+} from './host-bridge/companion/CompanionDiagnostics';
+import { buildCompanionTranscriptTokens } from './utils/transcriptDisplay';
 import {
   createSharedLocalModelLifecycleManager,
   LifecycleManagementModal,
@@ -138,19 +144,17 @@ import {
   attenuateBreathsAndCoughsInAudio,
   buildHonestAcousticSpeechSegments,
   convertTranscriptColloquialToFormal,
-  encodeMono16kWavBase64,
   normalizeNumbersAndCompoundsInTranscript,
   optimizeAndAnalyzeTrilingualAsrTranscript,
-  planAsrTranscriptionChunks,
   redactSelectedTokensInAudioAndTranscript,
   restorePersianProsodicPunctuation,
-  shiftTokensAndRecommendationsByOffset,
 } from './engine/persianAsrTranscriber';
 import { EnglishScriptRenderMode } from './ai-engine/asr/MultilingualCodeSwitchAndArabicEngine';
 import { AudioRedactionMaskMode } from '../packages/audio-runtime/src/SensitiveContentAndPiiRedactorEngine';
 import { buildPeakPyramid } from './engine/peakPyramid';
-import { resampleTo16kMono } from './engine/resampler';
 import { flicksToSeconds, formatTimecode, msToFlicks, secondsToFlicks } from './engine/timebase';
+import { evaluateLocalAsrExecutionReadiness } from './runtime/LocalExecutionPolicy';
+import { CompanionWebClient } from './host-bridge/companion/CompanionWebClient';
 
 const DEFAULT_DSP_PARAMS: EphemeralDspParams = {
   highPassHz: 80,
@@ -262,6 +266,15 @@ export default function App() {
   const [workflowState, setWorkflowState] = useState<StudioWorkflowState>(() =>
     workflowRef.current!.getState(),
   );
+  const [companionEndpoint, setCompanionEndpoint] = useState<string>(() =>
+    loadConfiguredCompanionEndpoint(),
+  );
+  const handleChangeCompanionEndpoint = useCallback((nextEndpoint: string) => {
+    const saved = saveConfiguredCompanionEndpoint(nextEndpoint);
+    if (saved.valid) {
+      setCompanionEndpoint(saved.normalizedEndpoint);
+    }
+  }, []);
   const modelManagerRef = useRef(createSharedLocalModelLifecycleManager());
   const syncModelSnapshotToWorkflow = useCallback(() => {
     const snap = modelManagerRef.current.getSnapshot();
@@ -292,7 +305,7 @@ export default function App() {
         state: 'MODEL_INTEGRITY_FAILURE',
         modelId: null,
         modelVersion: null,
-        message: snap.lastErrorFa ?? 'عدم تطابق امضای SHA-256 در فایل مدل ذخیره‌شده.',
+        message: snap.lastError ?? 'عدم تطابق امضای SHA-256 در فایل مدل ذخیره‌شده.',
       });
     } else {
       workflowRef.current?.setAsrState({
@@ -327,7 +340,7 @@ export default function App() {
   const [executionMode, setExecutionMode] = useState<ExecutionMode>(() =>
     executionModeStoreRef.current.getPreferredMode(),
   );
-  const [cloudAsrConfigured, setCloudAsrConfigured] = useState<boolean>(false);
+  const cloudAsrConfigured = false;
   const [activeFailure, setActiveFailure] = useState<UserFacingFailureModel | null>(null);
 
   const transportRef = useRef<StudioAudioTransport | null>(null);
@@ -511,21 +524,6 @@ export default function App() {
       transport.dispose();
       projectResourceLeaseRef.current.clear();
       broker.dispose();
-    };
-  }, []);
-
-  useEffect(() => {
-    let cancelled = false;
-    fetch('/api/v1/asr/health')
-      .then((res) => (res.ok ? res.json() : null))
-      .then((data: { cloudGeminiAsrConfigured?: boolean } | null) => {
-        if (!cancelled && data && typeof data.cloudGeminiAsrConfigured === 'boolean') {
-          setCloudAsrConfigured(data.cloudGeminiAsrConfigured);
-        }
-      })
-      .catch(() => {});
-    return () => {
-      cancelled = true;
     };
   }, []);
 
@@ -750,10 +748,34 @@ export default function App() {
       shouldLoop = activeLoop && !selection;
     }
 
+    const streamReadAssetRange = (assetId: string, startSample: number, length: number) => {
+      const asset = project.assets[assetId];
+      const fallback = project.pcmSources[assetId];
+      const blockSize =
+        asset?.blockSizeSamples ?? Math.max(1, (asset?.nativeSampleRate ?? project.sampleRate) * 4);
+      if (brokerRef.current && !brokerRef.current.isDisposed()) {
+        return brokerRef.current.streamReadRange(
+          assetId,
+          startSample,
+          length,
+          blockSize,
+          fallback,
+          'playback-feeder',
+        );
+      }
+      if (fallback) {
+        const s = Math.max(0, Math.min(fallback.length, Math.trunc(startSample)));
+        const e = Math.max(s, Math.min(fallback.length, s + Math.trunc(length)));
+        return Promise.resolve(fallback.slice(s, e));
+      }
+      return Promise.resolve(new Float32Array(0));
+    };
+
     transportRef.current.playTimelineWindowed({
       tracks: activeTracks,
       assets: project.assets,
       pcmSources: project.pcmSources,
+      readAssetRange: streamReadAssetRange,
       sampleRate: project.sampleRate,
       startTimelineSec: startSec,
       totalDurationSec: activeDurationSec,
@@ -789,6 +811,23 @@ export default function App() {
       tracks,
       assets: project.assets,
       pcmSources: project.pcmSources,
+      readAssetRange: (assetId, startSample, length) => {
+        const asset = project.assets[assetId];
+        const fallback = project.pcmSources[assetId];
+        const blockSize =
+          asset?.blockSizeSamples ?? Math.max(1, (asset?.nativeSampleRate ?? project.sampleRate) * 4);
+        if (brokerRef.current && !brokerRef.current.isDisposed()) {
+          return brokerRef.current.streamReadRange(
+            assetId,
+            startSample,
+            length,
+            blockSize,
+            fallback,
+            'playback-feeder',
+          );
+        }
+        return Promise.resolve(fallback ? fallback.slice(startSample, startSample + length) : new Float32Array(0));
+      },
       sampleRate: project.sampleRate,
       startTimelineSec: startSec,
       totalDurationSec,
@@ -819,6 +858,23 @@ export default function App() {
       tracks,
       assets: project.assets,
       pcmSources: project.pcmSources,
+      readAssetRange: (assetId, startSample, length) => {
+        const asset = project.assets[assetId];
+        const fallback = project.pcmSources[assetId];
+        const blockSize =
+          asset?.blockSizeSamples ?? Math.max(1, (asset?.nativeSampleRate ?? project.sampleRate) * 4);
+        if (brokerRef.current && !brokerRef.current.isDisposed()) {
+          return brokerRef.current.streamReadRange(
+            assetId,
+            startSample,
+            length,
+            blockSize,
+            fallback,
+            'playback-feeder',
+          );
+        }
+        return Promise.resolve(fallback ? fallback.slice(startSample, startSample + length) : new Float32Array(0));
+      },
       sampleRate: project.sampleRate,
       startTimelineSec: activeSel.startSec,
       totalDurationSec,
@@ -1483,234 +1539,7 @@ export default function App() {
     }
   };
 
-    const executeCloudGeminiAsr = async () => {
-      if (isReadOnlyLocked) {
-        setStatusNotice('ویرایش غیرفعال است: پروژه بدون قفل انحصاری در حالت فقط‌خواندنی قرار دارد.');
-        setAsrInlineFeedback({
-          kind: 'READ_ONLY',
-          titleFa: 'ویرایش غیرفعال است',
-          messageFa: 'پروژه بدون قفل انحصاری در حالت فقط‌خواندنی قرار دارد.',
-        });
-        return;
-      }
-
-      const resolved = await resolveTrackAssetAndPcm(tracks[0]);
-      if (!resolved) {
-        setStatusNotice('فایل صوتی قابل پردازش روی ترک اصلی یافت نشد.');
-        setAsrInlineFeedback({
-          kind: 'AUDIO_MISSING',
-          titleFa: 'فایل صوتی یافت نشد',
-          messageFa: 'برای اجرای تبدیل صوت به متن، ابتدا یک فایل صوتی معتبر وارد کنید.',
-        });
-        return;
-      }
-      const { targetTrack, asset, pcm } = resolved;
-
-      setIsTranscribingAsr(true);
-      setActiveFailure(null);
-      workflowRef.current?.setAsrState({
-        state: 'INFERENCE_RUNNING',
-        modelId: 'gemini-3.5-transcribe',
-        modelVersion: 'cloud-2026',
-        progressPct: 20,
-        message: 'در حال ارسال ایمن صوت به موتور Gemini ASR و استخراج کلمات فارسی...',
-      });
-      setStatusNotice('در حال تبدیل صوت به متن با Gemini ASR و هم‌ترازی آوایی روی تایم‌لاین...');
-
-      try {
-        const beforeTokensSnapshot = cloneTokens(tokens);
-        const beforeRecsSnapshot = cloneRecommendations(recommendations);
-        const chunkPlans = planAsrTranscriptionChunks(pcm.length, project.sampleRate, 60);
-
-        const aggregatedTokens: PersianWordToken[] = [];
-        const aggregatedRecs: SmartRecommendation[] = [];
-
-        for (let idx = 0; idx < chunkPlans.length; idx++) {
-          const plan = chunkPlans[idx];
-          const chunkPcm = pcm.subarray(plan.startSample, plan.endSample);
-
-          let maxAbs = 0;
-          for (let s = 0; s < chunkPcm.length; s += 8) {
-            const v = Math.abs(chunkPcm[s]);
-            if (v > maxAbs) maxAbs = v;
-          }
-          if (maxAbs < 1e-4) {
-            continue;
-          }
-
-          workflowRef.current?.setAsrState({
-            state: 'INFERENCE_RUNNING',
-            modelId: 'gemini-3.5-transcribe',
-            modelVersion: 'cloud-2026',
-            progressPct: Math.min(
-              95,
-              Math.round(((idx + 0.5) / Math.max(1, chunkPlans.length)) * 75) + 15,
-            ),
-            message: `در حال ارسال ایمن بخش ${idx + 1} از ${chunkPlans.length} به Gemini ASR و هم‌ترازی آوایی...`,
-          });
-
-          const resampled16k = resampleTo16kMono([chunkPcm], project.sampleRate, 16_000);
-          const audioBase64 = encodeMono16kWavBase64(resampled16k.samples, 16_000);
-
-          const resp = await fetch('/api/v1/asr/transcribe', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ audioBase64, mimeType: 'audio/wav' }),
-          });
-
-          const payload = (await resp.json().catch(() => ({}))) as {
-            transcriptText?: string;
-            error?: string;
-            message?: string;
-            messageFa?: string;
-          };
-
-          if (resp.status === 503 || payload.error === 'ASR_API_KEY_UNAVAILABLE') {
-            setCloudAsrConfigured(false);
-            const unavailableMsg =
-              payload.messageFa ??
-              'کلید سرویس ابری در سرور تنظیم نشده است. برای حفظ شفافیت، بازگشت خودکار به محلی انجام نشد.';
-            workflowRef.current?.setAsrState({
-              state: 'INFERENCE_FAILED',
-              modelId: 'gemini-3.5-transcribe',
-              modelVersion: 'cloud-2026',
-              message: unavailableMsg,
-            });
-            const err = classifyError(
-              new Error('CLOUD_PROVIDER_UNAVAILABLE: No Cloud provider endpoint or credentials are configured.'),
-              { subsystem: 'ASR_RUNTIME' },
-            );
-            setActiveFailure(buildUserFacingFailure(err, workflowState.locale));
-            setAsrInlineFeedback({
-              kind: 'CLOUD_UNCONFIGURED',
-              titleFa: 'حالت ابری پیکربندی نشده است',
-              messageFa: unavailableMsg,
-            });
-            setStatusNotice('کلید سرویس‌دهنده ابری روی سرور پیکربندی نشده است؛ بازگشت پنهان انجام نشد.');
-            return;
-          }
-
-          if (!resp.ok) {
-            throw new Error(payload.message ?? payload.error ?? `HTTP ${resp.status}`);
-          }
-
-          const chunkText = (payload.transcriptText ?? '').trim();
-          if (chunkText.length > 0) {
-            const aligned = alignPersianScriptToAudio({
-              pcm: chunkPcm,
-              sampleRate: project.sampleRate,
-              precomputed16k: resampled16k.samples,
-              trackId: targetTrack.id,
-              speakerName: targetTrack.speakerLabel,
-              rawTranscriptText: chunkText,
-              acousticProfile: asset.acousticProfile,
-              alignmentSource: 'ASR',
-            });
-            const shifted = shiftTokensAndRecommendationsByOffset({
-              tokens: aligned.tokens,
-              recommendations: aligned.recommendations,
-              offsetSec: plan.startSec,
-              chunkIndex: plan.chunkIndex,
-            });
-            aggregatedTokens.push(...shifted.tokens);
-            aggregatedRecs.push(...shifted.recommendations);
-          }
-
-          if (idx + 1 < chunkPlans.length) {
-            await new Promise<void>((resolve) => setTimeout(resolve, 0));
-          }
-        }
-
-        if (aggregatedTokens.length === 0) {
-          workflowRef.current?.setAsrState({
-            state: 'NO_SPEECH_DETECTED',
-            modelId: 'gemini-3.5-transcribe',
-            modelVersion: 'cloud-2026',
-            progressPct: 100,
-            message: 'گفتار قابل‌تشخیصی در این فایل صوتی شناسایی نشد.',
-          });
-          setAsrInlineFeedback({
-            kind: 'NO_SPEECH',
-            titleFa: 'گفتار قابل‌تشخیصی در صوت یافت نشد',
-            messageFa:
-              'صوت بررسی شد اما واژه‌ای از گفتار استخراج نشد. اگر فایل بسیار آرام یا نویزی است، ابتدا «حذف نویز طیفی» را اجرا کنید یا از «هم‌ترازی با متن دلخواه» استفاده نمایید.',
-          });
-          setStatusNotice('در تبدیل صوت به متن (Gemini ASR)، گفتار قابل‌تشخیصی در این فایل یافت نشد.');
-          return;
-        }
-
-        const otherTrackTokens = tokens.filter((t) => t.trackId !== targetTrack.id);
-        const mergedTokens = [...otherTrackTokens, ...aggregatedTokens].sort(
-          (a, b) => a.range.startFlicks - b.range.startFlicks,
-        );
-        const otherTrackRecs = recommendations.filter((r) => r.trackId !== targetTrack.id);
-        const mergedRecs = [...otherTrackRecs, ...aggregatedRecs];
-
-        historyRef.current.commitTransaction({
-          coalescingKey: '',
-          type: 'dsp-parameter-change',
-          description: `تبدیل صوت به متن Gemini ASR (${aggregatedTokens.length} واژه فارسی)`,
-          beforeTracks: tracks,
-          afterTracks: tracks,
-          beforeTokens: beforeTokensSnapshot,
-          afterTokens: mergedTokens,
-          beforeRecommendations: beforeRecsSnapshot,
-          afterRecommendations: mergedRecs,
-        });
-
-        setTokens(mergedTokens);
-        syncWorkflowTranscript(
-          mergedTokens,
-          `تبدیل صوت به متن Gemini ASR (${aggregatedTokens.length} واژه فارسی)`,
-          { establishRawIfEmpty: true },
-        );
-        setRecommendations(mergedRecs);
-        setSelectedRecId(mergedRecs[0]?.id ?? null);
-        persistDirtyCheckpointForCurrentState(tracks);
-        setHistoryTick((v) => v + 1);
-        workflowRef.current?.setAsrState({
-          state: 'TRANSCRIPTION_COMPLETED',
-          modelId: 'gemini-3.5-transcribe',
-          modelVersion: 'cloud-2026',
-          progressPct: 100,
-          message: `رونویسی و هم‌ترازی آوایی تکمیل شد (${aggregatedTokens.length} واژه).`,
-        });
-        setAsrInlineFeedback({
-          kind: 'SUCCESS',
-          titleFa: 'تبدیل صوت به متن و هم‌ترازی آوایی با موفقیت انجام شد',
-          messageFa: `${aggregatedTokens.length} واژه واقعی از گفتار توسط Gemini ASR استخراج و به مرزهای موج صوت هم‌تراز شد (${aggregatedRecs.length} پیشنهاد تدوین).`,
-        });
-        setStatusNotice(
-          `تبدیل صوت به متن تکمیل شد: ${aggregatedTokens.length} واژه واقعی استخراج و با تایم‌لاین هم‌تراز شد.`,
-        );
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        workflowRef.current?.setAsrState({
-          state: 'INFERENCE_FAILED',
-          modelId: 'gemini-3.5-transcribe',
-          modelVersion: 'cloud-2026',
-          message: `خطا در تبدیل صوت به متن: ${msg}`,
-        });
-        setAsrInlineFeedback({
-          kind: 'INFERENCE_ERROR',
-          titleFa: 'خطا در ارتباط با سرویس تبدیل صوت به متن',
-          messageFa: `درخواست رونویسی انجام نشد (${msg}). می‌توانید دوباره تلاش کنید یا از «هم‌ترازی با متن دلخواه» استفاده نمایید.`,
-        });
-        setStatusNotice(`خطا در تبدیل صوت به متن: ${msg}`);
-      } finally {
-        setIsTranscribingAsr(false);
-      }
-    };
-
-    const handleRunCloudGeminiAsr = async () => {
-      if (executionMode !== 'CLOUD') {
-        executionModeStoreRef.current.setPreferredMode('CLOUD', { explicitCloudOptIn: true });
-        setExecutionMode('CLOUD');
-      }
-      await executeCloudGeminiAsr();
-    };
-
-    const handleRunPersianAsr = async () => {
+  const handleRunPersianAsr = async () => {
     if (isReadOnlyLocked) {
       setStatusNotice('ویرایش غیرفعال است: پروژه بدون قفل انحصاری در حالت فقط‌خواندنی قرار دارد.');
       setAsrInlineFeedback({
@@ -1721,8 +1550,9 @@ export default function App() {
       return;
     }
 
-    const resolved = await resolveTrackAssetAndPcm(tracks[0]);
-    if (!resolved) {
+    const primaryTrack = tracks[0];
+    const primaryAssetId = primaryTrack ? getTrackPrimaryAssetId(primaryTrack, project.assets) : null;
+    if (!primaryTrack || !primaryAssetId || !project.assets[primaryAssetId]) {
       setStatusNotice('فایل صوتی قابل پردازش روی ترک اصلی یافت نشد.');
       setAsrInlineFeedback({
         kind: 'AUDIO_MISSING',
@@ -1731,78 +1561,155 @@ export default function App() {
       });
       return;
     }
-    const { targetTrack, asset, pcm } = resolved;
 
-    // Unified Processing Architecture: explicit LOCAL default vs explicit CLOUD opt-in; ZERO silent fallback
-    if (executionMode === 'CLOUD') {
-      if (!cloudAsrConfigured) {
-        const err = classifyError(
-          new Error('CLOUD_PROVIDER_UNAVAILABLE: No Cloud provider endpoint or credentials are configured.'),
-          { subsystem: 'ASR_RUNTIME' },
-        );
-        getSharedDiagnosticLogger().log({
-          severity: 'WARNING',
-          subsystem: 'ASR_RUNTIME',
-          code: err.code,
-          message: 'Explicit Cloud execution requested while no Cloud provider is configured.',
-        });
-        setActiveFailure(buildUserFacingFailure(err, workflowState.locale));
-        setAsrInlineFeedback({
-          kind: 'CLOUD_UNCONFIGURED',
-          titleFa: 'حالت ابری پیکربندی نشده است',
-          messageFa:
-            'مسیر پردازش روی «ابری (اختیاری)» قرار دارد اما هیچ سرور ابری متصل نیست. برای حفظ شفافیت، بازگشت خودکار پنهان انجام نشد؛ می‌توانید حالت محلی را فعال کنید یا بخش‌بندی زمانی موج صوت را اجرا نمایید.',
-        });
-        setStatusNotice(
-          'حالت ابری انتخاب شده است اما هیچ سرویس‌دهنده ابری پیکربندی نشده است؛ بازگشت خودکار پنهان به محلی انجام نشد.',
-        );
-        return;
-      }
-      await executeCloudGeminiAsr();
+    const activeModel = modelManagerRef.current.getSnapshot().activeModel;
+
+    // Check Shared Local Companion Service first (same central ASR engine used by Adobe Audition plugin)
+    const companionClient = new CompanionWebClient(companionEndpoint);
+    const companionHealth = executionMode === 'LOCAL' ? await companionClient.getHealth() : null;
+    const companionNeuralReady = Boolean(companionHealth?.runtime?.available);
+
+    // AVP-P01-006: Strict 100% Local-Only Policy — zero Cloud ASR, zero fake transcripts.
+    const readiness = evaluateLocalAsrExecutionReadiness({
+      hasInstalledModelWeights: Boolean(activeModel) || companionNeuralReady,
+      hasVerifiedInferenceEngine: companionNeuralReady,
+      requestedCloudMode: executionMode === 'CLOUD',
+    });
+
+    if (readiness.code === 'LOCAL_ONLY_CLOUD_ASR_BLOCKED') {
+      const err = classifyError(new Error(readiness.reasonEn), { subsystem: 'ASR_RUNTIME' });
+      getSharedDiagnosticLogger().log({
+        severity: 'WARNING',
+        subsystem: 'ASR_RUNTIME',
+        code: readiness.code,
+        message: readiness.reasonEn,
+      });
+      setActiveFailure(buildUserFacingFailure(err, workflowState.locale));
+      setAsrInlineFeedback({
+        kind: 'CLOUD_UNCONFIGURED',
+        titleFa: readiness.titleFa,
+        messageFa: readiness.messageFa,
+      });
+      setStatusNotice(readiness.titleFa);
       return;
     }
 
-    // Honest Local ASR readiness check (NEVER calls remote /api/v1/asr/transcribe silently in LOCAL mode)
-    const activeModel = modelManagerRef.current.getSnapshot().activeModel;
+    if (companionNeuralReady) {
+      const resolved = await resolveTrackAssetAndPcm(primaryTrack);
+      if (!resolved) {
+        setStatusNotice('داده‌های صوتی PCM برای ترک اصلی در دسترس نیست.');
+        return;
+      }
+
+      setIsTranscribingAsr(true);
+      setActiveFailure(null);
+      setStatusNotice('در حال رونویسی محلی با موتور عصبی Sherpa-ONNX (سرویس Companion)...');
+      try {
+        const result = await companionClient.transcribePcm({
+          pcm: resolved.pcm,
+          sampleRate: project.sampleRate,
+          filename: resolved.asset.name || 'studio-track.wav',
+          languageHint: 'fa',
+          onProgress: (job) => {
+            setStatusNotice(
+              `رونویسی محلی (${job.modelId ?? 'ONNX'}): ${job.progressPct}٪ (${job.currentChunk}/${job.totalChunks})`,
+            );
+          },
+        });
+
+        const speakerLabel = primaryTrack.speakerLabel || primaryTrack.name || 'گوینده ۱';
+        const nextTokens = buildCompanionTranscriptTokens({
+          segments: result.segments,
+          trackId: primaryTrack.id,
+          speakerName: speakerLabel,
+        });
+
+        if (nextTokens.length === 0) {
+          workflowRef.current?.setAsrState({
+            state: 'NO_SPEECH_DETECTED',
+            modelId: result.modelId,
+            modelVersion: result.quantization,
+            message: `موتور محلی ${result.modelId} گفتار انسانی قابل تشخیصی در این سیگنال صوتی پیدا نکرد.`,
+          });
+          setAsrInlineFeedback({
+            kind: 'NO_SPEECH',
+            titleFa: 'گفتاری توسط موتور محلی تشخیص داده نشد',
+            messageFa: `موتور ${result.modelId} فایل صوتی را بررسی کرد اما کلمه گفتاری قابل تشخیصی نیافت (فایل نمونه پیش‌فرض حاوی سیگنال آزمایشی مصنوعی است؛ برای تست واقعی یک فایل صوتی گفتار فارسی وارد کنید یا از بخش‌بندی زمانی / هم‌ترازی متن دلخواه استفاده کنید).`,
+          });
+          setStatusNotice(
+            `گفتاری در این فایل صوتی تشخیص داده نشد (${result.modelId} | RTF=${result.realTimeFactor}).`,
+          );
+          return;
+        }
+
+        const beforeTokensSnapshot = cloneTokens(tokens);
+        historyRef.current.commitTransaction({
+          coalescingKey: '',
+          type: 'restore-clip',
+          description: `رونویسی محلی عصبی (${result.modelId})`,
+          beforeTracks: tracks,
+          afterTracks: tracks,
+          beforeTokens: beforeTokensSnapshot,
+          afterTokens: nextTokens,
+          beforeRecommendations: recommendations,
+          afterRecommendations: recommendations,
+        });
+        setTokens(nextTokens);
+        syncWorkflowTranscript(nextTokens, `رونویسی محلی با ${result.modelId}`);
+        setHistoryTick((v) => v + 1);
+
+        workflowRef.current?.setAsrState({
+          state: 'TRANSCRIPTION_COMPLETED',
+          modelId: result.modelId,
+          modelVersion: result.quantization,
+          message: `رونویسی محلی با ${result.modelId} انجام شد (${nextTokens.length} واژه | RTF=${result.realTimeFactor}).`,
+        });
+        setAsrInlineFeedback(null);
+        setStatusNotice(
+          `رونویسی ۱۰۰٪ محلی کامل شد (${nextTokens.length} واژه | ${result.modelId} | RTF=${result.realTimeFactor} | زبان: ${result.dominantLanguage})`,
+        );
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        setAsrInlineFeedback({
+          kind: 'INFERENCE_ERROR',
+          titleFa: 'خطا در اجرای موتور محلی Companion',
+          messageFa: msg,
+        });
+        setStatusNotice(`خطای موتور محلی: ${msg}`);
+      } finally {
+        setIsTranscribingAsr(false);
+      }
+      return;
+    }
+
     if (!activeModel) {
       workflowRef.current?.setAsrState({
         state: 'MODEL_NOT_INSTALLED',
-        message:
-          'مدل عصبی محلی (.onnx) نصب نشده است. برای تشخیص واقعی کلمات، از «Gemini ASR (حالت ابری)» استفاده کنید یا فایل وزن .onnx را نصب نمایید.',
+        message: readiness.messageFa,
       });
-      const err = classifyError(new Error('ASR_MODEL_NOT_INSTALLED: Local ONNX weights are not installed.'), {
+      const err = classifyError(new Error(readiness.reasonEn), {
         subsystem: 'ASR_MODEL',
       });
       getSharedDiagnosticLogger().log({
         severity: 'INFO',
         subsystem: 'ASR_MODEL',
-        code: err.code,
-        message: 'Local ASR requested with no installed ONNX weights.',
+        code: readiness.code,
+        message: readiness.reasonEn,
       });
       setActiveFailure(buildUserFacingFailure(err, workflowState.locale));
       setAsrInlineFeedback({
         kind: 'MODEL_NOT_INSTALLED',
-        titleFa: 'مدل عصبی محلی (.onnx) نصب نشده است',
-        messageFa: cloudAsrConfigured
-          ? 'در حالت «محلی (LOCAL)»، به دلیل نبود فایل وزن .onnx و جلوگیری از ارسال پنهان صوت، رونویسی خودکار کلمات اجرا نشد. برای تشخیص واقعی واژگان فارسی می‌توانید با یک کلیک روی دکمه سبز «تشخیص واقعی کلمات با Gemini ASR» زیر کلیک کنید یا فایل .onnx خود را نصب نمایید.'
-          : 'برای جلوگیری از تولید متن ساختگی، رونویسی خودکار واژگان بدون فایل وزن .onnx انجام نمی‌شود. هم‌اکنون می‌توانید متن را در «هم‌ترازی با متن دلخواه» وارد کنید، بخش‌بندی زمانی موج صوت را اجرا نمایید یا فایل .onnx خود را نصب کنید.',
+        titleFa: readiness.titleFa,
+        messageFa: readiness.messageFa,
       });
       setStatusNotice(
-        'مدل عصبی محلی نصب نشده است — خروجی ساختگی تولید نمی‌شود و صوت در حالت محلی به‌صورت پنهان به سرور ارسال نشد.',
+        'مدل عصبی محلی نصب نشده است — خروجی ساختگی تولید نمی‌شود و هیچ صوتی به سرور ارسال نمی‌گردد.',
       );
       return;
     }
 
     setIsTranscribingAsr(true);
     setActiveFailure(null);
-    workflowRef.current?.setAsrState({
-      state: 'INFERENCE_RUNNING',
-      modelId: activeModel.modelId,
-      modelVersion: activeModel.version,
-      progressPct: 35,
-      message: `در حال بررسی اصالت مدل ${activeModel.modelId} و اجرای هم‌ترازی آوایی محلی...`,
-    });
-
     try {
       const integrityCheck = await modelManagerRef.current.verifyInstalledActiveModelOffline();
       if (!integrityCheck.ok) {
@@ -1823,120 +1730,18 @@ export default function App() {
         return;
       }
 
-      const beforeTokensSnapshot = cloneTokens(tokens);
-      const beforeRecsSnapshot = cloneRecommendations(recommendations);
-      const existingTrackText = tokens
-        .filter((t) => t.trackId === targetTrack.id)
-        .map((t) => t.originalText)
-        .join(' ');
-
-      let nextTrackTokens: PersianWordToken[];
-      let nextTrackRecs: SmartRecommendation[];
-      const usedExistingScript = existingTrackText.trim().length > 0;
-
-      if (usedExistingScript) {
-        const aligned = alignPersianScriptToAudio({
-          pcm,
-          sampleRate: project.sampleRate,
-          trackId: targetTrack.id,
-          speakerName: targetTrack.speakerLabel,
-          rawTranscriptText: existingTrackText,
-          acousticProfile: asset.acousticProfile,
-          alignmentSource: 'AcousticSnap',
-        });
-        nextTrackTokens = aligned.tokens;
-        nextTrackRecs = aligned.recommendations;
-      } else {
-        const segResult = buildHonestAcousticSpeechSegments({
-          pcm,
-          sampleRate: project.sampleRate,
-          trackId: targetTrack.id,
-          speakerName: targetTrack.speakerLabel,
-          acousticProfile: asset.acousticProfile,
-        });
-        nextTrackTokens = segResult.tokens;
-        nextTrackRecs = segResult.recommendations;
-      }
-
-      if (nextTrackTokens.length === 0) {
-        workflowRef.current?.setAsrState({
-          state: 'NO_SPEECH_DETECTED',
-          modelId: activeModel.modelId,
-          modelVersion: activeModel.version,
-          progressPct: 100,
-          message: 'گفتاری بالاتر از کف نویز اتاق در این فایل شناسایی نشد.',
-        });
-        setAsrInlineFeedback({
-          kind: 'NO_SPEECH',
-          titleFa: 'گفتاری شناسایی نشد',
-          messageFa: 'بازه گفتاری فعالی بالاتر از کف نویز اتاق در این فایل صوتی یافت نشد.',
-        });
-        setStatusNotice('در پردازش محلی، گفتاری بالاتر از کف نویز شناسایی نشد.');
-        return;
-      }
-
-      const otherTrackTokens = tokens.filter((t) => t.trackId !== targetTrack.id);
-      const mergedTokens = [...otherTrackTokens, ...nextTrackTokens].sort(
-        (a, b) => a.range.startFlicks - b.range.startFlicks,
-      );
-      const otherTrackRecs = recommendations.filter((r) => r.trackId !== targetTrack.id);
-      const mergedRecs = [...otherTrackRecs, ...nextTrackRecs];
-
-      const opLabel = usedExistingScript
-        ? `هم‌ترازی آوایی محلی (${nextTrackTokens.length} واژه)`
-        : `بخش‌بندی گفتاری آکوستیک محلی (${nextTrackTokens.length} بازه)`;
-
-      historyRef.current.commitTransaction({
-        coalescingKey: '',
-        type: 'dsp-parameter-change',
-        description: opLabel,
-        beforeTracks: tracks,
-        afterTracks: tracks,
-        beforeTokens: beforeTokensSnapshot,
-        afterTokens: mergedTokens,
-        beforeRecommendations: beforeRecsSnapshot,
-        afterRecommendations: mergedRecs,
-      });
-
-      setTokens(mergedTokens);
-      syncWorkflowTranscript(mergedTokens, opLabel, { establishRawIfEmpty: true });
-      setRecommendations(mergedRecs);
-      setSelectedRecId(mergedRecs[0]?.id ?? null);
-      persistDirtyCheckpointForCurrentState(tracks);
-      setHistoryTick((v) => v + 1);
       workflowRef.current?.setAsrState({
-        state: 'TRANSCRIPTION_COMPLETED',
+        state: 'MODEL_NOT_INSTALLED',
         modelId: activeModel.modelId,
         modelVersion: activeModel.version,
-        progressPct: 100,
-        message: `${opLabel} با تأیید اصالت ${activeModel.modelId} تکمیل شد.`,
+        message: readiness.messageFa,
       });
       setAsrInlineFeedback({
-        kind: 'SUCCESS',
-        titleFa: usedExistingScript
-          ? 'هم‌ترازی آوایی محلی تکمیل شد'
-          : 'بخش‌بندی گفتاری آکوستیک محلی تکمیل شد',
-        messageFa: usedExistingScript
-          ? `${nextTrackTokens.length} واژه موجود روی مرزهای موج صوت هم‌تراز شد (${nextTrackRecs.length} پیشنهاد تدوین). توجه: فایل ${activeModel.modelId} بدون واژه‌نامه Tokenizer هم‌ترازی آوایی انجام داده است.`
-          : `${nextTrackTokens.length} بازه گفتاری آکوستیک و ${nextTrackRecs.length} پیشنهاد تدوین استخراج شد. برای دیکود کامل واژگان بدون واژه‌نامه محلی، از «هم‌ترازی با متن دلخواه» یا «Gemini ASR» استفاده کنید.`,
+        kind: 'MODEL_NOT_INSTALLED',
+        titleFa: readiness.titleFa,
+        messageFa: readiness.messageFa,
       });
-      setStatusNotice(
-        `${opLabel} تکمیل شد (${nextTrackRecs.length} پیشنهاد تدوین).`,
-      );
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      workflowRef.current?.setAsrState({
-        state: 'INFERENCE_FAILED',
-        modelId: activeModel.modelId,
-        modelVersion: activeModel.version,
-        message: `خطا در پردازش محلی: ${msg}`,
-      });
-      setAsrInlineFeedback({
-        kind: 'INFERENCE_ERROR',
-        titleFa: 'خطا در پردازش آوایی محلی',
-        messageFa: `اجرای پردازش محلی با خطا متوقف شد (${msg}).`,
-      });
-      setStatusNotice(`خطا در پردازش محلی: ${msg}`);
+      setStatusNotice(readiness.titleFa);
     } finally {
       setIsTranscribingAsr(false);
     }
@@ -3120,11 +2925,13 @@ export default function App() {
     setStatusNotice('در حال ذخیره‌سازی جریانی و تحلیل آوایی فایل صوتی انتخاب‌شده...');
 
     try {
+      const shouldRetainActiveMirror =
+        file.size <= AVAPARDAZ_AUDIO_CACHE_SPLIT.mainThreadBytes;
       const loaded = await importAudioProject(file, {
         broker: brokerRef.current,
         brokerReady: brokerReadyPromiseRef.current,
         memoryBudgetManager: getSharedMemoryBudgetManager(),
-        retainActivePcmMirror: true,
+        retainActivePcmMirror: shouldRetainActiveMirror,
         abortSignal: abortController.signal,
         onProgress: (progress) => {
           if (!isMountedRef.current || abortController.signal.aborted) return;
@@ -3140,11 +2947,15 @@ export default function App() {
       }
 
       const primaryAsset = Object.values(loaded.assets)[0];
-      if (!primaryAsset || !loaded.pcmSources[primaryAsset.id]) {
+      const hasValidAudioBacking = Boolean(
+        primaryAsset &&
+          (loaded.pcmSources[primaryAsset.id] || primaryAsset.storageLifecycle === 'ready'),
+      );
+      if (!primaryAsset || !hasValidAudioBacking) {
         loaded.runtimeResourceLease?.dispose();
         throw new AudioImportCoordinatorError(
           'IMPORT_MANIFEST_INVALID',
-          'Imported project is missing a verified primary asset or resident audio mirror.',
+          'Imported project is missing a verified primary asset or durable OPFS/resident audio backing.',
         );
       }
 
@@ -3509,17 +3320,12 @@ export default function App() {
           workflowState={workflowState}
           executionMode={executionMode}
           cloudProviderStatusLabel={
-            cloudAsrConfigured
-              ? workflowState.locale === 'fa'
-                ? 'ابری آماده (Gemini ASR)'
-                : 'Cloud Ready (Gemini ASR)'
-              : workflowState.locale === 'fa'
-                ? 'ابری پیکربندی نشده (بدون بازگشت پنهان)'
-                : 'Cloud Unconfigured (No Silent Fallback)'
+            workflowState.locale === 'fa'
+              ? 'سیاست ۱۰۰٪ محلی فعال (ابری غیرفعال)'
+              : '100% Local-Only Policy Enforced (Cloud Disabled)'
           }
           onChangeExecutionMode={handleChangeExecutionMode}
           cloudAsrConfigured={cloudAsrConfigured}
-          onRunCloudGeminiAsr={handleRunCloudGeminiAsr}
           activeFailure={activeFailure}
           canInstallPwa={false}
           onTriggerInstallPwa={() => {}}
@@ -3682,6 +3488,12 @@ export default function App() {
           </div>
         </section>
 
+        <CompanionConnectionDiagnostic
+          endpoint={companionEndpoint}
+          onChangeEndpoint={handleChangeCompanionEndpoint}
+          locale={workflowState.locale}
+        />
+
         {statusNotice && (
           <div
             role="status"
@@ -3779,7 +3591,6 @@ export default function App() {
                       projectSessionNonce={projectSessionNonce}
                       asrInlineFeedback={asrInlineFeedback}
                       onDismissAsrInlineFeedback={() => setAsrInlineFeedback(null)}
-                      onRunCloudGeminiAsr={handleRunCloudGeminiAsr}
                       onRunAcousticSegmentation={handleRunAcousticSegmentation}
                       onOpenLocalModelInstaller={() => {
                         setLifecycleInitialTab('model');

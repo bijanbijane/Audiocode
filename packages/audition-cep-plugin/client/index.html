@@ -1,0 +1,145 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; connect-src http://127.0.0.1:47291 http://localhost:47291 http://127.0.0.1:3000 http://localhost:3000; style-src 'self'; script-src 'self';" />
+  <title>آواپرداز — افزونه Adobe Audition</title>
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <div class="brand-dot" id="engineDot"></div>
+      <div>
+        <h1>آواپرداز <span class="badge">Audition CEP</span></h1>
+        <p id="engineStatusText">در حال بررسی سرویس محلی Companion...</p>
+      </div>
+    </div>
+    <div class="offline-pill" id="offlineBadge">۱۰۰٪ محلی و آفلاین</div>
+  </header>
+
+  <nav class="tabs" role="tablist">
+    <button class="tab active" data-tab="workspace" role="tab" aria-selected="true">رونویسی</button>
+    <button class="tab" data-tab="editor" role="tab" aria-selected="false">ویرایشگر متن</button>
+    <button class="tab" data-tab="export" role="tab" aria-selected="false">خروجی زیرنویس</button>
+    <button class="tab" data-tab="settings" role="tab" aria-selected="false">تنظیمات</button>
+  </nav>
+
+  <main>
+    <!-- WORKSPACE TAB -->
+    <section id="tab-workspace" class="panel active">
+      <div class="card">
+        <h2>منبع صوتی Adobe Audition</h2>
+        <div class="source-meta" id="auditionDocInfo">فایل فعالی انتخاب نشده است.</div>
+        <div class="row">
+          <button id="btnSyncAudition" class="btn secondary">خواندن سند فعال Audition</button>
+          <label class="btn secondary file-btn">
+            انتخاب فایل صوتی محلی
+            <input type="file" id="localFileInput" accept=".wav,.mp3,.m4a,.flac,.ogg,.aac" hidden />
+          </label>
+        </div>
+        <div class="field">
+          <label for="manualFilePath">مسیر فایل صوتی روی دیسک (برای پردازش مستقیم بدون کپی)</label>
+          <input id="manualFilePath" type="text" dir="ltr" placeholder="/path/to/recording.wav" />
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>تنظیمات مدل و زبان</h2>
+        <div class="grid-2">
+          <div class="field">
+            <label for="modelSelect">مدل محلی نصب‌شده</label>
+            <select id="modelSelect"></select>
+          </div>
+          <div class="field">
+            <label for="languageSelect">زبان گفتار</label>
+            <select id="languageSelect">
+              <option value="auto">تشخیص خودکار (فارسی / انگلیسی)</option>
+              <option value="fa">فارسی (Persian)</option>
+              <option value="en">انگلیسی (English)</option>
+              <option value="fa-en">ترکیبی فارسی و انگلیسی</option>
+            </select>
+          </div>
+        </div>
+        <div class="row actions">
+          <button id="btnStartJob" class="btn primary">شروع رونویسی محلی</button>
+          <button id="btnCancelJob" class="btn danger" disabled>لغو پردازش</button>
+        </div>
+        <div class="progress-wrap" id="progressWrap" hidden>
+          <div class="progress-bar"><div class="progress-fill" id="progressFill"></div></div>
+          <div class="progress-meta">
+            <span id="progressLabel">۰٪</span>
+            <span id="elapsedLabel">۰ ثانیه</span>
+          </div>
+        </div>
+        <div class="notice" id="workspaceNotice" hidden></div>
+      </div>
+    </section>
+
+    <!-- EDITOR TAB -->
+    <section id="tab-editor" class="panel">
+      <div class="card">
+        <div class="row between">
+          <h2>ویرایشگر متن (RTL / LTR)</h2>
+          <div class="row">
+            <button id="btnUndo" class="btn sm secondary" disabled>بازگشت</button>
+            <button id="btnRedo" class="btn sm secondary" disabled>جلو</button>
+            <button id="btnCopyAll" class="btn sm secondary">کپی متن</button>
+          </div>
+        </div>
+        <div class="grid-2">
+          <input id="searchInput" type="text" placeholder="جستجو در متن..." />
+          <div class="row">
+            <input id="replaceInput" type="text" placeholder="جایگزینی با..." />
+            <button id="btnReplaceAll" class="btn sm secondary">جایگزین</button>
+          </div>
+        </div>
+        <div id="segmentsList" class="segments-list">
+          <p class="muted">هنوز متنی تولید نشده است. از تب «رونویسی» پردازش را آغاز کنید.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- EXPORT TAB -->
+    <section id="tab-export" class="panel">
+      <div class="card">
+        <h2>مرکز خروجی زیرنویس و متن (UTF-8)</h2>
+        <div class="field">
+          <label for="timelineOffsetInput">آفست تایم‌لاین Audition (ثانیه)</label>
+          <input id="timelineOffsetInput" type="number" step="0.1" min="0" value="0" dir="ltr" />
+        </div>
+        <div class="export-grid">
+          <button class="btn primary" data-export="srt">خروجی SRT</button>
+          <button class="btn primary" data-export="vtt">خروجی VTT</button>
+          <button class="btn secondary" data-export="txt">خروجی TXT</button>
+          <button class="btn secondary" data-export="json">خروجی JSON</button>
+        </div>
+        <pre id="exportPreview" class="export-preview" dir="auto"></pre>
+      </div>
+    </section>
+
+    <!-- SETTINGS TAB -->
+    <section id="tab-settings" class="panel">
+      <div class="card">
+        <h2>اتصال سرویس محلی Companion</h2>
+        <div class="field">
+          <label for="companionUrlInput">نشانی Loopback Companion</label>
+          <input id="companionUrlInput" type="text" dir="ltr" value="http://127.0.0.1:47291/api/v2/companion" />
+        </div>
+        <div class="field">
+          <label for="cpuThreadsInput">تعداد رشته‌های CPU</label>
+          <input id="cpuThreadsInput" type="number" min="1" max="8" value="4" dir="ltr" />
+        </div>
+        <div class="row">
+          <button id="btnReconnect" class="btn primary">اتصال مجدد و بررسی سلامت</button>
+          <button id="btnUnloadModel" class="btn secondary">آزادسازی حافظه مدل</button>
+        </div>
+        <pre id="healthJson" class="export-preview" dir="ltr"></pre>
+      </div>
+    </section>
+  </main>
+
+  <script src="./app.js"></script>
+</body>
+</html>

@@ -523,6 +523,7 @@ function cosineSim(a: number[], b: number[]): number {
  * Enforces strict tenant & project authorization BEFORE vector ranking or retrieval (§11.4).
  */
 export class TenantIsolatedSemanticIndex {
+  private static readonly MAX_INDEX_ROWS = 20_000;
   private readonly rows: IndexedSemanticSegment[] = [];
   constructor(private readonly embedder: EmbeddingProvider = new LocalBilingualTrigramEmbedder()) {}
 
@@ -534,10 +535,11 @@ export class TenantIsolatedSemanticIndex {
     language: 'fa' | 'en' | 'fa-en';
     segments: TimedSegmentInput[];
   }): { indexedCount: number; providerId: string } {
-    // Remove previous chunks for the same recording + version to keep re-indexing idempotent
+    // Remove previous chunks for the same org + project + recording + version to keep re-indexing idempotent and project-isolated
     for (let i = this.rows.length - 1; i >= 0; i--) {
       if (
         this.rows[i].organizationId === params.organizationId &&
+        this.rows[i].projectId === params.projectId &&
         this.rows[i].recordingId === params.recordingId &&
         this.rows[i].transcriptVersion === params.transcriptVersion
       ) {
@@ -563,15 +565,24 @@ export class TenantIsolatedSemanticIndex {
       });
     }
 
+    if (this.rows.length > TenantIsolatedSemanticIndex.MAX_INDEX_ROWS) {
+      this.rows.splice(0, this.rows.length - TenantIsolatedSemanticIndex.MAX_INDEX_ROWS);
+    }
+
     return { indexedCount: params.segments.length, providerId: this.embedder.providerId };
   }
 
-  public deleteRecordingEmbeddings(params: { organizationId: string; recordingId: string }): number {
+  public deleteRecordingEmbeddings(params: {
+    organizationId: string;
+    recordingId: string;
+    projectId?: string;
+  }): number {
     let removed = 0;
     for (let i = this.rows.length - 1; i >= 0; i--) {
       if (
         this.rows[i].organizationId === params.organizationId &&
-        this.rows[i].recordingId === params.recordingId
+        this.rows[i].recordingId === params.recordingId &&
+        (!params.projectId || this.rows[i].projectId === params.projectId)
       ) {
         this.rows.splice(i, 1);
         removed++;
@@ -654,6 +665,7 @@ export class TenantIsolatedSemanticIndex {
 // ── Stage 11F: Real-Time Speech Intelligence Event Bus & Latency Isolation ───
 
 export class RealtimeIntelligenceStreamCoordinator {
+  private static readonly MAX_EVENTS = 2_000;
   private sequenceCounter = 0;
   private readonly events: RealtimeIntelligenceEvent[] = [];
   private throttledOptionalWorkers = false;
@@ -713,6 +725,9 @@ export class RealtimeIntelligenceStreamCoordinator {
         createdAtIso: new Date().toISOString(),
       };
       this.events.push(ev);
+      if (this.events.length > RealtimeIntelligenceStreamCoordinator.MAX_EVENTS) {
+        this.events.splice(0, this.events.length - RealtimeIntelligenceStreamCoordinator.MAX_EVENTS);
+      }
       batch.push(ev);
     };
 

@@ -18,12 +18,16 @@ export type MemoryReservationPriority = 'protected' | 'normal' | 'optional';
 export type MemoryPressureLevel = 'normal' | 'elevated' | 'throttle' | 'emergency';
 
 export interface MemoryReservationRequest {
+  /** Optional caller-supplied deterministic allocation ID; duplicate active IDs are rejected. */
+  readonly id?: string;
   readonly owner: string;
   readonly category: MemoryCategory;
   readonly bytes: number;
   readonly priority?: MemoryReservationPriority;
   /** True for active user audio, transcripts, approved edits, or in-progress transactions. */
   readonly protectedUserData?: boolean;
+  /** True when the allocation may be reclaimed by eviction or cleanup callbacks. */
+  readonly releasable?: boolean;
 }
 
 export interface MemoryReservation {
@@ -34,6 +38,16 @@ export interface MemoryReservation {
   readonly createdAt: number;
   readonly priority: MemoryReservationPriority;
   readonly protectedUserData: boolean;
+  readonly releasable: boolean;
+}
+
+export interface MemoryLeakEntry {
+  readonly reservation: MemoryReservation;
+  readonly ageMs: number;
+}
+
+export interface MemoryBudgetManagerOptions {
+  readonly now?: () => number;
 }
 
 export interface BrowserJsHeapMeasurement {
@@ -85,6 +99,16 @@ export class InvalidMemoryReservationError extends RangeError {
   constructor(message: string) {
     super(message);
     this.name = 'InvalidMemoryReservationError';
+  }
+}
+
+export class DuplicateMemoryAllocationIdError extends Error {
+  public readonly code = 'DUPLICATE_MEMORY_ALLOCATION_ID';
+  public readonly allocationId: string;
+  constructor(allocationId: string) {
+    super(`Duplicate active memory allocation ID: "${allocationId}".`);
+    this.name = 'DuplicateMemoryAllocationIdError';
+    this.allocationId = allocationId;
   }
 }
 
@@ -187,6 +211,7 @@ export class MemoryBudgetManager {
   private readonly reservations = new Map<string, MemoryReservation>();
   private readonly evictionCallbacks = new Set<CacheEvictionCallback>();
   private readonly categoryTotals: Record<MemoryCategory, number> = createEmptyCategoryMap();
+  private readonly now: () => number;
 
   private accountedBytes = 0;
   private highWaterMarkBytes = 0;
@@ -195,9 +220,21 @@ export class MemoryBudgetManager {
   private isRunningEvictionCallbacks = false;
   private disposed = false;
 
-  constructor(policy: MemoryPolicyConfig = AVAPARDAZ_MEMORY_POLICY) {
+  constructor(
+    policy: MemoryPolicyConfig = AVAPARDAZ_MEMORY_POLICY,
+    options?: MemoryBudgetManagerOptions,
+  ) {
     validateMemoryPolicy(policy);
     this.policy = { ...policy };
+    this.now = options?.now ?? (() => Date.now());
+  }
+
+  public getUsedBytes(): number {
+    return this.accountedBytes;
+  }
+
+  public getCategoryUsage(category: MemoryCategory): number {
+    return this.categoryTotals[category] ?? 0;
   }
 
   public getPressureLevel(bytes: number = this.accountedBytes): MemoryPressureLevel {
@@ -318,6 +355,15 @@ export class MemoryBudgetManager {
       throw new InvalidMemoryReservationError('Reservation owner must be a non-empty string.');
     }
 
+    if (request.id !== undefined) {
+      if (typeof request.id !== 'string' || request.id.trim().length === 0) {
+        throw new InvalidMemoryReservationError('Explicit reservation id must be a non-empty string.');
+      }
+      if (this.reservations.has(request.id.trim())) {
+        throw new DuplicateMemoryAllocationIdError(request.id.trim());
+      }
+    }
+
     if (!ALL_CATEGORIES.includes(request.category)) {
       throw new InvalidMemoryReservationError(`Unknown memory category: ${String(request.category)}`);
     }
@@ -337,6 +383,8 @@ export class MemoryBudgetManager {
     const priority: MemoryReservationPriority =
       request.priority ?? (request.protectedUserData ? 'protected' : 'normal');
     const protectedUserData = Boolean(request.protectedUserData || priority === 'protected');
+    const releasable =
+      request.releasable !== undefined ? Boolean(request.releasable) : !protectedUserData;
 
     const projected = this.accountedBytes + bytes;
     const currentPressure = this.getPressureLevel();
@@ -385,14 +433,20 @@ export class MemoryBudgetManager {
       });
     }
 
+    const assignedId = request.id ? request.id.trim() : `mem-res-${++this.seq}`;
+    if (this.reservations.has(assignedId)) {
+      throw new DuplicateMemoryAllocationIdError(assignedId);
+    }
+
     const reservation: MemoryReservation = {
-      id: `mem-res-${++this.seq}`,
+      id: assignedId,
       owner: request.owner.trim(),
       category: request.category,
       bytes,
-      createdAt: Date.now(),
+      createdAt: this.now(),
       priority,
       protectedUserData,
+      releasable,
     };
 
     this.reservations.set(reservation.id, reservation);
@@ -422,8 +476,47 @@ export class MemoryBudgetManager {
     return true;
   }
 
+  /**
+   * Reconciles worker-side or cancelled-task releases by owner prefix or explicit ID list,
+   * returning total reclaimed bytes without ever underflowing.
+   */
+  public releaseByOwner(owner: string): number {
+    const trimmed = owner.trim();
+    if (!trimmed) return 0;
+    let reclaimed = 0;
+    for (const res of Array.from(this.reservations.values())) {
+      if (res.owner === trimmed) {
+        if (this.release(res.id)) {
+          reclaimed += res.bytes;
+        }
+      }
+    }
+    return reclaimed;
+  }
+
   public listActiveReservations(): readonly MemoryReservation[] {
     return Array.from(this.reservations.values());
+  }
+
+  public getActiveAllocations(): readonly MemoryReservation[] {
+    return this.listActiveReservations();
+  }
+
+  /**
+   * Detects active reservations older than `maxAgeMs` so leaked buffers are surfaced deterministically.
+   */
+  public detectLeaks(maxAgeMs: number, nowMs: number = this.now()): readonly MemoryLeakEntry[] {
+    if (!Number.isFinite(maxAgeMs) || maxAgeMs < 0) {
+      return [];
+    }
+    const leaks: MemoryLeakEntry[] = [];
+    for (const reservation of this.reservations.values()) {
+      const ageMs = Math.max(0, nowMs - reservation.createdAt);
+      if (ageMs >= maxAgeMs) {
+        leaks.push({ reservation, ageMs });
+      }
+    }
+    return leaks;
   }
 
   public getSnapshot(): MemoryBudgetSnapshot {

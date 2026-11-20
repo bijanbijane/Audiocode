@@ -880,19 +880,23 @@ export function shiftTokensAndRecommendationsByOffset(params: {
 }
 
 function toTimedPersianTokens(tokens: readonly PersianWordToken[]): TimedPersianToken[] {
-  return tokens.map((tok) => ({
-    tokenId: tok.id,
-    trackId: tok.trackId,
-    originalText: tok.originalText,
-    normalizedText: tok.normalizedText,
-    displayText: tok.displayText,
-    range: {
-      start: tok.range.startFlicks as Flicks,
-      end: tok.range.endFlicks as Flicks,
-    },
-    confidence: tok.confidence,
-    isFillerOrDisfluency: Boolean(tok.isDisfluency),
-  }));
+  return tokens.map((tok) => {
+    const startFlicks = tok.range?.startFlicks ?? 0;
+    const endFlicks = tok.range?.endFlicks ?? startFlicks;
+    return {
+      tokenId: tok.id,
+      trackId: tok.trackId,
+      originalText: tok.originalText ?? tok.displayText ?? '',
+      normalizedText: tok.normalizedText ?? tok.displayText ?? '',
+      displayText: tok.displayText ?? tok.originalText ?? '',
+      range: {
+        start: startFlicks as Flicks,
+        end: endFlicks as Flicks,
+      },
+      confidence: tok.confidence,
+      isFillerOrDisfluency: Boolean(tok.isDisfluency),
+    };
+  });
 }
 
 /**

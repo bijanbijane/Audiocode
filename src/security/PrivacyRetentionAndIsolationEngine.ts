@@ -18,8 +18,10 @@ import type {
 } from './SpeechSecurityContracts';
 
 const SECRET_TOKEN_PATTERNS = [
-  /asr_live_[a-zA-Z0-9_-]{8,}/g,
+  /asr_(?:live|test)_[a-zA-Z0-9_-]{8,}/g,
+  /whsec_[a-zA-Z0-9_-]{8,}/g,
   /Bearer\s+[a-zA-Z0-9._-]{12,}/gi,
+  /(?:api_key|access_token|secret_key|token)\s*=\s*[^\s&;]{8,}/gi,
   /AIza[0-9A-Za-z_-]{20,}/g,
   /sk-[0-9A-Za-z]{20,}/g,
   /-----BEGIN [A-Z ]+PRIVATE KEY-----[\s\S]*?-----END [A-Z ]+PRIVATE KEY-----/g,
@@ -58,6 +60,10 @@ export class PrivacyRetentionAndIsolationEngine {
       throw new Error('TENANT_ISOLATION_DENIED: Recording is owned by another tenant.');
     }
     this.recordingOwners.set(recordingId, tenantId);
+    if (this.recordingOwners.size > 10_000) {
+      const oldestKey = this.recordingOwners.keys().next().value;
+      if (oldestKey) this.recordingOwners.delete(oldestKey);
+    }
   }
 
   public getRecordingOwner(recordingId: string): string | null {
@@ -168,6 +174,10 @@ export class PrivacyRetentionAndIsolationEngine {
       throw new Error('CACHE_TENANT_SCOPE_VIOLATION: Cache key must carry explicit tenantId prefix.');
     }
     this.tenantCache.set(key, { tenantId, payload });
+    if (this.tenantCache.size > 5_000) {
+      const oldestKey = this.tenantCache.keys().next().value;
+      if (oldestKey) this.tenantCache.delete(oldestKey);
+    }
   }
 
   public getTenantScopedCache(key: string, requesterTenantId: string): unknown | null {
@@ -274,6 +284,9 @@ export class PrivacyRetentionAndIsolationEngine {
 
     const list = this.redactedDerivatives.get(params.tenantId) ?? [];
     list.unshift(derivative);
+    if (list.length > 500) {
+      list.length = 500;
+    }
     this.redactedDerivatives.set(params.tenantId, list);
 
     this.recordSecurityEvent({
@@ -381,9 +394,9 @@ export class PrivacyRetentionAndIsolationEngine {
       resourceType: 'recording_privacy_cascade',
     });
 
-    // Purge tenant-scoped cache entries referencing this recording
+    // Purge tenant-scoped cache entries referencing this exact recording segment
     for (const [key, entry] of this.tenantCache.entries()) {
-      if (entry.tenantId === params.tenantId && key.includes(`:r:${params.recordingId}:`)) {
+      if (entry.tenantId === params.tenantId && key.includes(`:r:${params.recordingId}:m:`)) {
         this.tenantCache.delete(key);
       }
     }
@@ -413,6 +426,9 @@ export class PrivacyRetentionAndIsolationEngine {
 
     const hist = this.deletionHistory.get(params.tenantId) ?? [];
     hist.unshift(report);
+    if (hist.length > 500) {
+      hist.length = 500;
+    }
     this.deletionHistory.set(params.tenantId, hist);
 
     this.recordSecurityEvent({

@@ -1,0 +1,17 @@
+# AVAPARDAZ PHASE-06 — Pinned Dependencies Lockfile (Native Hugging Face Transformers Track)
+# Target checkpoints: Qwen/Qwen3-ASR-0.6B-hf and Qwen/Qwen3-ASR-1.7B-hf
+# Native qwen3_asr architecture support merged into upstream transformers >= 5.13.0.
+# Environment: Isolated Python 3.11+ venv (separate from requirements-qwen.lock).
+# Includes PEFT for explicit, verified LoRA experiments on native AutoModelForMultimodalLM.
+
+torch==2.6.0
+torchaudio==2.6.0
+transformers==5.13.0
+accelerate==1.12.0
+peft==0.15.0
+datasets==3.2.0
+soundfile==0.13.0
+librosa==0.10.2.post1
+jiwer==3.1.0
+pyyaml==6.0.2
+safetensors==0.5.3

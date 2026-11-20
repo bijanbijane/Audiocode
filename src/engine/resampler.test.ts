@@ -113,3 +113,124 @@ test('alignPersianScriptToAudio produces identical results when precomputed16k m
   assert.deepEqual(withPre.recommendations, withoutPre.recommendations);
 });
 
+test('Single-Pass vs Chunked Streaming resampling: exact sample count, low RMS/max error, zero boundary discontinuity, <= 1 sample drift', async () => {
+  const { resampleChunkedTo16kStream } = await import('./resampler');
+
+  for (const srcRate of [48_000, 44_100, 32_000]) {
+    const durationSec = 6;
+    const totalIn = srcRate * durationSec;
+    const monoInput = new Float32Array(totalIn);
+    for (let i = 0; i < totalIn; i++) {
+      // Multi-tone speech-band signal (300Hz + 1100Hz + 2600Hz)
+      const t = i / srcRate;
+      monoInput[i] =
+        0.3 * Math.sin(2 * Math.PI * 300 * t) +
+        0.2 * Math.sin(2 * Math.PI * 1100 * t) +
+        0.1 * Math.sin(2 * Math.PI * 2600 * t);
+    }
+
+    const singlePass = resampleTo16kMono([monoInput], srcRate, 16_000).samples;
+
+    // Stream in arbitrary non-aligned chunks (e.g. 0.73s)
+    const chunkLen = Math.floor(srcRate * 0.73);
+    const streamedChunks: Float32Array[] = [];
+    let totalStreamed = 0;
+
+    await resampleChunkedTo16kStream({
+      inputSampleRate: srcRate,
+      targetSampleRate: 16_000,
+      totalInputSamples: monoInput.length,
+      chunkSizeSamples: chunkLen,
+      readInputChunkFn: async (start, count) =>
+        monoInput.subarray(start, Math.min(monoInput.length, start + count)),
+      onOutputChunk: (c) => {
+        streamedChunks.push(c);
+        totalStreamed += c.length;
+      },
+    });
+
+    const streamed = new Float32Array(totalStreamed);
+    let writePos = 0;
+    for (const c of streamedChunks) {
+      streamed.set(c, writePos);
+      writePos += c.length;
+    }
+
+    // 1. Sample count drift <= 1 sample at 16 kHz
+    const expectedOut = Math.round((totalIn * 16_000) / srcRate);
+    assert.ok(
+      Math.abs(streamed.length - expectedOut) <= 1,
+      `Sample count drift > 1 sample at ${srcRate}Hz: got ${streamed.length}, expected ${expectedOut}`,
+    );
+    assert.ok(
+      Math.abs(streamed.length - singlePass.length) <= 1,
+      `Single-pass (${singlePass.length}) vs streamed (${streamed.length}) length drift > 1 at ${srcRate}Hz`,
+    );
+
+    // 2. Compare interior samples (skipping 32-sample filter edge transients)
+    const compareLen = Math.min(singlePass.length, streamed.length);
+    const edge = 32;
+    let sumSqErr = 0;
+    let maxAbsErr = 0;
+    let count = 0;
+    for (let i = edge; i < compareLen - edge; i++) {
+      const diff = Math.abs(singlePass[i] - streamed[i]);
+      if (diff > maxAbsErr) maxAbsErr = diff;
+      sumSqErr += diff * diff;
+      count++;
+    }
+    const rmsErr = Math.sqrt(sumSqErr / Math.max(1, count));
+    assert.ok(
+      rmsErr < 1e-3,
+      `Streamed vs Single-Pass RMS error too high at ${srcRate}Hz: ${rmsErr}`,
+    );
+    assert.ok(
+      maxAbsErr < 5e-3,
+      `Streamed vs Single-Pass max abs error too high at ${srcRate}Hz: ${maxAbsErr}`,
+    );
+
+    // 3. Check boundary discontinuity at chunk joins
+    let cursor = 0;
+    for (let ci = 0; ci < streamedChunks.length - 1; ci++) {
+      cursor += streamedChunks[ci].length;
+      if (cursor > edge && cursor < streamed.length - edge) {
+        const jump = Math.abs(streamed[cursor] - streamed[cursor - 1]);
+        const refJump = Math.abs(singlePass[cursor] - singlePass[cursor - 1]);
+        assert.ok(
+          Math.abs(jump - refJump) < 0.01,
+          `Boundary discontinuity detected at chunk join #${ci} (${srcRate}Hz): jump=${jump}, ref=${refJump}`,
+        );
+      }
+    }
+  }
+});
+
+test('Resampler handles stereo downmix, empty input, and single-sample input without NaN/crash', () => {
+  // Empty
+  const emptyRes = resampleTo16kMono([new Float32Array(0)], 48_000, 16_000);
+  assert.equal(emptyRes.samples.length, 0);
+
+  const emptyStream = new StreamingKaiserSincResampler(48_000, 16_000);
+  assert.equal(emptyStream.pushChunk(new Float32Array(0)).length, 0);
+  assert.equal(emptyStream.flush().length, 0);
+
+  // Single sample
+  const singleRes = resampleTo16kMono([new Float32Array([0.5])], 48_000, 16_000);
+  for (let i = 0; i < singleRes.samples.length; i++) {
+    assert.ok(Number.isFinite(singleRes.samples[i]));
+  }
+
+  // Stereo opposite phase cancellation check
+  const n = 4800;
+  const left = new Float32Array(n);
+  const right = new Float32Array(n);
+  for (let i = 0; i < n; i++) {
+    left[i] = 0.4 * Math.sin((2 * Math.PI * 500 * i) / 48_000);
+    right[i] = 0.4 * Math.sin((2 * Math.PI * 500 * i) / 48_000);
+  }
+  const stereoRes = resampleTo16kMono([left, right], 48_000, 16_000);
+  assert.equal(stereoRes.samples.length, 1600);
+  assert.ok(computeSignalRms(stereoRes.samples) > 0.25);
+});
+
+

@@ -12,6 +12,7 @@
  * - Authorization failure occurs strictly prior to any state mutation.
  */
 
+import crypto from 'node:crypto';
 import { PlatformControlPlaneService, buildPlatformErrorEnvelope } from '../platform/PlatformControlPlaneEngine';
 import type { OrganizationRole } from '../platform/PlatformContractsAndSchemas';
 import { AudioSecurityGuard } from '../security/AudioSecurityGuard';
@@ -93,7 +94,7 @@ export class ModelFactoryGateway {
     const timestampIso = new Date().toISOString();
     const safeResourceId = AudioSecurityGuard.sanitizeErrorForTelemetry(params.resourceId).slice(0, 128);
     const entry: ModelGovernanceAuditEntry = {
-      auditId: `mlaud_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`,
+      auditId: `mlaud_${crypto.randomUUID().replace(/-/g, '').slice(0, 16)}`,
       requestId: params.requestId,
       organizationId: params.organizationId,
       actorId: params.actorId,
@@ -300,21 +301,44 @@ export class ModelFactoryGateway {
     };
     nowMs?: number;
   }): MlGatewayResponse {
+    const rawExpName =
+      typeof params.body?.experimentName === 'string' && params.body.experimentName.trim().length > 0
+        ? params.body.experimentName.trim()
+        : null;
     const auth = this.authorize({
       bearerToken: params.bearerToken,
       operation: 'ML_MANAGE_EXPERIMENTS',
-      resourceId: params.body?.experimentName ?? 'new_experiment',
+      resourceId: rawExpName ?? 'new_experiment',
       claimedTenantId: extractClaimedTenantId(params.body),
       nowMs: params.nowMs,
     });
     if (!auth.ok) return auth.response;
 
-    if (!params.body?.experimentName || !params.body?.hypothesis) {
+    if (
+      !rawExpName ||
+      !params.body?.hypothesis ||
+      typeof params.body.hypothesis !== 'object' ||
+      Array.isArray(params.body.hypothesis)
+    ) {
       return {
         status: 400,
         body: buildPlatformErrorEnvelope({
           code: 'VALIDATION_ERROR',
-          message: 'experimentName and hypothesis are required',
+          message: 'experimentName (non-empty string) and hypothesis (object) are required',
+          requestId: auth.context.requestId,
+        }),
+      };
+    }
+    if (
+      params.body.datasetReleaseIds !== undefined &&
+      (!Array.isArray(params.body.datasetReleaseIds) ||
+        params.body.datasetReleaseIds.some((id) => typeof id !== 'string'))
+    ) {
+      return {
+        status: 400,
+        body: buildPlatformErrorEnvelope({
+          code: 'VALIDATION_ERROR',
+          message: 'datasetReleaseIds must be an array of strings',
           requestId: auth.context.requestId,
         }),
       };
@@ -323,16 +347,28 @@ export class ModelFactoryGateway {
       const exp = this.service.createExperiment({
         tenantId: auth.context.organizationId,
         projectId: auth.context.projectId,
-        experimentName: params.body.experimentName,
+        experimentName: rawExpName,
         primaryObjective: params.body.primaryObjective ?? 'PERSIAN_CER_REDUCTION',
         hypothesis: params.body.hypothesis,
-        modelFamily: params.body.modelFamily ?? 'avapardaz_local_ctc_adapter',
-        architecture: params.body.architecture ?? 'SpectralCTC-BigramAdapter-v1',
+        modelFamily:
+          typeof params.body.modelFamily === 'string' && params.body.modelFamily.trim()
+            ? params.body.modelFamily.trim()
+            : 'avapardaz_local_ctc_adapter',
+        architecture:
+          typeof params.body.architecture === 'string' && params.body.architecture.trim()
+            ? params.body.architecture.trim()
+            : 'SpectralCTC-BigramAdapter-v1',
         initializationType: params.body.initializationType ?? 'ADAPTER_TUNING',
-        baseModelVersion: params.body.baseModelVersion ?? 'ASR-FA-EN-0.9.0-BASELINE',
+        baseModelVersion:
+          typeof params.body.baseModelVersion === 'string' && params.body.baseModelVersion.trim()
+            ? params.body.baseModelVersion.trim()
+            : 'ASR-FA-EN-0.9.0-BASELINE',
         configuration: params.body.configuration,
         datasetReleaseIds: params.body.datasetReleaseIds ?? [],
-        evaluationDatasetReleaseId: params.body.evaluationDatasetReleaseId,
+        evaluationDatasetReleaseId:
+          typeof params.body.evaluationDatasetReleaseId === 'string'
+            ? params.body.evaluationDatasetReleaseId
+            : undefined,
         requestedResourceClass: params.body.requestedResourceClass ?? 'CPU_ONLY',
         ownerId: auth.context.principalId,
       });
@@ -351,7 +387,7 @@ export class ModelFactoryGateway {
       return this.mapError(err, {
         context: auth.context,
         operation: 'ML_MANAGE_EXPERIMENTS',
-        resourceId: params.body.experimentName,
+        resourceId: rawExpName,
       });
     }
   }
@@ -394,7 +430,8 @@ export class ModelFactoryGateway {
     };
     nowMs?: number;
   }): MlGatewayResponse {
-    const experimentId = params.experimentId ?? params.body?.experimentId ?? '';
+    const rawExpId = params.experimentId ?? params.body?.experimentId;
+    const experimentId = typeof rawExpId === 'string' ? rawExpId.trim() : '';
     const auth = this.authorize({
       bearerToken: params.bearerToken,
       operation: 'ML_MANAGE_EXPERIMENTS',
@@ -408,7 +445,7 @@ export class ModelFactoryGateway {
         status: 400,
         body: buildPlatformErrorEnvelope({
           code: 'VALIDATION_ERROR',
-          message: 'experimentId is required',
+          message: 'experimentId must be a non-empty string',
           requestId: auth.context.requestId,
         }),
       };
@@ -541,20 +578,28 @@ export class ModelFactoryGateway {
     };
     nowMs?: number;
   }): MlGatewayResponse {
+    const modelVersionId =
+      typeof params.body?.modelVersionId === 'string' && params.body.modelVersionId.trim().length > 0
+        ? params.body.modelVersionId.trim()
+        : null;
+    const datasetReleaseId =
+      typeof params.body?.datasetReleaseId === 'string' && params.body.datasetReleaseId.trim().length > 0
+        ? params.body.datasetReleaseId.trim()
+        : null;
     const auth = this.authorize({
       bearerToken: params.bearerToken,
       operation: 'ML_EVALUATE_MODEL',
-      resourceId: params.body?.modelVersionId ?? 'evaluation',
+      resourceId: modelVersionId ?? 'evaluation',
       claimedTenantId: extractClaimedTenantId(params.body),
       nowMs: params.nowMs,
     });
     if (!auth.ok) return auth.response;
-    if (!params.body?.modelVersionId || !params.body?.datasetReleaseId) {
+    if (!modelVersionId || !datasetReleaseId) {
       return {
         status: 400,
         body: buildPlatformErrorEnvelope({
           code: 'VALIDATION_ERROR',
-          message: 'modelVersionId and datasetReleaseId are required',
+          message: 'modelVersionId and datasetReleaseId must be non-empty strings',
           requestId: auth.context.requestId,
         }),
       };
@@ -562,11 +607,18 @@ export class ModelFactoryGateway {
     try {
       const report = this.service.runEvaluation({
         tenantId: auth.context.organizationId,
-        modelVersionId: params.body.modelVersionId,
-        datasetReleaseId: params.body.datasetReleaseId,
+        modelVersionId,
+        datasetReleaseId,
         datasetSplit: params.body.datasetSplit,
-        baselineModelVersionId: params.body.baselineModelVersionId,
-        bootstrapIterations: params.body.bootstrapIterations,
+        baselineModelVersionId:
+          typeof params.body.baselineModelVersionId === 'string'
+            ? params.body.baselineModelVersionId
+            : undefined,
+        bootstrapIterations:
+          typeof params.body.bootstrapIterations === 'number' &&
+          Number.isFinite(params.body.bootstrapIterations)
+            ? params.body.bootstrapIterations
+            : undefined,
       });
       this.recordGovernanceAudit({
         requestId: auth.context.requestId,
@@ -583,7 +635,7 @@ export class ModelFactoryGateway {
       return this.mapError(err, {
         context: auth.context,
         operation: 'ML_EVALUATE_MODEL',
-        resourceId: params.body.modelVersionId,
+        resourceId: modelVersionId,
       });
     }
   }
@@ -635,20 +687,32 @@ export class ModelFactoryGateway {
     };
     nowMs?: number;
   }): MlGatewayResponse {
+    const modelId =
+      typeof params.body?.modelId === 'string' && params.body.modelId.trim().length > 0
+        ? params.body.modelId.trim()
+        : null;
+    const version =
+      typeof params.body?.version === 'string' && params.body.version.trim().length > 0
+        ? params.body.version.trim()
+        : null;
+    const experimentId =
+      typeof params.body?.experimentId === 'string' && params.body.experimentId.trim().length > 0
+        ? params.body.experimentId.trim()
+        : null;
     const auth = this.authorize({
       bearerToken: params.bearerToken,
       operation: 'ML_MANAGE_EXPERIMENTS',
-      resourceId: params.body?.modelId ?? 'new_model',
+      resourceId: modelId ?? 'new_model',
       claimedTenantId: extractClaimedTenantId(params.body),
       nowMs: params.nowMs,
     });
     if (!auth.ok) return auth.response;
-    if (!params.body?.modelId || !params.body?.version || !params.body?.experimentId) {
+    if (!modelId || !version || !experimentId) {
       return {
         status: 400,
         body: buildPlatformErrorEnvelope({
           code: 'VALIDATION_ERROR',
-          message: 'modelId, version, and experimentId are required',
+          message: 'modelId, version, and experimentId must be non-empty strings',
           requestId: auth.context.requestId,
         }),
       };
@@ -656,13 +720,15 @@ export class ModelFactoryGateway {
     try {
       const mv = this.service.registerModelVersion({
         tenantId: auth.context.organizationId,
-        modelId: params.body.modelId,
-        version: params.body.version,
-        experimentId: params.body.experimentId,
-        trainingRunId: params.body.trainingRunId,
-        checkpointId: params.body.checkpointId,
-        parentModelVersionId: params.body.parentModelVersionId,
-        tokenizerVersion: params.body.tokenizerVersion,
+        modelId,
+        version,
+        experimentId,
+        trainingRunId: typeof params.body.trainingRunId === 'string' ? params.body.trainingRunId : undefined,
+        checkpointId: typeof params.body.checkpointId === 'string' ? params.body.checkpointId : undefined,
+        parentModelVersionId:
+          typeof params.body.parentModelVersionId === 'string' ? params.body.parentModelVersionId : undefined,
+        tokenizerVersion:
+          typeof params.body.tokenizerVersion === 'string' ? params.body.tokenizerVersion : undefined,
         initialStatus: params.body.initialStatus,
       });
       this.recordGovernanceAudit({
@@ -680,7 +746,7 @@ export class ModelFactoryGateway {
       return this.mapError(err, {
         context: auth.context,
         operation: 'ML_MANAGE_EXPERIMENTS',
-        resourceId: params.body.modelId,
+        resourceId: modelId,
       });
     }
   }
@@ -831,12 +897,21 @@ export class ModelFactoryGateway {
       };
     }
 
-    if (!params.body?.modelVersionId || !params.body?.evaluationId || !params.body?.packageId) {
+    if (
+      typeof params.body?.modelVersionId !== 'string' ||
+      params.body.modelVersionId.trim().length === 0 ||
+      typeof params.body?.evaluationId !== 'string' ||
+      params.body.evaluationId.trim().length === 0 ||
+      typeof params.body?.packageId !== 'string' ||
+      params.body.packageId.trim().length === 0 ||
+      (params.body.approvalScope !== undefined && typeof params.body.approvalScope !== 'string') ||
+      (params.body.reason !== undefined && typeof params.body.reason !== 'string')
+    ) {
       return {
         status: 400,
         body: buildPlatformErrorEnvelope({
           code: 'VALIDATION_ERROR',
-          message: 'modelVersionId, evaluationId, and packageId are required.',
+          message: 'modelVersionId, evaluationId, and packageId must be non-empty strings.',
           requestId: auth.context.requestId,
         }),
       };
@@ -845,9 +920,9 @@ export class ModelFactoryGateway {
     try {
       const approval = this.service.approveModelForRelease({
         tenantId: auth.context.organizationId,
-        modelVersionId: params.body.modelVersionId,
-        evaluationId: params.body.evaluationId,
-        packageId: params.body.packageId,
+        modelVersionId: params.body.modelVersionId.trim(),
+        evaluationId: params.body.evaluationId.trim(),
+        packageId: params.body.packageId.trim(),
         approverId: auth.context.principalId,
         approverRole: auth.context.role,
         approvalScope: params.body.approvalScope ?? 'production',
@@ -959,12 +1034,34 @@ export class ModelFactoryGateway {
         }),
       };
     }
-    if (!params.body?.modelVersionId || !params.body?.packageId) {
+    if (
+      typeof params.body?.modelVersionId !== 'string' ||
+      params.body.modelVersionId.trim().length === 0 ||
+      typeof params.body?.packageId !== 'string' ||
+      params.body.packageId.trim().length === 0 ||
+      (params.body.previousModelVersionId !== undefined && typeof params.body.previousModelVersionId !== 'string')
+    ) {
       return {
         status: 400,
         body: buildPlatformErrorEnvelope({
           code: 'VALIDATION_ERROR',
-          message: 'modelVersionId and packageId are required.',
+          message: 'modelVersionId and packageId must be non-empty strings.',
+          requestId: auth.context.requestId,
+        }),
+      };
+    }
+    const trafficPercentage = params.body.trafficPercentage ?? 100;
+    if (
+      typeof trafficPercentage !== 'number' ||
+      !Number.isFinite(trafficPercentage) ||
+      trafficPercentage < 0 ||
+      trafficPercentage > 100
+    ) {
+      return {
+        status: 400,
+        body: buildPlatformErrorEnvelope({
+          code: 'VALIDATION_ERROR',
+          message: 'trafficPercentage must be a finite number between 0 and 100.',
           requestId: auth.context.requestId,
         }),
       };
@@ -973,11 +1070,11 @@ export class ModelFactoryGateway {
     try {
       const dep = this.service.deployModelVersion({
         tenantId: auth.context.organizationId,
-        modelVersionId: params.body.modelVersionId,
-        packageId: params.body.packageId,
+        modelVersionId: params.body.modelVersionId.trim(),
+        packageId: params.body.packageId.trim(),
         environment: requestedEnv,
         strategy: requestedStrategy,
-        trafficPercentage: params.body.trafficPercentage ?? 100,
+        trafficPercentage,
         actorId: auth.context.principalId,
         actorRole: auth.context.role,
         previousModelVersionId: params.body.previousModelVersionId,
@@ -1034,11 +1131,28 @@ export class ModelFactoryGateway {
     });
     if (!auth.ok) return auth.response;
 
+    const nextTrafficPercentage = params.trafficPercentage ?? 100;
+    if (
+      typeof nextTrafficPercentage !== 'number' ||
+      !Number.isFinite(nextTrafficPercentage) ||
+      nextTrafficPercentage < 1 ||
+      nextTrafficPercentage > 100
+    ) {
+      return {
+        status: 400,
+        body: buildPlatformErrorEnvelope({
+          code: 'VALIDATION_ERROR',
+          message: 'trafficPercentage must be a finite number between 1 and 100.',
+          requestId: auth.context.requestId,
+        }),
+      };
+    }
+
     try {
       const promoted = this.service.promoteCanaryDeployment({
         tenantId: auth.context.organizationId,
         deploymentId: params.deploymentId,
-        nextTrafficPercentage: params.trafficPercentage ?? 100,
+        nextTrafficPercentage,
         actorId: auth.context.principalId,
         actorRole: auth.context.role,
       });

@@ -42,6 +42,7 @@ export class AsrWorkerSupervisorAndWatchdog {
         const currentRssMb = getRssMb();
 
         if (elapsedTotal > this.policy.maxExecutionTimeoutMs) {
+          if (watchdogTimer) clearInterval(watchdogTimer);
           abortController.abort();
           reject(
             new Error(
@@ -52,6 +53,7 @@ export class AsrWorkerSupervisorAndWatchdog {
         }
 
         if (sinceLastHeartbeat > this.policy.heartbeatIntervalMs) {
+          if (watchdogTimer) clearInterval(watchdogTimer);
           abortController.abort();
           reject(
             new Error(
@@ -62,6 +64,7 @@ export class AsrWorkerSupervisorAndWatchdog {
         }
 
         if (currentRssMb > this.policy.maxWorkerRssMb) {
+          if (watchdogTimer) clearInterval(watchdogTimer);
           abortController.abort();
           reject(
             new Error(
@@ -79,6 +82,8 @@ export class AsrWorkerSupervisorAndWatchdog {
           lastHeartbeatAtMs = Date.now();
         },
       });
+      // Prevent unhandled rejection crash if watchdog rejects before workPromise throws AbortError
+      workPromise.catch(() => {});
 
       return await Promise.race([workPromise, watchdogPromise]);
     } finally {

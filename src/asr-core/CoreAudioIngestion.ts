@@ -19,6 +19,8 @@ import type {
 } from './CoreAsrContracts';
 
 const MAX_INGEST_BYTES = 128 * 1024 * 1024; // 128 MB hard safety cap against memory/decompression bombs
+const MAX_DECODED_DURATION_SEC = 7200; // 2 hours max decoded audio per request
+const MAX_DECODED_PCM_BYTES = 128 * 1024 * 1024; // 128 MB hard cap on decoded raw PCM output
 const TARGET_SR = 16_000;
 
 export function detectAudioContainerFormat(bytes: Buffer, filename = ''): AudioContainerFormat {
@@ -387,7 +389,7 @@ export function ingestAudioBufferToCanonical16kMono(params: {
     const streamInfo = probeAudioStreamInfo(inputPath);
     const probeChannels = Math.max(1, Math.min(2, streamInfo.channels));
 
-    // Decode via ffmpeg preserving up to 2 channels at 16kHz so we can inspect stereo correlation cleanly before downmix!
+    // Decode via ffmpeg preserving up to 2 channels at 16kHz with strict duration & output size caps
     execFileSync(
       'ffmpeg',
       [
@@ -397,6 +399,10 @@ export function ingestAudioBufferToCanonical16kMono(params: {
         '-i',
         inputPath,
         '-vn',
+        '-t',
+        String(MAX_DECODED_DURATION_SEC),
+        '-fs',
+        String(MAX_DECODED_PCM_BYTES),
         '-acodec',
         'pcm_s16le',
         '-ar',
@@ -410,6 +416,12 @@ export function ingestAudioBufferToCanonical16kMono(params: {
       { timeout: 25_000 },
     );
 
+    const decodedStat = fs.statSync(outStereo16kRaw);
+    if (decodedStat.size > MAX_DECODED_PCM_BYTES) {
+      throw new Error(
+        `AUDIO_INGEST_DECODED_LIMIT_EXCEEDED: Decoded PCM exceeds ${MAX_DECODED_PCM_BYTES} bytes.`,
+      );
+    }
     const decodedBuf = fs.readFileSync(outStereo16kRaw);
     const totalSamplesAllCh = Math.floor(decodedBuf.length / 2);
     const frames = Math.floor(totalSamplesAllCh / probeChannels);

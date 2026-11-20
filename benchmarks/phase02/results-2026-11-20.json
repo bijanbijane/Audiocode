@@ -1,0 +1,1915 @@
+{
+  "timestamp_utc": "2026-11-20T14:35:29.047092+00:00",
+  "host": {
+    "os": "Linux 4.19.0-gvisor x86_64",
+    "cpu_threads": 4,
+    "isa": "AVX-512 VNNI / AVX2 / SSE4.2",
+    "ram_mib": 12288,
+    "gpu": "NONE (G0_CPU_ONLY)",
+    "runtime": "sherpa-onnx v2.0.2 (ONNX Runtime CPU)"
+  },
+  "dataset": {
+    "name": "Google FLEURS dev split (CC-BY-4.0)",
+    "frozen_test_untouched": true,
+    "sample_count": 25,
+    "total_duration_sec": 277.33,
+    "breakdown": {
+      "fa": 10,
+      "en": 10,
+      "fa-en-concat": 5
+    }
+  },
+  "results": [
+    {
+      "model_name": "Shenava Rizeh v1.0 (NeMo FastConformer CTC Persian INT8)",
+      "model_id": "Reza2kn/Shenava-Rizeh",
+      "license_spdx": "Apache-2.0",
+      "disk_size_mib": 36.43,
+      "artifacts": [
+        {
+          "file": "model.int8.onnx",
+          "bytes": 38183269,
+          "sha256": "6bdd4ab80626ddfe0b19338a5c96fcc4f2021ad78899cece20a805a48dc5250d"
+        },
+        {
+          "file": "tokens.txt",
+          "bytes": 12236,
+          "sha256": "8e192963f6e666dfa5721e5cbd4710bc1ef592460a45f08cefc94b2db16a6954"
+        }
+      ],
+      "returncode": 0,
+      "offline_verified": true,
+      "cold_start_ms": 2128.0,
+      "single_stream_peak_rss_mib": 165.81,
+      "single_stream_rtf": 0.0331,
+      "batch_size_used": 5,
+      "batch_peak_rss_mib": 836.13,
+      "wall_sec": 19.289,
+      "decode_sec": 9.988,
+      "overall_rtf": 0.036,
+      "subsets": {
+        "fa": {
+          "sample_count": 10,
+          "total_audio_sec": 100.02,
+          "total_inference_sec": 3.602,
+          "rtf": 0.036,
+          "raw_cer_pct": 7.58,
+          "norm_cer_pct": 5.71,
+          "raw_wer_pct": 32.12,
+          "norm_wer_pct": 19.44,
+          "latin_token_recall_pct": null
+        },
+        "en": {
+          "sample_count": 10,
+          "total_audio_sec": 88.7,
+          "total_inference_sec": 3.195,
+          "rtf": 0.036,
+          "raw_cer_pct": 91.58,
+          "norm_cer_pct": 100.0,
+          "raw_wer_pct": 100.0,
+          "norm_wer_pct": 100.0,
+          "latin_token_recall_pct": 0.0
+        },
+        "fa-en-concat": {
+          "sample_count": 5,
+          "total_audio_sec": 88.61,
+          "total_inference_sec": 3.191,
+          "rtf": 0.036,
+          "raw_cer_pct": 66.24,
+          "norm_cer_pct": 65.23,
+          "raw_wer_pct": 77.91,
+          "norm_wer_pct": 74.14,
+          "latin_token_recall_pct": 0.0
+        }
+      },
+      "sample_outputs": [
+        {
+          "sample_id": "fleurs-fa-dev-01",
+          "language": "fa",
+          "duration_sec": 9.48,
+          "reference": "بیشتر دوران زندگی این خانواده یهودی در فضای باز گذشت.",
+          "hypothesis": "بیشتر دوران زندگی این خانواده یهودی در فضای بازگشت",
+          "raw_cer_pct": 5.66,
+          "norm_cer_pct": 3.85,
+          "norm_wer_pct": 20.0,
+          "latin_recall_pct": null
+        },
+        {
+          "sample_id": "fleurs-fa-dev-02",
+          "language": "fa",
+          "duration_sec": 7.38,
+          "reference": "در ابتدا لباس عمدتاً‌ متأثر از فرهنگ بیزانس در شرق بود.",
+          "hypothesis": "در ابتدا، لباس عمدتا متاثر از فرهنگ بیزانس در شرق بود",
+          "raw_cer_pct": 9.09,
+          "norm_cer_pct": 1.92,
+          "norm_wer_pct": 9.09,
+          "latin_recall_pct": null
+        },
+        {
+          "sample_id": "fleurs-fa-dev-03",
+          "language": "fa",
+          "duration_sec": 10.8,
+          "reference": "عربها اسلام را به این سرزمین‌ها نیز آوردند، و در جزایر کومور و مایوت در مقیاس وسیع شکل گرفت.",
+          "hypothesis": "عرب ها اسلام رو به این سرزمین ها نیز آوردند و در جزایر کور و مایوت در مقیاس وعی شکل شکل گرفت.",
+          "raw_cer_pct": 11.96,
+          "norm_cer_pct": 10.99,
+          "norm_wer_pct": 35.0,
+          "latin_recall_pct": null
+        },
+        {
+          "sample_id": "fleurs-fa-dev-04",
+          "language": "fa",
+          "duration_sec": 8.64,
+          "reference": "اولین مورد این بیماری در این فصل در اواخر جولای گزارش شد.",
+          "hypothesis": "اولین مورد این بیماری در این فصل در اواخل جولایی گزارش شد",
+          "raw_cer_pct": 5.26,
+          "norm_cer_pct": 3.57,
+          "norm_wer_pct": 16.67,
+          "latin_recall_pct": null
+        },
+        {
+          "sample_id": "fleurs-fa-dev-05",
+          "language": "fa",
+          "duration_sec": 6.48,
+          "reference": "دین اصلی مردم مولداوی مسیحیت ارتدکس است.",
+          "hypothesis": "دین اصلی مردم مللاوی مسیحیت ارتدوکس است.",
+          "raw_cer_pct": 7.5,
+          "norm_cer_pct": 7.69,
+          "norm_wer_pct": 28.57,
+          "latin_recall_pct": null
+        },
+        {
+          "sample_id": "fleurs-fa-dev-06",
+          "language": "fa",
+          "duration_sec": 11.88,
+          "reference": "هزاران سال پیش، مردی به نام آریستارخوس گفت که منظومه شمسی به دور خورشید حرکت می کند.",
+          "hypothesis": "هزاران سال پیش مردی به نام آریس تارخوس گفت که منظومه شمسی به دور خورشید حرکت می کند.",
+          "raw_cer_pct": 2.38,
+          "norm_cer_pct": 2.41,
+          "norm_wer_pct": 17.65,
+          "latin_recall_pct": null
+        },
+        {
+          "sample_id": "fleurs-fa-dev-07",
+          "language": "fa",
+          "duration_sec": 11.16,
+          "reference": "آمازون پهناورترین رودخانه روی کره زمین نیز هست، و در نقاطی عرض آن به شش مایل می‌رسد.",
+          "hypothesis": "آمازون، پهناورترین رودخانه روی کره زمین نیز هست و در نقاطتی عرض آن به شش ماهایل می رسد.",
+          "raw_cer_pct": 7.14,
+          "norm_cer_pct": 6.02,
+          "norm_wer_pct": 22.22,
+          "latin_recall_pct": null
+        },
+        {
+          "sample_id": "fleurs-fa-dev-08",
+          "language": "fa",
+          "duration_sec": 12.0,
+          "reference": "این بیمار در نیجریه بوده است، جایی که مواردی از ابتلا به ویروس ابولا گزارش شده است.",
+          "hypothesis": "این بیمار در نیجریه بوده است، جایی که مواردی از ابتلا به و ویروس ابولا گزارش شده است.",
+          "raw_cer_pct": 2.41,
+          "norm_cer_pct": 2.44,
+          "norm_wer_pct": 5.88,
+          "latin_recall_pct": null
+        },
+        {
+          "sample_id": "fleurs-fa-dev-09",
+          "language": "fa",
+          "duration_sec": 11.28,
+          "reference": "اکثر نواحی توسط اتوبوسهای دریایی کوچک ژاپنی که راحت و محکم هستند پوشش داده می‌شوند.",
+          "hypothesis": "اکثر نواحی توسط اتوبوس های دریایی کوچک ژاپنی که راحت و محکم هستند پوشش می شوند",
+          "raw_cer_pct": 9.64,
+          "norm_cer_pct": 7.32,
+          "norm_wer_pct": 18.75,
+          "latin_recall_pct": null
+        },
+        {
+          "sample_id": "fleurs-fa-dev-10",
+          "language": "fa",
+          "duration_sec": 10.92,
+          "reference": "برخی جشنواره‌ها مکان‌های ویژه‌ای برای اردو زدن خانواده‌ها با فرزند خردسال، دارند.",
+          "hypothesis": "برخی جشنواره ها، مکان های ویژه ای برای اردو زدن خانواده ها با فرزند خودس دار.",
+          "raw_cer_pct": 13.58,
+          "norm_cer_pct": 8.75,
+          "norm_wer_pct": 18.75,
+          "latin_recall_pct": null
+        },
+        {
+          "sample_id": "fleurs-en-dev-01",
+          "language": "en",
+          "duration_sec": 11.46,
+          "reference": "The main local beer is 'Number One', it is not a complex beer, but pleasant and refreshing. The other local beer is called \"Manta\".",
+          "hypothesis": "به می نوک و بیز هزار کامپ پاز بیا",
+          "raw_cer_pct": 93.89,
+          "norm_cer_pct": 100.0,
+          "norm_wer_pct": 100.0,
+          "latin_recall_pct": 0.0
+        },
+        {
+          "sample_id": "fleurs-en-dev-02",
+          "language": "en",
+          "duration_sec": 9.12,
+          "reference": "Insects were the first animals to take to the air. Their ability to fly helped them evade enemies more easily and find food and mates more efficiently.",
+          "hypothesis": "بهکس بهفرست این موسی س در بب بری ریفای همی تن میز ما ایزویی انرفین میز مسه.",
+          "raw_cer_pct": 88.74,
+          "norm_cer_pct": 100.0,
+          "norm_wer_pct": 100.0,
+          "latin_recall_pct": 0.0
+        },
+        {
+          "sample_id": "fleurs-en-dev-03",
+          "language": "en",
+          "duration_sec": 6.0,
+          "reference": "There are many beaches, due to Auckland's straddling of two harbours. The most popular ones are in three areas.",
+          "hypothesis": "به نظرین بیچ چیزی تو آغوزگرایی از سوار با مس است",
+          "raw_cer_pct": 90.99,
+          "norm_cer_pct": 100.0,
+          "norm_wer_pct": 100.0,
+          "latin_recall_pct": 0.0
+        },
+        {
+          "sample_id": "fleurs-en-dev-04",
+          "language": "en",
+          "duration_sec": 7.5,
+          "reference": "After seeing the horrors and atrocities of war during World War I, nations desired to avoid such a situation again in the future.",
+          "hypothesis": "از سین برز چص ریز بج بائ به ژسته ضر توو سیشن گنده",
+          "raw_cer_pct": 90.7,
+          "norm_cer_pct": 100.0,
+          "norm_wer_pct": 100.0,
+          "latin_recall_pct": 0.0
+        },
+        {
+          "sample_id": "fleurs-en-dev-05",
+          "language": "en",
+          "duration_sec": 10.0,
+          "reference": "Robin Uthappa made the innings highest score, 70 runs in just 41 balls by hitting 11 fours and 2 sixes.",
+          "hypothesis": "مییدی هایسور س",
+          "raw_cer_pct": 98.06,
+          "norm_cer_pct": 100.0,
+          "norm_wer_pct": 100.0,
+          "latin_recall_pct": 0.0
+        },
+        {
+          "sample_id": "fleurs-en-dev-06",
+          "language": "en",
+          "duration_sec": 7.92,
+          "reference": "Scientists think that ocelots follow and find animals to eat (prey) by smell, sniffing for where they've been on the ground.",
+          "hypothesis": "س چیز دی آست با وپ ایر موسیعی پ و و سف موردگرام می گوید.",
+          "raw_cer_pct": 87.9,
+          "norm_cer_pct": 100.0,
+          "norm_wer_pct": 100.0,
+          "latin_recall_pct": 0.0
+        },
+        {
+          "sample_id": "fleurs-en-dev-07",
+          "language": "en",
+          "duration_sec": 8.4,
+          "reference": "Ancient Roman meals couldn't have included foods that came to Europe from America or from Asia in later centuries.",
+          "hypothesis": "می امام موزل نوینگول بیزکینون مردا ارم ایجی",
+          "raw_cer_pct": 93.86,
+          "norm_cer_pct": 100.0,
+          "norm_wer_pct": 100.0,
+          "latin_recall_pct": 0.0
+        },
+        {
+          "sample_id": "fleurs-en-dev-08",
+          "language": "en",
+          "duration_sec": 6.58,
+          "reference": "Safaris are perhaps the greatest tourism draw in Africa and the highlight for many visitors.",
+          "hypothesis": "سه",
+          "raw_cer_pct": 100.0,
+          "norm_cer_pct": 100.0,
+          "norm_wer_pct": 100.0,
+          "latin_recall_pct": 0.0
+        },
+        {
+          "sample_id": "fleurs-en-dev-09",
+          "language": "en",
+          "duration_sec": 9.36,
+          "reference": "Out of 1,400 people polled prior to the 2010 federal election, those who oppose Australia becoming a republic grew by 8 per cent since 2008.",
+          "hypothesis": "برای خود میگی گفت خورد پنج رو دید از می ترین برای باور دو با گذاشت روی بیگ رااب دور وید سنگ ن",
+          "raw_cer_pct": 86.43,
+          "norm_cer_pct": 100.0,
+          "norm_wer_pct": 100.0,
+          "latin_recall_pct": 0.0
+        },
+        {
+          "sample_id": "fleurs-en-dev-10",
+          "language": "en",
+          "duration_sec": 12.36,
+          "reference": "Though it is widely used, especially among non-Romani, the word \"Gypsy\" is often considered offensive because of its associations with negative stereotypes and inaccurate perceptions of Romani people.",
+          "hypothesis": "بس باز یوس دست من ن رونی به جسی اسان فیتر به به سااسی اج نگر نکر سب ط م",
+          "raw_cer_pct": 90.5,
+          "norm_cer_pct": 100.0,
+          "norm_wer_pct": 100.0,
+          "latin_recall_pct": 0.0
+        },
+        {
+          "sample_id": "fleurs-bi-switch-01",
+          "language": "fa-en-concat",
+          "duration_sec": 21.29,
+          "reference": "بیشتر دوران زندگی این خانواده یهودی در فضای باز گذشت. The main local beer is 'Number One', it is not a complex beer, but pleasant and refreshing. The other local beer is called \"Manta\".",
+          "hypothesis": "بیشتر دوران زندگی این خانواده یهودی در فضای بازگشت به می لک و بی به هزار کامپ پازش بیا باباک",
+          "raw_cer_pct": 67.03,
+          "norm_cer_pct": 65.34,
+          "norm_wer_pct": 76.47,
+          "latin_recall_pct": 0.0
+        },
+        {
+          "sample_id": "fleurs-bi-switch-02",
+          "language": "fa-en-concat",
+          "duration_sec": 16.85,
+          "reference": "در ابتدا لباس عمدتاً‌ متأثر از فرهنگ بیزانس در شرق بود. Insects were the first animals to take to the air. Their ability to fly helped them evade enemies more easily and find food and mates more efficiently.",
+          "hypothesis": "در ابتدا، لباس عمدتا متاثر از فرهنگ بیزانس در شرق بود الزکس بهفرسترمس ت در بهری ریفای هفتمی یعنی میز ما ایزعی انفاین فیمی مورد بشه",
+          "raw_cer_pct": 68.6,
+          "norm_cer_pct": 67.33,
+          "norm_wer_pct": 73.68,
+          "latin_recall_pct": 0.0
+        },
+        {
+          "sample_id": "fleurs-bi-switch-03",
+          "language": "fa-en-concat",
+          "duration_sec": 17.15,
+          "reference": "عربها اسلام را به این سرزمین‌ها نیز آوردند، و در جزایر کومور و مایوت در مقیاس وسیع شکل گرفت. There are many beaches, due to Auckland's straddling of two harbours. The most popular ones are in three areas.",
+          "hypothesis": "عرب ها اسلام رو به این سرزمین ها نیز آوردند و در جزایر کور و مایوت در مقیاس وعی شکل شکل گرفت. است",
+          "raw_cer_pct": 59.8,
+          "norm_cer_pct": 59.0,
+          "norm_wer_pct": 67.5,
+          "latin_recall_pct": 0.0
+        },
+        {
+          "sample_id": "fleurs-bi-switch-04",
+          "language": "fa-en-concat",
+          "duration_sec": 16.49,
+          "reference": "اولین مورد این بیماری در این فصل در اواخر جولای گزارش شد. After seeing the horrors and atrocities of war during World War I, nations desired to avoid such a situation again in the future.",
+          "hypothesis": "اولین مورد این بیماری در این فصل در اواخل جولایی گزارش شد، از سین پروز انعرااس ریز فج با رژ سه سر توپ سی توژن گن",
+          "raw_cer_pct": 63.64,
+          "norm_cer_pct": 63.04,
+          "norm_wer_pct": 74.29,
+          "latin_recall_pct": 0.0
+        },
+        {
+          "sample_id": "fleurs-bi-switch-05",
+          "language": "fa-en-concat",
+          "duration_sec": 16.83,
+          "reference": "دین اصلی مردم مولداوی مسیحیت ارتدکس است. Robin Uthappa made the innings highest score, 70 runs in just 41 balls by hitting 11 fours and 2 sixes.",
+          "hypothesis": "دین اصلی مردم ملاوی مسیحیت ارتدوکس است را",
+          "raw_cer_pct": 74.31,
+          "norm_cer_pct": 73.76,
+          "norm_wer_pct": 81.48,
+          "latin_recall_pct": 0.0
+        }
+      ]
+    },
+    {
+      "model_name": "OpenAI Whisper Base (FP32 ONNX)",
+      "model_id": "openai/whisper-base-fp32",
+      "license_spdx": "MIT",
+      "disk_size_mib": 278.9,
+      "artifacts": [
+        {
+          "file": "base-encoder.onnx",
+          "bytes": 95087154,
+          "sha256": "5a6b87cb313993f6c9fefec9e7027556f6cb30becddf49655bee36c50ecc12d7"
+        },
+        {
+          "file": "base-decoder.onnx",
+          "bytes": 196548998,
+          "sha256": "8a12c3f6ad65bb5b86d7e6eccc302378f20f9fb2df6cb10747c62895da7ac194"
+        },
+        {
+          "file": "base-tokens.txt",
+          "bytes": 816730,
+          "sha256": "b34b360dbb493e781e479794586d661700670d65564001f23024971d1f2fa126"
+        }
+      ],
+      "returncode": 0,
+      "offline_verified": true,
+      "cold_start_ms": 2732.0,
+      "single_stream_peak_rss_mib": 526.31,
+      "single_stream_rtf": 0.2686,
+      "batch_size_used": 25,
+      "batch_peak_rss_mib": 675.5,
+      "wall_sec": 68.484,
+      "decode_sec": 65.772,
+      "overall_rtf": 0.2372,
+      "subsets": {
+        "fa": {
+          "sample_count": 10,
+          "total_audio_sec": 100.02,
+          "total_inference_sec": 23.721,
+          "rtf": 0.2372,
+          "raw_cer_pct": 32.87,
+          "norm_cer_pct": 29.57,
+          "raw_wer_pct": 93.43,
+          "norm_wer_pct": 85.42,
+          "latin_token_recall_pct": null
+        },
+        "en": {
+          "sample_count": 10,
+          "total_audio_sec": 88.7,
+          "total_inference_sec": 21.036,
+          "rtf": 0.2372,
+          "raw_cer_pct": 6.25,
+          "norm_cer_pct": 5.13,
+          "raw_wer_pct": 16.29,
+          "norm_wer_pct": 12.56,
+          "latin_token_recall_pct": 88.55
+        },
+        "fa-en-concat": {
+          "sample_count": 5,
+          "total_audio_sec": 88.61,
+          "total_inference_sec": 21.015,
+          "rtf": 0.2372,
+          "raw_cer_pct": 74.76,
+          "norm_cer_pct": 73.75,
+          "raw_wer_pct": 90.12,
+          "norm_wer_pct": 90.23,
+          "latin_token_recall_pct": 5.0
+        }
+      },
+      "sample_outputs": [
+        {
+          "sample_id": "fleurs-fa-dev-01",
+          "language": "fa",
+          "duration_sec": 9.48,
+          "reference": "بیشتر دوران زندگی این خانواده یهودی در فضای باز گذشت.",
+          "hypothesis": "بیشتل دوران زندگی این خانو و دی یهودی درف از آی باز گزشت",
+          "raw_cer_pct": 22.64,
+          "norm_cer_pct": 19.23,
+          "norm_wer_pct": 80.0,
+          "latin_recall_pct": null
+        },
+        {
+          "sample_id": "fleurs-fa-dev-02",
+          "language": "fa",
+          "duration_sec": 7.38,
+          "reference": "در ابتدا لباس عمدتاً‌ متأثر از فرهنگ بیزانس در شرق بود.",
+          "hypothesis": "تر اپتدو لبوز امدتن متأسر از فرحنگ بیزانز تر شارق بود",
+          "raw_cer_pct": 27.27,
+          "norm_cer_pct": 23.08,
+          "norm_wer_pct": 81.82,
+          "latin_recall_pct": null
+        },
+        {
+          "sample_id": "fleurs-fa-dev-03",
+          "language": "fa",
+          "duration_sec": 10.8,
+          "reference": "عربها اسلام را به این سرزمین‌ها نیز آوردند، و در جزایر کومور و مایوت در مقیاس وسیع شکل گرفت.",
+          "hypothesis": "اربهای سلام رب انسرزن منحنیز او اردنت و در جز ایر کمور و ميود در مپیص و سیشت شک گرفت",
+          "raw_cer_pct": 34.78,
+          "norm_cer_pct": 30.77,
+          "norm_wer_pct": 85.0,
+          "latin_recall_pct": null
+        },
+        {
+          "sample_id": "fleurs-fa-dev-04",
+          "language": "fa",
+          "duration_sec": 8.64,
+          "reference": "اولین مورد این بیماری در این فصل در اواخر جولای گزارش شد.",
+          "hypothesis": "اگر این مورد این بیماری ترین فست تر ابخل جلوائی کزار اششید",
+          "raw_cer_pct": 38.6,
+          "norm_cer_pct": 37.5,
+          "norm_wer_pct": 83.33,
+          "latin_recall_pct": null
+        },
+        {
+          "sample_id": "fleurs-fa-dev-05",
+          "language": "fa",
+          "duration_sec": 6.48,
+          "reference": "دین اصلی مردم مولداوی مسیحیت ارتدکس است.",
+          "hypothesis": "دين أسليم عدوم مولدوين مصيهية ارتو دقساست",
+          "raw_cer_pct": 52.5,
+          "norm_cer_pct": 35.9,
+          "norm_wer_pct": 85.71,
+          "latin_recall_pct": null
+        },
+        {
+          "sample_id": "fleurs-fa-dev-06",
+          "language": "fa",
+          "duration_sec": 11.88,
+          "reference": "هزاران سال پیش، مردی به نام آریستارخوس گفت که منظومه شمسی به دور خورشید حرکت می کند.",
+          "hypothesis": "حزاران سالپیش مردی بنام ااریز تارخوس کفت که منزومی شمسی بیدور خورشی داریکت می کنگت",
+          "raw_cer_pct": 23.81,
+          "norm_cer_pct": 22.89,
+          "norm_wer_pct": 76.47,
+          "latin_recall_pct": null
+        },
+        {
+          "sample_id": "fleurs-fa-dev-07",
+          "language": "fa",
+          "duration_sec": 11.16,
+          "reference": "آمازون پهناورترین رودخانه روی کره زمین نیز هست، و در نقاطی عرض آن به شش مایل می‌رسد.",
+          "hypothesis": "آمازون پهنو وارترین رو تنی رو یکاریز من نیز هست ادر نغاتی ارزان اشش معلمی رسال",
+          "raw_cer_pct": 38.1,
+          "norm_cer_pct": 36.14,
+          "norm_wer_pct": 94.44,
+          "latin_recall_pct": null
+        },
+        {
+          "sample_id": "fleurs-fa-dev-08",
+          "language": "fa",
+          "duration_sec": 12.0,
+          "reference": "این بیمار در نیجریه بوده است، جایی که مواردی از ابتلا به ویروس ابولا گزارش شده است.",
+          "hypothesis": "این بی مارد ارنجریه بود است جای کم اواردی از اپتلا بیر ویروس ابولا گزارش رو ده است",
+          "raw_cer_pct": 20.48,
+          "norm_cer_pct": 19.51,
+          "norm_wer_pct": 70.59,
+          "latin_recall_pct": null
+        },
+        {
+          "sample_id": "fleurs-fa-dev-09",
+          "language": "fa",
+          "duration_sec": 11.28,
+          "reference": "اکثر نواحی توسط اتوبوسهای دریایی کوچک ژاپنی که راحت و محکم هستند پوشش داده می‌شوند.",
+          "hypothesis": "اکسار ناوهی تاوست او توتبس های دری ای ایک کچک از آبونی که رو هات و مو کام استان پوشاش ده می شاوات",
+          "raw_cer_pct": 49.4,
+          "norm_cer_pct": 46.34,
+          "norm_wer_pct": 125.0,
+          "latin_recall_pct": null
+        },
+        {
+          "sample_id": "fleurs-fa-dev-10",
+          "language": "fa",
+          "duration_sec": 10.92,
+          "reference": "برخی جشنواره‌ها مکان‌های ویژه‌ای برای اردو زدن خانواده‌ها با فرزند خردسال، دارند.",
+          "hypothesis": "برخیچ اشت و ره ها، مقانه های بیجی، برعی اردو زدن خانواده ها با فرزند خورت سال دارند.",
+          "raw_cer_pct": 27.16,
+          "norm_cer_pct": 23.75,
+          "norm_wer_pct": 68.75,
+          "latin_recall_pct": null
+        },
+        {
+          "sample_id": "fleurs-en-dev-01",
+          "language": "en",
+          "duration_sec": 11.46,
+          "reference": "The main local beer is 'Number One', it is not a complex beer, but pleasant and refreshing. The other local beer is called \"Manta\".",
+          "hypothesis": "The main local beer is number one. It's not a complex beer but pleasant and refreshing. The other local beer is called \"Monta\".",
+          "raw_cer_pct": 7.63,
+          "norm_cer_pct": 4.0,
+          "norm_wer_pct": 20.83,
+          "latin_recall_pct": 87.5
+        },
+        {
+          "sample_id": "fleurs-en-dev-02",
+          "language": "en",
+          "duration_sec": 9.12,
+          "reference": "Insects were the first animals to take to the air. Their ability to fly helped them evade enemies more easily and find food and mates more efficiently.",
+          "hypothesis": "Insects were the first animals to take to the air. Their ability to fly helped them evade enemies more easily and find food and mates more efficiently.",
+          "raw_cer_pct": 0.0,
+          "norm_cer_pct": 0.0,
+          "norm_wer_pct": 0.0,
+          "latin_recall_pct": 100.0
+        },
+        {
+          "sample_id": "fleurs-en-dev-03",
+          "language": "en",
+          "duration_sec": 6.0,
+          "reference": "There are many beaches, due to Auckland's straddling of two harbours. The most popular ones are in three areas.",
+          "hypothesis": "There are many beaches due to Auckland's rattling of two harbours and most popular ones are in three areas.",
+          "raw_cer_pct": 8.11,
+          "norm_cer_pct": 6.48,
+          "norm_wer_pct": 10.53,
+          "latin_recall_pct": 85.0
+        },
+        {
+          "sample_id": "fleurs-en-dev-04",
+          "language": "en",
+          "duration_sec": 7.5,
+          "reference": "After seeing the horrors and atrocities of war during World War I, nations desired to avoid such a situation again in the future.",
+          "hypothesis": "After seeing the horrors and atrocities of war during World War I, nations desire to avoid such a situation again in the future.",
+          "raw_cer_pct": 0.78,
+          "norm_cer_pct": 0.79,
+          "norm_wer_pct": 4.35,
+          "latin_recall_pct": 95.65
+        },
+        {
+          "sample_id": "fleurs-en-dev-05",
+          "language": "en",
+          "duration_sec": 10.0,
+          "reference": "Robin Uthappa made the innings highest score, 70 runs in just 41 balls by hitting 11 fours and 2 sixes.",
+          "hypothesis": "Robin Uhapa made the innings high score, 70 runs in just 41 balls by hitting 11/4 and 2/6.",
+          "raw_cer_pct": 16.5,
+          "norm_cer_pct": 14.85,
+          "norm_wer_pct": 20.0,
+          "latin_recall_pct": 75.0
+        },
+        {
+          "sample_id": "fleurs-en-dev-06",
+          "language": "en",
+          "duration_sec": 7.92,
+          "reference": "Scientists think that ocelots follow and find animals to eat (prey) by smell, sniffing for where they've been on the ground.",
+          "hypothesis": "Scientists think that osolats follow and find animals to eat prey by smell sniffing for where they've been on the ground.",
+          "raw_cer_pct": 4.84,
+          "norm_cer_pct": 2.5,
+          "norm_wer_pct": 4.76,
+          "latin_recall_pct": 95.45
+        },
+        {
+          "sample_id": "fleurs-en-dev-07",
+          "language": "en",
+          "duration_sec": 8.4,
+          "reference": "Ancient Roman meals couldn't have included foods that came to Europe from America or from Asia in later centuries.",
+          "hypothesis": "Ancient Roman meals couldn't have included foods that came to Europe from America or from Asia in later centuries.",
+          "raw_cer_pct": 0.0,
+          "norm_cer_pct": 0.0,
+          "norm_wer_pct": 0.0,
+          "latin_recall_pct": 100.0
+        },
+        {
+          "sample_id": "fleurs-en-dev-08",
+          "language": "en",
+          "duration_sec": 6.58,
+          "reference": "Safaris are perhaps the greatest tourism draw in Africa and the highlight for many visitors.",
+          "hypothesis": "Safari's are perhaps the greatest tourism draw in Africa and the highlight for many visitors.",
+          "raw_cer_pct": 1.09,
+          "norm_cer_pct": 1.1,
+          "norm_wer_pct": 6.67,
+          "latin_recall_pct": 93.33
+        },
+        {
+          "sample_id": "fleurs-en-dev-09",
+          "language": "en",
+          "duration_sec": 9.36,
+          "reference": "Out of 1,400 people polled prior to the 2010 federal election, those who oppose Australia becoming a republic grew by 8 per cent since 2008.",
+          "hypothesis": "At a 1400 people pulled prior to the 2010 federal election, those who oppose Australia becoming a republic through by 8% since 2008.",
+          "raw_cer_pct": 15.0,
+          "norm_cer_pct": 15.22,
+          "norm_wer_pct": 30.77,
+          "latin_recall_pct": 71.43
+        },
+        {
+          "sample_id": "fleurs-en-dev-10",
+          "language": "en",
+          "duration_sec": 12.36,
+          "reference": "Though it is widely used, especially among non-Romani, the word \"Gypsy\" is often considered offensive because of its associations with negative stereotypes and inaccurate perceptions of Romani people.",
+          "hypothesis": "This is widely used, especially among non-romany, the word gypsy is often considered offensive because it's association with negative stereotypes and inaccurate perceptions of Romani people.",
+          "raw_cer_pct": 8.0,
+          "norm_cer_pct": 6.15,
+          "norm_wer_pct": 20.69,
+          "latin_recall_pct": 82.14
+        },
+        {
+          "sample_id": "fleurs-bi-switch-01",
+          "language": "fa-en-concat",
+          "duration_sec": 21.29,
+          "reference": "بیشتر دوران زندگی این خانواده یهودی در فضای باز گذشت. The main local beer is 'Number One', it is not a complex beer, but pleasant and refreshing. The other local beer is called \"Manta\".",
+          "hypothesis": "بیشتل دوران زندگی این خانو و دی یهودی درف از آی باز گزشت",
+          "raw_cer_pct": 77.84,
+          "norm_cer_pct": 76.14,
+          "norm_wer_pct": 91.18,
+          "latin_recall_pct": 0.0
+        },
+        {
+          "sample_id": "fleurs-bi-switch-02",
+          "language": "fa-en-concat",
+          "duration_sec": 16.85,
+          "reference": "در ابتدا لباس عمدتاً‌ متأثر از فرهنگ بیزانس در شرق بود. Insects were the first animals to take to the air. Their ability to fly helped them evade enemies more easily and find food and mates more efficiently.",
+          "hypothesis": "اپتی دا لباش امدتن مطاسر از فرحنگ بیزاند ارشارگ بود.",
+          "raw_cer_pct": 83.09,
+          "norm_cer_pct": 82.67,
+          "norm_wer_pct": 94.74,
+          "latin_recall_pct": 0.0
+        },
+        {
+          "sample_id": "fleurs-bi-switch-03",
+          "language": "fa-en-concat",
+          "duration_sec": 17.15,
+          "reference": "عربها اسلام را به این سرزمین‌ها نیز آوردند، و در جزایر کومور و مایوت در مقیاس وسیع شکل گرفت. There are many beaches, due to Auckland's straddling of two harbours. The most popular ones are in three areas.",
+          "hypothesis": "اربهای سلام رب انسرزن منحنیز او اردنت و در جز ایر کمور و مه یت در مپیص و سیشت شک گرفت",
+          "raw_cer_pct": 70.59,
+          "norm_cer_pct": 69.0,
+          "norm_wer_pct": 95.0,
+          "latin_recall_pct": 0.0
+        },
+        {
+          "sample_id": "fleurs-bi-switch-04",
+          "language": "fa-en-concat",
+          "duration_sec": 16.49,
+          "reference": "اولین مورد این بیماری در این فصل در اواخر جولای گزارش شد. After seeing the horrors and atrocities of war during World War I, nations desired to avoid such a situation again in the future.",
+          "hypothesis": "ابالی مورد این بیماری ترین فست تر ابخل جلوائی قزار اششتون ایسیون این اترستیز این اترستیز این روز این روز این این ایسیون سیاری از این این این این این این این",
+          "raw_cer_pct": 70.59,
+          "norm_cer_pct": 70.65,
+          "norm_wer_pct": 91.43,
+          "latin_recall_pct": 0.0
+        },
+        {
+          "sample_id": "fleurs-bi-switch-05",
+          "language": "fa-en-concat",
+          "duration_sec": 16.83,
+          "reference": "دین اصلی مردم مولداوی مسیحیت ارتدکس است. Robin Uthappa made the innings highest score, 70 runs in just 41 balls by hitting 11 fours and 2 sixes.",
+          "hypothesis": "رابن أوحا ميدي ايننز هائس سنودي رنزن just 41 بلز by hitting 11 4 and 2 6",
+          "raw_cer_pct": 70.14,
+          "norm_cer_pct": 68.79,
+          "norm_wer_pct": 74.07,
+          "latin_recall_pct": 25.0
+        }
+      ]
+    },
+    {
+      "model_name": "OpenAI Whisper Base (INT8 ONNX)",
+      "model_id": "openai/whisper-base-int8",
+      "license_spdx": "MIT",
+      "disk_size_mib": 153.17,
+      "artifacts": [
+        {
+          "file": "base-encoder.int8.onnx",
+          "bytes": 29120534,
+          "sha256": "0b8fb1304b6109976038efff5ace81720e00386f3ff6b54ee8c75291ca0a1e11"
+        },
+        {
+          "file": "base-decoder.int8.onnx",
+          "bytes": 130672026,
+          "sha256": "9759d217388a01b3a4c7c15533201067b48ae819c4daafc8624e64b9409dc02d"
+        },
+        {
+          "file": "base-tokens.txt",
+          "bytes": 816730,
+          "sha256": "b34b360dbb493e781e479794586d661700670d65564001f23024971d1f2fa126"
+        }
+      ],
+      "returncode": 0,
+      "offline_verified": true,
+      "cold_start_ms": 1882.0,
+      "single_stream_peak_rss_mib": 326.68,
+      "single_stream_rtf": 0.2462,
+      "batch_size_used": 25,
+      "batch_peak_rss_mib": 504.68,
+      "wall_sec": 66.155,
+      "decode_sec": 64.165,
+      "overall_rtf": 0.2314,
+      "subsets": {
+        "fa": {
+          "sample_count": 10,
+          "total_audio_sec": 100.02,
+          "total_inference_sec": 23.141,
+          "rtf": 0.2314,
+          "raw_cer_pct": 46.91,
+          "norm_cer_pct": 44.57,
+          "raw_wer_pct": 110.95,
+          "norm_wer_pct": 103.47,
+          "latin_token_recall_pct": null
+        },
+        "en": {
+          "sample_count": 10,
+          "total_audio_sec": 88.7,
+          "total_inference_sec": 20.522,
+          "rtf": 0.2314,
+          "raw_cer_pct": 6.56,
+          "norm_cer_pct": 5.21,
+          "raw_wer_pct": 17.65,
+          "norm_wer_pct": 13.0,
+          "latin_token_recall_pct": 87.44
+        },
+        "fa-en-concat": {
+          "sample_count": 5,
+          "total_audio_sec": 88.61,
+          "total_inference_sec": 20.501,
+          "rtf": 0.2314,
+          "raw_cer_pct": 79.29,
+          "norm_cer_pct": 78.52,
+          "raw_wer_pct": 105.81,
+          "norm_wer_pct": 105.75,
+          "latin_token_recall_pct": 0.0
+        }
+      },
+      "sample_outputs": [
+        {
+          "sample_id": "fleurs-fa-dev-01",
+          "language": "fa",
+          "duration_sec": 9.48,
+          "reference": "بیشتر دوران زندگی این خانواده یهودی در فضای باز گذشت.",
+          "hypothesis": "بیشتل دوران زندگی این خانو و دی یه دیدر فزای باز گزاشت",
+          "raw_cer_pct": 20.75,
+          "norm_cer_pct": 19.23,
+          "norm_wer_pct": 80.0,
+          "latin_recall_pct": null
+        },
+        {
+          "sample_id": "fleurs-fa-dev-02",
+          "language": "fa",
+          "duration_sec": 7.38,
+          "reference": "در ابتدا لباس عمدتاً‌ متأثر از فرهنگ بیزانس در شرق بود.",
+          "hypothesis": "تر اپتدو لبوز امدتن مطعصر از فرحنگ بزنز ترشارگ بود",
+          "raw_cer_pct": 38.18,
+          "norm_cer_pct": 34.62,
+          "norm_wer_pct": 81.82,
+          "latin_recall_pct": null
+        },
+        {
+          "sample_id": "fleurs-fa-dev-03",
+          "language": "fa",
+          "duration_sec": 10.8,
+          "reference": "عربها اسلام را به این سرزمین‌ها نیز آوردند، و در جزایر کومور و مایوت در مقیاس وسیع شکل گرفت.",
+          "hypothesis": "اربها سلام رب انسرزم انحانیز او اردنت و در جز ایر کمور و مه یت در مه پیص و سیشت شک گرفت",
+          "raw_cer_pct": 34.78,
+          "norm_cer_pct": 32.97,
+          "norm_wer_pct": 95.0,
+          "latin_recall_pct": null
+        },
+        {
+          "sample_id": "fleurs-fa-dev-04",
+          "language": "fa",
+          "duration_sec": 8.64,
+          "reference": "اولین مورد این بیماری در این فصل در اواخر جولای گزارش شد.",
+          "hypothesis": "اگه از از از از از از از از از از از از از از از از از از از از از از از از",
+          "raw_cer_pct": 96.49,
+          "norm_cer_pct": 98.21,
+          "norm_wer_pct": 208.33,
+          "latin_recall_pct": null
+        },
+        {
+          "sample_id": "fleurs-fa-dev-05",
+          "language": "fa",
+          "duration_sec": 6.48,
+          "reference": "دین اصلی مردم مولداوی مسیحیت ارتدکس است.",
+          "hypothesis": "دين أسليم أرضو مولدوين سهيات أردوك ساست",
+          "raw_cer_pct": 52.5,
+          "norm_cer_pct": 38.46,
+          "norm_wer_pct": 85.71,
+          "latin_recall_pct": null
+        },
+        {
+          "sample_id": "fleurs-fa-dev-06",
+          "language": "fa",
+          "duration_sec": 11.88,
+          "reference": "هزاران سال پیش، مردی به نام آریستارخوس گفت که منظومه شمسی به دور خورشید حرکت می کند.",
+          "hypothesis": "حزاران سالپیش مردی بنام ااریز تارخوس کفت که منزومی شمسی بدور خورش دارکیت می کنکت",
+          "raw_cer_pct": 23.81,
+          "norm_cer_pct": 22.89,
+          "norm_wer_pct": 76.47,
+          "latin_recall_pct": null
+        },
+        {
+          "sample_id": "fleurs-fa-dev-07",
+          "language": "fa",
+          "duration_sec": 11.16,
+          "reference": "آمازون پهناورترین رودخانه روی کره زمین نیز هست، و در نقاطی عرض آن به شش مایل می‌رسد.",
+          "hypothesis": "اموزون احنا ورترین بوطانه رو یکاریز من نیز هست ادر نغطی ارزان اشش مائل میرسد",
+          "raw_cer_pct": 35.71,
+          "norm_cer_pct": 32.53,
+          "norm_wer_pct": 100.0,
+          "latin_recall_pct": null
+        },
+        {
+          "sample_id": "fleurs-fa-dev-08",
+          "language": "fa",
+          "duration_sec": 12.0,
+          "reference": "این بیمار در نیجریه بوده است، جایی که مواردی از ابتلا به ویروس ابولا گزارش شده است.",
+          "hypothesis": "این بی مارد ارنجریه بود است جای کم آردی از اپتلا بیر ویروس ابولا گزارش رد است",
+          "raw_cer_pct": 21.69,
+          "norm_cer_pct": 19.51,
+          "norm_wer_pct": 64.71,
+          "latin_recall_pct": null
+        },
+        {
+          "sample_id": "fleurs-fa-dev-09",
+          "language": "fa",
+          "duration_sec": 11.28,
+          "reference": "اکثر نواحی توسط اتوبوسهای دریایی کوچک ژاپنی که راحت و محکم هستند پوشش داده می‌شوند.",
+          "hypothesis": "Aksar na va hita va sat utubus aya dair ya ya kuchak ja ja aponik ja rohat va mo kam aasan puushas na de mi shawant",
+          "raw_cer_pct": 121.69,
+          "norm_cer_pct": 121.95,
+          "norm_wer_pct": 162.5,
+          "latin_recall_pct": null
+        },
+        {
+          "sample_id": "fleurs-fa-dev-10",
+          "language": "fa",
+          "duration_sec": 10.92,
+          "reference": "برخی جشنواره‌ها مکان‌های ویژه‌ای برای اردو زدن خانواده‌ها با فرزند خردسال، دارند.",
+          "hypothesis": "برخیچ اشت وره ها مقنهای ویجی برعی اردزدن خانو وده ها با فرزن دخور سال دارند",
+          "raw_cer_pct": 30.86,
+          "norm_cer_pct": 27.5,
+          "norm_wer_pct": 87.5,
+          "latin_recall_pct": null
+        },
+        {
+          "sample_id": "fleurs-en-dev-01",
+          "language": "en",
+          "duration_sec": 11.46,
+          "reference": "The main local beer is 'Number One', it is not a complex beer, but pleasant and refreshing. The other local beer is called \"Manta\".",
+          "hypothesis": "The main local beer is number one. It's not a complex beer but pleasant and refreshing. The other local beer is called a Monta.",
+          "raw_cer_pct": 9.92,
+          "norm_cer_pct": 5.6,
+          "norm_wer_pct": 25.0,
+          "latin_recall_pct": 87.5
+        },
+        {
+          "sample_id": "fleurs-en-dev-02",
+          "language": "en",
+          "duration_sec": 9.12,
+          "reference": "Insects were the first animals to take to the air. Their ability to fly helped them evade enemies more easily and find food and mates more efficiently.",
+          "hypothesis": "Insects were the first animals to take to the air. Their ability to fly helps them evade enemies more easily and find food and mates more efficiently.",
+          "raw_cer_pct": 1.32,
+          "norm_cer_pct": 1.34,
+          "norm_wer_pct": 3.7,
+          "latin_recall_pct": 96.3
+        },
+        {
+          "sample_id": "fleurs-en-dev-03",
+          "language": "en",
+          "duration_sec": 6.0,
+          "reference": "There are many beaches, due to Auckland's straddling of two harbours. The most popular ones are in three areas.",
+          "hypothesis": "There are many beaches due to Auckland Straddling of two harbours and most popular ones are in three areas.",
+          "raw_cer_pct": 7.21,
+          "norm_cer_pct": 4.63,
+          "norm_wer_pct": 10.53,
+          "latin_recall_pct": 85.0
+        },
+        {
+          "sample_id": "fleurs-en-dev-04",
+          "language": "en",
+          "duration_sec": 7.5,
+          "reference": "After seeing the horrors and atrocities of war during World War I, nations desired to avoid such a situation again in the future.",
+          "hypothesis": "After seeing the horrors and atrocities of war during World War I, nations desire to avoid such a situation again in the future.",
+          "raw_cer_pct": 0.78,
+          "norm_cer_pct": 0.79,
+          "norm_wer_pct": 4.35,
+          "latin_recall_pct": 95.65
+        },
+        {
+          "sample_id": "fleurs-en-dev-05",
+          "language": "en",
+          "duration_sec": 10.0,
+          "reference": "Robin Uthappa made the innings highest score, 70 runs in just 41 balls by hitting 11 fours and 2 sixes.",
+          "hypothesis": "Robin Uhoppa made the innings high score. 70 runs in just 41 balls by hitting 11/4 and 2/6.",
+          "raw_cer_pct": 17.48,
+          "norm_cer_pct": 14.85,
+          "norm_wer_pct": 20.0,
+          "latin_recall_pct": 68.75
+        },
+        {
+          "sample_id": "fleurs-en-dev-06",
+          "language": "en",
+          "duration_sec": 7.92,
+          "reference": "Scientists think that ocelots follow and find animals to eat (prey) by smell, sniffing for where they've been on the ground.",
+          "hypothesis": "Scientists think that oscillates follow and find animals to eat prey by smell sniffing for where they've been on the ground.",
+          "raw_cer_pct": 6.45,
+          "norm_cer_pct": 4.17,
+          "norm_wer_pct": 4.76,
+          "latin_recall_pct": 95.45
+        },
+        {
+          "sample_id": "fleurs-en-dev-07",
+          "language": "en",
+          "duration_sec": 8.4,
+          "reference": "Ancient Roman meals couldn't have included foods that came to Europe from America or from Asia in later centuries.",
+          "hypothesis": "Ancient Roman meals couldn't have included foods that came to Europe from America or from Asia in later centuries.",
+          "raw_cer_pct": 0.0,
+          "norm_cer_pct": 0.0,
+          "norm_wer_pct": 0.0,
+          "latin_recall_pct": 100.0
+        },
+        {
+          "sample_id": "fleurs-en-dev-08",
+          "language": "en",
+          "duration_sec": 6.58,
+          "reference": "Safaris are perhaps the greatest tourism draw in Africa and the highlight for many visitors.",
+          "hypothesis": "Safari's are perhaps the greatest tourism draw in Africa and the highlight for many visitors.",
+          "raw_cer_pct": 1.09,
+          "norm_cer_pct": 1.1,
+          "norm_wer_pct": 6.67,
+          "latin_recall_pct": 93.33
+        },
+        {
+          "sample_id": "fleurs-en-dev-09",
+          "language": "en",
+          "duration_sec": 9.36,
+          "reference": "Out of 1,400 people polled prior to the 2010 federal election, those who oppose Australia becoming a republic grew by 8 per cent since 2008.",
+          "hypothesis": "At a 1400 people pulled prior to the 2010 federal election, those who opposed Australia becoming a republic through by 8% since 2008.",
+          "raw_cer_pct": 15.71,
+          "norm_cer_pct": 15.94,
+          "norm_wer_pct": 34.62,
+          "latin_recall_pct": 66.67
+        },
+        {
+          "sample_id": "fleurs-en-dev-10",
+          "language": "en",
+          "duration_sec": 12.36,
+          "reference": "Though it is widely used, especially among non-Romani, the word \"Gypsy\" is often considered offensive because of its associations with negative stereotypes and inaccurate perceptions of Romani people.",
+          "hypothesis": "This is widely used, especially among non-romany, the word gypsy is often considered offensive because of its association with negative stereotypes and inaccurate perceptions of Romani people.",
+          "raw_cer_pct": 6.0,
+          "norm_cer_pct": 4.1,
+          "norm_wer_pct": 13.79,
+          "latin_recall_pct": 85.71
+        },
+        {
+          "sample_id": "fleurs-bi-switch-01",
+          "language": "fa-en-concat",
+          "duration_sec": 21.29,
+          "reference": "بیشتر دوران زندگی این خانواده یهودی در فضای باز گذشت. The main local beer is 'Number One', it is not a complex beer, but pleasant and refreshing. The other local beer is called \"Manta\".",
+          "hypothesis": "بیشتل دورانزندگی این خانو و ده یهودی درفه زای باز گزاشت",
+          "raw_cer_pct": 77.84,
+          "norm_cer_pct": 76.7,
+          "norm_wer_pct": 97.06,
+          "latin_recall_pct": 0.0
+        },
+        {
+          "sample_id": "fleurs-bi-switch-02",
+          "language": "fa-en-concat",
+          "duration_sec": 16.85,
+          "reference": "در ابتدا لباس عمدتاً‌ متأثر از فرهنگ بیزانس در شرق بود. Insects were the first animals to take to the air. Their ability to fly helped them evade enemies more easily and find food and mates more efficiently.",
+          "hypothesis": "اپتدو لباش امدتن مطأسر از فرحنگ بیزنز ترشاربود",
+          "raw_cer_pct": 83.57,
+          "norm_cer_pct": 83.17,
+          "norm_wer_pct": 97.37,
+          "latin_recall_pct": 0.0
+        },
+        {
+          "sample_id": "fleurs-bi-switch-03",
+          "language": "fa-en-concat",
+          "duration_sec": 17.15,
+          "reference": "عربها اسلام را به این سرزمین‌ها نیز آوردند، و در جزایر کومور و مایوت در مقیاس وسیع شکل گرفت. There are many beaches, due to Auckland's straddling of two harbours. The most popular ones are in three areas.",
+          "hypothesis": "اربها سلام رب انسرزم انها نزا وردنت و در جزا رب کمور و مه یت در مه پیزها سیشت شک گرفت",
+          "raw_cer_pct": 70.59,
+          "norm_cer_pct": 70.0,
+          "norm_wer_pct": 95.0,
+          "latin_recall_pct": 0.0
+        },
+        {
+          "sample_id": "fleurs-bi-switch-04",
+          "language": "fa-en-concat",
+          "duration_sec": 16.49,
+          "reference": "اولین مورد این بیماری در این فصل در اواخر جولای گزارش شد. After seeing the horrors and atrocities of war during World War I, nations desired to avoid such a situation again in the future.",
+          "hypothesis": "اگر از از از از از از از از از از از از از از از از از از از از از از از از از از از از از از از از از از از از از از از از از از از از از از از ا",
+          "raw_cer_pct": 78.61,
+          "norm_cer_pct": 78.8,
+          "norm_wer_pct": 140.0,
+          "latin_recall_pct": 0.0
+        },
+        {
+          "sample_id": "fleurs-bi-switch-05",
+          "language": "fa-en-concat",
+          "duration_sec": 16.83,
+          "reference": "دین اصلی مردم مولداوی مسیحیت ارتدکس است. Robin Uthappa made the innings highest score, 70 runs in just 41 balls by hitting 11 fours and 2 sixes.",
+          "hypothesis": "رابن ألحبها ميدي انيز هائس سنة سنة وحناناً بلسلتها وحناناً بلسلتها وحناناً بلسلتها وحناناً بلسلتها وحناناً بلسلتها وحناناً بلسلتها وحنانا",
+          "raw_cer_pct": 88.19,
+          "norm_cer_pct": 85.82,
+          "norm_wer_pct": 100.0,
+          "latin_recall_pct": 0.0
+        }
+      ]
+    },
+    {
+      "model_name": "OpenAI Whisper large-v3-turbo (INT8 ONNX)",
+      "model_id": "openai/whisper-large-v3-turbo-int8",
+      "license_spdx": "MIT",
+      "disk_size_mib": 988.59,
+      "artifacts": [
+        {
+          "file": "turbo-encoder.int8.onnx",
+          "bytes": 674716297,
+          "sha256": "b02dcdf54f348741e93fe732b67d933c8dcb6735655f710640143081db38878b"
+        },
+        {
+          "file": "turbo-decoder.int8.onnx",
+          "bytes": 361080764,
+          "sha256": "20accd02388482eb3a46bd615631adfdc85e1eb2c7db9ea3f02a40ffe6b81547"
+        },
+        {
+          "file": "turbo-tokens.txt",
+          "bytes": 816730,
+          "sha256": "b34b360dbb493e781e479794586d661700670d65564001f23024971d1f2fa126"
+        }
+      ],
+      "returncode": 0,
+      "offline_verified": false,
+      "cold_start_ms": 7519.0,
+      "single_stream_peak_rss_mib": 1382.88,
+      "single_stream_rtf": 0.6976,
+      "batch_size_used": 5,
+      "batch_peak_rss_mib": 1823.38,
+      "wall_sec": 276.47,
+      "decode_sec": 169.761,
+      "overall_rtf": 0.6121,
+      "subsets": {
+        "all": {
+          "sample_count": 25,
+          "total_audio_sec": 277.33,
+          "total_inference_sec": 89.919,
+          "rtf": 0.3242,
+          "raw_cer_pct": 24.06,
+          "norm_cer_pct": 22.96,
+          "raw_wer_pct": 36.79,
+          "norm_wer_pct": 31.61,
+          "latin_token_recall_pct": 68.57
+        },
+        "fa": {
+          "sample_count": 10,
+          "total_audio_sec": 100.02,
+          "total_inference_sec": 34.801,
+          "rtf": 0.3479,
+          "raw_cer_pct": 8.71,
+          "norm_cer_pct": 7.71,
+          "raw_wer_pct": 35.77,
+          "norm_wer_pct": 27.78,
+          "latin_token_recall_pct": null
+        },
+        "en": {
+          "sample_count": 10,
+          "total_audio_sec": 88.7,
+          "total_inference_sec": 0.0,
+          "rtf": 0.0,
+          "raw_cer_pct": 3.47,
+          "norm_cer_pct": 2.21,
+          "raw_wer_pct": 10.86,
+          "norm_wer_pct": 5.83,
+          "latin_token_recall_pct": 94.1
+        },
+        "fa-en-concat": {
+          "sample_count": 5,
+          "total_audio_sec": 88.61,
+          "total_inference_sec": 55.118,
+          "rtf": 0.622,
+          "raw_cer_pct": 64.62,
+          "norm_cer_pct": 63.9,
+          "raw_wer_pct": 70.93,
+          "norm_wer_pct": 67.82,
+          "latin_token_recall_pct": 17.5
+        }
+      },
+      "sample_outputs": [
+        {
+          "sample_id": "fleurs-fa-dev-01",
+          "language": "fa",
+          "duration_sec": 9.48,
+          "reference": "بیشتر دوران زندگی این خانواده یهودی در فضای باز گذشت.",
+          "hypothesis": "بیشتر دوران زندگی این خانواده یهودی در فضای باز گذشت",
+          "raw_cer_pct": 1.89,
+          "norm_cer_pct": 0.0,
+          "raw_wer_pct": 10.0,
+          "norm_wer_pct": 0.0,
+          "latin_token_recall": null
+        },
+        {
+          "sample_id": "fleurs-fa-dev-02",
+          "language": "fa",
+          "duration_sec": 7.38,
+          "reference": "در ابتدا لباس عمدتاً‌ متأثر از فرهنگ بیزانس در شرق بود.",
+          "hypothesis": "در ابتدا لباس عمدتا متأثر از فرهنگ بیزانز در شرق بود.",
+          "raw_cer_pct": 5.45,
+          "norm_cer_pct": 1.92,
+          "raw_wer_pct": 18.18,
+          "norm_wer_pct": 9.09,
+          "latin_token_recall": null
+        },
+        {
+          "sample_id": "fleurs-fa-dev-03",
+          "language": "fa",
+          "duration_sec": 10.8,
+          "reference": "عربها اسلام را به این سرزمین‌ها نیز آوردند، و در جزایر کومور و مایوت در مقیاس وسیع شکل گرفت.",
+          "hypothesis": "عرب ها اسلام رو به این سرزمین ها نیز آوردند و در جزائر کمور و مایوت در مقیاس وسی شکل گرفت.",
+          "raw_cer_pct": 7.61,
+          "norm_cer_pct": 6.59,
+          "raw_wer_pct": 47.37,
+          "norm_wer_pct": 35.0,
+          "latin_token_recall": null
+        },
+        {
+          "sample_id": "fleurs-fa-dev-04",
+          "language": "fa",
+          "duration_sec": 8.64,
+          "reference": "اولین مورد این بیماری در این فصل در اواخر جولای گزارش شد.",
+          "hypothesis": "اولین مورد این بیماری در این فرست در اواخل جلائی گذاره شد.",
+          "raw_cer_pct": 14.04,
+          "norm_cer_pct": 14.29,
+          "raw_wer_pct": 33.33,
+          "norm_wer_pct": 33.33,
+          "latin_token_recall": null
+        },
+        {
+          "sample_id": "fleurs-fa-dev-05",
+          "language": "fa",
+          "duration_sec": 6.48,
+          "reference": "دین اصلی مردم مولداوی مسیحیت ارتدکس است.",
+          "hypothesis": "دین اصلی مردم ملداوی مسیحیت ارتوڈکس است.",
+          "raw_cer_pct": 7.5,
+          "norm_cer_pct": 7.69,
+          "raw_wer_pct": 28.57,
+          "norm_wer_pct": 28.57,
+          "latin_token_recall": null
+        },
+        {
+          "sample_id": "fleurs-fa-dev-06",
+          "language": "fa",
+          "duration_sec": 11.88,
+          "reference": "هزاران سال پیش، مردی به نام آریستارخوس گفت که منظومه شمسی به دور خورشید حرکت می کند.",
+          "hypothesis": "هزاران سال پیش مردی به نام آریز تارخوس گفت که منظومه شمسی به دور خرشی درکت می کند.",
+          "raw_cer_pct": 7.14,
+          "norm_cer_pct": 7.23,
+          "raw_wer_pct": 29.41,
+          "norm_wer_pct": 29.41,
+          "latin_token_recall": null
+        },
+        {
+          "sample_id": "fleurs-fa-dev-07",
+          "language": "fa",
+          "duration_sec": 11.16,
+          "reference": "آمازون پهناورترین رودخانه روی کره زمین نیز هست، و در نقاطی عرض آن به شش مایل می‌رسد.",
+          "hypothesis": "آمازون پهناورترین رودخانه روی کوری زمین نیز هست و در نقاطی عرض آن به 6 مایل میرسد.",
+          "raw_cer_pct": 7.14,
+          "norm_cer_pct": 7.23,
+          "raw_wer_pct": 23.53,
+          "norm_wer_pct": 27.78,
+          "latin_token_recall": null
+        },
+        {
+          "sample_id": "fleurs-fa-dev-08",
+          "language": "fa",
+          "duration_sec": 12.0,
+          "reference": "این بیمار در نیجریه بوده است، جایی که مواردی از ابتلا به ویروس ابولا گزارش شده است.",
+          "hypothesis": "این بیمار در نیجریه بوده است. جایی که مواردی از ابتلا بویر ویروس ایبولا گذاره شده است.",
+          "raw_cer_pct": 8.43,
+          "norm_cer_pct": 8.54,
+          "raw_wer_pct": 23.53,
+          "norm_wer_pct": 23.53,
+          "latin_token_recall": null
+        },
+        {
+          "sample_id": "fleurs-fa-dev-09",
+          "language": "fa",
+          "duration_sec": 11.28,
+          "reference": "اکثر نواحی توسط اتوبوسهای دریایی کوچک ژاپنی که راحت و محکم هستند پوشش داده می‌شوند.",
+          "hypothesis": "اکثر نواهی توسط اوتوبوس های دریایی کچک جاپونی که راحت و محکم هستن پوشه شده می شوند.",
+          "raw_cer_pct": 13.25,
+          "norm_cer_pct": 12.2,
+          "raw_wer_pct": 66.67,
+          "norm_wer_pct": 50.0,
+          "latin_token_recall": null
+        },
+        {
+          "sample_id": "fleurs-fa-dev-10",
+          "language": "fa",
+          "duration_sec": 10.92,
+          "reference": "برخی جشنواره‌ها مکان‌های ویژه‌ای برای اردو زدن خانواده‌ها با فرزند خردسال، دارند.",
+          "hypothesis": "برخی جهشتواره ها مکان های ویجهی برای اردو زدن خانواده ها با فرزند خوردسال دارند.",
+          "raw_cer_pct": 12.35,
+          "norm_cer_pct": 8.75,
+          "raw_wer_pct": 66.67,
+          "norm_wer_pct": 25.0,
+          "latin_token_recall": null
+        },
+        {
+          "sample_id": "fleurs-en-dev-01",
+          "language": "en",
+          "duration_sec": 11.46,
+          "reference": "The main local beer is 'Number One', it is not a complex beer, but pleasant and refreshing. The other local beer is called \"Manta\".",
+          "hypothesis": "The main local beer is number one. It is not a complex beer, but pleasant and refreshing. The other local beer is called Manta.",
+          "raw_cer_pct": 6.11,
+          "norm_cer_pct": 1.6,
+          "raw_wer_pct": 16.67,
+          "norm_wer_pct": 8.33,
+          "latin_token_recall": null
+        },
+        {
+          "sample_id": "fleurs-en-dev-02",
+          "language": "en",
+          "duration_sec": 9.12,
+          "reference": "Insects were the first animals to take to the air. Their ability to fly helped them evade enemies more easily and find food and mates more efficiently.",
+          "hypothesis": "Insects were the first animals to take to the air. Their ability to fly helped them evade enemies more easily and find food and mates more efficiently.",
+          "raw_cer_pct": 0.0,
+          "norm_cer_pct": 0.0,
+          "raw_wer_pct": 0.0,
+          "norm_wer_pct": 0.0,
+          "latin_token_recall": null
+        },
+        {
+          "sample_id": "fleurs-en-dev-03",
+          "language": "en",
+          "duration_sec": 6.0,
+          "reference": "There are many beaches, due to Auckland's straddling of two harbours. The most popular ones are in three areas.",
+          "hypothesis": "There are many beaches due to Auckland straddling of two harbors. The most popular ones are in three areas.",
+          "raw_cer_pct": 3.6,
+          "norm_cer_pct": 2.78,
+          "raw_wer_pct": 15.79,
+          "norm_wer_pct": 10.53,
+          "latin_token_recall": null
+        },
+        {
+          "sample_id": "fleurs-en-dev-04",
+          "language": "en",
+          "duration_sec": 7.5,
+          "reference": "After seeing the horrors and atrocities of war during World War I, nations desired to avoid such a situation again in the future.",
+          "hypothesis": "After seeing the horrors and atrocities of war during World War I, nations desire to avoid such a situation again in the future.",
+          "raw_cer_pct": 0.78,
+          "norm_cer_pct": 0.79,
+          "raw_wer_pct": 4.35,
+          "norm_wer_pct": 4.35,
+          "latin_token_recall": null
+        },
+        {
+          "sample_id": "fleurs-en-dev-05",
+          "language": "en",
+          "duration_sec": 10.0,
+          "reference": "Robin Uthappa made the innings highest score, 70 runs in just 41 balls by hitting 11 fours and 2 sixes.",
+          "hypothesis": "Robin U. Hoppe made the innings highest score 70 runs in just 41 balls by hitting 11 fours and two sixes",
+          "raw_cer_pct": 9.71,
+          "norm_cer_pct": 5.94,
+          "raw_wer_pct": 25.0,
+          "norm_wer_pct": 15.0,
+          "latin_token_recall": null
+        },
+        {
+          "sample_id": "fleurs-en-dev-06",
+          "language": "en",
+          "duration_sec": 7.92,
+          "reference": "Scientists think that ocelots follow and find animals to eat (prey) by smell, sniffing for where they've been on the ground.",
+          "hypothesis": "Scientists think that ocelots follow and find animals to eat prey by smell sniffing for where they've been on the ground.",
+          "raw_cer_pct": 2.42,
+          "norm_cer_pct": 0.0,
+          "raw_wer_pct": 9.52,
+          "norm_wer_pct": 0.0,
+          "latin_token_recall": null
+        },
+        {
+          "sample_id": "fleurs-en-dev-07",
+          "language": "en",
+          "duration_sec": 8.4,
+          "reference": "Ancient Roman meals couldn't have included foods that came to Europe from America or from Asia in later centuries.",
+          "hypothesis": "Ancient Roman meals couldn't have included foods that came to Europe from America or from Asia in later centuries.",
+          "raw_cer_pct": 0.0,
+          "norm_cer_pct": 0.0,
+          "raw_wer_pct": 0.0,
+          "norm_wer_pct": 0.0,
+          "latin_token_recall": null
+        },
+        {
+          "sample_id": "fleurs-en-dev-08",
+          "language": "en",
+          "duration_sec": 6.58,
+          "reference": "Safaris are perhaps the greatest tourism draw in Africa and the highlight for many visitors.",
+          "hypothesis": "Safaris are perhaps the greatest tourism draw in Africa and the highlight for many visitors.",
+          "raw_cer_pct": 0.0,
+          "norm_cer_pct": 0.0,
+          "raw_wer_pct": 0.0,
+          "norm_wer_pct": 0.0,
+          "latin_token_recall": null
+        },
+        {
+          "sample_id": "fleurs-en-dev-09",
+          "language": "en",
+          "duration_sec": 9.36,
+          "reference": "Out of 1,400 people polled prior to the 2010 federal election, those who oppose Australia becoming a republic grew by 8 per cent since 2008.",
+          "hypothesis": "Out of 1,400 people polled prior to the 2010 federal election, those who oppose Australia becoming a republic grew by 8% since 2008.",
+          "raw_cer_pct": 6.43,
+          "norm_cer_pct": 6.52,
+          "raw_wer_pct": 12.0,
+          "norm_wer_pct": 7.69,
+          "latin_token_recall": null
+        },
+        {
+          "sample_id": "fleurs-en-dev-10",
+          "language": "en",
+          "duration_sec": 12.36,
+          "reference": "Though it is widely used, especially among non-Romani, the word \"Gypsy\" is often considered offensive because of its associations with negative stereotypes and inaccurate perceptions of Romani people.",
+          "hypothesis": "This is widely used, especially among non-Romani. The word \"gypsy\" is often considered offensive because of its association with negative stereotypes and inaccurate perceptions of Romani people.",
+          "raw_cer_pct": 5.0,
+          "norm_cer_pct": 3.59,
+          "raw_wer_pct": 21.43,
+          "norm_wer_pct": 10.34,
+          "latin_token_recall": null
+        },
+        {
+          "sample_id": "fleurs-bi-switch-01",
+          "language": "fa-en-concat",
+          "duration_sec": 21.29,
+          "reference": "بیشتر دوران زندگی این خانواده یهودی در فضای باز گذشت. The main local beer is 'Number One', it is not a complex beer, but pleasant and refreshing. The other local beer is called \"Manta\".",
+          "hypothesis": "بیشتر دوران زندگی این خانواده یهودی در فضای باز گذشت.",
+          "raw_cer_pct": 71.35,
+          "norm_cer_pct": 70.45,
+          "raw_wer_pct": 70.59,
+          "norm_wer_pct": 70.59,
+          "latin_token_recall": 0.0
+        },
+        {
+          "sample_id": "fleurs-bi-switch-02",
+          "language": "fa-en-concat",
+          "duration_sec": 16.85,
+          "reference": "در ابتدا لباس عمدتاً‌ متأثر از فرهنگ بیزانس در شرق بود. Insects were the first animals to take to the air. Their ability to fly helped them evade enemies more easily and find food and mates more efficiently.",
+          "hypothesis": "در ابتدا لباس عمدتا متاثر از فرهنگ بیزانز در شرق بود.",
+          "raw_cer_pct": 75.36,
+          "norm_cer_pct": 74.75,
+          "raw_wer_pct": 78.95,
+          "norm_wer_pct": 73.68,
+          "latin_token_recall": 0.0
+        },
+        {
+          "sample_id": "fleurs-bi-switch-03",
+          "language": "fa-en-concat",
+          "duration_sec": 17.15,
+          "reference": "عربها اسلام را به این سرزمین‌ها نیز آوردند، و در جزایر کومور و مایوت در مقیاس وسیع شکل گرفت. There are many beaches, due to Auckland's straddling of two harbours. The most popular ones are in three areas.",
+          "hypothesis": "عرب ها اسلام رو به این سرزمین ها نیز آوردند و در جزائر کمور و مایوت در مقیاس و وسی شک گرفت.",
+          "raw_cer_pct": 59.8,
+          "norm_cer_pct": 59.0,
+          "raw_wer_pct": 78.95,
+          "norm_wer_pct": 72.5,
+          "latin_token_recall": 0.0
+        },
+        {
+          "sample_id": "fleurs-bi-switch-04",
+          "language": "fa-en-concat",
+          "duration_sec": 16.49,
+          "reference": "اولین مورد این بیماری در این فصل در اواخر جولای گزارش شد. After seeing the horrors and atrocities of war during World War I, nations desired to avoid such a situation again in the future.",
+          "hypothesis": "اولین مورد این بیماری در این فرص در اواخل جلائی گزارش شد.",
+          "raw_cer_pct": 72.19,
+          "norm_cer_pct": 72.28,
+          "raw_wer_pct": 74.29,
+          "norm_wer_pct": 74.29,
+          "latin_token_recall": 0.0
+        },
+        {
+          "sample_id": "fleurs-bi-switch-05",
+          "language": "fa-en-concat",
+          "duration_sec": 16.83,
+          "reference": "دین اصلی مردم مولداوی مسیحیت ارتدکس است. Robin Uthappa made the innings highest score, 70 runs in just 41 balls by hitting 11 fours and 2 sixes.",
+          "hypothesis": "The actual religion of Moldova is Orthodox Church. Robin U. Hoppe made the innings highest score. 70 runs in just 41 balls by hitting 11 fours and two sixes.",
+          "raw_cer_pct": 37.5,
+          "norm_cer_pct": 36.17,
+          "raw_wer_pct": 44.44,
+          "norm_wer_pct": 40.74,
+          "latin_token_recall": 0.875
+        }
+      ],
+      "recovery_note": "10 samples from batch-0 & fa-en-concat re-run with batch_size=1 and utf-8 errors=replace (Whisper BPE split-byte tokens) under identical offline proxy-blackhole env (rc=0 on 25/25)."
+    },
+    {
+      "model_name": "Qwen3-ASR-0.6B (INT8 ONNX)",
+      "model_id": "Qwen/Qwen3-ASR-0.6B-int8",
+      "license_spdx": "Apache-2.0",
+      "disk_size_mib": 941.28,
+      "artifacts": [
+        {
+          "file": "conv_frontend.onnx",
+          "bytes": 44148281,
+          "sha256": "d22dc4423e0940e49884e903d2ea2f7e5567c14fc1aed97e4e26d6b8f208ef9e"
+        },
+        {
+          "file": "encoder.int8.onnx",
+          "bytes": 182491662,
+          "sha256": "60748d3e6744a57c9c91e1b17424a6c2990567e8adceb0783940c03ed98fa9d9"
+        },
+        {
+          "file": "decoder.int8.onnx",
+          "bytes": 755914231,
+          "sha256": "4f6885be5959ae26af3089d38ee7972c5fafbeeb1cf8d5e76eab6d8b61ca5771"
+        },
+        {
+          "file": "vocab.json",
+          "bytes": 2776833,
+          "sha256": "ca10d7e9fb3ed18575dd1e277a2579c16d108e32f27439684afa0e10b1440910"
+        },
+        {
+          "file": "merges.txt",
+          "bytes": 1671853,
+          "sha256": "8831e4f1a044471340f7c0a83d7bd71306a5b867e95fd870f74d0c5308a904d5"
+        }
+      ],
+      "returncode": 0,
+      "offline_verified": true,
+      "cold_start_ms": 11612.0,
+      "single_stream_peak_rss_mib": 1588.21,
+      "single_stream_rtf": 0.603,
+      "batch_size_used": 5,
+      "batch_peak_rss_mib": 2292.48,
+      "wall_sec": 354.3401,
+      "decode_sec": 276.493,
+      "overall_rtf": 0.997,
+      "subsets": {
+        "fa": {
+          "sample_count": 10,
+          "total_audio_sec": 100.02,
+          "total_inference_sec": 99.718,
+          "rtf": 0.997,
+          "raw_cer_pct": 56.6,
+          "norm_cer_pct": 56.57,
+          "raw_wer_pct": 75.18,
+          "norm_wer_pct": 74.31,
+          "latin_token_recall_pct": null
+        },
+        "en": {
+          "sample_count": 10,
+          "total_audio_sec": 88.7,
+          "total_inference_sec": 88.432,
+          "rtf": 0.997,
+          "raw_cer_pct": 9.11,
+          "norm_cer_pct": 8.21,
+          "raw_wer_pct": 15.84,
+          "norm_wer_pct": 13.0,
+          "latin_token_recall_pct": 93.19
+        },
+        "fa-en-concat": {
+          "sample_count": 5,
+          "total_audio_sec": 88.61,
+          "total_inference_sec": 88.343,
+          "rtf": 0.997,
+          "raw_cer_pct": 48.76,
+          "norm_cer_pct": 48.06,
+          "raw_wer_pct": 58.14,
+          "norm_wer_pct": 56.9,
+          "latin_token_recall_pct": 72.01
+        }
+      },
+      "sample_outputs": [
+        {
+          "sample_id": "fleurs-fa-dev-01",
+          "language": "fa",
+          "duration_sec": 9.48,
+          "reference": "بیشتر دوران زندگی این خانواده یهودی در فضای باز گذشت.",
+          "hypothesis": "Bistere doğranen zengin İkhanavadeyi Yahudi derfazayı baz gözeşt.",
+          "raw_cer_pct": 107.55,
+          "norm_cer_pct": 111.54,
+          "norm_wer_pct": 100.0,
+          "latin_recall_pct": null
+        },
+        {
+          "sample_id": "fleurs-fa-dev-02",
+          "language": "fa",
+          "duration_sec": 7.38,
+          "reference": "در ابتدا لباس عمدتاً‌ متأثر از فرهنگ بیزانس در شرق بود.",
+          "hypothesis": "در ابتدا لباس امدادان متعارض استفاده می‌کند در شاربود.",
+          "raw_cer_pct": 38.18,
+          "norm_cer_pct": 38.46,
+          "norm_wer_pct": 63.64,
+          "latin_recall_pct": null
+        },
+        {
+          "sample_id": "fleurs-fa-dev-03",
+          "language": "fa",
+          "duration_sec": 10.8,
+          "reference": "عربها اسلام را به این سرزمین‌ها نیز آوردند، و در جزایر کومور و مایوت در مقیاس وسیع شکل گرفت.",
+          "hypothesis": "Araphoets slamrobbyinsatseminden har indgået, ved deres ørekomor ved majud dermed i osv. i skjækketgiften.",
+          "raw_cer_pct": 104.35,
+          "norm_cer_pct": 103.3,
+          "norm_wer_pct": 100.0,
+          "latin_recall_pct": null
+        },
+        {
+          "sample_id": "fleurs-fa-dev-04",
+          "language": "fa",
+          "duration_sec": 8.64,
+          "reference": "اولین مورد این بیماری در این فصل در اواخر جولای گزارش شد.",
+          "hypothesis": "Abalimorot in bimari, terinfas, tada abo kelejui lagi zor esot.",
+          "raw_cer_pct": 98.25,
+          "norm_cer_pct": 96.43,
+          "norm_wer_pct": 100.0,
+          "latin_recall_pct": null
+        },
+        {
+          "sample_id": "fleurs-fa-dev-05",
+          "language": "fa",
+          "duration_sec": 6.48,
+          "reference": "دین اصلی مردم مولداوی مسیحیت ارتدکس است.",
+          "hypothesis": "دین علی مهدی مولدavi مسئیته ارتوگس است.",
+          "raw_cer_pct": 30.0,
+          "norm_cer_pct": 30.77,
+          "norm_wer_pct": 71.43,
+          "latin_recall_pct": null
+        },
+        {
+          "sample_id": "fleurs-fa-dev-06",
+          "language": "fa",
+          "duration_sec": 11.88,
+          "reference": "هزاران سال پیش، مردی به نام آریستارخوس گفت که منظومه شمسی به دور خورشید حرکت می کند.",
+          "hypothesis": "هزاران سال پیش مردی به نام آریس تارخوس گفت که منظومه شمسی به دور خورشید داری که می‌کنه.",
+          "raw_cer_pct": 10.71,
+          "norm_cer_pct": 9.64,
+          "norm_wer_pct": 35.29,
+          "latin_recall_pct": null
+        },
+        {
+          "sample_id": "fleurs-fa-dev-07",
+          "language": "fa",
+          "duration_sec": 11.16,
+          "reference": "آمازون پهناورترین رودخانه روی کره زمین نیز هست، و در نقاطی عرض آن به شش مایل می‌رسد.",
+          "hypothesis": "اموزون پانورتارین رطخ نیروی کریز مینیز هست و در نوگتی ارزان بهش مایل می‌رسد.",
+          "raw_cer_pct": 29.76,
+          "norm_cer_pct": 27.71,
+          "norm_wer_pct": 72.22,
+          "latin_recall_pct": null
+        },
+        {
+          "sample_id": "fleurs-fa-dev-08",
+          "language": "fa",
+          "duration_sec": 12.0,
+          "reference": "این بیمار در نیجریه بوده است، جایی که مواردی از ابتلا به ویروس ابولا گزارش شده است.",
+          "hypothesis": "این بیمار در نجی ریه بوده است، جایی که مواردی از ابتلا به ویروس ابلاگ و زارش داشت.",
+          "raw_cer_pct": 12.05,
+          "norm_cer_pct": 12.2,
+          "norm_wer_pct": 35.29,
+          "latin_recall_pct": null
+        },
+        {
+          "sample_id": "fleurs-fa-dev-09",
+          "language": "fa",
+          "duration_sec": 11.28,
+          "reference": "اکثر نواحی توسط اتوبوسهای دریایی کوچک ژاپنی که راحت و محکم هستند پوشش داده می‌شوند.",
+          "hypothesis": "Aksara na bohit harus tahu betul bahaya darjah yang kucak yang japonek rahat dan mukiman asal pun sudah demi shawand.",
+          "raw_cer_pct": 122.89,
+          "norm_cer_pct": 124.39,
+          "norm_wer_pct": 125.0,
+          "latin_recall_pct": null
+        },
+        {
+          "sample_id": "fleurs-fa-dev-10",
+          "language": "fa",
+          "duration_sec": 10.92,
+          "reference": "برخی جشنواره‌ها مکان‌های ویژه‌ای برای اردو زدن خانواده‌ها با فرزند خردسال، دارند.",
+          "hypothesis": "برخی جاش‌داره‌ها مکان‌های ویژهی برای اردود زدن خانه‌دها با فرزند خرطsal دارند.",
+          "raw_cer_pct": 18.52,
+          "norm_cer_pct": 18.75,
+          "norm_wer_pct": 50.0,
+          "latin_recall_pct": null
+        },
+        {
+          "sample_id": "fleurs-en-dev-01",
+          "language": "en",
+          "duration_sec": 11.46,
+          "reference": "The main local beer is 'Number One', it is not a complex beer, but pleasant and refreshing. The other local beer is called \"Manta\".",
+          "hypothesis": "The main local beer is number one. It is not a complex beer, but pleasant and refreshing. The other local beer is called Monta.",
+          "raw_cer_pct": 6.87,
+          "norm_cer_pct": 2.4,
+          "norm_wer_pct": 12.5,
+          "latin_recall_pct": 91.67
+        },
+        {
+          "sample_id": "fleurs-en-dev-02",
+          "language": "en",
+          "duration_sec": 9.12,
+          "reference": "Insects were the first animals to take to the air. Their ability to fly helped them evade enemies more easily and find food and mates more efficiently.",
+          "hypothesis": "Insects were the first animals to take to the air. Their ability to fly helped them evade enemies more easily and find food and mates more efficiently.",
+          "raw_cer_pct": 0.0,
+          "norm_cer_pct": 0.0,
+          "norm_wer_pct": 0.0,
+          "latin_recall_pct": 100.0
+        },
+        {
+          "sample_id": "fleurs-en-dev-03",
+          "language": "en",
+          "duration_sec": 6.0,
+          "reference": "There are many beaches, due to Auckland's straddling of two harbours. The most popular ones are in three areas.",
+          "hypothesis": "There are many beaches due to Auckland's straddling of two harbors. The most popular ones are in three areas.",
+          "raw_cer_pct": 1.8,
+          "norm_cer_pct": 0.93,
+          "norm_wer_pct": 5.26,
+          "latin_recall_pct": 95.0
+        },
+        {
+          "sample_id": "fleurs-en-dev-04",
+          "language": "en",
+          "duration_sec": 7.5,
+          "reference": "After seeing the horrors and atrocities of war during World War I, nations desired to avoid such a situation again in the future.",
+          "hypothesis": "After seeing the horrors and atrocities of war during World War One, nations desire to avoid such a situation again in the future.",
+          "raw_cer_pct": 3.1,
+          "norm_cer_pct": 3.15,
+          "norm_wer_pct": 8.7,
+          "latin_recall_pct": 91.3
+        },
+        {
+          "sample_id": "fleurs-en-dev-05",
+          "language": "en",
+          "duration_sec": 10.0,
+          "reference": "Robin Uthappa made the innings highest score, 70 runs in just 41 balls by hitting 11 fours and 2 sixes.",
+          "hypothesis": "Robin Ujah made the inning's highest score—seventy runs in just forty-one balls by hitting eleven fours and two sixes.",
+          "raw_cer_pct": 31.07,
+          "norm_cer_pct": 30.69,
+          "norm_wer_pct": 35.0,
+          "latin_recall_pct": 87.5
+        },
+        {
+          "sample_id": "fleurs-en-dev-06",
+          "language": "en",
+          "duration_sec": 7.92,
+          "reference": "Scientists think that ocelots follow and find animals to eat (prey) by smell, sniffing for where they've been on the ground.",
+          "hypothesis": "Scientists think that ocelots follow and find animals to eat prey by smell, sniffing for where they've been on the ground.",
+          "raw_cer_pct": 1.61,
+          "norm_cer_pct": 0.0,
+          "norm_wer_pct": 0.0,
+          "latin_recall_pct": 100.0
+        },
+        {
+          "sample_id": "fleurs-en-dev-07",
+          "language": "en",
+          "duration_sec": 8.4,
+          "reference": "Ancient Roman meals couldn't have included foods that came to Europe from America or from Asia in later centuries.",
+          "hypothesis": "Ancient Roman mills couldn't have included foods that came to Europe from America or from Asia in later centuries.",
+          "raw_cer_pct": 1.75,
+          "norm_cer_pct": 1.77,
+          "norm_wer_pct": 5.26,
+          "latin_recall_pct": 95.0
+        },
+        {
+          "sample_id": "fleurs-en-dev-08",
+          "language": "en",
+          "duration_sec": 6.58,
+          "reference": "Safaris are perhaps the greatest tourism draw in Africa and the highlight for many visitors.",
+          "hypothesis": "Safaris are perhaps the greatest tourism draw in Africa, and the highlight for many visitors.",
+          "raw_cer_pct": 1.09,
+          "norm_cer_pct": 0.0,
+          "norm_wer_pct": 0.0,
+          "latin_recall_pct": 100.0
+        },
+        {
+          "sample_id": "fleurs-en-dev-09",
+          "language": "en",
+          "duration_sec": 9.36,
+          "reference": "Out of 1,400 people polled prior to the 2010 federal election, those who oppose Australia becoming a republic grew by 8 per cent since 2008.",
+          "hypothesis": "Out of fourteen hundred people polled prior to the two thousand ten federal election, those who opposed Australia becoming a republic grew by eight percent since two thousand eight.",
+          "raw_cer_pct": 40.71,
+          "norm_cer_pct": 40.58,
+          "norm_wer_pct": 46.15,
+          "latin_recall_pct": 85.71
+        },
+        {
+          "sample_id": "fleurs-en-dev-10",
+          "language": "en",
+          "duration_sec": 12.36,
+          "reference": "Though it is widely used, especially among non-Romani, the word \"Gypsy\" is often considered offensive because of its associations with negative stereotypes and inaccurate perceptions of Romani people.",
+          "hypothesis": "This is widely used, especially among non-Romani. The word \"Gypsy\" is often considered offensive because of its association with negative stereotypes and inaccurate perceptions of Romani people.",
+          "raw_cer_pct": 4.5,
+          "norm_cer_pct": 3.59,
+          "norm_wer_pct": 10.34,
+          "latin_recall_pct": 85.71
+        },
+        {
+          "sample_id": "fleurs-bi-switch-01",
+          "language": "fa-en-concat",
+          "duration_sec": 21.29,
+          "reference": "بیشتر دوران زندگی این خانواده یهودی در فضای باز گذشت. The main local beer is 'Number One', it is not a complex beer, but pleasant and refreshing. The other local beer is called \"Manta\".",
+          "hypothesis": "Bistere doğan zenginliği inanıvanı ayıdu dervazayı baz gözeşt. The main local beer is number one. It's not a complex beer, but pleasant and refreshing. The other local beer is called Monta.",
+          "raw_cer_pct": 35.14,
+          "norm_cer_pct": 31.82,
+          "norm_wer_pct": 35.29,
+          "latin_recall_pct": 87.5
+        },
+        {
+          "sample_id": "fleurs-bi-switch-02",
+          "language": "fa-en-concat",
+          "duration_sec": 16.85,
+          "reference": "در ابتدا لباس عمدتاً‌ متأثر از فرهنگ بیزانس در شرق بود. Insects were the first animals to take to the air. Their ability to fly helped them evade enemies more easily and find food and mates more efficiently.",
+          "hypothesis": "There are two types of birds: the most common are the passerines, found in the sky. Insects were the first animals to take to the air. Their ability to fly helped them evade enemies more easily and find food and mates more efficiently.",
+          "raw_cer_pct": 34.78,
+          "norm_cer_pct": 34.65,
+          "norm_wer_pct": 42.11,
+          "latin_recall_pct": 100.0
+        },
+        {
+          "sample_id": "fleurs-bi-switch-03",
+          "language": "fa-en-concat",
+          "duration_sec": 17.15,
+          "reference": "عربها اسلام را به این سرزمین‌ها نیز آوردند، و در جزایر کومور و مایوت در مقیاس وسیع شکل گرفت. There are many beaches, due to Auckland's straddling of two harbours. The most popular ones are in three areas.",
+          "hypothesis": "Arap hoslemper beinsættes af min hanes overdent, ved deres øre komor og majut dermed i øverste ishjælkekryft.",
+          "raw_cer_pct": 82.84,
+          "norm_cer_pct": 83.0,
+          "norm_wer_pct": 100.0,
+          "latin_recall_pct": 0.0
+        },
+        {
+          "sample_id": "fleurs-bi-switch-04",
+          "language": "fa-en-concat",
+          "duration_sec": 16.49,
+          "reference": "اولین مورد این بیماری در این فصل در اواخر جولای گزارش شد. After seeing the horrors and atrocities of war during World War I, nations desired to avoid such a situation again in the future.",
+          "hypothesis": "A very morbid in memory, that in fact, that about July goes on record. After seeing the horrors and atrocities of war during World War One, nations desire to avoid such a situation again in the future.",
+          "raw_cer_pct": 34.76,
+          "norm_cer_pct": 34.24,
+          "norm_wer_pct": 45.71,
+          "latin_recall_pct": 91.3
+        },
+        {
+          "sample_id": "fleurs-bi-switch-05",
+          "language": "fa-en-concat",
+          "duration_sec": 16.83,
+          "reference": "دین اصلی مردم مولداوی مسیحیت ارتدکس است. Robin Uthappa made the innings highest score, 70 runs in just 41 balls by hitting 11 fours and 2 sixes.",
+          "hypothesis": "Dinastliye melda ve Moldaviya sihiete ortodoks zast. Robin U Hapa Mayday innings highest score, seventy runs in just forty one balls by hitting eleven fours and two sixes.",
+          "raw_cer_pct": 56.25,
+          "norm_cer_pct": 56.03,
+          "norm_wer_pct": 55.56,
+          "latin_recall_pct": 81.25
+        }
+      ]
+    }
+  ],
+  "paired_bootstrap_comparisons": [
+    {
+      "baseline_model": "openai/whisper-base-fp32",
+      "candidate_model": "Reza2kn/Shenava-Rizeh",
+      "language": "fa",
+      "metric": "norm_cer",
+      "baseline_pct": 29.571,
+      "candidate_pct": 5.714,
+      "delta_pp": -23.857,
+      "ci_low_pp": -29.197,
+      "ci_high_pp": -19.009,
+      "iterations": 2000,
+      "seed": 42
+    },
+    {
+      "baseline_model": "openai/whisper-large-v3-turbo-int8",
+      "candidate_model": "Reza2kn/Shenava-Rizeh",
+      "language": "fa",
+      "metric": "norm_cer",
+      "baseline_pct": 7.714,
+      "candidate_pct": 5.714,
+      "delta_pp": -2.0,
+      "ci_low_pp": -4.623,
+      "ci_high_pp": 0.857,
+      "iterations": 2000,
+      "seed": 42
+    },
+    {
+      "baseline_model": "openai/whisper-base-fp32",
+      "candidate_model": "openai/whisper-large-v3-turbo-int8",
+      "language": "fa",
+      "metric": "norm_cer",
+      "baseline_pct": 29.571,
+      "candidate_pct": 7.714,
+      "delta_pp": -21.857,
+      "ci_low_pp": -26.594,
+      "ci_high_pp": -17.3,
+      "iterations": 2000,
+      "seed": 42
+    },
+    {
+      "baseline_model": "openai/whisper-base-fp32",
+      "candidate_model": "openai/whisper-base-int8",
+      "language": "fa",
+      "metric": "norm_cer",
+      "baseline_pct": 29.571,
+      "candidate_pct": 44.571,
+      "delta_pp": 15.0,
+      "ci_low_pp": 0.74,
+      "ci_high_pp": 34.222,
+      "iterations": 2000,
+      "seed": 42
+    },
+    {
+      "baseline_model": "Qwen/Qwen3-ASR-0.6B-int8",
+      "candidate_model": "openai/whisper-large-v3-turbo-int8",
+      "language": "fa",
+      "metric": "norm_cer",
+      "baseline_pct": 56.571,
+      "candidate_pct": 7.714,
+      "delta_pp": -48.857,
+      "ci_low_pp": -77.326,
+      "ci_high_pp": -21.302,
+      "iterations": 2000,
+      "seed": 42
+    },
+    {
+      "baseline_model": "openai/whisper-base-fp32",
+      "candidate_model": "openai/whisper-large-v3-turbo-int8",
+      "language": "en",
+      "metric": "norm_wer",
+      "baseline_pct": 12.556,
+      "candidate_pct": 5.83,
+      "delta_pp": -6.726,
+      "ci_low_pp": -11.538,
+      "ci_high_pp": -2.203,
+      "iterations": 2000,
+      "seed": 42
+    },
+    {
+      "baseline_model": "Qwen/Qwen3-ASR-0.6B-int8",
+      "candidate_model": "openai/whisper-large-v3-turbo-int8",
+      "language": "en",
+      "metric": "norm_wer",
+      "baseline_pct": 13.004,
+      "candidate_pct": 5.83,
+      "delta_pp": -7.175,
+      "ci_low_pp": -15.929,
+      "ci_high_pp": -0.441,
+      "iterations": 2000,
+      "seed": 42
+    },
+    {
+      "baseline_model": "Qwen/Qwen3-ASR-0.6B-int8",
+      "candidate_model": "openai/whisper-large-v3-turbo-int8",
+      "language": "fa-en-concat",
+      "metric": "norm_cer",
+      "baseline_pct": 48.062,
+      "candidate_pct": 63.898,
+      "delta_pp": 15.836,
+      "ci_low_pp": -9.79,
+      "ci_high_pp": 39.149,
+      "iterations": 2000,
+      "seed": 42
+    }
+  ],
+  "wasm_runtime_assets": {
+    "ort-wasm-simd-threaded.asyncify.wasm": {
+      "bytes": 28747738,
+      "sha256": "ca319e9539cd0f1e291cf56074760121eaf39650f5dbf84b6e52c07f4b2944ec"
+    },
+    "ort-wasm-simd-threaded.jsep.wasm": {
+      "bytes": 29520971,
+      "sha256": "5ab8361783822d02a57d1e97cf2514bceb451a628f2b29ae0d7b6e618201ff8f"
+    },
+    "ort-wasm-simd-threaded.jspi.wasm": {
+      "bytes": 17920659,
+      "sha256": "b89a3efceeb6df2ba29a66fef59f48fd7b7c22a62af54c3cfe05e63863a07fd5"
+    },
+    "ort-wasm-simd-threaded.wasm": {
+      "bytes": 14848852,
+      "sha256": "4b884c203b0fa48d057be3332c65513ff85aa3c5bddd6946acc0fab7ecda001d"
+    }
+  }
+}

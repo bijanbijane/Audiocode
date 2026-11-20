@@ -270,12 +270,15 @@ export function fingerprintBitSimilarity(fpA: string, fpB: string): number {
   return sameBits / totalBits;
 }
 
+const MAX_DECODED_WAV_BYTES = 256 * 1024 * 1024; // 256 MiB hard cap against decompression bombs
+
 /**
- * Isolated container decode using ffprobe + ffmpeg subprocess (no shell, strict timeout) when non-WAV containers arrive.
+ * Isolated container decode using ffprobe + ffmpeg subprocess (no shell, strict timeout & size cap) when non-WAV containers arrive.
  */
 async function decodeContainerWithIsolatedFfmpeg(
   fileBytes: Buffer,
-  timeoutMs: number
+  timeoutMs: number,
+  maxDurationSeconds: number
 ): Promise<{
   sampleRate: number;
   channelCount: number;
@@ -309,12 +312,37 @@ async function decodeContainerWithIsolatedFfmpeg(
     if (!audioStream) {
       throw new Error('UNSUPPORTED_MEDIA: No valid audio stream found inside container.');
     }
+    const probedDurationSec = Number(probe.format?.duration);
+    if (Number.isFinite(probedDurationSec) && probedDurationSec > maxDurationSeconds) {
+      throw new Error(
+        `UPLOAD_DURATION_EXCEEDED: Probed duration (${probedDurationSec.toFixed(1)}s) exceeds max limit (${maxDurationSeconds}s).`
+      );
+    }
 
+    const safeCapSec = Math.max(1, Math.ceil(maxDurationSeconds) + 1);
     await execFileAsync(
       'ffmpeg',
-      ['-y', '-v', 'error', '-i', inPath, '-vn', '-c:a', 'pcm_s16le', outWavPath],
+      [
+        '-y',
+        '-v',
+        'error',
+        '-i',
+        inPath,
+        '-vn',
+        '-t',
+        String(safeCapSec),
+        '-fs',
+        String(MAX_DECODED_WAV_BYTES),
+        '-c:a',
+        'pcm_s16le',
+        outWavPath,
+      ],
       { timeout: timeoutMs, maxBuffer: 2 * 1024 * 1024 }
     );
+    const stat = await fs.stat(outWavPath);
+    if (stat.size > MAX_DECODED_WAV_BYTES) {
+      throw new Error(`UPLOAD_LIMIT_EXCEEDED: Decoded WAV exceeds safety cap (${MAX_DECODED_WAV_BYTES} bytes).`);
+    }
     const wavBuf = await fs.readFile(outWavPath);
     const decoded = decodeWavBufferStrict(wavBuf);
 
@@ -566,7 +594,8 @@ export async function ingestAndDecodeUntrustedAudio(params: {
   } else {
     const ffDecoded = await decodeContainerWithIsolatedFfmpeg(
       params.fileBytes,
-      limits.maxProcessingDurationMs
+      limits.maxProcessingDurationMs,
+      limits.maxDurationSeconds
     );
     sampleRate = ffDecoded.sampleRate;
     channelCount = ffDecoded.channelCount;
@@ -755,8 +784,44 @@ export function applyReproducibleAugmentation(params: {
   augmentedPcm16k: Float32Array;
 } {
   const { config, canonicalPcm16k } = params;
-  if (config.speedFactor < 0.8 || config.speedFactor > 1.25) {
+  if (!config || typeof config !== 'object') {
+    throw new Error('AUGMENTATION_GUARD: AugmentationConfig object is required.');
+  }
+  if (
+    typeof config.speedFactor !== 'number' ||
+    !Number.isFinite(config.speedFactor) ||
+    config.speedFactor < 0.8 ||
+    config.speedFactor > 1.25
+  ) {
     throw new Error('AUGMENTATION_GUARD: speedFactor out of safe intelligible speech bounds [0.80, 1.25].');
+  }
+  if (
+    typeof config.gainDb !== 'number' ||
+    !Number.isFinite(config.gainDb) ||
+    config.gainDb < -40 ||
+    config.gainDb > 24
+  ) {
+    throw new Error('AUGMENTATION_GUARD: gainDb must be a finite number within [-40, 24].');
+  }
+  if (
+    config.targetNoiseSnrDb !== null &&
+    (typeof config.targetNoiseSnrDb !== 'number' ||
+      !Number.isFinite(config.targetNoiseSnrDb) ||
+      config.targetNoiseSnrDb < -10 ||
+      config.targetNoiseSnrDb > 60)
+  ) {
+    throw new Error('AUGMENTATION_GUARD: targetNoiseSnrDb must be null or finite within [-10, 60].');
+  }
+  if (
+    typeof config.reverberationMix !== 'number' ||
+    !Number.isFinite(config.reverberationMix) ||
+    config.reverberationMix < 0 ||
+    config.reverberationMix > 1
+  ) {
+    throw new Error('AUGMENTATION_GUARD: reverberationMix must be a finite number within [0, 1].');
+  }
+  if (typeof config.randomSeed !== 'number' || !Number.isFinite(config.randomSeed)) {
+    throw new Error('AUGMENTATION_GUARD: randomSeed must be a finite number.');
   }
   const rng = createSeededRng(config.randomSeed);
 

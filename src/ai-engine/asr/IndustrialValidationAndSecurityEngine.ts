@@ -513,7 +513,8 @@ export function sanitizePublicErrorOutput(rawError: string): string {
     .replace(/sk-[A-Za-z0-9\-_]{10,}/g, 'sk-[REDACTED]')
     .replace(/AIza[0-9A-Za-z\-_]{15,}/g, 'AIza[REDACTED]')
     .replace(/-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----/g, '[PRIVATE_KEY_REDACTED]')
-    .replace(/\/home\/[^\s:]+|\/app\/[^\s:]+/g, '[INTERNAL_PATH]');
+    .replace(/Command failed:\s*[^\r\n]+/gi, 'Subprocess execution failed')
+    .replace(/\/(?:home|app|tmp|var|etc|usr)\/[^\s:'"]+/g, '[INTERNAL_PATH]');
 }
 
 // ============================================================================

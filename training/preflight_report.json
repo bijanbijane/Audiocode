@@ -1,10 +1,35 @@
 {
-  "preflight_version": "1.0.0-phase4",
-  "timestamp_utc": "2026-11-18T16:15:59.652728+00:00",
+  "preflight_version": "2.0.0-phase06",
+  "timestamp_utc": "2026-11-20T14:07:06.800223+00:00",
   "hostname": "localhost",
+  "os_system": "Linux",
   "os_kernel": "Linux 4.19.0-gvisor (x86_64)",
-  "python_version": "3.11.2",
+  "cpu_architecture": "x86_64",
   "cpu_count": 4,
+  "cpu_isa_flags": [
+    "avx",
+    "avx2",
+    "avx512_vnni",
+    "avx512f",
+    "fma",
+    "sse4_2"
+  ],
+  "system_ram_total_mb": 12288,
+  "system_ram_available_mb": 9990,
+  "disk_free_gb": 376.83,
+  "python_version": "3.11.2",
+  "pip_available": false,
+  "packages": {
+    "torch": null,
+    "torchaudio": null,
+    "transformers": null,
+    "accelerate": null,
+    "peft": null,
+    "datasets": null,
+    "qwen_asr": null,
+    "onnxruntime": null,
+    "flash_attn": null
+  },
   "gpu_detected": false,
   "gpu_model": null,
   "total_vram_mb": 0,
@@ -13,15 +38,34 @@
   "pytorch_installed": false,
   "pytorch_version": null,
   "pytorch_cuda_available": false,
+  "mps_available": false,
+  "rocm_available": false,
   "bf16_supported": false,
   "fp16_supported": false,
   "flash_attention_available": false,
+  "supported_accelerator": "NONE_CPU_ONLY",
+  "transformers_compatibility": {
+    "status": "NOT_INSTALLED",
+    "compatible_with_official_qwen_asr": false,
+    "compatible_with_native_hf_qwen3_asr": false,
+    "notes": "transformers is not installed in the current Python environment."
+  },
   "assigned_hardware_profile": "G0_CPU_ONLY",
   "full_1_7b_sft_ready_locally": false,
   "local_cpu_adapter_training_ready": true,
-  "preflight_status": "BLOCKED_FOR_1_7B_GPU_SFT__READY_FOR_G0_CPU_PIPELINE",
+  "preflight_status": "BLOCKED_EXTERNAL_TRAINING_COMPUTE",
   "blockers": [
     "NO_NVIDIA_GPU_DETECTED: nvidia-smi binary not found in container.",
-    "PYTORCH_NOT_INSTALLED: torch package is not installed in this G0 container."
-  ]
+    "PYTORCH_NOT_INSTALLED: torch package is not installed in this G0 container.",
+    "PIP_NOT_INSTALLED: pip/pip3 unavailable in container.",
+    "TRANSFORMERS_NOT_INSTALLED: transformers not installed."
+  ],
+  "training_feasibility": {
+    "qwen3_asr_0_6b_full_sft": false,
+    "qwen3_asr_0_6b_lora": false,
+    "qwen3_asr_1_7b_full_sft": false,
+    "qwen3_asr_1_7b_lora": false,
+    "mac_8gb_unified_oom_guard_triggered": false,
+    "rationale": "CPU-only environment without CUDA/PyTorch accelerator; neural fine-tuning blocked."
+  }
 }

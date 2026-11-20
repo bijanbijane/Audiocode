@@ -178,18 +178,29 @@ export function validateAndNormalizeAnnotationSegments(segments: readonly Annota
 
   for (let i = 0; i < segments.length; i++) {
     const seg = segments[i];
-    if (!Number.isFinite(seg.startSec) || !Number.isFinite(seg.endSec) || seg.startSec < 0 || seg.endSec <= seg.startSec) {
-      errors.push(`INVALID_TIMESTAMP: Segment ${seg.segmentId} has invalid range [${seg.startSec}, ${seg.endSec}].`);
+    if (!seg || typeof seg !== 'object') {
+      errors.push(`INVALID_SEGMENT: Segment at index ${i} must be an object.`);
+      continue;
     }
-    if (!seg.speakerLabel.trim()) {
-      errors.push(`MISSING_SPEAKER_LABEL: Segment ${seg.segmentId} missing opaque speaker label.`);
+    const segId = typeof seg.segmentId === 'string' && seg.segmentId.trim() ? seg.segmentId : `idx_${i}`;
+    if (!Number.isFinite(seg.startSec) || !Number.isFinite(seg.endSec) || seg.startSec < 0 || seg.endSec <= seg.startSec) {
+      errors.push(`INVALID_TIMESTAMP: Segment ${segId} has invalid range [${seg.startSec}, ${seg.endSec}].`);
+    }
+    if (typeof seg.speakerLabel !== 'string' || !seg.speakerLabel.trim()) {
+      errors.push(`MISSING_SPEAKER_LABEL: Segment ${segId} missing opaque speaker label.`);
     }
 
+    if (typeof seg.rawText !== 'string') {
+      errors.push(`INVALID_RAW_TEXT: Segment ${segId} must provide string rawText.`);
+      continue;
+    }
     const trimmed = seg.rawText.trim();
-    const hasUnintelligibleEvent = seg.nonSpeechEvents?.some((ev) => ev.kind === 'UNINTELLIGIBLE') ?? false;
+    const hasUnintelligibleEvent = Array.isArray(seg.nonSpeechEvents)
+      ? seg.nonSpeechEvents.some((ev) => ev && ev.kind === 'UNINTELLIGIBLE')
+      : false;
     if (hasUnintelligibleEvent && trimmed.length > 0 && !seg.uncertain) {
       warnings.push(
-        `UNINTELLIGIBLE_CO_OCCURS_WITH_TEXT: Segment ${seg.segmentId} marks UNINTELLIGIBLE event alongside words; verify words are not hallucinated.`
+        `UNINTELLIGIBLE_CO_OCCURS_WITH_TEXT: Segment ${segId} marks UNINTELLIGIBLE event alongside words; verify words are not hallucinated.`
       );
     }
 

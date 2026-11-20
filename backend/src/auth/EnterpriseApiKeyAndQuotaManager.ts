@@ -12,6 +12,13 @@ export type EnterpriseKeyScope =
   | 'EXTERNAL_GATEWAY'
   | 'CLOUD_ASR_ENTERPRISE';
 
+const ALLOWED_ENTERPRISE_SCOPES = new Set<EnterpriseKeyScope>([
+  'MODELS_READ',
+  'EXTERNAL_GATEWAY',
+  'CLOUD_ASR_ENTERPRISE',
+]);
+const MAX_QUOTA_DELTA_SECONDS = 2_147_483_647;
+
 export interface VerifiedEnterpriseKeyContext {
   readonly keyId: string;
   readonly organizationId: string;
@@ -36,6 +43,33 @@ export class EnterpriseApiKeyAndQuotaManager {
     plaintextApiKeyOnce: string;
     keyPrefix: string;
   }> {
+    if (
+      typeof params.organizationId !== 'string' ||
+      params.organizationId.trim().length === 0 ||
+      !Array.isArray(params.scopes) ||
+      params.scopes.length === 0 ||
+      typeof params.monthlyAudioSecondsLimit !== 'number' ||
+      !Number.isSafeInteger(params.monthlyAudioSecondsLimit) ||
+      params.monthlyAudioSecondsLimit < 0
+    ) {
+      throw new Error('ENTERPRISE_KEY_ISSUE_INVALID_PARAMS');
+    }
+    if (
+      params.expiresInDays !== undefined &&
+      (!Number.isSafeInteger(params.expiresInDays) || params.expiresInDays <= 0)
+    ) {
+      throw new Error('ENTERPRISE_KEY_INVALID_EXPIRY_DAYS');
+    }
+    const normalizedScopes: EnterpriseKeyScope[] = [];
+    for (const s of params.scopes) {
+      if (typeof s !== 'string' || !ALLOWED_ENTERPRISE_SCOPES.has(s as EnterpriseKeyScope)) {
+        throw new Error('ENTERPRISE_KEY_INVALID_SCOPE');
+      }
+      if (!normalizedScopes.includes(s as EnterpriseKeyScope)) {
+        normalizedScopes.push(s as EnterpriseKeyScope);
+      }
+    }
+
     const rawSecret = crypto.randomBytes(24).toString('hex');
     const plaintextApiKeyOnce = `paudio_live_${rawSecret}`;
     const keyPrefix = plaintextApiKeyOnce.slice(0, 18);
@@ -47,10 +81,10 @@ export class EnterpriseApiKeyAndQuotaManager {
        VALUES ($1, $2, $3, $4, $5, CASE WHEN $6::int IS NULL THEN NULL ELSE NOW() + ($6 || ' days')::interval END)
        RETURNING key_id`,
       [
-        params.organizationId,
+        params.organizationId.trim(),
         keyPrefix,
         keySha256Hex,
-        params.scopes,
+        normalizedScopes,
         params.monthlyAudioSecondsLimit,
         params.expiresInDays ?? null,
       ],
@@ -70,7 +104,10 @@ export class EnterpriseApiKeyAndQuotaManager {
     providedPlaintextKey: string,
     requiredScope: EnterpriseKeyScope,
   ): Promise<VerifiedEnterpriseKeyContext> {
-    if (!providedPlaintextKey.startsWith('paudio_live_')) {
+    if (
+      typeof providedPlaintextKey !== 'string' ||
+      !providedPlaintextKey.startsWith('paudio_live_')
+    ) {
       throw new Error('ENTERPRISE_KEY_MALFORMED');
     }
 
@@ -133,7 +170,20 @@ export class EnterpriseApiKeyAndQuotaManager {
     newUsedSeconds: number;
     remainingSeconds: number;
   }> {
+    if (
+      typeof keyId !== 'string' ||
+      keyId.trim().length === 0 ||
+      typeof requestedAudioSeconds !== 'number' ||
+      !Number.isFinite(requestedAudioSeconds) ||
+      requestedAudioSeconds <= 0
+    ) {
+      return { approved: false, newUsedSeconds: 0, remainingSeconds: 0 };
+    }
+
     const roundedSec = Math.max(1, Math.ceil(requestedAudioSeconds));
+    if (!Number.isSafeInteger(roundedSec) || roundedSec > MAX_QUOTA_DELTA_SECONDS) {
+      return { approved: false, newUsedSeconds: 0, remainingSeconds: 0 };
+    }
 
     const res = await this.db.query<{
       monthly_audio_seconds_used: string;
@@ -160,6 +210,34 @@ export class EnterpriseApiKeyAndQuotaManager {
       newUsedSeconds: used,
       remainingSeconds: Math.max(0, limit - used),
     };
+  }
+
+  /**
+   * 4. Atomically refunds previously deducted quota if downstream job enqueue/admission fails.
+   */
+  public async refundAudioQuotaAtomically(
+    keyId: string,
+    refundAudioSeconds: number,
+  ): Promise<void> {
+    if (
+      typeof keyId !== 'string' ||
+      keyId.trim().length === 0 ||
+      typeof refundAudioSeconds !== 'number' ||
+      !Number.isFinite(refundAudioSeconds) ||
+      refundAudioSeconds <= 0
+    ) {
+      return;
+    }
+    const roundedSec = Math.max(1, Math.ceil(refundAudioSeconds));
+    if (!Number.isSafeInteger(roundedSec) || roundedSec > MAX_QUOTA_DELTA_SECONDS) {
+      return;
+    }
+    await this.db.query(
+      `UPDATE enterprise_api_keys
+       SET monthly_audio_seconds_used = GREATEST(0, monthly_audio_seconds_used - $2)
+       WHERE key_id = $1`,
+      [keyId, roundedSec],
+    );
   }
 
   private hashApiKey(plaintextKey: string): string {

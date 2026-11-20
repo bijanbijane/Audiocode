@@ -283,7 +283,7 @@ export const TranscriptPanel: React.FC<TranscriptPanelProps> = ({
       return tok?.trackId === firstTok.trackId;
     });
     setSelectedTokenIds(sameTrackIds);
-    onSeekSec(flicksToSeconds(firstTok.range.startFlicks));
+    onSeekSec(flicksToSeconds(firstTok.range?.startFlicks ?? 0));
   };
 
   const handleSelectScriptExtras = () => {
@@ -291,12 +291,12 @@ export const TranscriptPanel: React.FC<TranscriptPanelProps> = ({
     setSelectedTokenIds(scriptDiffReport.extraSpokenTokenIds);
     const firstTok = tokens.find((t) => t.id === scriptDiffReport.extraSpokenTokenIds[0]);
     if (firstTok) {
-      onSeekSec(flicksToSeconds(firstTok.range.startFlicks));
+      onSeekSec(flicksToSeconds(firstTok.range?.startFlicks ?? 0));
     }
   };
 
   const handleWordClick = (tok: PersianWordToken, e: React.MouseEvent<HTMLButtonElement>) => {
-    const startSec = flicksToSeconds(tok.range.startFlicks);
+    const startSec = flicksToSeconds(tok.range?.startFlicks ?? 0);
     onSeekSec(startSec);
 
     if (e.shiftKey && activeSelectedIds.length > 0) {
@@ -341,6 +341,7 @@ export const TranscriptPanel: React.FC<TranscriptPanelProps> = ({
     if (!editingTokenId || !editingTextValue.trim()) return;
     onUpdateTokenDisplayText(editingTokenId, editingTextValue.trim());
     setEditingTokenId(null);
+    setSelectedTokenIds([]);
   };
 
   const handleApplyCut = (explicitMode?: RecommendationActionMode) => {
@@ -387,7 +388,7 @@ export const TranscriptPanel: React.FC<TranscriptPanelProps> = ({
     setSelectedTokenIds(ids);
     const firstTok = tokens.find((t) => t.id === ids[0]);
     if (firstTok) {
-      onSeekSec(flicksToSeconds(firstTok.range.startFlicks));
+      onSeekSec(flicksToSeconds(firstTok.range?.startFlicks ?? 0));
     }
   };
 
@@ -433,15 +434,15 @@ export const TranscriptPanel: React.FC<TranscriptPanelProps> = ({
     <section
       dir="rtl"
       aria-label="متن همگام‌شده فارسی و تدوین متن‌محور"
-      className="border border-[#252F42] bg-[#131924] rounded-lg flex flex-col"
+      className="border border-slate-200 dark:border-[#252F42] bg-white dark:bg-[#131924] rounded-lg flex flex-col shadow-xs dark:shadow-none"
     >
       {/* Top Header & ASR / Forced Alignment Controls */}
-      <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3 border-b border-[#252F42]">
+      <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3 border-b border-slate-200 dark:border-[#252F42]">
         <div>
-          <h2 className="text-sm font-semibold text-slate-100">
+          <h2 className="text-sm font-semibold text-slate-900 dark:text-slate-100">
             تدوین متن‌محور و تراز آوایی فارسی (Text-Based Audio Editor)
           </h2>
-          <p className="text-xs text-slate-400 mt-0.5">
+          <p className="text-xs text-slate-600 dark:text-slate-400 mt-0.5">
             روی هر واژه کلیک کنید تا انتخاب شود؛ با حذف یا بوق سانسور، صدای آن به‌صورت هوشمند و همگام روی تایم‌لاین اعمال می‌شود
           </p>
         </div>
@@ -452,12 +453,12 @@ export const TranscriptPanel: React.FC<TranscriptPanelProps> = ({
             data-testid="btn-run-persian-asr"
             disabled={isTranscribingAsr}
             onClick={onRunPersianAsr}
-            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium rounded-md border border-sky-500/40 bg-sky-500/15 text-sky-200 hover:bg-sky-500/25 disabled:opacity-50 cursor-pointer"
+            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium rounded-md border border-sky-500/40 bg-sky-500/10 dark:bg-sky-500/15 text-sky-800 dark:text-sky-200 hover:bg-sky-500/20 dark:hover:bg-sky-500/25 disabled:opacity-50 cursor-pointer"
           >
             {isTranscribingAsr ? (
-              <Loader2 className="w-3.5 h-3.5 animate-spin text-sky-400" aria-hidden="true" />
+              <Loader2 className="w-3.5 h-3.5 animate-spin text-sky-600 dark:text-sky-400" aria-hidden="true" />
             ) : (
-              <Mic className="w-3.5 h-3.5 text-sky-400" aria-hidden="true" />
+              <Mic className="w-3.5 h-3.5 text-sky-600 dark:text-sky-400" aria-hidden="true" />
             )}
             <span>{isTranscribingAsr ? 'در حال استخراج متن...' : 'تبدیل صوت به متن (ASR)'}</span>
           </button>
@@ -467,9 +468,9 @@ export const TranscriptPanel: React.FC<TranscriptPanelProps> = ({
             data-testid="btn-toggle-forced-align"
             onClick={handleOpenForcedAlign}
             aria-expanded={showForcedAlignDrawer}
-            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium rounded-md border border-[#252F42] bg-[#0E131D] text-slate-200 hover:bg-[#1E2738] cursor-pointer"
+            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium rounded-md border border-slate-300 dark:border-[#252F42] bg-slate-50 dark:bg-[#0E131D] text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-[#1E2738] cursor-pointer"
           >
-            <Sparkles className="w-3.5 h-3.5 text-amber-400" aria-hidden="true" />
+            <Sparkles className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" aria-hidden="true" />
             <span>هم‌ترازی متن با صوت (Forced Align)</span>
           </button>
 
@@ -480,18 +481,18 @@ export const TranscriptPanel: React.FC<TranscriptPanelProps> = ({
             aria-expanded={showScriptDiffDrawer}
             className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium rounded-md border cursor-pointer ${
               showScriptDiffDrawer
-                ? 'border-amber-400/60 bg-amber-400/15 text-amber-200'
-                : 'border-[#252F42] bg-[#0E131D] text-slate-200 hover:bg-[#1E2738]'
+                ? 'border-amber-500/50 dark:border-amber-400/60 bg-amber-500/15 dark:bg-amber-400/15 text-amber-800 dark:text-amber-200'
+                : 'border-slate-300 dark:border-[#252F42] bg-slate-50 dark:bg-[#0E131D] text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-[#1E2738]'
             }`}
           >
-            <FileDiff className="w-3.5 h-3.5 text-amber-400" aria-hidden="true" />
+            <FileDiff className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" aria-hidden="true" />
             <span>تطبیق با متن مرجع (Script Diff)</span>
           </button>
 
           <div
             role="group"
             aria-label="لایه متن فارسی"
-            className="flex items-center gap-1 p-1 bg-[#0E131D] border border-[#252F42] rounded-md"
+            className="flex items-center gap-1 p-1 bg-slate-100 dark:bg-[#0E131D] border border-slate-200 dark:border-[#252F42] rounded-md"
           >
             {layerLabels.map((item) => (
               <button
@@ -502,7 +503,7 @@ export const TranscriptPanel: React.FC<TranscriptPanelProps> = ({
                 className={`px-2.5 py-1 text-xs font-medium rounded transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
                   layer === item.id
                     ? 'bg-amber-400 text-slate-950'
-                    : 'text-slate-400 hover:text-slate-100'
+                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100'
                 }`}
               >
                 {item.label}
@@ -513,7 +514,7 @@ export const TranscriptPanel: React.FC<TranscriptPanelProps> = ({
       </div>
 
       {/* Phonetic & Homophone Search + Non-Destructive Prosodic/Colloquial Enhancements Bar */}
-      <div className="px-4 py-2 border-b border-[#252F42] bg-[#0E131D]/80 flex flex-wrap items-center justify-between gap-2">
+      <div className="px-4 py-2 border-b border-slate-200 dark:border-[#252F42] bg-slate-50 dark:bg-[#0E131D]/80 flex flex-wrap items-center justify-between gap-2">
         <div className="flex flex-wrap items-center gap-2 flex-1 min-w-[230px]">
           <div className="relative flex-1 max-w-sm">
             <Search
@@ -527,14 +528,14 @@ export const TranscriptPanel: React.FC<TranscriptPanelProps> = ({
               onChange={(e) => setPhoneticQuery(e.target.value)}
               placeholder="جستجوی آوایی سه‌زبانه (فارسی / EN / عربی)..."
               aria-label="جستجوی آوایی در متن"
-              className="w-full pr-8 pl-6 py-1 rounded bg-[#131924] border border-[#252F42] text-xs text-slate-100 placeholder:text-slate-500 focus:outline-none focus:border-sky-400"
+              className="w-full pr-8 pl-6 py-1 rounded bg-white dark:bg-[#131924] border border-slate-300 dark:border-[#252F42] text-xs text-slate-900 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:outline-none focus:border-sky-500 dark:focus:border-sky-400"
             />
             {phoneticQuery && (
               <button
                 type="button"
                 onClick={() => setPhoneticQuery('')}
                 aria-label="پاک کردن جستجو"
-                className="absolute left-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-200 cursor-pointer"
+                className="absolute left-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 cursor-pointer"
               >
                 <X className="w-3 h-3" />
               </button>
@@ -545,7 +546,7 @@ export const TranscriptPanel: React.FC<TranscriptPanelProps> = ({
             <div className="flex items-center gap-2 text-xs">
               <span
                 data-testid="phonetic-search-hit-count"
-                className="text-sky-300 font-medium"
+                className="text-sky-700 dark:text-sky-300 font-medium"
               >
                 {searchMatchedTokenIdSet.size} منطبق
                 {hasHomophoneHit ? ' (شامل تطبیق آوایی/هم‌آوا)' : ''}
@@ -555,7 +556,7 @@ export const TranscriptPanel: React.FC<TranscriptPanelProps> = ({
                   type="button"
                   data-testid="btn-select-search-hits"
                   onClick={handleSelectAllSearchHits}
-                  className="px-2 py-0.5 rounded bg-sky-500/20 border border-sky-400/40 text-sky-200 hover:bg-sky-500/30 text-[11px] cursor-pointer"
+                  className="px-2 py-0.5 rounded bg-sky-500/15 dark:bg-sky-500/20 border border-sky-500/40 text-sky-800 dark:text-sky-200 hover:bg-sky-500/25 dark:hover:bg-sky-500/30 text-[11px] cursor-pointer"
                 >
                   انتخاب برای برش
                 </button>
@@ -577,9 +578,9 @@ export const TranscriptPanel: React.FC<TranscriptPanelProps> = ({
                 )
               }
               title="بهینه‌سازی سه‌زبانه ASR (فارسی + انگلیسی + عربی)، بازامتیازدهی دوطرفه هم‌آواها و سوئیچ نگارش انگلیسی (Latin / فارسی)"
-              className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium rounded border border-indigo-500/40 bg-indigo-500/15 text-indigo-200 hover:bg-indigo-500/25 cursor-pointer"
+              className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium rounded border border-indigo-500/40 bg-indigo-500/10 dark:bg-indigo-500/15 text-indigo-800 dark:text-indigo-200 hover:bg-indigo-500/20 dark:hover:bg-indigo-500/25 cursor-pointer"
             >
-              <Sparkles className="w-3.5 h-3.5 text-indigo-300" aria-hidden="true" />
+              <Sparkles className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-300" aria-hidden="true" />
               <span>
                 سه‌زبانه FA/EN/AR ({englishRenderMode === 'LATIN_TECHNICAL' ? 'EN: Latin' : 'EN: فارسی'})
               </span>
@@ -592,9 +593,9 @@ export const TranscriptPanel: React.FC<TranscriptPanelProps> = ({
               data-testid="btn-restore-punctuation"
               onClick={onRestoreProsodicPunctuation}
               title="گذاری خودکار ویرگول، نقطه و علامت سؤال بر اساس مکث و شیب فرکانس پایه F0"
-              className="inline-flex items-center gap-1 px-2.5 py-1 text-xs rounded border border-[#252F42] bg-[#131924] text-slate-200 hover:bg-[#1E2738] cursor-pointer"
+              className="inline-flex items-center gap-1 px-2.5 py-1 text-xs rounded border border-slate-300 dark:border-[#252F42] bg-white dark:bg-[#131924] text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-[#1E2738] cursor-pointer"
             >
-              <Wand2 className="w-3.5 h-3.5 text-amber-400" aria-hidden="true" />
+              <Wand2 className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" aria-hidden="true" />
               <span>علائم نگارشی (F0)</span>
             </button>
           )}
@@ -605,9 +606,9 @@ export const TranscriptPanel: React.FC<TranscriptPanelProps> = ({
               data-testid="btn-formalize-colloquial"
               onClick={onConvertColloquialToFormal}
               title="تبدیل غیرمخرب افعال و ضمایر محاوره‌ای به فارسی معیار در لایه نمایشی"
-              className="inline-flex items-center gap-1 px-2.5 py-1 text-xs rounded border border-[#252F42] bg-[#131924] text-slate-200 hover:bg-[#1E2738] cursor-pointer"
+              className="inline-flex items-center gap-1 px-2.5 py-1 text-xs rounded border border-slate-300 dark:border-[#252F42] bg-white dark:bg-[#131924] text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-[#1E2738] cursor-pointer"
             >
-              <BookOpenCheck className="w-3.5 h-3.5 text-emerald-400" aria-hidden="true" />
+              <BookOpenCheck className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" aria-hidden="true" />
               <span>معیارسازی محاوره</span>
             </button>
           )}
@@ -618,9 +619,9 @@ export const TranscriptPanel: React.FC<TranscriptPanelProps> = ({
               data-testid="btn-normalize-numbers-compounds"
               onClick={onNormalizeNumbersAndCompounds}
               title="تبدیل اعداد گفتاری به ارقام فارسی و اتصال ترکیبات نیم‌فاصله و اصطلاحات فنی"
-              className="inline-flex items-center gap-1 px-2.5 py-1 text-xs rounded border border-[#252F42] bg-[#131924] text-slate-200 hover:bg-[#1E2738] cursor-pointer"
+              className="inline-flex items-center gap-1 px-2.5 py-1 text-xs rounded border border-slate-300 dark:border-[#252F42] bg-white dark:bg-[#131924] text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-[#1E2738] cursor-pointer"
             >
-              <Hash className="w-3.5 h-3.5 text-sky-400" aria-hidden="true" />
+              <Hash className="w-3.5 h-3.5 text-sky-600 dark:text-sky-400" aria-hidden="true" />
               <span>اعداد و ترکیبات</span>
             </button>
           )}
@@ -632,11 +633,11 @@ export const TranscriptPanel: React.FC<TranscriptPanelProps> = ({
             aria-expanded={showProsodyLexiconDrawer}
             className={`inline-flex items-center gap-1 px-2.5 py-1 text-xs rounded border cursor-pointer ${
               showProsodyLexiconDrawer
-                ? 'border-emerald-400/60 bg-emerald-400/15 text-emerald-200'
-                : 'border-[#252F42] bg-[#131924] text-slate-300 hover:bg-[#1E2738]'
+                ? 'border-emerald-500/50 dark:border-emerald-400/60 bg-emerald-500/15 dark:bg-emerald-400/15 text-emerald-800 dark:text-emerald-200'
+                : 'border-slate-300 dark:border-[#252F42] bg-white dark:bg-[#131924] text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-[#1E2738]'
             }`}
           >
-            <ListTree className="w-3.5 h-3.5 text-emerald-400" aria-hidden="true" />
+            <ListTree className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" aria-hidden="true" />
             <span>واژه‌نامه، آهنگ بیان و سرفصل‌ها</span>
           </button>
 
@@ -648,11 +649,11 @@ export const TranscriptPanel: React.FC<TranscriptPanelProps> = ({
             }
             className={`inline-flex items-center gap-1 px-2.5 py-1 text-xs rounded border cursor-pointer ${
               subtitlePreviewMode !== 'none'
-                ? 'border-amber-400/60 bg-amber-400/15 text-amber-200'
-                : 'border-[#252F42] bg-[#131924] text-slate-300 hover:bg-[#1E2738]'
+                ? 'border-amber-500/50 dark:border-amber-400/60 bg-amber-500/15 dark:bg-amber-400/15 text-amber-800 dark:text-amber-200'
+                : 'border-slate-300 dark:border-[#252F42] bg-white dark:bg-[#131924] text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-[#1E2738]'
             }`}
           >
-            <FileText className="w-3.5 h-3.5 text-amber-400" aria-hidden="true" />
+            <FileText className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" aria-hidden="true" />
             <span>زیرنویس / TextGrid</span>
           </button>
         </div>
@@ -1062,17 +1063,17 @@ export const TranscriptPanel: React.FC<TranscriptPanelProps> = ({
       {multiWordCutSpec && syncSafetyDecision && (
         <div
           data-testid="transcript-word-edit-bar"
-          className="px-4 py-2.5 border-b border-amber-500/30 bg-amber-500/10 flex flex-col gap-2"
+          className="px-4 py-2.5 border-b border-amber-500/35 bg-amber-50 dark:bg-amber-500/10 flex flex-col gap-2"
         >
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="flex flex-wrap items-center gap-2 text-xs">
-              <span className="font-semibold text-amber-300">
+              <span className="font-semibold text-amber-800 dark:text-amber-300">
                 {activeSelectedIds.length} واژه انتخاب‌شده:
               </span>
-              <span className="px-2 py-0.5 rounded bg-[#0E131D] border border-amber-400/40 text-slate-100 font-medium">
+              <span className="px-2 py-0.5 rounded bg-white dark:bg-[#0E131D] border border-amber-500/40 text-slate-900 dark:text-slate-100 font-medium">
                 «{multiWordCutSpec.combinedText}»
               </span>
-              <span dir="ltr" className="font-mono text-[11px] text-slate-300">
+              <span dir="ltr" className="font-mono tabular-nums text-[11px] text-slate-600 dark:text-slate-300">
                 [{flicksToSeconds(multiWordCutSpec.range.startFlicks).toFixed(2)}s ..{' '}
                 {flicksToSeconds(multiWordCutSpec.range.endFlicks).toFixed(2)}s]
               </span>
@@ -1098,7 +1099,7 @@ export const TranscriptPanel: React.FC<TranscriptPanelProps> = ({
                   type="button"
                   data-testid="btn-roomtone-cut-words"
                   onClick={() => handleApplyCut('in-place-room-tone-suppression')}
-                  className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium rounded border border-emerald-500/40 bg-emerald-500/15 text-emerald-200 hover:bg-emerald-500/25 cursor-pointer"
+                  className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium rounded border border-emerald-600/40 dark:border-emerald-500/40 bg-emerald-500/10 dark:bg-emerald-500/15 text-emerald-800 dark:text-emerald-200 hover:bg-emerald-500/20 dark:hover:bg-emerald-500/25 cursor-pointer"
                 >
                   <VolumeX className="w-3.5 h-3.5" aria-hidden="true" />
                   <span>سکوت درجا (Room Tone)</span>
@@ -1111,7 +1112,7 @@ export const TranscriptPanel: React.FC<TranscriptPanelProps> = ({
                     type="button"
                     data-testid="btn-redact-bleep-words"
                     onClick={() => handleApplyRedaction('BROADCAST_BLEEP_1KHZ')}
-                    className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium rounded border border-rose-500/40 bg-rose-500/15 text-rose-200 hover:bg-rose-500/25 cursor-pointer"
+                    className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium rounded border border-rose-600/40 dark:border-rose-500/40 bg-rose-500/10 dark:bg-rose-500/15 text-rose-800 dark:text-rose-200 hover:bg-rose-500/20 dark:hover:bg-rose-500/25 cursor-pointer"
                   >
                     <ShieldAlert className="w-3.5 h-3.5" aria-hidden="true" />
                     <span>بوق سانسور ۱kHz</span>
@@ -1120,7 +1121,7 @@ export const TranscriptPanel: React.FC<TranscriptPanelProps> = ({
                     type="button"
                     data-testid="btn-redact-muffle-words"
                     onClick={() => handleApplyRedaction('LOW_PASS_VOICE_MUFFLE')}
-                    className="inline-flex items-center gap-1 px-2 py-1 text-xs rounded border border-[#252F42] bg-[#0E131D] text-slate-200 hover:bg-[#1E2738] cursor-pointer"
+                    className="inline-flex items-center gap-1 px-2 py-1 text-xs rounded border border-slate-300 dark:border-[#252F42] bg-white dark:bg-[#0E131D] text-slate-800 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-[#1E2738] cursor-pointer"
                   >
                     <span>مات‌سازی صدا</span>
                   </button>
@@ -1134,7 +1135,7 @@ export const TranscriptPanel: React.FC<TranscriptPanelProps> = ({
                     data-testid="btn-wsola-slow-words"
                     onClick={() => handleApplyWsolaStretch(0.8)}
                     title="کشش زمانی بدون تغییر زیر و بمی صدا (WSOLA 0.8x)"
-                    className="inline-flex items-center gap-1 px-2 py-1 text-xs rounded border border-sky-500/40 bg-sky-500/15 text-sky-200 hover:bg-sky-500/25 cursor-pointer"
+                    className="inline-flex items-center gap-1 px-2 py-1 text-xs rounded border border-sky-600/40 dark:border-sky-500/40 bg-sky-500/10 dark:bg-sky-500/15 text-sky-800 dark:text-sky-200 hover:bg-sky-500/20 dark:hover:bg-sky-500/25 cursor-pointer"
                   >
                     <Gauge className="w-3 h-3" aria-hidden="true" />
                     <span>کندتر ۰.۸x (WSOLA)</span>
@@ -1144,7 +1145,7 @@ export const TranscriptPanel: React.FC<TranscriptPanelProps> = ({
                     data-testid="btn-wsola-fast-words"
                     onClick={() => handleApplyWsolaStretch(1.25)}
                     title="فشرده‌سازی زمانی بدون تغییر زیر و بمی صدا (WSOLA 1.25x)"
-                    className="inline-flex items-center gap-1 px-2 py-1 text-xs rounded border border-sky-500/40 bg-sky-500/15 text-sky-200 hover:bg-sky-500/25 cursor-pointer"
+                    className="inline-flex items-center gap-1 px-2 py-1 text-xs rounded border border-sky-600/40 dark:border-sky-500/40 bg-sky-500/10 dark:bg-sky-500/15 text-sky-800 dark:text-sky-200 hover:bg-sky-500/20 dark:hover:bg-sky-500/25 cursor-pointer"
                   >
                     <Gauge className="w-3 h-3" aria-hidden="true" />
                     <span>سریع‌تر ۱.۲۵x (WSOLA)</span>
@@ -1158,9 +1159,9 @@ export const TranscriptPanel: React.FC<TranscriptPanelProps> = ({
                   data-testid="btn-punchin-spectral-match"
                   onClick={handleApplyPunchInMatch}
                   title="تطبیق طیفی ۴ بانده برداشت جایگزین با رنگ صدای استودیو و درج واترمارک نامحسوس ۱۹ کیلوهرتز BPSK"
-                  className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium rounded border border-purple-500/40 bg-purple-500/15 text-purple-200 hover:bg-purple-500/25 cursor-pointer"
+                  className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium rounded border border-purple-600/40 dark:border-purple-500/40 bg-purple-500/10 dark:bg-purple-500/15 text-purple-800 dark:text-purple-200 hover:bg-purple-500/20 dark:hover:bg-purple-500/25 cursor-pointer"
                 >
-                  <Wand2 className="w-3 h-3 text-purple-300" aria-hidden="true" />
+                  <Wand2 className="w-3 h-3 text-purple-600 dark:text-purple-300" aria-hidden="true" />
                   <span>تطبیق طیفی ۴ بانده + واترمارک ۱۹kHz</span>
                 </button>
               )}
@@ -1170,7 +1171,7 @@ export const TranscriptPanel: React.FC<TranscriptPanelProps> = ({
                   type="button"
                   data-testid="btn-edit-word-spelling"
                   onClick={handleStartEditSingleWord}
-                  className="inline-flex items-center gap-1 px-2 py-1 text-xs rounded border border-[#252F42] bg-[#0E131D] text-slate-200 hover:bg-[#1E2738] cursor-pointer"
+                  className="inline-flex items-center gap-1 px-2 py-1 text-xs rounded border border-slate-300 dark:border-[#252F42] bg-white dark:bg-[#0E131D] text-slate-800 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-[#1E2738] cursor-pointer"
                 >
                   <Edit3 className="w-3 h-3" aria-hidden="true" />
                   <span>اصلاح املا</span>
@@ -1184,18 +1185,18 @@ export const TranscriptPanel: React.FC<TranscriptPanelProps> = ({
                   setEditingTokenId(null);
                 }}
                 aria-label="لغو انتخاب واژگان"
-                className="p-1 rounded border border-[#252F42] bg-[#0E131D] text-slate-400 hover:text-slate-100 cursor-pointer"
+                className="p-1 rounded border border-slate-300 dark:border-[#252F42] bg-white dark:bg-[#0E131D] text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100 cursor-pointer"
               >
                 <X className="w-3.5 h-3.5" />
               </button>
             </div>
           </div>
 
-          <div className="flex flex-wrap items-center gap-3 text-[11px] text-slate-300">
+          <div className="flex flex-wrap items-center gap-3 text-[11px] text-slate-700 dark:text-slate-300">
             <span>{syncSafetyDecision.reasonFa}</span>
             {multiWordCutSpec.hasTrailingEzafeRisk && multiWordCutSpec.ezafeWarningFa && (
-              <span className="inline-flex items-center gap-1 text-rose-300 font-medium">
-                <AlertTriangle className="w-3 h-3 text-rose-400 shrink-0" aria-hidden="true" />
+              <span className="inline-flex items-center gap-1 text-rose-700 dark:text-rose-300 font-medium">
+                <AlertTriangle className="w-3 h-3 text-rose-600 dark:text-rose-400 shrink-0" aria-hidden="true" />
                 <span>{multiWordCutSpec.ezafeWarningFa}</span>
               </span>
             )}
@@ -1203,7 +1204,7 @@ export const TranscriptPanel: React.FC<TranscriptPanelProps> = ({
 
           {editingTokenId && (
             <form onSubmit={handleSaveSingleWordEdit} className="flex items-center gap-2 pt-1">
-              <label htmlFor="edit-word-display-input" className="text-xs text-slate-300">
+              <label htmlFor="edit-word-display-input" className="text-xs text-slate-700 dark:text-slate-300">
                 املای نمایشی جدید:
               </label>
               <input
@@ -1211,7 +1212,7 @@ export const TranscriptPanel: React.FC<TranscriptPanelProps> = ({
                 type="text"
                 value={editingTextValue}
                 onChange={(e) => setEditingTextValue(e.target.value)}
-                className="px-2.5 py-1 rounded bg-[#0E131D] border border-amber-400/60 text-xs text-slate-100 focus:outline-none"
+                className="px-2.5 py-1 rounded bg-white dark:bg-[#0E131D] border border-amber-500 dark:border-amber-400/60 text-xs text-slate-900 dark:text-slate-100 focus:outline-none"
               />
               <button
                 type="submit"
@@ -1231,21 +1232,21 @@ export const TranscriptPanel: React.FC<TranscriptPanelProps> = ({
           data-testid="transcript-asr-inline-panel"
           className={`px-4 py-3 border-b text-xs space-y-2 ${
             asrInlineFeedback.kind === 'SUCCESS'
-              ? 'border-emerald-500/35 bg-emerald-500/10 text-emerald-100'
-              : 'border-amber-500/40 bg-amber-500/10 text-amber-100'
+              ? 'border-emerald-500/35 bg-emerald-50 dark:bg-emerald-500/10 text-emerald-900 dark:text-emerald-100'
+              : 'border-amber-500/40 bg-amber-50 dark:bg-amber-500/10 text-amber-950 dark:text-amber-100'
           }`}
         >
           <div className="flex items-start justify-between gap-2">
             <div className="space-y-1">
               <div className="font-semibold flex items-center gap-1.5">
                 {asrInlineFeedback.kind === 'SUCCESS' ? (
-                  <Check className="w-3.5 h-3.5 shrink-0 text-emerald-300" aria-hidden="true" />
+                  <Check className="w-3.5 h-3.5 shrink-0 text-emerald-600 dark:text-emerald-300" aria-hidden="true" />
                 ) : (
-                  <AlertTriangle className="w-3.5 h-3.5 shrink-0 text-amber-300" aria-hidden="true" />
+                  <AlertTriangle className="w-3.5 h-3.5 shrink-0 text-amber-600 dark:text-amber-300" aria-hidden="true" />
                 )}
                 <span>{asrInlineFeedback.titleFa}</span>
               </div>
-              <p className="text-[11px] text-slate-200 leading-relaxed">
+              <p className="text-[11px] text-slate-700 dark:text-slate-200 leading-relaxed">
                 {asrInlineFeedback.messageFa}
               </p>
             </div>
@@ -1254,7 +1255,7 @@ export const TranscriptPanel: React.FC<TranscriptPanelProps> = ({
                 type="button"
                 onClick={onDismissAsrInlineFeedback}
                 aria-label="بستن پیام هم‌ترازی و ASR"
-                className="p-1 rounded text-slate-300 hover:text-white cursor-pointer"
+                className="p-1 rounded text-slate-600 dark:text-slate-300 hover:text-slate-950 dark:hover:text-white cursor-pointer"
               >
                 <X className="w-3.5 h-3.5" />
               </button>
@@ -1306,9 +1307,9 @@ export const TranscriptPanel: React.FC<TranscriptPanelProps> = ({
                     data-testid="btn-run-acoustic-segmentation"
                     disabled={isTranscribingAsr}
                     onClick={onRunAcousticSegmentation}
-                    className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded border border-sky-500/40 bg-sky-500/15 text-sky-200 font-medium text-xs hover:bg-sky-500/25 disabled:opacity-50 cursor-pointer"
+                    className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded border border-sky-600/40 dark:border-sky-500/40 bg-sky-500/10 dark:bg-sky-500/15 text-sky-800 dark:text-sky-200 font-medium text-xs hover:bg-sky-500/20 dark:hover:bg-sky-500/25 disabled:opacity-50 cursor-pointer"
                   >
-                    <Wand2 className="w-3.5 h-3.5 text-sky-400" aria-hidden="true" />
+                    <Wand2 className="w-3.5 h-3.5 text-sky-600 dark:text-sky-400" aria-hidden="true" />
                     <span>بخش‌بندی زمانی موج صوت بدون تشخیص کلمه</span>
                   </button>
                 )}
@@ -1318,9 +1319,9 @@ export const TranscriptPanel: React.FC<TranscriptPanelProps> = ({
                   type="button"
                   data-testid="btn-inline-open-forced-align"
                   onClick={openForcedAlignDrawer}
-                  className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded border border-amber-400/50 bg-[#0E131D] text-amber-200 hover:bg-[#1E2738] text-xs cursor-pointer"
+                  className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded border border-amber-500/50 bg-white dark:bg-[#0E131D] text-amber-800 dark:text-amber-200 hover:bg-amber-50 dark:hover:bg-[#1E2738] text-xs cursor-pointer"
                 >
-                  <Sparkles className="w-3.5 h-3.5 text-amber-400" aria-hidden="true" />
+                  <Sparkles className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" aria-hidden="true" />
                   <span>هم‌ترازی با متن دلخواه (Forced Align)</span>
                 </button>
               )}
@@ -1330,7 +1331,7 @@ export const TranscriptPanel: React.FC<TranscriptPanelProps> = ({
                   type="button"
                   data-testid="btn-inline-open-model-modal"
                   onClick={onOpenLocalModelInstaller}
-                  className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded border border-[#252F42] bg-[#0E131D] text-slate-200 hover:bg-[#1E2738] text-xs cursor-pointer"
+                  className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded border border-slate-300 dark:border-[#252F42] bg-white dark:bg-[#0E131D] text-slate-800 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-[#1E2738] text-xs cursor-pointer"
                 >
                   <span>نصب یا انتخاب فایل مدل محلی (.onnx)</span>
                 </button>
@@ -1341,10 +1342,13 @@ export const TranscriptPanel: React.FC<TranscriptPanelProps> = ({
       )}
 
       {/* Word Token Stream */}
-      <div className="p-4 min-h-[210px] max-h-[340px] overflow-y-auto">
+      <div
+        data-testid="transcript-word-stream"
+        className="p-4 min-h-[210px] max-h-[340px] overflow-y-auto"
+      >
         {tokens.length === 0 ? (
-          <div className="py-8 text-center text-xs text-slate-400 space-y-3">
-            <p className="text-slate-200 font-medium">
+          <div className="py-8 text-center text-xs text-slate-600 dark:text-slate-400 space-y-3">
+            <p className="text-slate-800 dark:text-slate-200 font-medium">
               هنوز هیچ واژه‌ای در تایم‌لاین باقی نمانده یا استخراج نشده است.
             </p>
             <div className="flex flex-wrap items-center justify-center gap-2">
@@ -1394,9 +1398,9 @@ export const TranscriptPanel: React.FC<TranscriptPanelProps> = ({
                   data-testid="btn-empty-acoustic-segment"
                   disabled={isTranscribingAsr}
                   onClick={onRunAcousticSegmentation}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-sky-500/40 bg-sky-500/15 text-sky-200 hover:bg-sky-500/25 disabled:opacity-50 text-xs font-medium cursor-pointer"
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-sky-600/40 dark:border-sky-500/40 bg-sky-500/10 dark:bg-sky-500/15 text-sky-800 dark:text-sky-200 hover:bg-sky-500/20 dark:hover:bg-sky-500/25 disabled:opacity-50 text-xs font-medium cursor-pointer"
                 >
-                  <Wand2 className="w-3.5 h-3.5 text-sky-400" aria-hidden="true" />
+                  <Wand2 className="w-3.5 h-3.5 text-sky-600 dark:text-sky-400" aria-hidden="true" />
                   <span>بخش‌بندی زمانی بدون تشخیص کلمه</span>
                 </button>
               )}
@@ -1405,9 +1409,9 @@ export const TranscriptPanel: React.FC<TranscriptPanelProps> = ({
                 type="button"
                 data-testid="btn-empty-forced-align"
                 onClick={openForcedAlignDrawer}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-[#252F42] bg-[#0E131D] text-slate-200 hover:bg-[#1E2738] text-xs font-medium cursor-pointer"
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-slate-300 dark:border-[#252F42] bg-slate-50 dark:bg-[#0E131D] text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-[#1E2738] text-xs font-medium cursor-pointer"
               >
-                <Sparkles className="w-3.5 h-3.5 text-amber-400" aria-hidden="true" />
+                <Sparkles className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" aria-hidden="true" />
                 <span>هم‌ترازی متن دلخواه</span>
               </button>
             </div>
@@ -1415,99 +1419,101 @@ export const TranscriptPanel: React.FC<TranscriptPanelProps> = ({
         ) : (
           <div className="flex flex-wrap items-baseline gap-x-2 gap-y-3 leading-8">
             {tokens.map((tok, tokIdx) => {
+              const startFlicks = tok.range?.startFlicks ?? 0;
+              const endFlicks = tok.range?.endFlicks ?? startFlicks;
               const isActivePlayhead =
-                playheadFlicks >= tok.range.startFlicks && playheadFlicks < tok.range.endFlicks;
+                playheadFlicks >= startFlicks && playheadFlicks < endFlicks;
               const isSelected = activeSelectedIds.includes(tok.id);
               const isSearchHit = searchMatchedTokenIdSet.has(tok.id);
               const speakerTurnPrefix = resolveSpeakerTurnLabel(tokens, tokIdx);
               const textValue =
                 layer === 'original'
-                  ? tok.originalText
+                  ? (tok.originalText ?? tok.displayText ?? '')
                   : layer === 'normalized'
-                    ? tok.normalizedText
-                    : tok.displayText;
+                    ? (tok.normalizedText ?? tok.displayText ?? '')
+                    : (tok.displayText ?? tok.originalText ?? '');
 
               if (layer === 'display' && textValue.trim().length === 0) {
                 return null;
               }
 
-              const startSec = flicksToSeconds(tok.range.startFlicks);
+              const startSec = flicksToSeconds(startFlicks);
 
               return (
-                <button
-                  key={tok.id}
-                  type="button"
-                  data-testid={`transcript-token-${tok.id}`}
-                  aria-pressed={isSelected}
-                  onClick={(e) => handleWordClick(tok, e)}
-                  title={`${tok.speakerName} · ${startSec.toFixed(2)}s · اطمینان ${(tok.confidence * 100).toFixed(0)}٪ · منبع: ${tok.alignmentSource} (کلیک: انتخاب واژه برای برش صوتی)`}
-                  className={`group inline-flex items-center gap-1 px-2 py-0.5 rounded text-sm transition-colors cursor-pointer ${
-                    isSelected
-                      ? 'bg-amber-400 text-slate-950 font-semibold ring-2 ring-amber-300'
-                      : isSearchHit
-                        ? 'bg-sky-500/25 text-sky-100 ring-2 ring-sky-400 font-medium'
-                        : isActivePlayhead
-                          ? 'bg-amber-400/20 text-amber-200 ring-1 ring-amber-400/60'
-                          : tok.isCrosstalkSuppressed
-                            ? 'bg-emerald-500/10 text-emerald-300/70 line-through decoration-emerald-400/70'
-                            : tok.isDisfluency
-                              ? 'bg-rose-500/10 text-rose-300 hover:bg-rose-500/20'
-                              : tok.hasTrailingEzafeRisk
-                                ? 'bg-sky-500/10 text-sky-200 hover:bg-sky-500/20'
-                                : 'text-slate-200 hover:bg-[#1E2738]'
-                  }`}
-                >
+                <React.Fragment key={tok.id}>
                   {speakerTurnPrefix && (
                     <span
-                      className={`text-[11px] font-medium ${
-                        isSelected ? 'text-slate-800' : 'text-slate-400'
-                      }`}
+                      data-testid="transcript-speaker-turn"
+                      className="text-xs font-semibold text-slate-500 dark:text-slate-400 select-none"
                     >
-                      {speakerTurnPrefix}
+                      <bdi>{speakerTurnPrefix}</bdi>
                     </span>
                   )}
-                  <span
-                    className={
-                      tok.isDisfluency && !isSelected
-                        ? 'line-through decoration-rose-400/70'
-                        : ''
-                    }
+                  <button
+                    type="button"
+                    data-testid={`transcript-token-${tok.id}`}
+                    aria-pressed={isSelected}
+                    onClick={(e) => handleWordClick(tok, e)}
+                    title={`${tok.speakerName || 'گوینده'} · ${startSec.toFixed(2)}s · اطمینان ${(tok.confidence * 100).toFixed(0)}٪ · منبع: ${tok.alignmentSource} (کلیک: انتخاب واژه برای برش صوتی)`}
+                    className={`group inline-flex items-center gap-1 px-2 py-0.5 rounded text-sm transition-colors cursor-pointer ${
+                      isSelected
+                        ? 'bg-amber-400 text-slate-950 font-semibold ring-2 ring-amber-300'
+                        : isSearchHit
+                          ? 'bg-sky-500/20 dark:bg-sky-500/25 text-sky-900 dark:text-sky-100 ring-2 ring-sky-500 dark:ring-sky-400 font-medium'
+                          : isActivePlayhead
+                            ? 'bg-amber-400/20 text-amber-900 dark:text-amber-200 ring-1 ring-amber-500/60 dark:ring-amber-400/60'
+                            : tok.isCrosstalkSuppressed
+                              ? 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-300/70 line-through decoration-emerald-500/70 dark:decoration-emerald-400/70'
+                              : tok.isDisfluency
+                                ? 'bg-rose-500/10 text-rose-700 dark:text-rose-300 hover:bg-rose-500/20'
+                                : tok.hasTrailingEzafeRisk
+                                  ? 'bg-sky-500/10 text-sky-800 dark:text-sky-200 hover:bg-sky-500/20'
+                                  : 'text-slate-800 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-[#1E2738]'
+                    }`}
                   >
-                    {textValue}
-                  </span>
-                  {tok.detectedLanguage === 'EN' && (
                     <span
-                      dir="ltr"
-                      className={`text-[9px] font-mono px-1 py-0.2 rounded ${
-                        isSelected
-                          ? 'bg-slate-900 text-amber-300'
-                          : 'bg-indigo-500/25 text-indigo-200 border border-indigo-400/40'
-                      }`}
+                      className={
+                        tok.isDisfluency && !isSelected
+                          ? 'line-through decoration-rose-500/70 dark:decoration-rose-400/70'
+                          : ''
+                      }
                     >
-                      EN
+                      {textValue}
                     </span>
-                  )}
-                  {tok.detectedLanguage === 'AR' && (
-                    <span
-                      dir="ltr"
-                      className={`text-[9px] font-mono px-1 py-0.2 rounded ${
-                        isSelected
-                          ? 'bg-slate-900 text-amber-300'
-                          : 'bg-emerald-500/25 text-emerald-200 border border-emerald-400/40'
-                      }`}
-                    >
-                      AR
-                    </span>
-                  )}
-                  {tok.hasTrailingEzafeRisk && (
-                    <AlertTriangle
-                      className={`w-3 h-3 shrink-0 ${
-                        isSelected ? 'text-slate-900' : 'text-amber-400'
-                      }`}
-                      aria-label="خطر کسره اضافه معلق"
-                    />
-                  )}
-                </button>
+                    {tok.detectedLanguage === 'EN' && (
+                      <span
+                        dir="ltr"
+                        className={`text-[9px] font-mono px-1 py-0.2 rounded ${
+                          isSelected
+                            ? 'bg-slate-900 text-amber-300'
+                            : 'bg-indigo-500/15 dark:bg-indigo-500/25 text-indigo-800 dark:text-indigo-200 border border-indigo-400/40'
+                        }`}
+                      >
+                        EN
+                      </span>
+                    )}
+                    {tok.detectedLanguage === 'AR' && (
+                      <span
+                        dir="ltr"
+                        className={`text-[9px] font-mono px-1 py-0.2 rounded ${
+                          isSelected
+                            ? 'bg-slate-900 text-amber-300'
+                            : 'bg-emerald-500/15 dark:bg-emerald-500/25 text-emerald-800 dark:text-emerald-200 border border-emerald-400/40'
+                        }`}
+                      >
+                        AR
+                      </span>
+                    )}
+                    {tok.hasTrailingEzafeRisk && (
+                      <AlertTriangle
+                        className={`w-3 h-3 shrink-0 ${
+                          isSelected ? 'text-slate-900' : 'text-amber-600 dark:text-amber-400'
+                        }`}
+                        aria-label="خطر کسره اضافه معلق"
+                      />
+                    )}
+                  </button>
+                </React.Fragment>
               );
             })}
           </div>
@@ -1516,27 +1522,33 @@ export const TranscriptPanel: React.FC<TranscriptPanelProps> = ({
 
       <div
         data-testid="trilingual-asr-telemetry-bar"
-        className="px-4 py-2 border-t border-[#252F42] bg-[#101520] flex flex-wrap items-center justify-between gap-2 text-[11px] text-slate-400"
+        className="px-4 py-2 border-t border-slate-200 dark:border-[#252F42] bg-slate-50 dark:bg-[#101520] flex flex-wrap items-center justify-between gap-2 text-[11px] text-slate-600 dark:text-slate-400"
       >
         <div className="flex flex-wrap items-center gap-3">
           <span>
             تشخیص چندزبانه (Code-Switching):
           </span>
-          <span className="text-slate-200 font-mono">
+          <span dir="ltr" className="text-slate-800 dark:text-slate-200 font-mono tabular-nums">
             FA: {trilingualStats.persianCount}
           </span>
-          <span className="text-indigo-300 font-mono">
+          <span dir="ltr" className="text-indigo-700 dark:text-indigo-300 font-mono tabular-nums">
             EN: {trilingualStats.englishCount}
           </span>
-          <span className="text-emerald-300 font-mono">
+          <span dir="ltr" className="text-emerald-700 dark:text-emerald-300 font-mono tabular-nums">
             AR: {trilingualStats.arabicCount}
           </span>
-          <span className="text-amber-300 font-mono">
-            اطمینان کالیبره‌شده (Platt): {(trilingualStats.meanCalibratedConfidence * 100).toFixed(1)}٪
+          <span className="text-amber-700 dark:text-amber-300 inline-flex items-center gap-1">
+            <span>اطمینان کالیبره‌شده (Platt):</span>
+            <bdi dir="ltr" className="font-mono tabular-nums font-semibold">
+              {(trilingualStats.meanCalibratedConfidence * 100).toFixed(1)}%
+            </bdi>
           </span>
         </div>
-        <span data-testid="transcript-token-count" className="font-mono">
-          واژگان همگام‌شده: {tokens.length}
+        <span data-testid="transcript-token-count" className="inline-flex items-center gap-1">
+          <span>واژگان همگام‌شده:</span>
+          <bdi dir="ltr" className="font-mono tabular-nums font-semibold text-slate-800 dark:text-slate-200">
+            {tokens.length}
+          </bdi>
         </span>
       </div>
     </section>

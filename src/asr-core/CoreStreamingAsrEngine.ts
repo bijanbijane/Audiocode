@@ -76,6 +76,9 @@ interface InternalStreamingSession {
 }
 
 export class CoreStreamingAsrManager {
+  private static readonly MAX_CLOSED_SESSIONS = 200;
+  private static readonly MAX_EVENTS_PER_SESSION = 2_000;
+  private static readonly MAX_ALLOWED_QUEUED_SAMPLES = CORE_SAMPLE_RATE * 60;
   private readonly sessions = new Map<string, InternalStreamingSession>();
   private readonly maxConcurrentSessions: number;
 
@@ -87,6 +90,22 @@ export class CoreStreamingAsrManager {
       Number.isFinite(maxConcurrentSessions) && maxConcurrentSessions >= 1
         ? Math.floor(maxConcurrentSessions)
         : 8;
+  }
+
+  private pruneClosedSessions(): void {
+    let closedCount = 0;
+    for (const s of this.sessions.values()) {
+      if (s.closed) closedCount++;
+    }
+    if (closedCount <= CoreStreamingAsrManager.MAX_CLOSED_SESSIONS) return;
+    let toRemove = closedCount - CoreStreamingAsrManager.MAX_CLOSED_SESSIONS;
+    for (const [id, s] of this.sessions) {
+      if (toRemove <= 0) break;
+      if (s.closed) {
+        this.sessions.delete(id);
+        toRemove--;
+      }
+    }
   }
 
   public getActiveSessionCount(): number {
@@ -102,9 +121,29 @@ export class CoreStreamingAsrManager {
     sessionId: string;
     readyEvent: CoreStreamingEvent;
   } {
-    const sessionId = config.sessionId ?? `stream_${crypto.randomBytes(5).toString('hex')}`;
+    const sessionId =
+      typeof config.sessionId === 'string' && config.sessionId.trim().length > 0
+        ? config.sessionId.trim()
+        : `stream_${crypto.randomBytes(5).toString('hex')}`;
     const category: StreamingExecutionCategory =
       config.streamingCategory ?? 'STATEFUL_CHUNKED_STREAMING';
+
+    const existing = this.sessions.get(sessionId);
+    if (existing && !existing.closed) {
+      const conflictEvent: CoreStreamingEvent = {
+        eventId: `evt_${crypto.randomBytes(4).toString('hex')}`,
+        sessionId,
+        seq: 1,
+        type: 'session.overloaded',
+        streamingCategory: category,
+        emittedAtMs: Date.now(),
+        audioCursorSec: 0,
+        confidenceStatus: 'UNAVAILABLE_UNCALIBRATED',
+        calibratedConfidence: null,
+        detail: `Session "${sessionId}" is already active.`,
+      };
+      return { accepted: false, sessionId, readyEvent: conflictEvent };
+    }
 
     if (this.getActiveSessionCount() >= this.maxConcurrentSessions) {
       const overloadEvent: CoreStreamingEvent = {
@@ -132,19 +171,19 @@ export class CoreStreamingAsrManager {
       typeof config.silenceEndpointMs === 'number' &&
       Number.isFinite(config.silenceEndpointMs) &&
       config.silenceEndpointMs > 0
-        ? config.silenceEndpointMs
+        ? Math.min(30_000, config.silenceEndpointMs)
         : 360;
     const maxUtteranceSec =
       typeof config.maxUtteranceSec === 'number' &&
       Number.isFinite(config.maxUtteranceSec) &&
       config.maxUtteranceSec > 0
-        ? config.maxUtteranceSec
+        ? Math.min(60, config.maxUtteranceSec)
         : 12.0;
     const maxQueuedSamples =
       typeof config.maxQueuedSamples === 'number' &&
       Number.isFinite(config.maxQueuedSamples) &&
       config.maxQueuedSamples > 0
-        ? Math.floor(config.maxQueuedSamples)
+        ? Math.min(CoreStreamingAsrManager.MAX_ALLOWED_QUEUED_SAMPLES, Math.floor(config.maxQueuedSamples))
         : CORE_SAMPLE_RATE * 15;
 
     const session: InternalStreamingSession = {
@@ -179,6 +218,7 @@ export class CoreStreamingAsrManager {
       detail: `Streaming initialized as ${category}`,
     });
     this.sessions.set(sessionId, session);
+    this.pruneClosedSessions();
     return { accepted: true, sessionId, readyEvent: ready };
   }
 
@@ -186,12 +226,23 @@ export class CoreStreamingAsrManager {
     const session = this.sessions.get(sessionId);
     if (!session) throw new Error(`STREAM_SESSION_NOT_FOUND: ${sessionId}`);
     if (session.closed) throw new Error(`STREAM_SESSION_CLOSED: ${sessionId}`);
+    if (!Buffer.isBuffer(pcm16Chunk)) {
+      throw new Error('STREAM_INVALID_CHUNK: pcm16Chunk must be a Buffer.');
+    }
 
     const t0 = performance.now();
     if (session.firstChunkReceivedAtMs === null) {
       session.firstChunkReceivedAtMs = t0;
     }
     session.chunksReceived++;
+
+    if (pcm16Chunk.byteLength > session.maxQueuedSamples * 2) {
+      session.droppedOverloadChunks++;
+      const evt = this.pushEvent(session, 'session.overloaded', {
+        detail: `Single chunk exceeds queue limit (${session.maxQueuedSamples} samples).`,
+      });
+      return [evt];
+    }
 
     const floatChunk = pcm16BufferToFloat32(pcm16Chunk);
     if (session.activeSamples.length + floatChunk.length > session.maxQueuedSamples) {
@@ -291,23 +342,26 @@ export class CoreStreamingAsrManager {
     const session = this.sessions.get(sessionId);
     if (!session) throw new Error(`STREAM_SESSION_NOT_FOUND: ${sessionId}`);
 
-    const tFin0 = performance.now();
+    let finMs = 0;
     const emitted: CoreStreamingEvent[] = [];
 
     if (!session.closed) {
+      const tFin0 = performance.now();
       if (session.inSpeech && session.activeSamples.length > 0) {
         emitted.push(...this.finalizeCurrentUtterance(session));
       }
+      session.activeSamples = [];
       emitted.push(
         this.pushEvent(session, 'session.completed', {
           detail: `Finalized ${session.finalizedSegmentCount} segments cleanly.`,
         }),
       );
       session.closed = true;
+      finMs = performance.now() - tFin0;
+      session.totalProcessingMs += finMs;
+      this.pruneClosedSessions();
     }
 
-    const finMs = performance.now() - tFin0;
-    session.totalProcessingMs += finMs;
     const totalAudioSec = session.cursorSamples / CORE_SAMPLE_RATE;
 
     return {
@@ -391,6 +445,9 @@ export class CoreStreamingAsrManager {
       ...extra,
     };
     session.events.push(evt);
+    if (session.events.length > CoreStreamingAsrManager.MAX_EVENTS_PER_SESSION) {
+      session.events.splice(0, session.events.length - CoreStreamingAsrManager.MAX_EVENTS_PER_SESSION);
+    }
     return evt;
   }
 }

@@ -1,7 +1,15 @@
-# Engineering Execution State Tracker
+# Engineering Execution State Tracker (HISTORICAL — SUPERSEDED)
 
-**Program Mode:** Continuous Disciplined Execution  
-**Last Updated:** 2026-11-18  
+> **AUTHORITATIVE STATE NOTICE (2026-11-20 — `PHASE-02` Reconciliation):**  
+> This legacy tracker (`2026-11-18`) is **SUPERSEDED** and retained strictly as a historical archive.  
+> The single authoritative execution state and roadmap live exclusively in:
+> - `docs/AVAPARDAZ/CURRENT-STATE.md`
+> - `docs/AVAPARDAZ/MASTER-ROADMAP.md` (`MASTER v3.1`)
+> - `docs/AVAPARDAZ/IMPLEMENTATION-LEDGER.md`
+> - `docs/AVAPARDAZ/HANDOFF-LOG.md`
+
+**Program Mode:** Historical Archive (See `docs/AVAPARDAZ/CURRENT-STATE.md`)  
+**Last Updated:** 2026-11-18 (Reconciled 2026-11-20)  
 
 ---
 

@@ -320,17 +320,28 @@ export class AudioIngestionAndUrlGuard {
       };
     }
 
-    const host = parsed.hostname.toLowerCase().replace(/^\[|\]$/g, '');
+    const host = parsed.hostname.toLowerCase().replace(/^\[|\]$/g, '').replace(/\.+$/, '');
+    if (!host) {
+      return {
+        allowed: false,
+        normalizedUrl: null,
+        resolvedHost: null,
+        blockedReasonCode: 'INVALID_URL',
+        explanation: 'URL must contain a valid hostname.',
+      };
+    }
 
-    // Block known metadata hostnames explicitly
+    // Block known metadata and internal hostnames explicitly (after trailing-dot FQDN normalization)
     if (
       host === 'metadata.google.internal' ||
       host === 'metadata.goog' ||
+      host === 'metadata' ||
       host === 'instance-data' ||
       host.endsWith('.internal') ||
       host === 'localhost' ||
       host.endsWith('.localhost') ||
-      host.endsWith('.local')
+      host.endsWith('.local') ||
+      host.endsWith('.localdomain')
     ) {
       const isMeta = host.includes('metadata') || host === 'instance-data';
       return {
@@ -342,29 +353,13 @@ export class AudioIngestionAndUrlGuard {
       };
     }
 
-    // Block IPv4 loopback, private, link-local, metadata, CGNAT, and 0.0.0.0/8
-    const ipv4Match = host.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
-    if (ipv4Match) {
+    const classifyIpv4 = (candidate: string): 'INVALID' | 'METADATA' | 'PRIVATE' | 'PUBLIC' | null => {
+      const ipv4Match = candidate.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+      if (!ipv4Match) return null;
       const octets = ipv4Match.slice(1).map((x) => Number(x));
-      if (octets.some((o) => o < 0 || o > 255)) {
-        return {
-          allowed: false,
-          normalizedUrl: null,
-          resolvedHost: host,
-          blockedReasonCode: 'INVALID_URL',
-          explanation: 'Invalid IPv4 literal.',
-        };
-      }
-      const [a, b] = octets;
-      if (a === 169 && b === 254) {
-        return {
-          allowed: false,
-          normalizedUrl: null,
-          resolvedHost: host,
-          blockedReasonCode: 'CLOUD_METADATA_ENDPOINT',
-          explanation: 'Blocked link-local / cloud instance metadata IP (169.254.0.0/16).',
-        };
-      }
+      if (octets.some((o) => o < 0 || o > 255)) return 'INVALID';
+      const [a, b, c] = octets;
+      if (a === 169 && b === 254) return 'METADATA';
       const isPrivateOrLocal =
         a === 0 ||
         a === 10 ||
@@ -372,56 +367,126 @@ export class AudioIngestionAndUrlGuard {
         (a === 172 && b >= 16 && b <= 31) ||
         (a === 192 && b === 168) ||
         (a === 100 && b >= 64 && b <= 127) ||
+        (a === 192 && b === 0 && (c === 0 || c === 2)) ||
+        (a === 198 && (b === 18 || b === 19)) ||
         a >= 224;
-      if (isPrivateOrLocal) {
-        return {
-          allowed: false,
-          normalizedUrl: null,
-          resolvedHost: host,
-          blockedReasonCode: 'PRIVATE_OR_LOOPBACK_IP',
-          explanation: `Blocked private/loopback/reserved IPv4 address (${host}).`,
-        };
-      }
-    }
+      return isPrivateOrLocal ? 'PRIVATE' : 'PUBLIC';
+    };
 
-    // Block numeric decimal/hex encoded IPv4 bypass tricks (e.g. 2130706433 or 0x7f000001)
-    if (/^(?:\d+|0x[0-9a-f]+)$/i.test(host)) {
+    // Block IPv4 loopback, private, link-local, metadata, CGNAT, and 0.0.0.0/8
+    const v4Class = classifyIpv4(host);
+    if (v4Class === 'INVALID') {
+      return {
+        allowed: false,
+        normalizedUrl: null,
+        resolvedHost: host,
+        blockedReasonCode: 'INVALID_URL',
+        explanation: 'Invalid IPv4 literal.',
+      };
+    }
+    if (v4Class === 'METADATA') {
+      return {
+        allowed: false,
+        normalizedUrl: null,
+        resolvedHost: host,
+        blockedReasonCode: 'CLOUD_METADATA_ENDPOINT',
+        explanation: 'Blocked link-local / cloud instance metadata IP (169.254.0.0/16).',
+      };
+    }
+    if (v4Class === 'PRIVATE') {
       return {
         allowed: false,
         normalizedUrl: null,
         resolvedHost: host,
         blockedReasonCode: 'PRIVATE_OR_LOOPBACK_IP',
-        explanation: 'Numeric/hexadecimal IPv4 host literal bypasses are blocked.',
+        explanation: `Blocked private/loopback/reserved IPv4 address (${host}).`,
       };
     }
 
-    // Block IPv6 local/loopback/ULA/mapped metadata
-    if (
-      host === '::1' ||
-      host === '::' ||
-      host.startsWith('fe80:') ||
-      host.startsWith('fc') ||
-      host.startsWith('fd') ||
-      host.includes('169.254.') ||
-      host.includes('127.0.0.')
-    ) {
+    // Block numeric decimal/hex/octal encoded IPv4 bypass tricks (e.g. 2130706433, 0x7f000001, 017700000001)
+    if (/^(?:\d+|0x[0-9a-f]+|0[0-7]+)$/i.test(host)) {
       return {
         allowed: false,
         normalizedUrl: null,
         resolvedHost: host,
-        blockedReasonCode: host.includes('169.254.') ? 'CLOUD_METADATA_ENDPOINT' : 'PRIVATE_OR_LOOPBACK_IP',
-        explanation: `Blocked internal IPv6 literal (${host}).`,
+        blockedReasonCode: 'PRIVATE_OR_LOOPBACK_IP',
+        explanation: 'Numeric/hexadecimal/octal IPv4 host literal bypasses are blocked.',
       };
+    }
+
+    // Block IPv6 local/loopback/ULA/link-local/multicast/NAT64/IPv4-mapped literals
+    // Only apply IPv6 rules when host is actually an IPv6 literal (contains ':') so public domains like fcdn.* are never misclassified
+    if (host.includes(':')) {
+      const decodeMappedPair = (hiHex: string, loHex: string): string => {
+        const hi = parseInt(hiHex, 16);
+        const lo = parseInt(loHex, 16);
+        return `${(hi >> 8) & 0xff}.${hi & 0xff}.${(lo >> 8) & 0xff}.${lo & 0xff}`;
+      };
+
+      const v4MappedDotted = host.match(/^(?:::ffff:|0:0:0:0:0:ffff:|64:ff9b::|::)(\d+\.\d+\.\d+\.\d+)$/);
+      if (v4MappedDotted) {
+        const mappedClass = classifyIpv4(v4MappedDotted[1]);
+        if (mappedClass !== 'PUBLIC') {
+          return {
+            allowed: false,
+            normalizedUrl: null,
+            resolvedHost: host,
+            blockedReasonCode: mappedClass === 'METADATA' ? 'CLOUD_METADATA_ENDPOINT' : 'PRIVATE_OR_LOOPBACK_IP',
+            explanation: `Blocked IPv4-mapped/NAT64 internal IPv6 literal (${host}).`,
+          };
+        }
+      }
+
+      const v4MappedHex = host.match(
+        /^(?:::ffff:|0:0:0:0:0:ffff:|64:ff9b::|::)([0-9a-f]{1,4}):([0-9a-f]{1,4})$/,
+      );
+      if (v4MappedHex) {
+        const mappedClass = classifyIpv4(decodeMappedPair(v4MappedHex[1], v4MappedHex[2]));
+        if (mappedClass !== 'PUBLIC') {
+          return {
+            allowed: false,
+            normalizedUrl: null,
+            resolvedHost: host,
+            blockedReasonCode: mappedClass === 'METADATA' ? 'CLOUD_METADATA_ENDPOINT' : 'PRIVATE_OR_LOOPBACK_IP',
+            explanation: `Blocked hex-encoded IPv4-mapped/NAT64 internal IPv6 literal (${host}).`,
+          };
+        }
+      }
+
+      const firstGroup = host.split(':')[0] || '0';
+      const firstVal = parseInt(firstGroup, 16);
+      const isPrivateV6 =
+        host === '::1' ||
+        host === '::' ||
+        host === '0:0:0:0:0:0:0:1' ||
+        host === '0:0:0:0:0:0:0:0' ||
+        host.startsWith('100::') ||
+        (!Number.isNaN(firstVal) &&
+          ((firstVal & 0xfe00) === 0xfc00 || // fc00::/7 Unique Local
+            (firstVal & 0xffc0) === 0xfe80 || // fe80::/10 Link-Local
+            (firstVal & 0xffc0) === 0xfec0 || // fec0::/10 Deprecated Site-Local
+            (firstVal & 0xff00) === 0xff00)); // ff00::/8 Multicast
+
+      if (isPrivateV6) {
+        return {
+          allowed: false,
+          normalizedUrl: null,
+          resolvedHost: host,
+          blockedReasonCode: 'PRIVATE_OR_LOOPBACK_IP',
+          explanation: `Blocked internal IPv6 literal (${host}).`,
+        };
+      }
     }
 
     // Require allowlisted host match when allowlist is configured
     const hostAllowed =
       policy.allowedHostPatterns.length > 0 &&
       policy.allowedHostPatterns.some((pattern) => {
-        const clean = pattern.trim().toLowerCase();
+        const clean = pattern.trim().toLowerCase().replace(/\.+$/, '');
         if (!clean) return false;
         if (clean.startsWith('*.')) {
-          return host.endsWith(clean.slice(1)) && host.length > clean.length - 1;
+          const suffix = clean.slice(1);
+          return !host.startsWith('.') && host.endsWith(suffix) && host.length > suffix.length;
         }
         return host === clean;
       });

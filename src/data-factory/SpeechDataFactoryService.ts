@@ -162,6 +162,7 @@ export class SpeechDataFactoryService {
     retentionExpiresAtIso?: string | null;
     autoNormalizeCanonical?: boolean;
     channelPolicyOverride?: StereoChannelPolicy;
+    _fromJobId?: string;
   }): Promise<{
     recording: RecordingRecord;
     rights: RightsRecord;
@@ -174,7 +175,10 @@ export class SpeechDataFactoryService {
     }
 
     const activeQueueCount = [...this.ingestionJobs.values()].filter(
-      (j) => j.tenantId === params.tenantId && j.status === 'PROCESSING'
+      (j) =>
+        j.tenantId === params.tenantId &&
+        j.status === 'PROCESSING' &&
+        (!params._fromJobId || j.jobId !== params._fromJobId)
     ).length;
     if (activeQueueCount >= this.limits.maxConcurrentTasksPerTenant) {
       throw new Error('TENANT_CONCURRENT_INGESTION_LIMIT: Concurrent ingestion limit reached for tenant.');
@@ -259,7 +263,30 @@ export class SpeechDataFactoryService {
         createdAtIso: nowIso,
         deletedAtIso: null,
       };
+      const rejectedRights: RightsRecord = {
+        rightsRecordId,
+        tenantId: params.tenantId,
+        recordingId,
+        sourceOwnerOrProvider: src.ownerReference,
+        licenseId: params.licenseId ?? 'UNKNOWN_LICENSE',
+        licenseUrlOrDocRef: params.licenseUrlOrDocRef ?? src.licenseReference,
+        licenseVersion: params.licenseVersion ?? '1.0',
+        permissionBasis: params.permissionBasis ?? 'explicit_consent',
+        consentReference: params.consentReference ?? null,
+        permissions: buildDefaultDenyRightsPermissions({}),
+        evaluationAllowed: false,
+        retentionPolicyId: 'ret_standard_365d',
+        geographicRestrictions: [],
+        legalHold: false,
+        verificationStatus: 'UNVERIFIED',
+        expirationAtIso: params.expirationAtIso ?? null,
+        revokedAtIso: null,
+        retentionExpiresAtIso: params.retentionExpiresAtIso ?? null,
+        createdAtIso: nowIso,
+        updatedAtIso: nowIso,
+      };
       this.recordings.set(recordingId, rejectedRec);
+      this.rightsRecords.set(recordingId, rejectedRights);
       throw new Error(safeMsg);
     }
 
@@ -384,6 +411,13 @@ export class SpeechDataFactoryService {
       }
     }
 
+    const activeQueueCount = [...this.ingestionJobs.values()].filter(
+      (j) => j.tenantId === params.tenantId && j.status === 'PROCESSING'
+    ).length;
+    if (activeQueueCount >= this.limits.maxConcurrentTasksPerTenant) {
+      throw new Error('TENANT_CONCURRENT_INGESTION_LIMIT: Concurrent ingestion limit reached for tenant.');
+    }
+
     const jobId = `ing_${crypto.randomUUID().slice(0, 12)}`;
     const nowIso = new Date().toISOString();
     let job: IngestionJobRecord = {
@@ -415,6 +449,7 @@ export class SpeechDataFactoryService {
           ...entry,
           tenantId: params.tenantId,
           projectId: params.projectId,
+          _fromJobId: jobId,
         });
         recIds.push(res.recording.recordingId);
       } catch (err) {
@@ -452,6 +487,9 @@ export class SpeechDataFactoryService {
 
   public cancelIngestionJob(tenantId: string, jobId: string): IngestionJobRecord {
     const job = this.getIngestionJob(tenantId, jobId);
+    if (job.status !== 'PROCESSING') {
+      return job;
+    }
     const updated: IngestionJobRecord = {
       ...job,
       status: 'CANCELLED',
@@ -524,6 +562,9 @@ export class SpeechDataFactoryService {
     const pcm16k = this.decodedPcmCache.get(params.recordingId)?.channels[0];
     if (!pcm16k) {
       throw new Error('PCM_CACHE_UNAVAILABLE');
+    }
+    if (canonicalBytes.byteLength < 44) {
+      throw new Error('CORRUPT_CANONICAL_16K_ARTIFACT: Stored canonical WAV header is truncated.');
     }
     // Extract canonical float32 directly from stored WAV PCM16 bytes
     const frames = Math.floor((canonicalBytes.byteLength - 44) / 2);
@@ -1031,8 +1072,9 @@ export class SpeechDataFactoryService {
       throw new Error('TENANT_ISOLATION_DENIED: Release not accessible.');
     }
 
-    const isTrainingRequester = params.requesterRole === 'TRAINING_PIPELINE';
-    if (rel.sealedTestProtected && isTrainingRequester) {
+    const canReadSealedTest =
+      params.requesterRole === 'AUTHORIZED_EVAL_WORKFLOW' || params.requesterRole === 'ADMIN';
+    if (rel.sealedTestProtected && !canReadSealedTest) {
       return {
         release: rel,
         manifestJsonlPreview: '',
@@ -1041,11 +1083,11 @@ export class SpeechDataFactoryService {
     }
 
     const rows = this.releaseManifestRows.get(rel.datasetReleaseId) ?? [];
-    const safeRows = isTrainingRequester ? rows.filter((r) => r.split !== 'TEST') : rows;
+    const safeRows = canReadSealedTest ? rows : rows.filter((r) => r.split !== 'TEST');
     return {
       release: rel,
       manifestJsonlPreview: safeRows.map((r) => JSON.stringify(r)).join('\n'),
-      sealedTestTranscriptsWithheld: isTrainingRequester && rel.sealedTestProtected,
+      sealedTestTranscriptsWithheld: !canReadSealedTest && rel.sealedTestProtected,
     };
   }
 
@@ -1261,8 +1303,16 @@ function pathSafeBaseName(filename: string): string {
 }
 
 export function buildErrorStatus(code: string, message: string) {
+  const mappedCode =
+    code === 'UPLOAD_LIMIT' || code === 'UPLOAD_TOO_LARGE'
+      ? 'UPLOAD_TOO_LARGE'
+      : code === 'CONFLICT' || code === 'IDEMPOTENCY_CONFLICT'
+        ? 'IDEMPOTENCY_CONFLICT'
+        : code === 'AUDIO_FORMAT_UNSUPPORTED'
+          ? 'AUDIO_FORMAT_UNSUPPORTED'
+          : 'VALIDATION_ERROR';
   return buildPlatformErrorEnvelope({
-    code: 'AUDIO_FORMAT_UNSUPPORTED',
+    code: mappedCode,
     message: `[${code}] ${AudioSecurityGuard.sanitizeErrorForTelemetry(message)}`,
   });
 }

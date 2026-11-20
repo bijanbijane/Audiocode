@@ -23,6 +23,7 @@ export class NodeAsrModelSessionPool {
   private readonly pool = new Map<string, PooledSessionRecord>();
   private readonly loadingPromises = new Map<string, Promise<PooledSessionRecord>>();
   private totalAllocatedMb = 0;
+  private reservedLoadingMb = 0;
 
   constructor(
     private readonly ortProvider: OrtRuntimeProvider,
@@ -42,15 +43,19 @@ export class NodeAsrModelSessionPool {
       // Single-flight concurrent load coalescing
       let loading = this.loadingPromises.get(descriptor.modelKey);
       if (!loading) {
-        loading = this.loadAndWarmupModel(descriptor);
-        this.loadingPromises.set(descriptor.modelKey, loading);
+        const loadTask = this.loadAndWarmupModel(descriptor);
+        loading = loadTask;
+        this.loadingPromises.set(descriptor.modelKey, loadTask);
+        void loadTask
+          .finally(() => {
+            if (this.loadingPromises.get(descriptor.modelKey) === loadTask) {
+              this.loadingPromises.delete(descriptor.modelKey);
+            }
+          })
+          .catch(() => {});
       }
 
-      try {
-        record = await loading;
-      } finally {
-        this.loadingPromises.delete(descriptor.modelKey);
-      }
+      record = await loading;
     }
 
     record.activeLeases++;
@@ -71,53 +76,72 @@ export class NodeAsrModelSessionPool {
   private async loadAndWarmupModel(
     descriptor: ModelPoolDescriptor
   ): Promise<PooledSessionRecord> {
-    await this.evictIdleSessionsIfNeeded(descriptor.estimatedMemoryFootprintMb);
+    const footprintMb = Math.max(0, descriptor.estimatedMemoryFootprintMb);
+    // Reserve memory synchronously BEFORE any await so concurrent loads cannot both pass the budget check
+    this.reservedLoadingMb += footprintMb;
+    let session: OrtSessionLike | null = null;
+    try {
+      await this.evictIdleSessionsIfNeeded(footprintMb);
 
-    const session = await this.ortProvider.createSession(
-      descriptor.modelPathOrBytes,
-      descriptor.executionProviders
-    );
+      session = await this.ortProvider.createSession(
+        descriptor.modelPathOrBytes,
+        descriptor.executionProviders
+      );
 
-    // Execute Warm-Up pass before serving real traffic
-    if (descriptor.buildWarmupDummyFeeds) {
-      await session.run(descriptor.buildWarmupDummyFeeds());
+      // Execute Warm-Up pass before serving real traffic
+      if (descriptor.buildWarmupDummyFeeds) {
+        await session.run(descriptor.buildWarmupDummyFeeds());
+      }
+
+      const record: PooledSessionRecord = {
+        descriptor,
+        session,
+        activeLeases: 0,
+        lastUsedAtMs: Date.now(),
+      };
+      this.pool.set(descriptor.modelKey, record);
+      this.totalAllocatedMb += footprintMb;
+      return record;
+    } catch (err) {
+      if (session?.release) {
+        await session.release().catch(() => {});
+      }
+      throw err;
+    } finally {
+      this.reservedLoadingMb = Math.max(0, this.reservedLoadingMb - footprintMb);
     }
-
-    const record: PooledSessionRecord = {
-      descriptor,
-      session,
-      activeLeases: 0,
-      lastUsedAtMs: Date.now(),
-    };
-    this.pool.set(descriptor.modelKey, record);
-    this.totalAllocatedMb += descriptor.estimatedMemoryFootprintMb;
-    return record;
   }
 
   /**
    * 2. Safely evicts idle sessions (activeLeases === 0) in LRU order to fit memory budget.
+   *    Note: incomingMb is already included in this.reservedLoadingMb by loadAndWarmupModel.
    */
   private async evictIdleSessionsIfNeeded(incomingMb: number): Promise<void> {
-    if (this.totalAllocatedMb + incomingMb <= this.maxMemoryBudgetMb) return;
+    if (this.totalAllocatedMb + this.reservedLoadingMb <= this.maxMemoryBudgetMb) return;
 
     const idleCandidates = Array.from(this.pool.values())
       .filter((r) => r.activeLeases === 0)
       .sort((a, b) => a.lastUsedAtMs - b.lastUsedAtMs);
 
+    const toRelease: PooledSessionRecord[] = [];
     for (const candidate of idleCandidates) {
-      if (this.totalAllocatedMb + incomingMb <= this.maxMemoryBudgetMb) break;
+      if (this.totalAllocatedMb + this.reservedLoadingMb <= this.maxMemoryBudgetMb) break;
 
       this.pool.delete(candidate.descriptor.modelKey);
       this.totalAllocatedMb = Math.max(
         0,
         this.totalAllocatedMb - candidate.descriptor.estimatedMemoryFootprintMb
       );
+      toRelease.push(candidate);
+    }
+
+    for (const candidate of toRelease) {
       if (candidate.session.release) {
         await candidate.session.release();
       }
     }
 
-    if (this.totalAllocatedMb + incomingMb > this.maxMemoryBudgetMb) {
+    if (this.totalAllocatedMb + this.reservedLoadingMb > this.maxMemoryBudgetMb) {
       throw new Error(
         `SESSION_POOL_MEMORY_EXHAUSTED: فضای حافظه برای بارگذاری ${incomingMb}MB کافی نیست و تمام نشست‌های فعلی در حال کارند.`
       );

@@ -28,9 +28,16 @@ export class BackendAuthAndPaymentService {
     fastify.post<{ Body: { email: string; password: string } }>(
       '/api/v1/auth/register',
       async (request, reply) => {
-        const email = request.body.email.trim().toLowerCase();
-        const password = request.body.password;
-        if (password.length < 10) {
+        const rawEmail = request.body?.email;
+        const password = request.body?.password;
+        if (typeof rawEmail !== 'string' || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(rawEmail.trim())) {
+          return reply.status(400).send({
+            error: 'INVALID_EMAIL',
+            messageFa: 'نشانی ایمیل معتبر نیست.',
+          });
+        }
+        const email = rawEmail.trim().toLowerCase();
+        if (typeof password !== 'string' || password.length < 10) {
           return reply.status(400).send({
             error: 'WEAK_PASSWORD',
             messageFa: 'رمز عبور باید حداقل ۱۰ کاراکتر باشد.',
@@ -46,10 +53,21 @@ export class BackendAuthAndPaymentService {
           const userId = res.rows[0].id;
           const accessToken = this.issueEdDsaJwt({ sub: userId, email });
           return reply.status(201).send({ userId, accessToken });
-        } catch {
-          return reply.status(409).send({
-            error: 'EMAIL_ALREADY_EXISTS',
-            messageFa: 'این ایمیل قبلاً ثبت شده است.',
+        } catch (err: unknown) {
+          const pgCode = (err as { code?: unknown } | null)?.code;
+          const errMsg = err instanceof Error ? err.message : '';
+          if (
+            pgCode === '23505' ||
+            /unique|duplicate/i.test(errMsg)
+          ) {
+            return reply.status(409).send({
+              error: 'EMAIL_ALREADY_EXISTS',
+              messageFa: 'این ایمیل قبلاً ثبت شده است.',
+            });
+          }
+          return reply.status(500).send({
+            error: 'REGISTRATION_FAILED',
+            messageFa: 'خطای داخلی هنگام ثبت حساب کاربری رخ داد.',
           });
         }
       },
@@ -59,8 +77,12 @@ export class BackendAuthAndPaymentService {
     fastify.post<{ Body: { email: string; password: string } }>(
       '/api/v1/auth/login',
       async (request, reply) => {
-        const email = request.body.email.trim().toLowerCase();
-        const password = request.body.password;
+        const rawEmail = request.body?.email;
+        const password = request.body?.password;
+        if (typeof rawEmail !== 'string' || rawEmail.trim().length === 0 || typeof password !== 'string') {
+          return reply.status(400).send({ error: 'INVALID_CREDENTIALS_PAYLOAD' });
+        }
+        const email = rawEmail.trim().toLowerCase();
 
         const res = await this.db.query<{
           id: string;
@@ -103,6 +125,9 @@ export class BackendAuthAndPaymentService {
       }
 
       const b = request.body;
+      if (!b || typeof b !== 'object' || typeof b.userId !== 'string' || b.userId.trim().length === 0) {
+        return reply.status(400).send({ error: 'WEBHOOK_INVALID_PAYLOAD' });
+      }
 
       // On refund, immediately cancel active subscription and revoke all offline license leases
       if (b.status === 'REFUNDED') {
@@ -115,6 +140,22 @@ export class BackendAuthAndPaymentService {
           [b.userId],
         );
         return reply.send({ processed: true, action: 'SUBSCRIPTION_AND_LEASES_REVOKED' });
+      }
+
+      if (
+        b.status !== 'PAID' ||
+        typeof b.gatewayName !== 'string' ||
+        b.gatewayName.trim().length === 0 ||
+        typeof b.gatewayTxId !== 'string' ||
+        b.gatewayTxId.trim().length === 0 ||
+        typeof b.currency !== 'string' ||
+        b.currency.trim().length === 0 ||
+        (b.planTier !== 'PRO_MONTHLY' && b.planTier !== 'PRO_ANNUAL' && b.planTier !== 'STUDIO_ENTERPRISE') ||
+        typeof b.amountMinorUnits !== 'number' ||
+        !Number.isSafeInteger(b.amountMinorUnits) ||
+        b.amountMinorUnits <= 0
+      ) {
+        return reply.status(400).send({ error: 'WEBHOOK_UNSUPPORTED_OR_INVALID_PAYMENT_STATE' });
       }
 
       // Idempotency step: attempt insert with ON CONFLICT DO NOTHING
@@ -199,9 +240,24 @@ export class BackendAuthAndPaymentService {
   }
 
   public verifyEdDsaJwt(token: string): { sub: string; email: string } {
+    if (typeof token !== 'string') throw new Error('JWT_MALFORMED');
     const parts = token.split('.');
-    if (parts.length !== 3) throw new Error('JWT_MALFORMED');
+    if (parts.length !== 3 || parts.some((p) => p.length === 0)) throw new Error('JWT_MALFORMED');
     const [header, payload, sigB64] = parts;
+
+    let parsedHeader: { alg?: unknown; typ?: unknown };
+    try {
+      parsedHeader = JSON.parse(Buffer.from(header, 'base64url').toString('utf8')) as {
+        alg?: unknown;
+        typ?: unknown;
+      };
+    } catch {
+      throw new Error('JWT_MALFORMED');
+    }
+    if (!parsedHeader || typeof parsedHeader !== 'object' || parsedHeader.alg !== 'EdDSA') {
+      throw new Error('JWT_UNSUPPORTED_ALG');
+    }
+
     const ok = crypto.verify(
       null,
       Buffer.from(`${header}.${payload}`, 'utf8'),
@@ -209,18 +265,47 @@ export class BackendAuthAndPaymentService {
       Buffer.from(sigB64, 'base64url'),
     );
     if (!ok) throw new Error('JWT_INVALID_SIGNATURE');
-    const decoded = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8')) as {
-      sub: string;
-      email: string;
-      exp: number;
-    };
-    if (Math.floor(Date.now() / 1000) > decoded.exp) {
+
+    let decoded: { sub?: unknown; email?: unknown; exp?: unknown; nbf?: unknown };
+    try {
+      decoded = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8')) as {
+        sub?: unknown;
+        email?: unknown;
+        exp?: unknown;
+        nbf?: unknown;
+      };
+    } catch {
+      throw new Error('JWT_MALFORMED');
+    }
+
+    if (
+      !decoded ||
+      typeof decoded !== 'object' ||
+      typeof decoded.sub !== 'string' ||
+      decoded.sub.length === 0 ||
+      typeof decoded.email !== 'string' ||
+      typeof decoded.exp !== 'number' ||
+      !Number.isFinite(decoded.exp)
+    ) {
+      throw new Error('JWT_INVALID_CLAIMS');
+    }
+    const nowSec = Math.floor(Date.now() / 1000);
+    if (typeof decoded.nbf === 'number' && Number.isFinite(decoded.nbf) && nowSec < decoded.nbf) {
+      throw new Error('JWT_NOT_YET_VALID');
+    }
+    if (nowSec > decoded.exp) {
       throw new Error('JWT_EXPIRED');
     }
     return { sub: decoded.sub, email: decoded.email };
   }
 
   private verifyWebhookHmac(rawPayload: string, providedHex: string): boolean {
+    if (
+      typeof this.config.paymentWebhookHmacSecret !== 'string' ||
+      this.config.paymentWebhookHmacSecret.trim().length === 0
+    ) {
+      return false;
+    }
     if (!providedHex || !/^[0-9a-fA-F]+$/.test(providedHex) || providedHex.length % 2 !== 0) {
       return false;
     }

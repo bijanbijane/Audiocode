@@ -40,6 +40,20 @@ export class BackendAsrJobQueueAndPool {
       );
     }
 
+    if (
+      typeof req.userId !== 'string' ||
+      req.userId.trim().length === 0 ||
+      typeof req.modelId !== 'string' ||
+      req.modelId.trim().length === 0 ||
+      typeof req.remoteStorageRef !== 'string' ||
+      req.remoteStorageRef.trim().length === 0 ||
+      typeof req.audioDurationSeconds !== 'number' ||
+      !Number.isFinite(req.audioDurationSeconds) ||
+      req.audioDurationSeconds <= 0
+    ) {
+      throw new Error('INVALID_CLOUD_JOB_ENQUEUE_REQUEST');
+    }
+
     // Admission Control: prevent queue saturation by a single user
     const activeRes = await this.db.query<{ cnt: string }>(
       `SELECT COUNT(*)::text AS cnt
@@ -85,6 +99,13 @@ export class BackendAsrJobQueueAndPool {
     leaseDurationSeconds: number = 120,
   ): Promise<ClaimedAsrWorkerJob | null> {
     if (!this.cloudRuntimeEnabled) return null;
+    if (typeof workerId !== 'string' || workerId.trim().length === 0) {
+      throw new Error('INVALID_WORKER_ID');
+    }
+    const safeLeaseSec =
+      Number.isFinite(leaseDurationSeconds) && leaseDurationSeconds > 0
+        ? Math.min(3600, Math.floor(leaseDurationSeconds))
+        : 120;
 
     const res = await this.db.query<{
       job_id: string;
@@ -111,7 +132,7 @@ export class BackendAsrJobQueueAndPool {
        FROM next_job
        WHERE j.job_id = next_job.job_id
        RETURNING j.job_id, j.user_id, j.model_id, j.audio_duration_seconds, j.remote_storage_ref, j.attempts`,
-      [workerId, leaseDurationSeconds],
+      [workerId, safeLeaseSec],
     );
 
     if (res.rows.length === 0) return null;

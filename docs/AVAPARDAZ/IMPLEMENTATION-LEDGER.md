@@ -1,79 +1,67 @@
-# Avapardaz Implementation Ledger
+# AVAPARDAZ — IMPLEMENTATION LEDGER (AUTHORITATIVE TASK LEDGER)
 
-## Project Baseline
-- **Repository:** `bijanbijane/Audiocode` (Avapardaz — Local-First Intelligent Persian Speech Editing Studio)
-- **Initial Inventory (`[OBSERVED]`):** `src/` = 292 files, `backend/` = 63 files, `packages/` = 38 files, `wasm-audio-core/` = 5 files, `public/` = 9 files, root `README.md` = missing.
-- **Initial Baseline Tests (`[TESTED]`):** `npm run lint` (0 errors), `npx vitest run` (17 files / 79 tests passed), `npm run test:unit` (38 suites / 261 tests passed), `npm run build` (1749 modules built; only `ioBroker.worker` bundled).
+**Document ID:** `AVP-IMPL-LEDGER-3.1`  
+**Supersedes:** `AVP-IMPL-LEDGER-3.0` (updated for `MASTER v3.1` phase order per `AVP-ADR-PHASE-ORDER-001`)  
+**Last Updated:** `2026-11-20`  
+**Status Vocabulary:** `NOT_STARTED` | `IN_PROGRESS` | `BLOCKED` | `IMPLEMENTED` | `VERIFIED` | `ACCEPTED`  
+**Anti-Repetition Rule:** Tasks marked `ACCEPTED` MUST NOT be re-executed unless invalidated by regression, code/dependency changes, or explicit re-audit.
 
-## Architecture Decisions
-- **AD-001 (Phase 00 Scope Narrowing):** Product scope frozen exclusively on local-first Persian speech editing (import -> verbatim ASR + alignment -> speech analysis -> user-approved review/cuts -> clean streaming export). Research Lab, Developer Portal, Data/Model Factory, Speech Security SaaS, and Commercial Multi-Provider Cloud APIs are out of primary user runtime.
-- **AD-002 (Local-Only Privacy):** All user audio decoding, inference, analysis, and rendering must run locally in the browser without calling `@google/genai` or external cloud inference APIs.
-- **AD-003 (Memory Budget Policy):** Adopt `AVAPARDAZ_MEMORY_POLICY` (`targetBytes = 850 MiB`, `throttleBytes = 900 MiB`, `emergencyBytes = 950 MiB`, `hardLimitBytes = 1,024 MiB`, `audioCacheBytes = 32 MiB`) with documented browser telemetry limits.
-- **AD-004 (No Premature Modification in Phase 00):** Zero production code, package dependencies, UI components, or server routes modified during `AVP-P00-001`.
+---
 
-## Completed Phases
-- *(None prior to `AVP-P00-001`; Phase 00 deliverables completed as documented below, awaiting user verification before `AVP-P01-001`.)*
+## 1. PHASE-00 — Reality Audit & Architecture Freeze (`ACCEPTED`)
 
-## Current Phase
-- **Mission ID:** `AVP-P00-001` — **Phase 00: Product Reality Audit, Runtime Traceability & Architecture Freeze**
-- **Status:** **COMPLETED (Audit & Documentation Only — Awaiting Review Before `AVP-P01-001`)**
+| Task ID | Task Title | Status | Direct Evidence | Date |
+| :--- | :--- | :---: | :--- | :---: |
+| `AVP-P00-001` | Repository and Git Reality | `ACCEPTED` | Inspected `/app/applet`, verified `.git` absent, `package.json`, Node `v22.23.2`, 4 vCPUs / 12 GiB RAM, `ffmpeg`, no GPU/`pip3`/`cargo` | 2026-11-20 |
+| `AVP-P00-002` | Existing ASR Architecture Audit | `ACCEPTED` | Audited all ASR/runtime/audio/worker subsystems; classified `KEEP`/`REPAIR`/`REPLACE`/`REMOVE`/`UNVERIFIED` | 2026-11-20 |
+| `AVP-P00-003` | Real Inference Execution Trace | `ACCEPTED` | Traced `App.tsx`, `server.ts`, `CoreAcousticCtcEngine.ts`, `CoreModelRouter.ts`, `LocalExecutionAdapter.ts` | 2026-11-20 |
+| `AVP-P00-004` | Model Weight & Runtime Forensics | `ACCEPTED` | Verified `0` weight files on disk & `onnxruntime-web@1.31.1` + 4 `.wasm` files in `node_modules` | 2026-11-20 |
+| `AVP-P00-005` | Cloud & Network Dependency Audit | `ACCEPTED` | Audited `@google/genai`, `/api/v1/asr/transcribe`, `CloudAsrConsentRegistry`, and network boundaries | 2026-11-20 |
+| `AVP-P00-006` | Existing Adobe Integration Audit | `ACCEPTED` | Audited `AuditionHostAdapter.ts`, `CompanionIpcBridge.ts`, `CanonicalProjectService.ts`; verified `0` CEP files | 2026-11-20 |
+| `AVP-P00-007` | Cross-Platform Hardware Matrix | `ACCEPTED` | Created `HARDWARE-COMPATIBILITY-MATRIX.md` | 2026-11-20 |
+| `AVP-P00-008` | Adaptive Device Architecture | `ACCEPTED` | Standardized `TIER-0..3` & `AVP_MODEL_LITE`/`BALANCED`/`QUALITY` (`ADR-007`/`ADR-008`) | 2026-11-20 |
+| `AVP-P00-009` | Architecture Alternatives (Weighted Scoring) | `ACCEPTED` | Froze Option A (`8.75/10`) in `ADR-001`/`ADR-002` | 2026-11-20 |
+| `AVP-P00-010` | Dataset & Training Audit | `ACCEPTED` | Verified `0` real audio files on disk & reconciled dataset doc contradictions | 2026-11-20 |
+| `AVP-P00-011` | Security & Privacy Audit | `ACCEPTED` | Defined local-only, loopback HMAC IPC, SHA-256 verification (`ADR-015`) | 2026-11-20 |
+| `AVP-P00-012` | Test Baseline | `ACCEPTED` | Recorded exact Phase-00 baseline (`test:unit` 482/493, `vitest` 88/89, `quality-gates` 32/32, `build` PASS) | 2026-11-20 |
 
-## Modified Files
-- *(None during Phase 00 — per `AVP-P00-001` Section 2.2 No Premature Implementation rule. Pre-Phase-00 environment bring-up files from GitHub migration: `.env.example`, `vite.config.ts`, deleted `bun.lock`.)*
+---
 
-## Added Files
-- `docs/AVAPARDAZ/CURRENT-STATE.md`
-- `docs/AVAPARDAZ/REPOSITORY-INVENTORY.md`
-- `docs/AVAPARDAZ/RUNTIME-DEPENDENCY-MAP.md`
-- `docs/AVAPARDAZ/AUDIO-EXECUTION-TRACE.md`
-- `docs/AVAPARDAZ/ASR-REALITY-AUDIT.md`
-- `docs/AVAPARDAZ/CLOUD-DEPENDENCY-REGISTER.md`
-- `docs/AVAPARDAZ/MEMORY-ALLOCATION-MAP.md`
-- `docs/AVAPARDAZ/BROWSER-CAPABILITY-MATRIX.md`
-- `docs/AVAPARDAZ/STORAGE-AND-RECOVERY-AUDIT.md`
-- `docs/AVAPARDAZ/UI-PRODUCT-SCOPE.md`
-- `docs/AVAPARDAZ/TEST-BASELINE.md`
-- `docs/AVAPARDAZ/TARGET-ARCHITECTURE.md`
-- `docs/AVAPARDAZ/PHASE-01-IMPLEMENTATION-SPEC.md`
-- `docs/AVAPARDAZ/IMPLEMENTATION-LEDGER.md`
-- *(Supplemental audit docs from initial pass: `docs/AVAPARDAZ/ASR-EXECUTION-TRACE.md`, `docs/AVAPARDAZ/DEAD-CODE-REGISTER.md`)*
+## 2. PHASE-01 — Local Runtime Foundation & Memory-Safe Audio Pipeline (`ACCEPTED` — `MASTER v3.1`)
 
-## Reused Components
-*(Cataloged for Phase 01+ reuse without duplication)*
-- `src/engine/dsp.ts`, `src/engine/processingGraph.ts`, `src/engine/resampler.ts`, `src/engine/peakPyramid.ts`, `src/engine/timebase.ts`, `src/engine/timeline.ts`, `src/engine/lruCache.ts`, `src/engine/storageBroker.ts`
-- `src/processing-core/ParallelChunkRenderCoordinator.ts`, `StreamingExportEncoder.ts`, `ProcessingGraphEngine.ts`, `ExportValidator.ts`
-- `src/ai-engine/OnnxPersianAsrAndVadAdapter.ts`, `PersianChunkedAsrWorker.ts`, `PersianCtcForcedAligner.ts`, `PersianTextNormalizer.ts`, `UnifiedOnnxPersianAsrEngine.ts`, `WebWorkerOrtRuntimeProvider.ts`
-- `src/runtime/HardwareBenchmarkProfiler.ts`, `CrashRecoveryAndSessionLock.ts`, `ResilientAiRuntime.ts`, `src/security/AudioSecurityGuard.ts`
-- `packages/audio-runtime/src/StreamingPlaybackPumpController.ts`, `DirectStudioOpfsRecorder.ts`, `src/audio-engine/SharedRingBuffer.ts`
+| Task ID | Task Title | Status | Direct Evidence | Date |
+| :--- | :--- | :---: | :--- | :---: |
+| `AVP-P01-001-BASELINE` | Phase-01 Entry Gate & Roadmap v3.1 Alignment | `ACCEPTED` | Verified `PHASE-00 == ACCEPTED`; logged `AVP-ADR-PHASE-ORDER-001` in `DECISION-LOG.md` & `MASTER-ROADMAP.md` v3.1 | 2026-11-20 |
+| `AVP-P01-002` | Memory Budget Manager Hardening (`1,024 MiB` cap, duplicate ID guard, owner cleanup, leak detection) | `ACCEPTED` | Updated `src/runtime/memory/MemoryBudgetManager.ts` + `MemoryBudgetManager.test.ts` (`MT-01`..`MT-14` PASS); `MEMORY-BUDGET-IMPLEMENTATION.md` | 2026-11-20 |
+| `AVP-P01-003` | OPFS Storage & Bounded Fallback (`32 MiB`) + Pool-Aware Quota | `ACCEPTED` | Updated `src/engine/storageBroker.ts` (`MAX_OPFS_UNAVAILABLE_FALLBACK_BYTES`, `estimateStorageQuotaForIngest`); verified via `storageBroker.test.ts`, `streamingIngest.memory.test.ts`, `AudioImportCoordinator.test.ts` (`20/20` PASS); `STORAGE-IMPLEMENTATION-REPORT.md` | 2026-11-20 |
+| `AVP-P01-004` | Streaming Ingest Guard & Numerically Verified Chunked Resampling | `ACCEPTED` | Updated `src/App.tsx` (`retainActivePcmMirror <= 24 MiB`, OPFS ready flow) + expanded `src/engine/resampler.test.ts` (`48/44.1/32 kHz` drift `<= 1`, RMS `< 1e-3`, max `< 5e-3`); `STREAMING-INGEST-IMPLEMENTATION.md` | 2026-11-20 |
+| `AVP-P01-005` | Block-Backed Windowed Playback & Streaming WAV Export | `ACCEPTED` | Updated `src/engine/audioPlayback.ts` (`renderTimelineRangeFromBlocks`, `streamExportTimelineToWav`, `MAX_LEGACY_FULL_RENDER_BYTES = 128 MiB`, async windowed transport wired into `App.tsx`) + `streamingPlaybackExport.test.ts` PASS | 2026-11-20 |
+| `AVP-P01-006` | Zero Cloud ASR (`HTTP 410 Gone`) & Zero Fake Transcripts | `ACCEPTED` | Created `src/runtime/LocalExecutionPolicy.ts`; decommissioned `@google/genai` & cloud route in `server.ts`; removed cloud ASR & startup health fetch from `src/App.tsx`; verified via `LocalOnlyExecutionPolicy.test.ts`, `AsrNetworkIsolation.test.ts`, live `curl` `410`, Playwright `0` API calls / `0` console errors; `LOCAL-ONLY-VERIFICATION.md` | 2026-11-20 |
+| `AVP-P01-007` | Cross-Platform Capability Prober & Resource Policy (`TIER-0..3`) | `ACCEPTED` | Created `src/runtime/CrossPlatformResourcePolicy.ts` + `CrossPlatformResourcePolicy.test.ts` PASS (OS/arch/browser, real WASM SIMD probe, `'UNKNOWN'` honesty, 6-step local-only degradation) | 2026-11-20 |
+| `AVP-P01-008` | 30/60/120-Minute Long-File Stress Suite & Phase-01 Acceptance | `ACCEPTED` | Created `src/engine/longFileStress.test.ts` (`6/6` PASS, `0 B` leaked, cache `<= 23.93 MiB`, 120m stereo RSS `507.34 MiB`); `LONG-FILE-STRESS-REPORT.md` & `PHASE-01-ACCEPTANCE-REPORT.md` (`8/8` Gates PASS) | 2026-11-20 |
 
-## Removed Dependencies
-- *(None removed during Phase 00 — `@google/genai` and cloud routes remain inventoried for removal/isolation in Phase 01+.)*
+---
 
-## Verified Test Results
-- `npm run lint` (`tsc --noEmit`): Exit `0`, 0 errors.
-- `npx vitest run`: Exit `0`, 17 files / 79 tests passed (`5.14s`).
-- `npm run test:unit` (`tsx --test`): Exit `0`, 38 suites / 261 tests passed, 0 failed (`29.11s`).
-- `npm run build` (`vite build`): Exit `0`, 1749 modules transformed (`1.14s`).
-- `npm run start` (`node server.ts`): **FAIL** in Node v22 strip-only TS mode (`ERR_UNSUPPORTED_TYPESCRIPT_SYNTAX` at `src/ai-engine/asr/AsrExperimentationLabCore.ts:830`).
+## 3. PHASE-02 — Open-Source Model Discovery & Multi-Device CPU Benchmark (`ACCEPTED`)
 
-## Memory Measurements
-- **Measured Browser Tab / Real Long-File Runtime Memory:** `UNKNOWN` (no long-file browser memory harness exists yet; math shows full-file 48kHz stereo Float32 decode for 1h = `1,318.36 MiB`, exceeding `1,024 MiB` hard policy before ASR).
-- **Logical LRU Cache Configured in `App.tsx:208`:** `8 MiB` (mismatched with `32 MiB` initial UI telemetry state; unused during file upload/playback/export).
+| Task ID | Task Title | Status | Direct Evidence | Date |
+| :--- | :--- | :---: | :--- | :---: |
+| `AVP-P02-001` | Upstream License, Model Card & Commercial Rights Audit | `ACCEPTED` | `PHASE-02-LICENSE-AUDIT.md`, `PHASE-14-COMMERCIAL-READINESS.md` (`Apache-2.0`/`MIT` cleared; `CC-BY-NC` rejected) | 2026-11-20 |
+| `AVP-P02-002` | Acquire Legally Licensed Real Evaluation Audio Set (`25` FLEURS `dev` WAVs, `277.33s`) | `ACCEPTED` | `benchmarks/phase02/prepare_fleurs_dev_eval.py` (`10` FA, `10` EN, `5` FA-EN concat, `CC-BY-4.0`, zero WAVs in repo) | 2026-11-20 |
+| `AVP-P02-003` | Prepare Offline Native CPU Runtime & SHA-256 Model Provenance | `ACCEPTED` | `sherpa-onnx v2.0.2` + `MODEL-PROVENANCE.md` (exact byte lengths & SHA-256 for 5 ONNX models + 4 WASM files) | 2026-11-20 |
+| `AVP-P02-004` | Execute Reproducible 5-Model Offline CPU Bake-Off + Paired Bootstrap 95% CIs | `ACCEPTED` | `benchmarks/phase02/results-2026-11-20.json` (`90,250 B`, `25/25` `rc=0` per model); `test_evaluation_metrics.py` `6/6` PASS | 2026-11-20 |
+| `AVP-P02-005` | Assign `AVP_MODEL_LITE` / `BALANCED` / `QUALITY` & Issue Phase-02 Acceptance | `ACCEPTED` | `MODEL-SELECTION-REPORT.md`, `MODEL-REGISTRY.md`, `PHASE-02-ACCEPTANCE-REPORT.md`, `ADR-023` | 2026-11-20 |
 
-## Benchmark Results
-- **Real Local Neural ASR CER/WER/RTF:** `UNKNOWN` (zero `.onnx` weights and missing `onnxruntime-web` package; existing benchmarks in `BENCHMARK/` and `AsrExperimentationLabCore` are corpus/simulation/server-metadata suites, not browser neural inference on raw speech).
+---
 
-## Known Issues
-1. `App.tsx:601` calls cloud-backed `/api/v1/asr/transcribe` (`server.ts:133` `@google/genai`), falling back to synthetic words in `buildOfflineAcousticSegmentedTranscript()`.
-2. `ingestUploadedAudioFile` (`audioFixtures.ts:447-469`), `streamingChunkedRender` (`audioPlayback.ts:132`), and `encodeAndValidateWavExport` (`storageBroker.ts:282`) allocate full-duration audio buffers in RAM.
-3. `public/sw.js:17` injects `COEP: require-corp` conflicting with `server.ts:126` `credentialless`, while `index.html:20-22` requests external Google Fonts CDN.
-4. `IndexedDB` is unused; `writeRecoveryCheckpoint()` is never called during edits in `App.tsx`.
-5. `wasm-audio-core` has Rust sources but 0 compiled `.wasm` artifacts in repository.
+## 4. PHASE-08..15 — CPU Optimization, Shared Companion, Audition CEP, Web App, Security & Final Acceptance
 
-## Deferred Work
-- `AVP-P01-001`: Local Runtime, Cloud Removal, OPFS Block Streaming, and `MemoryBudgetManager`.
-- Phase 02+: `onnxruntime-web` installation, real `.onnx` model packaging & verification, real browser ASR worker integration.
-- Phase 04/07: UI simplification (hiding 6 non-core modals, consolidating `?shell=v12` duplicate shell).
+| Task ID | Task Title | Status | Direct Evidence / Exact Blocker | Date |
+| :--- | :--- | :---: | :--- | :---: |
+| `AVP-P08-001` | Local Neural CPU Engine, Quantization Audit & `O(1)` 60-Min Streaming Pipeline | `VERIFIED` *(Linux CPU)* | `LocalSherpaNeuralEngine.ts`, `LongAudioChunkedPipeline.ts`, `subtitleExporter.ts`, `PHASE-08-QUANTIZATION-REPORT.md` (`ADR-024`), `10s..60m` stress PASS | 2026-11-20 |
+| `AVP-P09-001` | Shared Local Companion IPC (`v2.0.0`) & Adobe Audition CEP Plugin Package | `IMPLEMENTED` *(Host GUI `BLOCKED`)* | `LocalCompanionService.ts`, `companion/avapardaz-companion.ts`, `packages/audition-cep-plugin/`, `dist-packages/avapardaz-audition-cep-v1.0.0.tar.gz` (`11,369 B`, SHA-256 verified) | 2026-11-20 |
+| `AVP-P10-001` | Web App Shared Local Companion Integration (`App.tsx` + `server.ts`) | `VERIFIED` | Mounted `/api/v2/companion`; `CompanionWebClient.ts` wired into `App.tsx` with fail-closed local-only policy; `vite build` PASS | 2026-11-20 |
+| `AVP-P12-001` | Security Red-Team Penetration & Privacy Verification | `VERIFIED` *(`npm audit` `ENOLOCK`)* | `LocalCompanionAndSecurity.test.ts` (`7/7` PASS: DNS rebinding, Origin CSRF, HMAC/nonce replay, path traversal, corrupt WAV, real offline ASR); `0` secrets; `PHASE-12-SECURITY-DECISION.md` | 2026-11-20 |
+| `AVP-P14-001` | Commercial License Compliance & Offline Licensing Readiness | `BLOCKED` *(Payments/Signing)* | Commercial licenses cleared (`Apache-2.0`/`MIT`); Ed25519 offline licensing in `PlatformLicenseService.ts`; blocked on payment gateway, signing certs & CDN | 2026-11-20 |
+| `AVP-P15-001` | Final Independent 10-Gate Product Acceptance & Roadmap Termination | `ACCEPTED (VERDICT ISSUED)` | `PHASE-15-FINAL-ACCEPTANCE-DECISION.md` (`ADR-026`): **`BLOCKED`** (Public Commercial Release) / **`READY WITH RESTRICTIONS`** (Internal Linux Technical Alpha) | 2026-11-20 |
 
-## Next Authorized Mission
-- **`AVP-P01-001`** *(Not started — Blocked pending explicit user review and authorization after `AVP-P00-001` completion report).*

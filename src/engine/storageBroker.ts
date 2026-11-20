@@ -88,6 +88,95 @@ export async function requestPersistentStorage(): Promise<{
   }
 }
 
+/** Strict upper bound for transient audio buffers when OPFS is unavailable (<= 32 MiB). */
+export const MAX_OPFS_UNAVAILABLE_FALLBACK_BYTES = AVAPARDAZ_MEMORY_POLICY.audioCacheBytes;
+
+export interface StorageQuotaEstimateReport {
+  readonly available: boolean;
+  readonly quotaBytes: number | null;
+  readonly usageBytes: number | null;
+  readonly remainingBytes: number | null;
+  readonly requiredBytes: number;
+  readonly pool: 'audio-blocks' | 'model-weights';
+  readonly sufficient: boolean | null;
+  readonly safetyHeadroomBytes: number;
+}
+
+/**
+ * Estimates whether browser storage quota can accommodate a planned ingest or model cache write,
+ * separating audio block storage from model weight storage and returning `sufficient: null`
+ * when `navigator.storage.estimate()` is unavailable (never fabricating quota numbers).
+ */
+export async function estimateStorageQuotaForIngest(params: {
+  readonly requiredBytes: number;
+  readonly pool: 'audio-blocks' | 'model-weights';
+  readonly safetyHeadroomBytes?: number;
+  readonly estimateFn?: () => Promise<{ usage?: number; quota?: number }>;
+}): Promise<StorageQuotaEstimateReport> {
+  const requiredBytes = Math.max(0, Math.trunc(params.requiredBytes));
+  const safetyHeadroomBytes =
+    params.safetyHeadroomBytes ?? (params.pool === 'model-weights' ? 64 * 1024 * 1024 : 32 * 1024 * 1024);
+
+  const fn =
+    params.estimateFn ??
+    (typeof navigator !== 'undefined' && typeof navigator.storage?.estimate === 'function'
+      ? () => navigator.storage.estimate()
+      : null);
+
+  if (!fn) {
+    return {
+      available: false,
+      quotaBytes: null,
+      usageBytes: null,
+      remainingBytes: null,
+      requiredBytes,
+      pool: params.pool,
+      sufficient: null,
+      safetyHeadroomBytes,
+    };
+  }
+
+  try {
+    const est = await fn();
+    const quotaBytes = typeof est.quota === 'number' && Number.isFinite(est.quota) ? Math.trunc(est.quota) : null;
+    const usageBytes = typeof est.usage === 'number' && Number.isFinite(est.usage) ? Math.trunc(est.usage) : null;
+    if (quotaBytes === null || usageBytes === null) {
+      return {
+        available: false,
+        quotaBytes,
+        usageBytes,
+        remainingBytes: null,
+        requiredBytes,
+        pool: params.pool,
+        sufficient: null,
+        safetyHeadroomBytes,
+      };
+    }
+    const remainingBytes = Math.max(0, quotaBytes - usageBytes);
+    return {
+      available: true,
+      quotaBytes,
+      usageBytes,
+      remainingBytes,
+      requiredBytes,
+      pool: params.pool,
+      sufficient: remainingBytes >= requiredBytes + safetyHeadroomBytes,
+      safetyHeadroomBytes,
+    };
+  } catch {
+    return {
+      available: false,
+      quotaBytes: null,
+      usageBytes: null,
+      remainingBytes: null,
+      requiredBytes,
+      pool: params.pool,
+      sufficient: null,
+      safetyHeadroomBytes,
+    };
+  }
+}
+
 export function buildSeekTable(
   totalSamples: number,
   blockSizeSamples: number,

@@ -5,6 +5,7 @@
  */
 
 import { PlatformControlPlaneService, buildPlatformErrorEnvelope } from '../platform/PlatformControlPlaneEngine';
+import { sanitizePublicErrorOutput } from '../ai-engine/asr/IndustrialValidationAndSecurityEngine';
 import { SpeechDataFactoryService, buildErrorStatus } from './SpeechDataFactoryService';
 import type {
   AugmentationConfig,
@@ -21,6 +22,26 @@ export interface GatewayHttpResponse {
   readonly body: unknown;
 }
 
+const ALLOWED_INGESTION_SOURCE_TYPES = new Set<IngestionSourceType>([
+  'AUTHORIZED_USER_UPLOAD',
+  'ORGANIZATION_CONTROLLED_RECORDING',
+  'EXPLICITLY_LICENSED_CORPUS',
+  'APPROVED_PUBLIC_DATASET',
+  'CONSENT_CONTRIBUTOR_RECORDING',
+  'APPROVED_HUMAN_ANNOTATION_DELIVERY',
+  'AUTHORIZED_PRODUCTION_FEEDBACK',
+]);
+
+const ALLOWED_DATASET_RELEASE_TYPES = new Set<DatasetReleaseType>([
+  'TRAIN',
+  'VALIDATION',
+  'TEST',
+  'CHALLENGE',
+  'REGRESSION',
+  'STREAMING_EVALUATION',
+  'RESEARCH_ONLY',
+]);
+
 export class DataFactoryGateway {
   public readonly service: SpeechDataFactoryService;
 
@@ -29,29 +50,30 @@ export class DataFactoryGateway {
   }
 
   private mapErrorToHttp(err: unknown): GatewayHttpResponse {
-    const msg = err instanceof Error ? err.message : String(err);
-    if (msg.startsWith('TENANT_ISOLATION_DENIED') || msg.startsWith('TENANT_OR_SOURCE_NOT_FOUND')) {
+    const rawMsg = err instanceof Error ? err.message : String(err);
+    const msg = sanitizePublicErrorOutput(rawMsg);
+    if (rawMsg.startsWith('TENANT_ISOLATION_DENIED') || rawMsg.startsWith('TENANT_OR_SOURCE_NOT_FOUND')) {
       return {
         status: 403,
         body: buildPlatformErrorEnvelope({ code: 'TENANT_ISOLATION_DENIED', message: msg }),
       };
     }
-    if (msg.startsWith('BLIND_ANNOTATION_VIOLATION') || msg.startsWith('RIGHTS_DENIED')) {
+    if (rawMsg.startsWith('BLIND_ANNOTATION_VIOLATION') || rawMsg.startsWith('RIGHTS_DENIED')) {
       return {
         status: 403,
         body: buildPlatformErrorEnvelope({ code: 'INSUFFICIENT_SCOPE', message: msg }),
       };
     }
-    if (msg.startsWith('IMMUTABLE_RELEASE_CONFLICT') || msg.startsWith('RIGHTS_REVOKED_IMMUTABLE')) {
+    if (rawMsg.startsWith('IMMUTABLE_RELEASE_CONFLICT') || rawMsg.startsWith('RIGHTS_REVOKED_IMMUTABLE')) {
       return { status: 409, body: buildErrorStatus('CONFLICT', msg) };
     }
-    if (msg.startsWith('RELEASE_NOT_FOUND') || msg.startsWith('ARTIFACT_MISSING')) {
+    if (rawMsg.startsWith('RELEASE_NOT_FOUND') || rawMsg.startsWith('ARTIFACT_MISSING')) {
       return {
         status: 404,
         body: buildPlatformErrorEnvelope({ code: 'RESOURCE_NOT_FOUND', message: msg }),
       };
     }
-    if (msg.includes('EXCEEDED') || msg.includes('TOO_LARGE') || msg.includes('UPLOAD_TOO_LARGE')) {
+    if (rawMsg.includes('EXCEEDED') || rawMsg.includes('TOO_LARGE') || rawMsg.includes('UPLOAD_TOO_LARGE')) {
       return { status: 413, body: buildErrorStatus('UPLOAD_LIMIT', msg) };
     }
     return { status: 400, body: buildErrorStatus('VALIDATION_ERROR', msg) };
@@ -70,16 +92,33 @@ export class DataFactoryGateway {
   }): GatewayHttpResponse {
     const auth = this.service.authenticate(params.bearerToken);
     if (!auth.authenticated) return { status: auth.httpStatus, body: auth.errorEnvelope };
-    if (!params.body?.sourceName || !params.body?.sourceType) {
-      return { status: 400, body: buildErrorStatus('VALIDATION_ERROR', 'sourceType and sourceName are required') };
+    if (
+      typeof params.body?.sourceName !== 'string' ||
+      params.body.sourceName.trim().length === 0 ||
+      typeof params.body?.sourceType !== 'string' ||
+      !ALLOWED_INGESTION_SOURCE_TYPES.has(params.body.sourceType as IngestionSourceType)
+    ) {
+      return {
+        status: 400,
+        body: buildErrorStatus(
+          'VALIDATION_ERROR',
+          'sourceName (non-empty string) and valid sourceType are required',
+        ),
+      };
     }
     try {
       const rec = this.service.createDataSource({
         tenantId: auth.organization.id,
         sourceType: params.body.sourceType,
-        sourceName: params.body.sourceName,
-        ownerReference: params.body.ownerReference ?? auth.organization.id,
-        licenseReference: params.body.licenseReference ?? 'UNSPECIFIED',
+        sourceName: params.body.sourceName.trim(),
+        ownerReference:
+          typeof params.body.ownerReference === 'string' && params.body.ownerReference.trim().length > 0
+            ? params.body.ownerReference.trim()
+            : auth.organization.id,
+        licenseReference:
+          typeof params.body.licenseReference === 'string' && params.body.licenseReference.trim().length > 0
+            ? params.body.licenseReference.trim()
+            : 'UNSPECIFIED',
         verified: Boolean(params.body.verified),
         provenanceMetadata: params.body.provenanceMetadata,
       });
@@ -118,7 +157,28 @@ export class DataFactoryGateway {
   }): Promise<GatewayHttpResponse> {
     const auth = this.service.authenticate(params.bearerToken);
     if (!auth.authenticated) return { status: auth.httpStatus, body: auth.errorEnvelope };
-    const entries = params.body?.entries ?? [];
+    const rawEntries = (params.body as { entries?: unknown })?.entries;
+    if (rawEntries !== undefined && !Array.isArray(rawEntries)) {
+      return { status: 400, body: buildErrorStatus('VALIDATION_ERROR', 'entries must be an array') };
+    }
+    const entries = (rawEntries ?? []) as NonNullable<typeof params.body.entries>;
+    for (const e of entries) {
+      if (
+        !e ||
+        typeof e !== 'object' ||
+        typeof e.sourceId !== 'string' ||
+        typeof e.filename !== 'string' ||
+        typeof e.audioBase64 !== 'string'
+      ) {
+        return {
+          status: 400,
+          body: buildErrorStatus(
+            'VALIDATION_ERROR',
+            'Each ingestion entry must include string sourceId, filename, and audioBase64',
+          ),
+        };
+      }
+    }
     try {
       const job = await this.service.createIngestionJob({
         tenantId: auth.organization.id,
@@ -129,10 +189,10 @@ export class DataFactoryGateway {
           projectId: auth.project.id,
           sourceId: e.sourceId,
           filename: e.filename,
-          claimedMimeType: e.claimedMimeType,
-          fileBytes: Buffer.from(e.audioBase64 ?? '', 'base64'),
-          speakerRef: e.speakerRef ?? `spk_${idx}`,
-          sessionRef: e.sessionRef ?? `ses_${idx}`,
+          claimedMimeType: typeof e.claimedMimeType === 'string' ? e.claimedMimeType : undefined,
+          fileBytes: Buffer.from(e.audioBase64, 'base64'),
+          speakerRef: typeof e.speakerRef === 'string' && e.speakerRef.trim() ? e.speakerRef : `spk_${idx}`,
+          sessionRef: typeof e.sessionRef === 'string' && e.sessionRef.trim() ? e.sessionRef : `ses_${idx}`,
           sourceCorpusTag: e.sourceCorpusTag,
           domainTag: e.domainTag,
           declaredLanguage: e.declaredLanguage,
@@ -190,19 +250,24 @@ export class DataFactoryGateway {
   }): Promise<GatewayHttpResponse> {
     const auth = this.service.authenticate(params.bearerToken);
     if (!auth.authenticated) return { status: auth.httpStatus, body: auth.errorEnvelope };
-    if (!params.body?.sourceId || !params.body?.audioBase64) {
-      return { status: 400, body: buildErrorStatus('VALIDATION_ERROR', 'sourceId and audioBase64 are required') };
+    if (
+      typeof params.body?.sourceId !== 'string' ||
+      params.body.sourceId.trim().length === 0 ||
+      typeof params.body?.audioBase64 !== 'string' ||
+      params.body.audioBase64.trim().length === 0
+    ) {
+      return { status: 400, body: buildErrorStatus('VALIDATION_ERROR', 'sourceId and audioBase64 strings are required') };
     }
     try {
       const out = await this.service.ingestRecording({
         tenantId: auth.organization.id,
         projectId: auth.project.id,
-        sourceId: params.body.sourceId,
-        filename: params.body.filename ?? 'upload.wav',
-        claimedMimeType: params.body.claimedMimeType,
+        sourceId: params.body.sourceId.trim(),
+        filename: typeof params.body.filename === 'string' && params.body.filename.trim() ? params.body.filename.trim() : 'upload.wav',
+        claimedMimeType: typeof params.body.claimedMimeType === 'string' ? params.body.claimedMimeType : undefined,
         fileBytes: Buffer.from(params.body.audioBase64, 'base64'),
-        speakerRef: params.body.speakerRef ?? 'spk_anon',
-        sessionRef: params.body.sessionRef ?? 'ses_default',
+        speakerRef: typeof params.body.speakerRef === 'string' && params.body.speakerRef.trim() ? params.body.speakerRef : 'spk_anon',
+        sessionRef: typeof params.body.sessionRef === 'string' && params.body.sessionRef.trim() ? params.body.sessionRef : 'ses_default',
         sourceCorpusTag: params.body.sourceCorpusTag,
         domainTag: params.body.domainTag,
         declaredLanguage: params.body.declaredLanguage,
@@ -272,6 +337,12 @@ export class DataFactoryGateway {
   }): GatewayHttpResponse {
     const auth = this.service.authenticate(params.bearerToken);
     if (!auth.authenticated) return { status: auth.httpStatus, body: auth.errorEnvelope };
+    if (!params.config || typeof params.config !== 'object' || Array.isArray(params.config)) {
+      return {
+        status: 400,
+        body: buildErrorStatus('VALIDATION_ERROR', 'config must be a valid AugmentationConfig object'),
+      };
+    }
     try {
       const art = this.service.createAugmentedArtifact({
         tenantId: auth.organization.id,
@@ -301,6 +372,9 @@ export class DataFactoryGateway {
   }): GatewayHttpResponse {
     const auth = this.service.authenticate(params.bearerToken);
     if (!auth.authenticated) return { status: auth.httpStatus, body: auth.errorEnvelope };
+    if (!params.body || typeof params.body !== 'object' || Array.isArray(params.body)) {
+      return { status: 400, body: buildErrorStatus('VALIDATION_ERROR', 'Request body must be a JSON object') };
+    }
     try {
       const ann = this.service.createAnnotationDraft({
         ...params.body,
@@ -320,6 +394,12 @@ export class DataFactoryGateway {
   }): GatewayHttpResponse {
     const auth = this.service.authenticate(params.bearerToken);
     if (!auth.authenticated) return { status: auth.httpStatus, body: auth.errorEnvelope };
+    // Never trust client-supplied ?reviewer=true unless API credential has reviewer/audit/admin scope
+    const hasReviewerPrivilege =
+      auth.credential.scopes.includes('models:approve') ||
+      auth.credential.scopes.includes('security:audit') ||
+      auth.credential.scopes.includes('security:admin');
+    const effectiveIsReviewer = Boolean(params.isReviewer) && hasReviewerPrivilege;
     try {
       return {
         status: 200,
@@ -327,7 +407,7 @@ export class DataFactoryGateway {
           tenantId: auth.organization.id,
           annotationId: params.annotationId,
           requesterAnnotatorId: params.requesterAnnotatorId,
-          isReviewer: params.isReviewer,
+          isReviewer: effectiveIsReviewer,
         }),
       };
     } catch (err) {
@@ -342,6 +422,9 @@ export class DataFactoryGateway {
   }): GatewayHttpResponse {
     const auth = this.service.authenticate(params.bearerToken);
     if (!auth.authenticated) return { status: auth.httpStatus, body: auth.errorEnvelope };
+    if (!Array.isArray(params.segments)) {
+      return { status: 400, body: buildErrorStatus('VALIDATION_ERROR', 'segments must be an array') };
+    }
     try {
       return {
         status: 200,
@@ -368,16 +451,29 @@ export class DataFactoryGateway {
   }): GatewayHttpResponse {
     const auth = this.service.authenticate(params.bearerToken);
     if (!auth.authenticated) return { status: auth.httpStatus, body: auth.errorEnvelope };
+    if (!params.body || typeof params.body !== 'object' || Array.isArray(params.body)) {
+      return { status: 400, body: buildErrorStatus('VALIDATION_ERROR', 'Request body must be a JSON object') };
+    }
+    const allowedActions = new Set(['APPROVED', 'NEEDS_CORRECTION', 'REJECTED', 'ADJUDICATE']);
+    if (
+      params.body.action !== undefined &&
+      (typeof params.body.action !== 'string' || !allowedActions.has(params.body.action))
+    ) {
+      return { status: 400, body: buildErrorStatus('VALIDATION_ERROR', 'Unsupported review action') };
+    }
     try {
       return {
         status: 200,
         body: this.service.reviewOrAdjudicateAnnotation({
           tenantId: auth.organization.id,
           annotationId: params.annotationId,
-          reviewerId: params.body.reviewerId ?? 'reviewer_api',
+          reviewerId:
+            typeof params.body.reviewerId === 'string' && params.body.reviewerId.trim()
+              ? params.body.reviewerId.trim()
+              : 'reviewer_api',
           action: params.body.action ?? 'APPROVED',
           resolvedSegments: params.body.resolvedSegments,
-          policyNote: params.body.policyNote,
+          policyNote: typeof params.body.policyNote === 'string' ? params.body.policyNote : undefined,
         }),
       };
     } catch (err) {
@@ -391,17 +487,21 @@ export class DataFactoryGateway {
   }): GatewayHttpResponse {
     const auth = this.service.authenticate(params.bearerToken);
     if (!auth.authenticated) return { status: auth.httpStatus, body: auth.errorEnvelope };
-    if (!params.body?.datasetName) {
-      return { status: 400, body: buildErrorStatus('VALIDATION_ERROR', 'datasetName is required') };
+    if (typeof params.body?.datasetName !== 'string' || params.body.datasetName.trim().length === 0) {
+      return { status: 400, body: buildErrorStatus('VALIDATION_ERROR', 'datasetName must be a non-empty string') };
     }
-    return {
-      status: 201,
-      body: this.service.createDatasetDefinition({
-        tenantId: auth.organization.id,
-        datasetName: params.body.datasetName,
-        description: params.body.description,
-      }),
-    };
+    try {
+      return {
+        status: 201,
+        body: this.service.createDatasetDefinition({
+          tenantId: auth.organization.id,
+          datasetName: params.body.datasetName.trim(),
+          description: typeof params.body.description === 'string' ? params.body.description : undefined,
+        }),
+      };
+    } catch (err) {
+      return this.mapErrorToHttp(err);
+    }
   }
 
   public listDatasets(bearerToken: string): GatewayHttpResponse {
@@ -423,18 +523,33 @@ export class DataFactoryGateway {
   }): GatewayHttpResponse {
     const auth = this.service.authenticate(params.bearerToken);
     if (!auth.authenticated) return { status: auth.httpStatus, body: auth.errorEnvelope };
-    if (!params.body?.version) {
-      return { status: 400, body: buildErrorStatus('VALIDATION_ERROR', 'version is required') };
+    if (typeof params.body?.version !== 'string' || params.body.version.trim().length === 0) {
+      return { status: 400, body: buildErrorStatus('VALIDATION_ERROR', 'version must be a non-empty string') };
+    }
+    if (
+      params.body.releaseType !== undefined &&
+      (typeof params.body.releaseType !== 'string' ||
+        !ALLOWED_DATASET_RELEASE_TYPES.has(params.body.releaseType))
+    ) {
+      return { status: 400, body: buildErrorStatus('VALIDATION_ERROR', 'Unsupported releaseType') };
     }
     try {
       const built = this.service.buildDatasetRelease({
         tenantId: auth.organization.id,
         datasetId: params.datasetId,
-        version: params.body.version,
+        version: params.body.version.trim(),
         releaseType: params.body.releaseType ?? 'TRAIN',
-        releaseAuthor: params.body.releaseAuthor ?? auth.credential.name,
-        splitPolicy: params.body.splitPolicy,
-        recordingIdsFilter: params.body.recordingIdsFilter,
+        releaseAuthor:
+          typeof params.body.releaseAuthor === 'string' && params.body.releaseAuthor.trim()
+            ? params.body.releaseAuthor.trim()
+            : auth.credential.name,
+        splitPolicy:
+          params.body.splitPolicy && typeof params.body.splitPolicy === 'object' && !Array.isArray(params.body.splitPolicy)
+            ? params.body.splitPolicy
+            : undefined,
+        recordingIdsFilter: Array.isArray(params.body.recordingIdsFilter)
+          ? params.body.recordingIdsFilter.filter((id): id is string => typeof id === 'string')
+          : undefined,
       });
       return { status: 201, body: built };
     } catch (err) {
@@ -469,13 +584,26 @@ export class DataFactoryGateway {
   }): GatewayHttpResponse {
     const auth = this.service.authenticate(params.bearerToken);
     if (!auth.authenticated) return { status: auth.httpStatus, body: auth.errorEnvelope };
+    // Strictly derive privilege ceiling from authenticated server-side scopes; client ?role cannot elevate
+    const scopes = auth.credential.scopes;
+    const canAdmin = scopes.includes('security:admin');
+    const canEval = canAdmin || scopes.includes('models:approve') || scopes.includes('security:audit');
+    let effectiveRole: 'TRAINING_PIPELINE' | 'AUTHORIZED_EVAL_WORKFLOW' | 'ADMIN' = 'TRAINING_PIPELINE';
+    if (params.requesterRole === 'ADMIN' && canAdmin) {
+      effectiveRole = 'ADMIN';
+    } else if (
+      (params.requesterRole === 'AUTHORIZED_EVAL_WORKFLOW' || params.requesterRole === 'ADMIN') &&
+      canEval
+    ) {
+      effectiveRole = 'AUTHORIZED_EVAL_WORKFLOW';
+    }
     try {
       return {
         status: 200,
         body: this.service.getDatasetRelease({
           tenantId: auth.organization.id,
           releaseId: params.releaseId,
-          requesterRole: params.requesterRole,
+          requesterRole: effectiveRole,
         }),
       };
     } catch (err) {
@@ -506,17 +634,27 @@ export class DataFactoryGateway {
   }): GatewayHttpResponse {
     const auth = this.service.authenticate(params.bearerToken);
     if (!auth.authenticated) return { status: auth.httpStatus, body: auth.errorEnvelope };
+    if (!params.body || typeof params.body !== 'object' || Array.isArray(params.body)) {
+      return { status: 400, body: buildErrorStatus('VALIDATION_ERROR', 'Request body must be a JSON object') };
+    }
     try {
       return {
         status: 200,
         body: this.service.verifyRightsRecord({
           tenantId: auth.organization.id,
           recordingId: params.recordingId,
-          licenseId: params.body.licenseId,
-          permissions: params.body.permissions,
-          evaluationAllowed: params.body.evaluationAllowed,
-          legalHold: params.body.legalHold,
-          expirationAtIso: params.body.expirationAtIso,
+          licenseId: typeof params.body.licenseId === 'string' ? params.body.licenseId : undefined,
+          permissions:
+            params.body.permissions && typeof params.body.permissions === 'object' && !Array.isArray(params.body.permissions)
+              ? params.body.permissions
+              : undefined,
+          evaluationAllowed:
+            typeof params.body.evaluationAllowed === 'boolean' ? params.body.evaluationAllowed : undefined,
+          legalHold: typeof params.body.legalHold === 'boolean' ? params.body.legalHold : undefined,
+          expirationAtIso:
+            typeof params.body.expirationAtIso === 'string' || params.body.expirationAtIso === null
+              ? params.body.expirationAtIso
+              : undefined,
         }),
       };
     } catch (err) {

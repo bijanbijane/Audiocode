@@ -32,9 +32,10 @@ export class BackendBackgroundCronDaemon {
 
   public start(intervalMs: number = 60_000): void {
     if (this.timer) return;
+    const safeIntervalMs = Math.max(1_000, Math.floor(intervalMs));
     this.timer = setInterval(() => {
-      void this.runSingleSweepTick();
-    }, intervalMs);
+      void this.runSingleSweepTick().catch(() => {});
+    }, safeIntervalMs);
   }
 
   public stop(): void {

@@ -23,10 +23,16 @@ export class BackendModelCanaryRolloutService {
      * 1. Sticky Deterministic Model Version Assignment (SHA-256 user+model bucket 0..99)
      */
     fastify.get<{
-      Querystring: { userId: string; modelId: string };
+      Querystring: { userId?: string; modelId?: string };
     }>('/api/v1/models/resolve-assignment', async (request, reply) => {
-      const { userId, modelId } = request.query;
-      if (!userId || !modelId) {
+      const userId = request.query?.userId;
+      const modelId = request.query?.modelId;
+      if (
+        typeof userId !== 'string' ||
+        userId.trim().length === 0 ||
+        typeof modelId !== 'string' ||
+        modelId.trim().length === 0
+      ) {
         return reply.status(400).send({ error: 'MISSING_USER_OR_MODEL_ID' });
       }
 
@@ -122,12 +128,13 @@ export class BackendModelCanaryRolloutService {
       const failCount = parseInt(statsRes.rows[0]?.fail_cnt ?? '0', 10);
       const totalSamples = okCount + failCount;
 
-      if (totalSamples < pol.min_telemetry_samples) {
+      const minRequiredSamples = Math.max(1, pol.min_telemetry_samples);
+      if (totalSamples < minRequiredSamples) {
         return reply.send({
           evaluated: true,
           action: 'WAIT_FOR_MORE_SAMPLES',
           totalSamples,
-          requiredMinSamples: pol.min_telemetry_samples,
+          requiredMinSamples: minRequiredSamples,
         });
       }
 
@@ -150,7 +157,7 @@ export class BackendModelCanaryRolloutService {
           );
           await this.db.query('COMMIT');
         } catch (err) {
-          await this.db.query('ROLLBACK');
+          await this.db.query('ROLLBACK').catch(() => {});
           throw err;
         }
 
@@ -189,14 +196,18 @@ export class BackendModelCanaryRolloutService {
       const polRes = await this.db.query<{
         stable_version: string;
         candidate_version: string | null;
+        rollout_state?: string;
       }>(
-        `SELECT stable_version, candidate_version FROM model_rollout_policies WHERE model_id = $1`,
+        `SELECT stable_version, candidate_version, rollout_state FROM model_rollout_policies WHERE model_id = $1`,
         [modelId],
       );
 
       const pol = polRes.rows[0];
       if (!pol || !pol.candidate_version) {
         return reply.status(400).send({ error: 'NO_CANDIDATE_TO_PROMOTE' });
+      }
+      if (pol.rollout_state === 'HALTED_ROLLBACK') {
+        return reply.status(409).send({ error: 'CANNOT_PROMOTE_HALTED_ROLLBACK' });
       }
 
       await this.db.query('BEGIN');
@@ -217,11 +228,12 @@ export class BackendModelCanaryRolloutService {
         );
         await this.db.query('COMMIT');
       } catch (err) {
-        await this.db.query('ROLLBACK');
+        await this.db.query('ROLLBACK').catch(() => {});
         throw err;
       }
 
       this.sharedCache.invalidateByPrefix(`rollout_policy:${modelId}`);
+      this.sharedCache.invalidateByPrefix(`manifest:${modelId}:`);
       return reply.send({
         promotedVersion: pol.candidate_version,
         status: 'ACTIVE',

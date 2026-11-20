@@ -388,6 +388,7 @@ export class SpeechIntelligenceOrchestrator {
     const prevVersions = Array.from(this.artifacts.values()).filter(
       (a) =>
         a.organizationId === params.organizationId &&
+        a.projectId === params.projectId &&
         a.recordingId === params.recordingId &&
         a.artifactType === params.artifactType &&
         !a.deletedAtIso
@@ -422,6 +423,10 @@ export class SpeechIntelligenceOrchestrator {
       deletedAtIso: null,
     };
     this.artifacts.set(rec.artifactId, rec);
+    if (this.artifacts.size > 5_000) {
+      const oldestKey = this.artifacts.keys().next().value;
+      if (oldestKey) this.artifacts.delete(oldestKey);
+    }
     return rec;
   }
 
@@ -464,6 +469,7 @@ export class SpeechIntelligenceOrchestrator {
     }
     const deletedVectorsCount = this.semanticIndex.deleteRecordingEmbeddings({
       organizationId: params.organizationId,
+      projectId: params.projectId,
       recordingId: params.recordingId,
     });
     this.controlPlane.recordAuditLog({
@@ -569,6 +575,8 @@ export class SpeechIntelligenceOrchestrator {
       throw new Error(`BUDGET_OR_QUOTA_DENIED: ${reservation.errorEnvelope.error.message}`);
     }
 
+    let usageCommitted = false;
+    try {
     // Ensure immutable ORIGINAL_AUDIO and ASR_HYPOTHESIS exist without overwriting prior versions
     let audioArt = this.getArtifactsForRecording({
       organizationId: params.organizationId,
@@ -1019,6 +1027,9 @@ export class SpeechIntelligenceOrchestrator {
         stats.totalDurationMs += durMs;
         stats.totalAudioSecProcessed += audioDurSec;
         stats.latenciesMs.push(durMs);
+        if (stats.latenciesMs.length > 500) {
+          stats.latenciesMs.splice(0, stats.latenciesMs.length - 500);
+        }
 
         producedByCap.set(desc.capabilityId, art);
         job.completedCapabilities.push(desc.capabilityId);
@@ -1082,12 +1093,44 @@ export class SpeechIntelligenceOrchestrator {
       processingDurationMs: job.executions.reduce((a, e) => a + e.durationMs, 0),
       succeeded: job.completedCapabilities.length > 0,
     });
+    usageCommitted = true;
 
     this.jobs.set(job.jobId, job);
+    if (this.jobs.size > 2_000) {
+      const oldestJobKey = this.jobs.keys().next().value;
+      if (oldestJobKey) this.jobs.delete(oldestJobKey);
+    }
     if (idemScope) {
       this.idempotencyCache.set(idemScope, job);
+      if (this.idempotencyCache.size > 2_000) {
+        const oldestIdemKey = this.idempotencyCache.keys().next().value;
+        if (oldestIdemKey) this.idempotencyCache.delete(oldestIdemKey);
+      }
     }
     return job;
+    } catch (unexpectedErr) {
+      if (!usageCommitted) {
+        try {
+          this.controlPlane.commitAuthoritativeUsageAndLedger({
+            reservationId: reservation.reservation.reservationId,
+            usageEventId: `uev_intel_abort_${reqId}`,
+            idempotencyKey: `idem_intel_abort_${reqId}`,
+            credentialId: params.credentialId,
+            transcriptionId: reqId,
+            modelId: 'speech-intelligence-dag-v1',
+            modelVersion: '1.0.0',
+            executionMode: 'batch',
+            verifiedAudioDurationMs: Math.round(audioDurSec * 1000),
+            billableDurationMs: 0,
+            processingDurationMs: 0,
+            succeeded: false,
+          });
+        } catch {
+          // Best-effort reservation release on unexpected failure
+        }
+      }
+      throw unexpectedErr;
+    }
   }
 
   public getJob(params: { organizationId: string; projectId: string; jobId: string }): {
@@ -1189,10 +1232,29 @@ export class SpeechIntelligenceOrchestrator {
     if (!params.idpVerified) {
       return { authorized: false, reason: 'IDP_SIGNATURE_NOT_VERIFIED' };
     }
-    const groups = params.claims.groups ?? [];
+    const validRoles = new Set<OrganizationRole>([
+      'OWNER',
+      'ADMIN',
+      'DEVELOPER',
+      'BILLING_ADMIN',
+      'ANALYST',
+      'VIEWER',
+      'SECURITY_AUDITOR',
+    ]);
+    const bindings = params.configuredGroupRoleBindings;
+    if (!bindings || typeof bindings !== 'object') {
+      return {
+        authorized: false,
+        reason: 'FAIL_CLOSED_NO_EXPLICIT_ROLE_BINDING: Authentication alone does not grant workspace privileges.',
+      };
+    }
+    const groups = Array.isArray(params.claims?.groups) ? params.claims.groups : [];
     for (const grp of groups) {
-      const mapped = params.configuredGroupRoleBindings[grp];
-      if (mapped) {
+      if (typeof grp !== 'string' || !Object.prototype.hasOwnProperty.call(bindings, grp)) {
+        continue;
+      }
+      const mapped = bindings[grp];
+      if (typeof mapped === 'string' && validRoles.has(mapped)) {
         return { authorized: true, role: mapped };
       }
     }

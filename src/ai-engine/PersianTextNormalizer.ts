@@ -86,3 +86,13 @@ export const PersianTextNormalizer = {
       .trim();
   },
 } as const;
+
+export function normalizePersianTranscript(
+  rawText: string,
+  mode: 'display' | 'normalized' | 'original' = 'display',
+): string {
+  const res = normalizePersianText(rawText);
+  if (mode === 'original') return res.original;
+  if (mode === 'normalized') return res.normalized;
+  return res.display;
+}

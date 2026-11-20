@@ -6,6 +6,7 @@
  */
 
 import express from 'express';
+import { buildPlatformErrorEnvelope } from '../platform/PlatformControlPlaneEngine';
 import type {
   DeploymentEnvironment,
   DeploymentStrategy,
@@ -17,14 +18,19 @@ import type {
 } from './ModelFactoryContracts';
 import type { ModelFactoryGateway } from './ModelFactoryGateway';
 
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
 function extractCrossTenantHint(req: express.Request): string | null {
+  const bodyRecord = isPlainRecord(req.body) ? req.body : undefined;
   const candidates: unknown[] = [
     req.headers['x-tenant-id'],
     req.headers['x-organization-id'],
     req.query.tenantId,
     req.query.organizationId,
-    (req.body as Record<string, unknown> | undefined)?.tenantId,
-    (req.body as Record<string, unknown> | undefined)?.organizationId,
+    bodyRecord?.tenantId,
+    bodyRecord?.organizationId,
   ];
   for (const c of candidates) {
     if (typeof c === 'string' && c.trim().length > 0) {
@@ -38,6 +44,21 @@ export function createModelFactoryHttpRouter(
   modelFactoryGateway: ModelFactoryGateway
 ): express.Router {
   const router = express.Router();
+
+  router.use('/v1/ml', (req, res, next) => {
+    if (req.method === 'POST' || req.method === 'PUT' || req.method === 'PATCH') {
+      if (req.body !== undefined && !isPlainRecord(req.body)) {
+        res.status(400).json(
+          buildPlatformErrorEnvelope({
+            code: 'VALIDATION_ERROR',
+            message: 'Request body must be a JSON object.',
+          })
+        );
+        return;
+      }
+    }
+    next();
+  });
 
   router.post('/v1/ml/experiments', (req, res) => {
     const rawBody = (req.body ?? {}) as Record<string, unknown>;

@@ -333,6 +333,7 @@ export const AsrResearchLabModal: React.FC<AsrResearchLabModalProps> = ({
         config: {
           expectedLanguage: 'fa-en-mixed',
           mode: 'batch',
+          keyterms: [],
           timeoutMs: 15000,
           isFrozenTestSample: true,
         },

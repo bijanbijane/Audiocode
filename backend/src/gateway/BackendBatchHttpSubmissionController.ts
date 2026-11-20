@@ -9,6 +9,7 @@ export interface CompletedAsrJobArtifactStore {
   getCompletedTokensForJob(jobId: string): Promise<{
     audioDurationSec: number;
     tokens: TimedPersianToken[];
+    organizationId?: string;
   } | null>;
 }
 
@@ -31,9 +32,9 @@ export class BackendBatchHttpSubmissionController {
     fastify.post<{
       Headers: { 'x-enterprise-api-key'?: string };
       Body: {
-        modelId: string;
-        audioDurationSeconds: number;
-        remoteStorageRef: string;
+        modelId?: string;
+        audioDurationSeconds?: number;
+        remoteStorageRef?: string;
       };
     }>('/api/v1/enterprise/asr/jobs', async (request, reply) => {
       if (!this.enableServerSideAsrInference) {
@@ -56,9 +57,23 @@ export class BackendBatchHttpSubmissionController {
         });
       }
 
+      const b = request.body;
+      if (
+        !b ||
+        typeof b.modelId !== 'string' ||
+        b.modelId.trim().length === 0 ||
+        typeof b.remoteStorageRef !== 'string' ||
+        b.remoteStorageRef.trim().length === 0 ||
+        typeof b.audioDurationSeconds !== 'number' ||
+        !Number.isFinite(b.audioDurationSeconds) ||
+        b.audioDurationSeconds <= 0
+      ) {
+        return reply.status(400).send({ error: 'INVALID_ASR_JOB_REQUEST' });
+      }
+
       const quotaRes = await this.quotaManager.consumeAudioQuotaAtomically(
         keyCtx.keyId,
-        request.body.audioDurationSeconds
+        b.audioDurationSeconds
       );
       if (!quotaRes.approved) {
         return reply.status(429).send({
@@ -67,12 +82,31 @@ export class BackendBatchHttpSubmissionController {
         });
       }
 
-      const enqueued = await this.jobQueue.enqueueJobWithAdmissionControl({
-        userId: keyCtx.organizationId,
-        modelId: request.body.modelId,
-        audioDurationSeconds: request.body.audioDurationSeconds,
-        remoteStorageRef: request.body.remoteStorageRef,
-      });
+      let enqueued: { jobId: string; estimatedCreditsCost: number };
+      try {
+        enqueued = await this.jobQueue.enqueueJobWithAdmissionControl({
+          userId: keyCtx.organizationId,
+          modelId: b.modelId.trim(),
+          audioDurationSeconds: b.audioDurationSeconds,
+          remoteStorageRef: b.remoteStorageRef.trim(),
+        });
+      } catch (err) {
+        // Refund deducted quota atomically when admission control or enqueue fails
+        await this.quotaManager
+          .refundAudioQuotaAtomically(keyCtx.keyId, b.audioDurationSeconds)
+          .catch(() => {});
+        const msg = err instanceof Error ? err.message : 'ENQUEUE_FAILED';
+        if (msg.startsWith('ADMISSION_REJECTED_QUOTA')) {
+          return reply.status(429).send({ error: 'ADMISSION_REJECTED_QUOTA', detail: msg });
+        }
+        if (
+          msg.startsWith('INVALID_CLOUD_JOB_ENQUEUE_REQUEST') ||
+          msg.startsWith('CLOUD_RUNTIME_DISABLED_IN_V1')
+        ) {
+          return reply.status(400).send({ error: 'JOB_ENQUEUE_REJECTED', detail: msg });
+        }
+        return reply.status(500).send({ error: 'JOB_ENQUEUE_FAILED' });
+      }
 
       return reply.status(202).send({
         jobId: enqueued.jobId,
@@ -90,8 +124,9 @@ export class BackendBatchHttpSubmissionController {
       Querystring: { format?: 'json' | 'srt' | 'textgrid' | 'ctm' };
     }>('/api/v1/enterprise/asr/jobs/:jobId/export', async (request, reply) => {
       const rawKey = request.headers['x-enterprise-api-key'] ?? '';
+      let keyCtx;
       try {
-        await this.quotaManager.authenticateAndAuthorizeScope(
+        keyCtx = await this.quotaManager.authenticateAndAuthorizeScope(
           rawKey,
           'CLOUD_ASR_ENTERPRISE'
         );
@@ -101,12 +136,25 @@ export class BackendBatchHttpSubmissionController {
         });
       }
 
-      const artifact = await this.artifactStore.getCompletedTokensForJob(request.params.jobId);
+      const jobId = typeof request.params?.jobId === 'string' ? request.params.jobId.trim() : '';
+      if (jobId.length === 0) {
+        return reply.status(400).send({ error: 'INVALID_JOB_ID' });
+      }
+
+      const rawFmt = request.query?.format;
+      const fmt = rawFmt === undefined ? 'json' : rawFmt;
+      if (fmt !== 'json' && fmt !== 'srt' && fmt !== 'textgrid' && fmt !== 'ctm') {
+        return reply.status(400).send({ error: 'UNSUPPORTED_EXPORT_FORMAT' });
+      }
+
+      const artifact = await this.artifactStore.getCompletedTokensForJob(jobId);
       if (!artifact) {
         return reply.status(404).send({ error: 'JOB_ARTIFACT_NOT_FOUND' });
       }
+      if (artifact.organizationId && artifact.organizationId !== keyCtx.organizationId) {
+        return reply.status(403).send({ error: 'FORBIDDEN_TENANT_MISMATCH' });
+      }
 
-      const fmt = request.query.format ?? 'json';
       if (fmt === 'srt') {
         reply.header('Content-Type', 'application/x-subrip; charset=utf-8');
         return reply.send(
@@ -126,7 +174,7 @@ export class BackendBatchHttpSubmissionController {
         reply.header('Content-Type', 'text/plain; charset=utf-8');
         return reply.send(
           PraatTextGridAndLinguisticExporter.exportToNistCtm(
-            request.params.jobId,
+            jobId,
             artifact.tokens,
             1
           )
@@ -134,7 +182,7 @@ export class BackendBatchHttpSubmissionController {
       }
 
       return reply.send({
-        jobId: request.params.jobId,
+        jobId,
         audioDurationSec: artifact.audioDurationSec,
         tokens: artifact.tokens,
       });

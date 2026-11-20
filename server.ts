@@ -2,7 +2,6 @@ import express from 'express';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createServer as createViteServer } from 'vite';
-import { GoogleGenAI } from '@google/genai';
 import {
   ModelLifecycleStatus,
   PlatformLicenseService,
@@ -82,15 +81,16 @@ import {
   UnifiedProcessingOrchestrator,
   type UnifiedProcessingRequest,
 } from './src/processing-engine/index.ts';
-import {
-  CloudAsrConsentRegistry,
-  createStudioCloudAsrRouter,
-  STUDIO_CLOUD_MODEL_ID,
-} from './src/security/CloudAsrConsentRegistry.ts';
+import { LocalCompanionService } from './src/host-bridge/companion/LocalCompanionService.ts';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const PORT = Number(process.env.PORT || 3000);
 const IS_PROD = process.env.NODE_ENV === 'production';
+const RAW_PORT = process.env.PORT;
+const COLLIDES_WITH_NGINX = Boolean(RAW_PORT && process.env.NGINX_PORT && RAW_PORT === process.env.NGINX_PORT);
+const PORT =
+  !IS_PROD || COLLIDES_WITH_NGINX
+    ? Number(process.env.APP_PORT || process.env.DEFAULT_APP_PORT || 3000)
+    : Number(process.env.APP_PORT || RAW_PORT || 3000);
 
 async function startServer() {
   const app = express();
@@ -131,7 +131,7 @@ async function startServer() {
   const unifiedProcessingOrchestrator = new UnifiedProcessingOrchestrator({
     localAdapter: new LocalExecutionAdapter({ coreRouter: coreAsrRouter }),
   });
-  const cloudAsrConsentRegistry = new CloudAsrConsentRegistry();
+  const localCompanionService = new LocalCompanionService();
 
   // Preserve Cross-Origin Isolation so SharedArrayBuffer & OPFS SyncAccessHandle remain active
   app.use((_req, res, next) => {
@@ -221,58 +221,33 @@ async function startServer() {
     })
   );
 
-  // Mount Studio Cloud ASR Consent & Binary WAV Router BEFORE global express.json() so raw
-  // audio/wav payloads are strictly validated, capped at 4 MiB, and never JSON-parsed.
-  app.use(
-    createStudioCloudAsrRouter({
-      registry: cloudAsrConsentRegistry,
-      isApiKeyAvailable: () => Boolean(process.env.GEMINI_API_KEY),
-      transcribeWavBytes: async ({ wavBytes, modelId }) => {
-        const apiKey = process.env.GEMINI_API_KEY;
-        if (!apiKey) {
-          throw new Error('ASR_API_KEY_UNAVAILABLE');
-        }
-        const ai = new GoogleGenAI({
-          apiKey,
-          httpOptions: {
-            headers: {
-              'User-Agent': 'aistudio-build',
-            },
-          },
-        });
-        const response = await ai.models.generateContent({
-          model: modelId || STUDIO_CLOUD_MODEL_ID,
-          contents: {
-            parts: [
-              {
-                inlineData: {
-                  mimeType: 'audio/wav',
-                  data: wavBytes.toString('base64'),
-                },
-              },
-              {
-                text:
-                  'این فایل صوتی را دقیق و کلمه‌به‌کلمه به متن تبدیل کن. این گفتار چندزبانه (Code-Switching) است: ' +
-                  '۱) گفتار اصلی فارسی را همراه با تپق‌ها و کشیدگی‌های گفتاری (مثل اممم، رفتیممم) دقیق پیاده کن. ' +
-                  '۲) اگر کلمات یا اصطلاحات انگلیسی و فنی (مانند API, TypeScript, Backend, Docker, WebGPU, LLM, Cloud, Startup) در میان کلام فارسی بیان شدند، آن‌ها را دقیق تشخیص بده و به فرم استاندارد انگلیسی (Latin) یا معادل دقیق بنویس. ' +
-                  '۳) اگر عبارات یا واژگان عربی (مانند إن شاء الله، الحمد لله، فی‌الواقع، علی‌ای‌حال، تحقیقاً، دقیقاً) بیان شدند، املای صحیح عربی و تنوین آن‌ها را حفظ کن. فقط متن پیاده‌شده را بدون هیچ توضیح اضافی برگردان.',
-              },
-            ],
-          },
-        });
-        const rawText = (response.text ?? '').trim();
-        const transcriptText = rawText
-          .replace(/^```(?:text|txt)?\s*/i, '')
-          .replace(/\s*```$/i, '')
-          .replace(/^["«»]|["«»]$/g, '')
-          .trim();
-        return {
-          transcriptText,
-          model: modelId || STUDIO_CLOUD_MODEL_ID,
-        };
-      },
-    }),
-  );
+  // AVP-P01-006: Strict Local-Only ASR Enforcement — Cloud ASR / audio upload is permanently disabled.
+  app.all('/api/v1/asr/transcribe', (req, res) => {
+    req.resume();
+    res.status(410).json({
+      error: 'LOCAL_ONLY_ASR_POLICY_ENFORCED',
+      code: 'LOCAL_ONLY_CLOUD_ASR_BLOCKED',
+      localOnlyEnforced: true,
+      message:
+        'Cloud ASR audio upload (/api/v1/asr/transcribe) is permanently disabled by AVAPARDAZ Local-Only Policy (AVP-P01-006).',
+      messageFa:
+        'سرویس رونویسی ابری و ارسال صوت به سرور طبق سیاست ۱۰۰٪ محلی آواپرداز به‌طور کامل غیرفعال شده است.',
+    });
+  });
+
+  app.all('/api/v1/asr/cloud-consents', (req, res) => {
+    req.resume();
+    res.status(410).json({
+      error: 'LOCAL_ONLY_ASR_POLICY_ENFORCED',
+      code: 'LOCAL_ONLY_CLOUD_ASR_BLOCKED',
+      localOnlyEnforced: true,
+      message: 'Cloud ASR consent issuance is disabled under AVAPARDAZ Local-Only Policy.',
+    });
+  });
+
+  // AVP-P08/P09/P10: Shared Local Companion Service (Loopback-only, HMAC IPC v1.0.0)
+  // Mounted BEFORE global express.json() so it enforces its own Host/Origin/Loopback security guards.
+  app.use('/api/v2/companion', localCompanionService.createExpressRouter({ allowSameOriginProxyHost: true }));
 
   app.use(express.json({ limit: '16mb' }));
 
@@ -402,17 +377,15 @@ async function startServer() {
 
   app.get('/api/v1/asr/health', (_req, res) => {
     const activeCheckpoint = GLOBAL_PHASE4_CHECKPOINT_MANAGER.getActiveCheckpoint();
-    const cloudGeminiAsrConfigured = Boolean(
-      process.env.GEMINI_API_KEY && process.env.GEMINI_API_KEY.trim().length > 0,
-    );
     res.json({
       status: 'OK',
       hardwareProfile: 'G0_CPU_ONLY',
       activeCheckpointId: activeCheckpoint.checkpointId,
       globalStep: activeCheckpoint.globalStep,
-      releaseStatus: 'PARTIAL',
-      cloudGeminiAsrConfigured,
-      cloudGeminiModel: 'gemini-3.5-transcribe',
+      releaseStatus: 'PHASE_01_LOCAL_FOUNDATION',
+      localOnlyEnforced: true,
+      cloudGeminiAsrConfigured: false,
+      cloudAsrEnabled: false,
     });
   });
 
@@ -672,7 +645,7 @@ async function startServer() {
       res.status(out.status).json(out.body);
       return;
     }
-    const cap = out.body as (typeof PHASE11_CAPABILITY_REGISTRY)[number];
+    const cap = out.body as { capabilityId: string; capabilityVersion: string };
     res.json({ capabilityId: cap.capabilityId, versions: [cap.capabilityVersion] });
   });
 

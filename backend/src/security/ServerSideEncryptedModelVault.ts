@@ -11,13 +11,15 @@ export class ServerSideEncryptedModelVault {
   private readonly masterKekBytes: Buffer;
 
   constructor(masterKeyWrappingHex32Bytes: string) {
-    const buf = Buffer.from(masterKeyWrappingHex32Bytes, 'hex');
-    if (buf.byteLength !== 32) {
+    if (
+      typeof masterKeyWrappingHex32Bytes !== 'string' ||
+      !/^[0-9a-f]{64}$/i.test(masterKeyWrappingHex32Bytes)
+    ) {
       throw new Error(
         'VAULT_INVALID_KEK_LENGTH: کلید اصلی رمزنگاری (KEK) باید دقیقاً ۳۲ بایت (۶۴ کاراکتر Hex) باشد.'
       );
     }
-    this.masterKekBytes = buf;
+    this.masterKekBytes = Buffer.from(masterKeyWrappingHex32Bytes, 'hex');
   }
 
   /**
@@ -36,40 +38,52 @@ export class ServerSideEncryptedModelVault {
     modelId: string,
     version: string
   ): Uint8Array {
+    if (
+      typeof modelId !== 'string' ||
+      modelId.length === 0 ||
+      modelId.includes(':') ||
+      typeof version !== 'string' ||
+      version.length === 0 ||
+      version.includes(':')
+    ) {
+      throw new Error('VAULT_INVALID_AAD_CONTEXT: شناسه مدل و نسخه باید رشته‌های غیرخالی بدون کاراکتر «:» باشند.');
+    }
     const aadContext = Buffer.from(`${modelId}:${version}`, 'utf8');
 
     // A) Generate unique random 256-bit Data Encryption Key (DEK)
     const dek = crypto.randomBytes(32);
 
-    // B) Encrypt model payload with DEK and AAD context
-    const payloadIv = crypto.randomBytes(12);
-    const payloadCipher = crypto.createCipheriv('aes-256-gcm', dek, payloadIv);
-    payloadCipher.setAAD(aadContext);
-    const encryptedPayload = Buffer.concat([
-      payloadCipher.update(plaintextOnnxBytes),
-      payloadCipher.final(),
-    ]);
-    const payloadAuthTag = payloadCipher.getAuthTag();
+    try {
+      // B) Encrypt model payload with DEK and AAD context
+      const payloadIv = crypto.randomBytes(12);
+      const payloadCipher = crypto.createCipheriv('aes-256-gcm', dek, payloadIv);
+      payloadCipher.setAAD(aadContext);
+      const encryptedPayload = Buffer.concat([
+        payloadCipher.update(plaintextOnnxBytes),
+        payloadCipher.final(),
+      ]);
+      const payloadAuthTag = payloadCipher.getAuthTag();
 
-    // C) Wrap DEK with server Master KEK
-    const kekIv = crypto.randomBytes(12);
-    const kekCipher = crypto.createCipheriv('aes-256-gcm', this.masterKekBytes, kekIv);
-    kekCipher.setAAD(aadContext);
-    const wrappedDek = Buffer.concat([kekCipher.update(dek), kekCipher.final()]);
-    const kekAuthTag = kekCipher.getAuthTag();
+      // C) Wrap DEK with server Master KEK
+      const kekIv = crypto.randomBytes(12);
+      const kekCipher = crypto.createCipheriv('aes-256-gcm', this.masterKekBytes, kekIv);
+      kekCipher.setAAD(aadContext);
+      const wrappedDek = Buffer.concat([kekCipher.update(dek), kekCipher.final()]);
+      const kekAuthTag = kekCipher.getAuthTag();
 
-    // Zero out temporary DEK from memory immediately
-    dek.fill(0);
-
-    return Buffer.concat([
-      ServerSideEncryptedModelVault.MAGIC,
-      kekIv,
-      kekAuthTag,
-      wrappedDek,
-      payloadIv,
-      payloadAuthTag,
-      encryptedPayload,
-    ]);
+      return Buffer.concat([
+        ServerSideEncryptedModelVault.MAGIC,
+        kekIv,
+        kekAuthTag,
+        wrappedDek,
+        payloadIv,
+        payloadAuthTag,
+        encryptedPayload,
+      ]);
+    } finally {
+      // Zero out temporary DEK from memory unconditionally, even on failure
+      dek.fill(0);
+    }
   }
 
   /**
@@ -94,6 +108,17 @@ export class ServerSideEncryptedModelVault {
       !buf.subarray(0, 4).equals(ServerSideEncryptedModelVault.MAGIC)
     ) {
       throw new Error('VAULT_INVALID_MAGIC_FORMAT: هدر بسته رمزنگاری‌شده مدل معتبر نیست.');
+    }
+
+    if (
+      typeof expectedModelId !== 'string' ||
+      expectedModelId.length === 0 ||
+      expectedModelId.includes(':') ||
+      typeof expectedVersion !== 'string' ||
+      expectedVersion.length === 0 ||
+      expectedVersion.includes(':')
+    ) {
+      throw new Error('VAULT_INVALID_AAD_CONTEXT: شناسه مدل و نسخه معتبر نیستند.');
     }
 
     const aadContext = Buffer.from(`${expectedModelId}:${expectedVersion}`, 'utf8');

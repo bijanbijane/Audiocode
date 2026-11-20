@@ -1,6 +1,9 @@
-# CORE ASR ENGINE EXECUTION STATE (`CORE-01` .. `CORE-08`)
+# CORE ASR ENGINE EXECUTION STATE (`CORE-01` .. `CORE-08`) — HISTORICAL ARCHIVE
 
-**Last Updated (UTC):** `2026-11-18`  
+> **AUTHORITATIVE STATE NOTICE (2026-11-20 — `PHASE-02` Reconciliation):**  
+> This historical `2026-11-18` milestone log refers to the legacy non-neural acoustic prototype (`CoreAcousticCtcEngine.ts`) and is **SUPERSEDED** by `docs/AVAPARDAZ/CURRENT-STATE.md` and `docs/AVAPARDAZ/MASTER-ROADMAP.md` (`MASTER v3.1`).
+
+**Last Updated (UTC):** `2026-11-18` (Reconciled `2026-11-20`)  
 **Workspace:** `/app/applet`
 
 | Milestone | Scope & Primary Files | Verification Evidence (`[Observed Fact]`) | State |

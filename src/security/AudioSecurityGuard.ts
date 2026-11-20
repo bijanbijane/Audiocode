@@ -114,9 +114,15 @@ export class AudioSecurityGuard {
     }
   }
 
-  public static sanitizeErrorForTelemetry(rawErrorMessage: string): string {
-    return rawErrorMessage
-      .replace(/([a-zA-Z]:\\[^\s]+|\/Users\/[^\s]+|\/home\/[^\s]+)/g, '[REDACTED_PATH]')
+  public static sanitizeErrorForTelemetry(rawErrorMessage: unknown): string {
+    const text =
+      typeof rawErrorMessage === 'string'
+        ? rawErrorMessage
+        : rawErrorMessage instanceof Error
+          ? rawErrorMessage.message
+          : String(rawErrorMessage ?? '');
+    return text
+      .replace(/([a-zA-Z]:\\[^\s]+|\/(?:Users|home|tmp|app|var|etc|usr)\/[^\s]+)/g, '[REDACTED_PATH]')
       .replace(/[\u0600-\u06FF]+(?:\u200c[\u0600-\u06FF]+)*/g, '[REDACTED_PERSIAN_CONTENT]');
   }
 }

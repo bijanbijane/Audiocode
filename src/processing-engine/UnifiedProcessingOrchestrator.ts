@@ -12,6 +12,7 @@ import {
   validateUnifiedProcessingRequest,
   validateUnifiedProcessingResultEnvelope,
 } from './UnifiedProcessingContract';
+import { sanitizeSecurityTelemetry } from '../security/PrivacyRetentionAndIsolationEngine';
 
 export interface UnifiedOrchestratorOptions {
   readonly localAdapter?: UnifiedExecutionAdapter;
@@ -162,7 +163,7 @@ export class UnifiedProcessingOrchestrator {
               code: 'PROCESSING_FAILED',
               executionMode: resolvedMode,
               providerId: adapter.adapterId,
-              detailEn: err instanceof Error ? err.message : String(err),
+              detailEn: sanitizeSecurityTelemetry(err instanceof Error ? err.message : String(err)),
             });
 
       this.recordTrace({

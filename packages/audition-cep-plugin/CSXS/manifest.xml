@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ExtensionManifest Version="11.0" ExtensionBundleId="ir.avapardaz.audition.cep" ExtensionBundleVersion="1.0.0" ExtensionBundleName="AVAPARDAZ — آواپرداز" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <ExtensionList>
+    <Extension Id="ir.avapardaz.audition.panel" Version="1.0.0" />
+  </ExtensionList>
+  <ExecutionEnvironment>
+    <HostList>
+      <!-- Verified Adobe Audition Host ID (UXP is NOT supported by Adobe Audition as of 2026) -->
+      <Host Name="AUDT" Version="[22.0,99.9]" />
+    </HostList>
+    <LocaleList>
+      <Locale Code="All" />
+    </LocaleList>
+    <RequiredRuntimeList>
+      <RequiredRuntime Name="CSXS" Version="11.0" />
+    </RequiredRuntimeList>
+  </ExecutionEnvironment>
+  <DispatchInfoList>
+    <Extension Id="ir.avapardaz.audition.panel">
+      <DispatchInfo>
+        <Resources>
+          <MainPath>./client/index.html</MainPath>
+          <ScriptPath>./jsx/auditionHost.jsx</ScriptPath>
+          <CEFCommandLine>
+            <Parameter>--enable-nodejs</Parameter>
+            <Parameter>--mixed-context</Parameter>
+          </CEFCommandLine>
+        </Resources>
+        <Lifecycle>
+          <AutoVisible>true</AutoVisible>
+        </Lifecycle>
+        <UI>
+          <Type>Panel</Type>
+          <Menu>AVAPARDAZ — آواپرداز</Menu>
+          <Geometry>
+            <Size>
+              <Height>760</Height>
+              <Width>440</Width>
+            </Size>
+            <MinSize>
+              <Height>520</Height>
+              <Width>360</Width>
+            </MinSize>
+            <MaxSize>
+              <Height>1400</Height>
+              <Width>960</Width>
+            </MaxSize>
+          </Geometry>
+        </UI>
+      </DispatchInfo>
+    </Extension>
+  </DispatchInfoList>
+</ExtensionManifest>

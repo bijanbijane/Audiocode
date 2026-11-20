@@ -11,10 +11,17 @@ interface CacheEntry<T> {
 export class SingleFlightReadThroughCache {
   private readonly cache = new Map<string, CacheEntry<unknown>>();
   private readonly inFlightPromises = new Map<string, Promise<unknown>>();
+  private readonly maxEntries: number;
+  private invalidationGeneration = 0;
 
   public hitsCount = 0;
   public missesCount = 0;
   public coalescedRequestsSaved = 0;
+
+  constructor(maxEntries: number = 10_000) {
+    this.maxEntries =
+      Number.isFinite(maxEntries) && maxEntries >= 1 ? Math.floor(maxEntries) : 10_000;
+  }
 
   /**
    * Retrieve from cache or execute exactly one concurrent DB query across all parallel callers for the same key (Single-Flight)
@@ -31,6 +38,9 @@ export class SingleFlightReadThroughCache {
       this.hitsCount++;
       return existing.value;
     }
+    if (existing) {
+      this.cache.delete(key);
+    }
 
     const activePromise = this.inFlightPromises.get(key) as Promise<T> | undefined;
     if (activePromise) {
@@ -39,13 +49,31 @@ export class SingleFlightReadThroughCache {
     }
 
     this.missesCount++;
+    const startGeneration = this.invalidationGeneration;
+    const safeTtlMs = Number.isFinite(ttlMs) && ttlMs > 0 ? ttlMs : 0;
     const loadPromise = (async () => {
       try {
         const freshValue = await loaderFn();
-        this.cache.set(key, {
-          value: freshValue,
-          expiresAtMs: Date.now() + ttlMs,
-        });
+        // Only populate cache if no invalidation occurred while loader was in flight and TTL > 0
+        if (this.invalidationGeneration === startGeneration && safeTtlMs > 0) {
+          const writeNow = Date.now();
+          if (this.cache.size >= this.maxEntries && !this.cache.has(key)) {
+            for (const [k, entry] of this.cache.entries()) {
+              if (entry.expiresAtMs <= writeNow) {
+                this.cache.delete(k);
+              }
+            }
+            while (this.cache.size >= this.maxEntries) {
+              const oldestKey = this.cache.keys().next().value;
+              if (oldestKey === undefined) break;
+              this.cache.delete(oldestKey);
+            }
+          }
+          this.cache.set(key, {
+            value: freshValue,
+            expiresAtMs: writeNow + safeTtlMs,
+          });
+        }
         return freshValue;
       } finally {
         this.inFlightPromises.delete(key);
@@ -60,6 +88,7 @@ export class SingleFlightReadThroughCache {
    * Instant cache invalidation when a model version is REVOKED or rollout state changes (Section 40)
    */
   public invalidateByPrefix(keyPrefix: string): number {
+    this.invalidationGeneration++;
     let removed = 0;
     for (const k of this.cache.keys()) {
       if (k.startsWith(keyPrefix)) {
@@ -81,8 +110,10 @@ export class BackendMetricsExporter {
   public recordRequestLatency(url: string, statusCode: number, elapsedTimeMs: number): void {
     if (url === '/metrics' || url === '/healthz') return;
     this.totalHttpRequests++;
-    if (statusCode >= 500) this.totalHttpErrors5xx++;
-    this.sumLatencyMs += elapsedTimeMs;
+    if (Number.isFinite(statusCode) && statusCode >= 500) this.totalHttpErrors5xx++;
+    if (Number.isFinite(elapsedTimeMs) && elapsedTimeMs >= 0) {
+      this.sumLatencyMs += elapsedTimeMs;
+    }
   }
 
   public registerHooksAndEndpoint(

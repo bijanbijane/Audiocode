@@ -1,0 +1,84 @@
+# AVAPARDAZ PHASE-06 — Verified Qwen3-ASR Persian-English Specialization Config (v2)
+# Supersedes unverified v1 config (which claimed LoRA on official full-SFT script and used non-SHA revision).
+# Hardware Truth: Local container is G0_CPU_ONLY; genuine neural training requires external CUDA GPU.
+
+experiment:
+  name: avapardaz_qwen3_asr_fa_en_p06_v2
+  execution_id: AVP-P06-001
+  seed: 42
+  current_container_profile: G0_CPU_ONLY
+  training_execution_status: BLOCKED_EXTERNAL_TRAINING_COMPUTE
+
+model_selection:
+  primary_cpu_target:
+    profile: AVP_MODEL_BALANCED
+    model_id: Qwen/Qwen3-ASR-0.6B
+    hf_native_model_id: Qwen/Qwen3-ASR-0.6B-hf
+    pinned_commit_sha: PENDING_DOWNLOAD_VERIFICATION
+    license: Apache-2.0
+    rationale: Best balance of Persian/English/Code-Switch quality and realistic local CPU INT8/Q8 RAM (~1.0-1.5 GiB).
+    min_gpu_vram_full_sft_gb: 16
+    min_gpu_vram_lora_gb: 10
+  workstation_quality_target:
+    profile: AVP_MODEL_QUALITY
+    model_id: Qwen/Qwen3-ASR-1.7B
+    hf_native_model_id: Qwen/Qwen3-ASR-1.7B-hf
+    pinned_commit_sha: PENDING_DOWNLOAD_VERIFICATION
+    license: Apache-2.0
+    rationale: Higher Persian/English accuracy for 16-32+ GiB workstations (~2.0-2.5 GiB INT8 RAM).
+    min_gpu_vram_full_sft_gb: 40
+    min_gpu_vram_lora_gb: 20
+
+training_tracks:
+  official_qwen_asr_sft:
+    script: https://github.com/QwenLM/Qwen3-ASR/blob/main/finetuning/qwen3_asr_sft.py
+    lockfile: training/requirements-qwen.lock
+    method: FULL_SUPERVISED_FINE_TUNING
+    supports_peft_lora_natively: false
+    jsonl_schema: '{"audio": "/absolute/path/to/sample.wav", "text": "language Persian<asr_text>..."}'
+    language_prefixes:
+      fa: "language Persian<asr_text>"
+      en: "language English<asr_text>"
+      fa-en-mixed: "language Persian<asr_text>"
+    pilot_hyperparameters:
+      batch_size: 4
+      grad_acc: 4
+      gradient_checkpointing: 1
+      lr: 2.0e-5
+      epochs: 3
+      save_steps: 200
+      save_total_limit: 5
+  native_hf_peft_lora_experimental:
+    lockfile: training/requirements-qwen-hf-native.lock
+    method: LORA
+    requires_module_hierarchy_verification: true
+    candidate_lora_r: 32
+    candidate_lora_alpha: 64
+    candidate_lora_dropout: 0.05
+    candidate_target_modules: ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"]
+
+dataset:
+  canonical_manifest_validator: training/scripts/validate_dataset.py
+  qwen_jsonl_exporter: training/scripts/split_and_export_qwen.py
+  split_ratio_default:
+    train: 0.80
+    validation: 0.10
+    test: 0.10
+  split_policy: speaker_disjoint_and_source_isolated
+  frozen_test_only_sources: ["PESTE_BENCHMARK"]
+  preserve_colloquial_persian: true
+  train_only_augmentation: true
+  verified_augmentation_profiles: ["A00_CLEAN", "A01_GAIN_PERTURB", "A02_WHITE_SNR_18DB", "A03_BAND_LIMIT_TELEPHONE"]
+
+evaluation:
+  evaluator_script: training/scripts/evaluate_asr.py
+  normalization_policy: FA-RELAXED-V1
+  report_raw_and_normalized: true
+  bootstrap_iterations: 10000
+  bootstrap_confidence_level: 0.95
+  bootstrap_seed: 42
+  acceptance_targets:
+    persian_cer_min_abs_improvement_pp: 0.5
+    persian_cer_min_rel_improvement_pct: 5.0
+    english_wer_max_regression_pp: 0.2
+    batch_rtf_target: 0.15

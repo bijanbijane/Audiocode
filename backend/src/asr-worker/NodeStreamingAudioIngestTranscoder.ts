@@ -30,10 +30,22 @@ export class NodeStreamingAudioIngestTranscoder {
     const overlapSec = params.overlapDurationSec ?? 3;
     const maxSec = params.maxAllowedDurationSec ?? 6 * 3600;
 
-    const winSamples = Math.floor(winSec * this.TARGET_RATE);
+    if (
+      !Number.isFinite(winSec) ||
+      winSec <= 0 ||
+      !Number.isFinite(overlapSec) ||
+      overlapSec < 0 ||
+      overlapSec >= winSec ||
+      !Number.isFinite(maxSec) ||
+      maxSec <= 0
+    ) {
+      throw new Error('INVALID_TRANSCODER_WINDOW_CONFIG');
+    }
+
+    const winSamples = Math.max(1, Math.floor(winSec * this.TARGET_RATE));
     const overlapSamples = Math.floor(overlapSec * this.TARGET_RATE);
     const strideSamples = Math.max(1, winSamples - overlapSamples);
-    const maxAllowedSamples = Math.floor(maxSec * this.TARGET_RATE);
+    const maxAllowedSamples = Math.max(1, Math.floor(maxSec * this.TARGET_RATE));
 
     let leftoverBytes = Buffer.alloc(0);
     let ringSamples = new Float32Array(0);
@@ -113,6 +125,18 @@ export class NodeStreamingAudioIngestTranscoder {
     ffmpegBinaryPath?: string;
     abortSignal?: AbortSignal;
   }): AsyncGenerator<StreamedAsrWindowChunk, void, void> {
+    if (
+      typeof params.inputFilePath !== 'string' ||
+      params.inputFilePath.trim().length === 0 ||
+      params.inputFilePath.includes('\0') ||
+      params.inputFilePath.startsWith('-') ||
+      /^(?:concat|subfile|pipe|crypto|data|file|http|https|ftp|rtmp|rtsp):/i.test(
+        params.inputFilePath.trim(),
+      )
+    ) {
+      throw new Error('INVALID_FFMPEG_INPUT_PATH');
+    }
+
     const ffmpeg = spawn(
       params.ffmpegBinaryPath ?? 'ffmpeg',
       [
@@ -133,9 +157,17 @@ export class NodeStreamingAudioIngestTranscoder {
       { stdio: ['ignore', 'pipe', 'pipe'] },
     );
 
+    const spawnState: { error: Error | null } = { error: null };
+    ffmpeg.once('error', (err: Error) => {
+      spawnState.error = err;
+    });
+
+    const maxStderrBytes = 8192;
     let stderrText = '';
     ffmpeg.stderr.on('data', (d: Buffer) => {
-      stderrText += d.toString('utf8');
+      if (stderrText.length < maxStderrBytes) {
+        stderrText += d.toString('utf8').slice(0, maxStderrBytes - stderrText.length);
+      }
     });
 
     const abortHandler = () => {
@@ -152,6 +184,10 @@ export class NodeStreamingAudioIngestTranscoder {
         onKillProcess: () => ffmpeg.kill('SIGKILL'),
         abortSignal: params.abortSignal,
       });
+
+      if (spawnState.error) {
+        throw new Error(`FFMPEG_SPAWN_FAILED: ${spawnState.error.message}`);
+      }
 
       const exitCode = await new Promise<number | null>((resolve) => {
         if (ffmpeg.exitCode !== null) resolve(ffmpeg.exitCode);

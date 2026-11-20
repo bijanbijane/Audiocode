@@ -11,6 +11,7 @@ import {
   UnifiedProcessingResultEnvelope,
   validateUnifiedProcessingResultEnvelope,
 } from './UnifiedProcessingContract';
+import { sanitizeSecurityTelemetry } from '../security/PrivacyRetentionAndIsolationEngine';
 
 export interface CloudProviderConfig {
   readonly providerId: string;
@@ -128,7 +129,7 @@ export class CloudExecutionAdapter implements UnifiedExecutionAdapter {
     const bodyObj = body && typeof body === 'object' ? (body as Record<string, unknown>) : null;
     const detail =
       typeof bodyObj?.message === 'string'
-        ? bodyObj.message
+        ? sanitizeSecurityTelemetry(bodyObj.message)
         : `Remote provider returned HTTP ${status}.`;
 
     let code: UnifiedProcessingErrorCode;
@@ -295,7 +296,7 @@ export class CloudExecutionAdapter implements UnifiedExecutionAdapter {
                   code: 'CLOUD_PROVIDER_UNAVAILABLE',
                   executionMode: 'CLOUD',
                   providerId: this.config.providerId,
-                  detailEn: err instanceof Error ? err.message : String(err),
+                  detailEn: sanitizeSecurityTelemetry(err instanceof Error ? err.message : String(err)),
                 });
 
         lastError = mapped;
@@ -311,7 +312,34 @@ export class CloudExecutionAdapter implements UnifiedExecutionAdapter {
         }
 
         attempt++;
-        await new Promise((r) => setTimeout(r, this.backoffBaseMs * attempt));
+        const backoffMs = this.backoffBaseMs * attempt;
+        await new Promise<void>((resolve, reject) => {
+          if (signal?.aborted) {
+            reject(
+              new UnifiedProcessingError({
+                code: 'PROCESSING_CANCELLED',
+                executionMode: 'CLOUD',
+                providerId: this.config.providerId,
+              }),
+            );
+            return;
+          }
+          const onBackoffAbort = () => {
+            clearTimeout(backoffTimer);
+            reject(
+              new UnifiedProcessingError({
+                code: 'PROCESSING_CANCELLED',
+                executionMode: 'CLOUD',
+                providerId: this.config.providerId,
+              }),
+            );
+          };
+          const backoffTimer = setTimeout(() => {
+            signal?.removeEventListener('abort', onBackoffAbort);
+            resolve();
+          }, backoffMs);
+          signal?.addEventListener('abort', onBackoffAbort, { once: true });
+        });
       }
     }
 

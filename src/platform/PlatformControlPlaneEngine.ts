@@ -1028,6 +1028,7 @@ export class PlatformControlPlaneService {
       throw new Error(`INVALID_SCOPES: ${scopeCheck.message}`);
     }
 
+    const effectiveDelegationRole = params.issuerRole ?? activeMemberships[0].role;
     if (params.issuerRole) {
       const delegation = validateScopeDelegation({
         issuerRole: params.issuerRole,
@@ -1037,6 +1038,24 @@ export class PlatformControlPlaneService {
         throw new Error(
           `SCOPE_DELEGATION_DENIED: Requested scopes exceed issuer role policy (${delegation.deniedScopes.join(', ')}).`,
         );
+      }
+    } else {
+      const controlPlanePrivilegedScopes: ReadonlySet<ApiCredentialScope> = new Set([
+        'api-keys:manage',
+        'projects:write',
+        'billing:write',
+      ]);
+      const requestedPrivileged = scopeCheck.scopes.filter((s) => controlPlanePrivilegedScopes.has(s));
+      if (requestedPrivileged.length > 0) {
+        const principalDelegation = validateScopeDelegation({
+          issuerRole: effectiveDelegationRole,
+          requestedScopes: requestedPrivileged,
+        });
+        if (!principalDelegation.allowed) {
+          throw new Error(
+            `SCOPE_DELEGATION_DENIED: Principal role ${effectiveDelegationRole} cannot be issued privileged control-plane scopes (${principalDelegation.deniedScopes.join(', ')}).`,
+          );
+        }
       }
     }
 
