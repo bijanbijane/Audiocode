@@ -29,7 +29,7 @@ export const ProcessingGraphView: React.FC<ProcessingGraphViewProps> = ({
   const safeSampleRate = Number.isFinite(sampleRate) && sampleRate > 0 ? sampleRate : 48_000;
 
   return (
-    <div className="space-y-6">
+    <div dir="rtl" className="space-y-6">
       {/* Top KPI Summary */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         <div className="border border-[#252F42] bg-[#131924] rounded-lg p-4">

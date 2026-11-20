@@ -55,10 +55,13 @@ export const SpeechSecurityModal: React.FC<SpeechSecurityModalProps> = ({ isOpen
     setLoading(true);
     try {
       const resp = await fetch('/api/v1/security/sandbox/overview');
+      if (!resp.ok) {
+        throw new Error(`HTTP ${resp.status}`);
+      }
       const json = (await resp.json()) as SecurityOverviewPayload;
       setData(json);
     } catch (err) {
-      setActionMsg(`خطا در بارگذاری داده‌های امنیتی: ${String(err)}`);
+      setActionMsg(`خطا در بارگذاری داده‌های امنیتی: ${err instanceof Error ? err.message : String(err)}`);
     } finally {
       setLoading(false);
     }
@@ -70,17 +73,29 @@ export const SpeechSecurityModal: React.FC<SpeechSecurityModalProps> = ({ isOpen
     }
   }, [isOpen]);
 
+  useEffect(() => {
+    if (!isOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [isOpen, onClose]);
+
   if (!isOpen) return null;
 
   const handleRunRedTeam = async () => {
     setLoading(true);
     try {
       const resp = await fetch('/api/v1/security/sandbox/red-team/run', { method: 'POST' });
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
       const resJson = (await resp.json()) as { groups: RedTeamGroupResult[] };
       await fetchOverview();
       const totalPassed = resJson.groups.reduce((a, b) => a + b.passedChecks, 0);
       const totalAll = resJson.groups.reduce((a, b) => a + b.totalChecks, 0);
       setActionMsg(`ماتریس Red Team اجرا شد: ${totalPassed} از ${totalAll} تست دفاعی موفق.`);
+    } catch (err) {
+      setActionMsg(`خطا در اجرای ماتریس Red Team: ${err instanceof Error ? err.message : String(err)}`);
     } finally {
       setLoading(false);
     }
@@ -94,9 +109,12 @@ export const SpeechSecurityModal: React.FC<SpeechSecurityModalProps> = ({ isOpen
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ recordingId: 'rec_sandbox_pii', originalTranscript: piiInput }),
       });
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
       const deriv = (await resp.json()) as RedactedTranscriptDerivative;
       await fetchOverview();
       setActionMsg(`مشتق سانسورشده PII ساخته شد (${deriv.redactionsApplied} مورد) و متن اصلی دست‌نخورده حفظ گردید.`);
+    } catch (err) {
+      setActionMsg(`خطا در ساخت مشتق PII: ${err instanceof Error ? err.message : String(err)}`);
     } finally {
       setLoading(false);
     }
@@ -110,6 +128,7 @@ export const SpeechSecurityModal: React.FC<SpeechSecurityModalProps> = ({ isOpen
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ transcriptText: promptProbe }),
       });
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
       const resJson = (await resp.json()) as {
         envelope: { promptInjectionDetected: boolean; neutralizedDirectives: string[] };
         toolDecision: { authorized: boolean; reasonCode: string };
@@ -118,6 +137,8 @@ export const SpeechSecurityModal: React.FC<SpeechSecurityModalProps> = ({ isOpen
       setActionMsg(
         `تزریق دستور مسدود شد (${resJson.toolDecision.reasonCode}) — دستورهای خنثی‌شده: ${resJson.envelope.neutralizedDirectives.length}`
       );
+    } catch (err) {
+      setActionMsg(`خطا در تست مرز تزریق دستور: ${err instanceof Error ? err.message : String(err)}`);
     } finally {
       setLoading(false);
     }
@@ -131,9 +152,12 @@ export const SpeechSecurityModal: React.FC<SpeechSecurityModalProps> = ({ isOpen
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ recordingId: 'rec_sandbox_pii' }),
       });
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
       const del = (await resp.json()) as DeletionCascadeReport;
       await fetchOverview();
       setActionMsg(`حذف آبشاری انجام شد (${del.purgedStores.length} مخزن زنده پاک‌سازی شدند).`);
+    } catch (err) {
+      setActionMsg(`خطا در حذف آبشاری: ${err instanceof Error ? err.message : String(err)}`);
     } finally {
       setLoading(false);
     }

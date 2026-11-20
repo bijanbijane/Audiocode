@@ -90,67 +90,88 @@ export const LifecycleManagementModal: React.FC<LifecycleManagementModalProps> =
     const file = e.target.files?.[0];
     e.target.value = '';
     if (!file) return;
-    const bytes = new Uint8Array(await file.arrayBuffer());
-    const sha = await computeSha256Hex(bytes);
-    const res = await modelManager.installOrUpdateFromStream({
-      manifest: {
-        modelId: file.name.replace(/\.onnx$/i, '') || 'local-persian-asr',
-        modelVersion: '1.0.0-local',
-        architecture: 'FASTCONFORMER_CTC',
-        fileName: file.name,
-        expectedByteLength: bytes.byteLength,
-        expectedSha256Hex: sha,
-      },
-      stream: {
-        supportsRangeResume: false,
-        async fetchRange(start: number, end: number) {
-          return bytes.subarray(start, end);
+    try {
+      const bytes = new Uint8Array(await file.arrayBuffer());
+      const sha = await computeSha256Hex(bytes);
+      const res = await modelManager.installOrUpdateFromStream({
+        manifest: {
+          modelId: file.name.replace(/\.onnx$/i, '') || 'local-persian-asr',
+          modelVersion: '1.0.0-local',
+          architecture: 'FASTCONFORMER_CTC',
+          fileName: file.name,
+          expectedByteLength: bytes.byteLength,
+          expectedSha256Hex: sha,
         },
-      },
-      sourceOrigin: 'local-user-file',
-      license: 'User-supplied local ONNX weights',
-    });
-    if (res.ok) {
-      await modelManager.verifyInstalledActiveModelOffline();
+        stream: {
+          supportsRangeResume: false,
+          async fetchRange(start: number, end: number) {
+            return bytes.subarray(start, end);
+          },
+        },
+        sourceOrigin: 'local-user-file',
+        license: 'User-supplied local ONNX weights',
+      });
+      if (res.ok) {
+        await modelManager.verifyInstalledActiveModelOffline();
+        setStatusMessage(
+          isFa
+            ? `مدل محلی «${file.name}» با SHA-256 تأیید و ثبت شد.`
+            : `Local model "${file.name}" verified with SHA-256 and registered.`,
+        );
+        onModelStateChanged();
+      } else {
+        setStatusMessage(res.snapshot.lastError ?? 'Model installation failed.');
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
       setStatusMessage(
-        isFa
-          ? `مدل محلی «${file.name}» با SHA-256 تأیید و ثبت شد.`
-          : `Local model "${file.name}" verified with SHA-256 and registered.`,
+        isFa ? `خطا در نصب فایل مدل محلی: ${msg}` : `Failed to install local model: ${msg}`,
       );
-      onModelStateChanged();
-    } else {
-      setStatusMessage(res.snapshot.lastError ?? 'Model installation failed.');
     }
   };
 
   const handleRemoveModel = async () => {
-    await modelManager.removeActiveModel();
-    setStatusMessage(
-      isFa
-        ? 'مدل محلی حذف شد. تمام پروژه‌ها و فایل‌های صوتی کاربر دست‌نخورده باقی ماندند.'
-        : 'Local model removed. All user projects and audio files remain untouched.',
-    );
-    onModelStateChanged();
+    try {
+      await modelManager.removeActiveModel();
+      setStatusMessage(
+        isFa
+          ? 'مدل محلی حذف شد. تمام پروژه‌ها و فایل‌های صوتی کاربر دست‌نخورده باقی ماندند.'
+          : 'Local model removed. All user projects and audio files remain untouched.',
+      );
+      onModelStateChanged();
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setStatusMessage(
+        isFa ? `خطا در حذف مدل محلی: ${msg}` : `Failed to remove local model: ${msg}`,
+      );
+    }
   };
 
   const handleCheckOfflineReadiness = async () => {
-    const swReg =
-      typeof navigator !== 'undefined' &&
-      'serviceWorker' in navigator &&
-      Boolean(navigator.serviceWorker.controller);
-    const critical = ['/', '/index.html', '/manifest.webmanifest'];
-    const rep = await AppUpdateAndShellManager.verifyActualOfflineReadiness({
-      serviceWorkerRegistered: swReg,
-      criticalAssets: critical,
-      hasCachedAsset: async (assetPath) => {
-        if (typeof caches === 'undefined') return false;
-        const m = await caches.match(assetPath);
-        return Boolean(m);
-      },
-      wasmAssetsCached: typeof WebAssembly === 'object',
-      localModelInstalled: Boolean(modelSnap.activeModel),
-    });
-    setOfflineReport(rep);
+    try {
+      const swReg =
+        typeof navigator !== 'undefined' &&
+        'serviceWorker' in navigator &&
+        Boolean(navigator.serviceWorker.controller);
+      const critical = ['/', '/index.html', '/manifest.webmanifest'];
+      const rep = await AppUpdateAndShellManager.verifyActualOfflineReadiness({
+        serviceWorkerRegistered: swReg,
+        criticalAssets: critical,
+        hasCachedAsset: async (assetPath) => {
+          if (typeof caches === 'undefined') return false;
+          const m = await caches.match(assetPath);
+          return Boolean(m);
+        },
+        wasmAssetsCached: typeof WebAssembly === 'object',
+        localModelInstalled: Boolean(modelSnap.activeModel),
+      });
+      setOfflineReport(rep);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setStatusMessage(
+        isFa ? `خطا در بررسی آمادگی آفلاین: ${msg}` : `Offline readiness check failed: ${msg}`,
+      );
+    }
   };
 
   const handleRunHealthChecks = async () => {
@@ -162,79 +183,105 @@ export const LifecycleManagementModal: React.FC<LifecycleManagementModalProps> =
       });
       const rep = await registry.checkAll({ lightweightOnly: false });
       setHealthReport(rep);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setStatusMessage(
+        isFa ? `خطا در اجرای بررسی سلامت زیرسیستم‌ها: ${msg}` : `Subsystem health check failed: ${msg}`,
+      );
     } finally {
       setRunningHealth(false);
     }
   };
 
   const handleInspectStorage = async () => {
-    const rep = await StorageAndDiagnosticsManager.inspectStorage({
-      installedModelBytes: modelSnap.activeModel?.fileSizeBytes ?? 0,
-      projectMetadataBytes: JSON.stringify({
-        projectId: workflowState.projectId,
-        versions: workflowState.transcriptVersions.length,
-      }).length,
-      tempRenderBytes: 0,
-      partialModelBytes: modelSnap.partialDownload?.receivedBytes ?? 0,
-      recoverableCheckpointCount: workflowState.recoverableCheckpoint ? 1 : 0,
-    });
-    setStorageReport(rep);
+    try {
+      const rep = await StorageAndDiagnosticsManager.inspectStorage({
+        installedModelBytes: modelSnap.activeModel?.fileSizeBytes ?? 0,
+        projectMetadataBytes: JSON.stringify({
+          projectId: workflowState.projectId,
+          versions: workflowState.transcriptVersions.length,
+        }).length,
+        tempRenderBytes: 0,
+        partialModelBytes: modelSnap.partialDownload?.receivedBytes ?? 0,
+        recoverableCheckpointCount: workflowState.recoverableCheckpoint ? 1 : 0,
+      });
+      setStorageReport(rep);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setStatusMessage(
+        isFa ? `خطا در بازرسی فضای ذخیره‌سازی: ${msg}` : `Storage inspection failed: ${msg}`,
+      );
+    }
   };
 
   const handleSafeCleanup = async () => {
-    const cleanedPartial = await modelManager.cleanupInvalidPartialDownloads();
-    setStatusMessage(
-      isFa
-        ? `پاک‌سازی ایمن انجام شد (${cleanedPartial} فایل نیمه‌کاره حذف شد؛ هیچ پروژه یا صوت کاربری لمس نشد).`
-        : `Safe cleanup completed (${cleanedPartial} partial download(s) removed; user projects untouched).`,
-    );
-    await handleInspectStorage();
+    try {
+      const cleanedPartial = await modelManager.cleanupInvalidPartialDownloads();
+      setStatusMessage(
+        isFa
+          ? `پاک‌سازی ایمن انجام شد (${cleanedPartial} فایل نیمه‌کاره حذف شد؛ هیچ پروژه یا صوت کاربری لمس نشد).`
+          : `Safe cleanup completed (${cleanedPartial} partial download(s) removed; user projects untouched).`,
+      );
+      await handleInspectStorage();
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setStatusMessage(
+        isFa ? `خطا در پاک‌سازی ایمن: ${msg}` : `Safe cleanup failed: ${msg}`,
+      );
+    }
   };
 
   const handleExportProjectBackup = async () => {
-    const nowMs = Date.now();
-    const envelope: PersistedProjectEnvelope = {
-      schemaVersion: AVAPARDAZ_VERSION_CONTRACT.projectSchemaVersion,
-      projectSchemaVersion: AVAPARDAZ_VERSION_CONTRACT.projectSchemaVersion,
-      appVersion: AVAPARDAZ_VERSION_CONTRACT.appVersion,
-      projectId: workflowState.projectId,
-      projectName: workflowState.projectName,
-      createdAtMs: nowMs,
-      updatedAtMs: nowMs,
-      sourceAudioRef: workflowState.sourceAudio
-        ? {
-            sourceAudioId: workflowState.sourceAudio.sourceAudioId,
-            sourceAudioHash: workflowState.sourceAudio.sourceAudioHash,
-            fileName: workflowState.sourceAudio.fileName,
-            sampleRate: workflowState.sourceAudio.sampleRate,
-          }
-        : null,
-      transcriptVersions: workflowState.transcriptVersions.map((v) => ({ ...v })),
-      edlSnapshot: workflowState.edlSnapshot,
-    };
+    try {
+      const nowMs = Date.now();
+      const envelope: PersistedProjectEnvelope = {
+        schemaVersion: AVAPARDAZ_VERSION_CONTRACT.projectSchemaVersion,
+        projectSchemaVersion: AVAPARDAZ_VERSION_CONTRACT.projectSchemaVersion,
+        appVersion: AVAPARDAZ_VERSION_CONTRACT.appVersion,
+        projectId: workflowState.projectId,
+        projectName: workflowState.projectName,
+        createdAtMs: nowMs,
+        updatedAtMs: nowMs,
+        sourceAudioRef: workflowState.sourceAudio
+          ? {
+              sourceAudioId: workflowState.sourceAudio.sourceAudioId,
+              sourceAudioHash: workflowState.sourceAudio.sourceAudioHash,
+              fileName: workflowState.sourceAudio.fileName,
+              sampleRate: workflowState.sourceAudio.sampleRate,
+            }
+          : null,
+        transcriptVersions: workflowState.transcriptVersions.map((v) => ({ ...v })),
+        edlSnapshot: workflowState.edlSnapshot,
+      };
 
-    const res = await ProjectBackupAndRestore.createBackup({
-      project: envelope,
-      mode: backupMode,
-    });
-    if (!res.ok || !res.packageJson || !res.fileName) {
-      setStatusMessage(res.error ?? 'Backup creation failed.');
-      return;
+      const res = await ProjectBackupAndRestore.createBackup({
+        project: envelope,
+        mode: backupMode,
+      });
+      if (!res.ok || !res.packageJson || !res.fileName) {
+        setStatusMessage(res.error ?? 'Backup creation failed.');
+        return;
+      }
+      const blob = new Blob([res.packageJson], { type: 'application/json;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = res.fileName;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      window.setTimeout(() => URL.revokeObjectURL(url), 2000);
+      setStatusMessage(
+        isFa
+          ? `بسته پشتیبان (${backupMode}) با کد اصالت SHA-256 آماده و ذخیره شد.`
+          : `Project backup (${backupMode}) packaged with SHA-256 manifest.`,
+      );
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setStatusMessage(
+        isFa ? `خطا در ساخت بسته پشتیبان: ${msg}` : `Backup export failed: ${msg}`,
+      );
     }
-    const blob = new Blob([res.packageJson], { type: 'application/json;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = res.fileName;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-    setStatusMessage(
-      isFa
-        ? `بسته پشتیبان (${backupMode}) با کد اصالت SHA-256 آماده و ذخیره شد.`
-        : `Project backup (${backupMode}) packaged with SHA-256 manifest.`,
-    );
   };
 
   const handleRefreshDiagnostics = () => {

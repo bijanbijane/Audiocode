@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   Activity,
   AlertTriangle,
@@ -190,9 +190,19 @@ export const AsrResearchLabModal: React.FC<AsrResearchLabModalProps> = ({
   );
   const [trainingConsent, setTrainingConsent] = useState(false);
   const [fbResultMsg, setFbResultMsg] = useState<string | null>(null);
+  const [benchmarkError, setBenchmarkError] = useState<string | null>(null);
   const [canaryState, setCanaryState] = useState(() => ({
     ...GLOBAL_CONTINUOUS_LEARNING_HUB.canaryState,
   }));
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [isOpen, onClose]);
 
   // Derived analytics
   const datasetAudit = useMemo(() => {
@@ -290,6 +300,7 @@ export const AsrResearchLabModal: React.FC<AsrResearchLabModalProps> = ({
 
   const handleRunBenchmark = async () => {
     setIsRunningExp(true);
+    setBenchmarkError(null);
     try {
       const pcm = studioPcm && studioPcm.length > 0 ? studioPcm : new Float32Array(16000);
       const audioReport = validateAndPreprocessAudioForLab({
@@ -311,6 +322,9 @@ export const AsrResearchLabModal: React.FC<AsrResearchLabModalProps> = ({
         },
       });
       setExpResult(res);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setBenchmarkError(`خطا در اجرای بنچمارک ASR: ${msg}`);
     } finally {
       setIsRunningExp(false);
     }
@@ -323,8 +337,10 @@ export const AsrResearchLabModal: React.FC<AsrResearchLabModalProps> = ({
     const a = document.createElement('a');
     a.href = url;
     a.download = `${expResult.experimentId}.json`;
+    document.body.appendChild(a);
     a.click();
-    URL.revokeObjectURL(url);
+    document.body.removeChild(a);
+    window.setTimeout(() => URL.revokeObjectURL(url), 2000);
   };
 
   const handleRunPhase4Inference = () => {
@@ -610,6 +626,11 @@ export const AsrResearchLabModal: React.FC<AsrResearchLabModalProps> = ({
 
         {/* Main Scrollable Content */}
         <div className="flex-1 overflow-y-auto p-5 space-y-5">
+          {benchmarkError && (
+            <div className="p-3 rounded-lg border border-rose-500/40 bg-rose-500/10 text-xs text-rose-200">
+              {benchmarkError}
+            </div>
+          )}
           {/* TAB 1: BENCHMARK & ERROR TAXONOMY */}
           {activeTab === 'benchmark' && (
             <section className="space-y-4">

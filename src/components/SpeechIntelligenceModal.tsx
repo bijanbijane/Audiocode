@@ -89,14 +89,21 @@ export const SpeechIntelligenceModal: React.FC<SpeechIntelligenceModalProps> = (
   const [notice, setNotice] = useState<string | null>(null);
 
   const loadOverview = async () => {
-    const res = await fetch('/api/v1/intelligence/sandbox/overview');
-    if (res.ok) {
-      const data = (await res.json()) as {
-        capabilities: CapabilityDescriptor[];
-        connectors: EnterpriseConnectorRecord[];
-      };
-      setCapabilities(data.capabilities);
-      setConnectors(data.connectors);
+    try {
+      const res = await fetch('/api/v1/intelligence/sandbox/overview');
+      if (res.ok) {
+        const data = (await res.json()) as {
+          capabilities: CapabilityDescriptor[];
+          connectors: EnterpriseConnectorRecord[];
+        };
+        setCapabilities(data.capabilities);
+        setConnectors(data.connectors);
+      } else {
+        setNotice(`خطا در بارگذاری نمای کلی هوش گفتار (کد ${res.status}).`);
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setNotice(`خطا در ارتباط با سرویس هوش گفتار: ${msg}`);
     }
   };
 
@@ -105,6 +112,15 @@ export const SpeechIntelligenceModal: React.FC<SpeechIntelligenceModalProps> = (
       void loadOverview();
     }
   }, [isOpen]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [isOpen, onClose]);
 
   if (!isOpen) return null;
 
@@ -142,50 +158,77 @@ export const SpeechIntelligenceModal: React.FC<SpeechIntelligenceModalProps> = (
         setNotice(
           `پایپ‌لاین DAG با وضعیت ${data.job.status} اجرا شد (${data.job.completedCapabilities.length} موفق / ${data.job.failedCapabilities.length} مسدود یا ناموفق).`
         );
+      } else {
+        const err = (await res.json().catch(() => ({}))) as { message?: string };
+        setNotice(`خطا در اجرای پایپ‌لاین DAG (کد ${res.status}): ${err.message ?? 'پاسخ نامعتبر'}`);
       }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setNotice(`خطا در اجرای پایپ‌لاین DAG: ${msg}`);
     } finally {
       setIsRunning(false);
     }
   };
 
   const handleSemanticSearch = async () => {
-    const res = await fetch('/api/v1/intelligence/sandbox/search', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ recordingId, query: searchQuery }),
-    });
-    if (res.ok) {
-      const data = (await res.json()) as { results: SemanticSearchResultItem[] };
-      setSearchResults(data.results);
+    try {
+      const res = await fetch('/api/v1/intelligence/sandbox/search', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ recordingId, query: searchQuery }),
+      });
+      if (res.ok) {
+        const data = (await res.json()) as { results: SemanticSearchResultItem[] };
+        setSearchResults(data.results);
+      } else {
+        setNotice(`خطا در جستجوی معنایی (کد ${res.status}).`);
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setNotice(`خطا در جستجوی معنایی: ${msg}`);
     }
   };
 
   const handleCascadeDelete = async () => {
-    const res = await fetch(`/api/v1/intelligence/sandbox/recordings/${encodeURIComponent(recordingId)}`, {
-      method: 'DELETE',
-    });
-    if (res.ok) {
-      const data = (await res.json()) as { deletedArtifactsCount: number; deletedVectorsCount: number };
-      setArtifacts([]);
-      setSearchResults([]);
-      setNotice(
-        `حذف زنجیره‌ای انجام شد: ${data.deletedArtifactsCount} آرتیفکت مشتق و ${data.deletedVectorsCount} بردار جستجو با حفظ جداسازی مستأجر پاک شدند.`
-      );
+    try {
+      const res = await fetch(`/api/v1/intelligence/sandbox/recordings/${encodeURIComponent(recordingId)}`, {
+        method: 'DELETE',
+      });
+      if (res.ok) {
+        const data = (await res.json()) as { deletedArtifactsCount: number; deletedVectorsCount: number };
+        setArtifacts([]);
+        setSearchResults([]);
+        setNotice(
+          `حذف زنجیره‌ای انجام شد: ${data.deletedArtifactsCount} آرتیفکت مشتق و ${data.deletedVectorsCount} بردار جستجو با حفظ جداسازی مستأجر پاک شدند.`
+        );
+      } else {
+        setNotice(`خطا در حذف زنجیره‌ای آرتیفکت‌ها (کد ${res.status}).`);
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setNotice(`خطا در حذف زنجیره‌ای: ${msg}`);
     }
   };
 
   const handleRunRealtimeSim = async () => {
-    const res = await fetch('/api/v1/intelligence/sandbox/realtime-sim', { method: 'POST' });
-    if (res.ok) {
-      const data = (await res.json()) as {
-        events: RealtimeIntelligenceEvent[];
-        asrStreamAliveThroughout: boolean;
-        backpressureTriggeredOnOverload: boolean;
-      };
-      setRealtimeEvents(data.events);
-      setRealtimeStatusNote(
-        `جریان اصلی ASR پایدار ماند (${data.asrStreamAliveThroughout ? 'ACTIVE' : 'BROKEN'}) · ایزوله‌سازی Backpressure روی تاخیر مازاد: ${data.backpressureTriggeredOnOverload ? 'فعال شد' : 'خیر'}`
-      );
+    try {
+      const res = await fetch('/api/v1/intelligence/sandbox/realtime-sim', { method: 'POST' });
+      if (res.ok) {
+        const data = (await res.json()) as {
+          events: RealtimeIntelligenceEvent[];
+          asrStreamAliveThroughout: boolean;
+          backpressureTriggeredOnOverload: boolean;
+        };
+        setRealtimeEvents(data.events);
+        setRealtimeStatusNote(
+          `جریان اصلی ASR پایدار ماند (${data.asrStreamAliveThroughout ? 'ACTIVE' : 'BROKEN'}) · ایزوله‌سازی Backpressure روی تاخیر مازاد: ${data.backpressureTriggeredOnOverload ? 'فعال شد' : 'خیر'}`
+        );
+      } else {
+        setNotice(`خطا در شبیه‌سازی جریان زنده (کد ${res.status}).`);
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setNotice(`خطا در شبیه‌سازی جریان زنده: ${msg}`);
     }
   };
 

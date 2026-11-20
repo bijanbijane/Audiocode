@@ -101,31 +101,63 @@ export function resampleTo16kMono(
   const beta = 6.5; // Kaiser beta (~65+ dB stopband attenuation)
   const invI0Beta = 1 / besselI0(beta);
 
+  // Precompute polyphase normalized filter bank so besselI0 & sin run once per phase (not per sample!)
+  const isIntegerRatio = Math.abs(ratio - Math.round(ratio)) < 1e-9;
+  const phaseCount = isIntegerRatio ? 1 : 256;
+  const kernelTable = new Float32Array(phaseCount * filterTaps);
+  for (let p = 0; p < phaseCount; p++) {
+    const frac = p / phaseCount;
+    const base = p * filterTaps;
+    let wSum = 0;
+    for (let t = -halfWidth; t <= halfWidth; t++) {
+      const x = t - frac;
+      const norm = x / halfWidth;
+      let w = 0;
+      if (Math.abs(norm) <= 1) {
+        const win = besselI0(beta * Math.sqrt(Math.max(0, 1 - norm * norm))) * invI0Beta;
+        const sincArg = 2 * fc * x;
+        const sinc =
+          Math.abs(sincArg) < 1e-8 ? 2 * fc : Math.sin(Math.PI * sincArg) / (Math.PI * x);
+        w = sinc * win;
+      }
+      kernelTable[base + (t + halfWidth)] = w;
+      wSum += w;
+    }
+    if (wSum > 1e-9) {
+      const invW = 1 / wSum;
+      for (let k = 0; k < filterTaps; k++) {
+        kernelTable[base + k] *= invW;
+      }
+    }
+  }
+
   for (let outIdx = 0; outIdx < outputLength; outIdx++) {
     const center = outIdx * ratio;
     const centerInt = Math.floor(center);
-    const startTap = Math.max(0, centerInt - halfWidth);
-    const endTap = Math.min(inputLength - 1, centerInt + halfWidth);
+    const frac = center - centerInt;
+    const phaseIdx = phaseCount === 1 ? 0 : Math.min(phaseCount - 1, Math.round(frac * phaseCount) % phaseCount);
+    const kernelBase = phaseIdx * filterTaps;
 
-    let acc = 0;
-    let weightSum = 0;
-
-    for (let inIdx = startTap; inIdx <= endTap; inIdx++) {
-      const x = inIdx - center;
-      const norm = x / halfWidth;
-      const windowArg = Math.max(0, 1 - norm * norm);
-      const win = besselI0(beta * Math.sqrt(windowArg)) * invI0Beta;
-      const sincArg = 2 * fc * x;
-      const sinc =
-        Math.abs(sincArg) < 1e-8
-          ? 2 * fc
-          : Math.sin(Math.PI * sincArg) / (Math.PI * x);
-      const w = sinc * win;
-      acc += mono[inIdx] * w;
-      weightSum += w;
+    const startOffset = centerInt - halfWidth;
+    if (startOffset >= 0 && centerInt + halfWidth < inputLength) {
+      let acc = 0;
+      for (let k = 0; k < filterTaps; k++) {
+        acc += mono[startOffset + k] * kernelTable[kernelBase + k];
+      }
+      output[outIdx] = acc;
+    } else {
+      let acc = 0;
+      let weightSum = 0;
+      for (let k = 0; k < filterTaps; k++) {
+        const inIdx = startOffset + k;
+        if (inIdx >= 0 && inIdx < inputLength) {
+          const w = kernelTable[kernelBase + k];
+          acc += mono[inIdx] * w;
+          weightSum += w;
+        }
+      }
+      output[outIdx] = weightSum > 1e-9 ? acc / weightSum : 0;
     }
-
-    output[outIdx] = weightSum > 1e-9 ? acc / weightSum : 0;
   }
 
   return {
@@ -166,6 +198,8 @@ export class StreamingKaiserSincResampler {
   private readonly halfWidth: number;
   private readonly beta = 6.5;
   private readonly invI0Beta: number;
+  private readonly phaseCount: number;
+  private readonly kernelTable: Float32Array;
 
   private ringTail = new Float32Array(0);
   private windowStartGlobalIdx = 0;
@@ -191,11 +225,41 @@ export class StreamingKaiserSincResampler {
       this.filterTaps = 1;
       this.aliasingAttenuationDb = 96;
       this.invI0Beta = 1;
+      this.phaseCount = 1;
+      this.kernelTable = new Float32Array([1]);
     } else {
       this.halfWidth = Math.max(12, Math.round(16 * this.ratio));
       this.filterTaps = this.halfWidth * 2 + 1;
       this.aliasingAttenuationDb = 68;
       this.invI0Beta = 1 / besselI0(this.beta);
+      const isIntegerRatio = Math.abs(this.ratio - Math.round(this.ratio)) < 1e-9;
+      this.phaseCount = isIntegerRatio ? 1 : 256;
+      this.kernelTable = new Float32Array(this.phaseCount * this.filterTaps);
+      for (let p = 0; p < this.phaseCount; p++) {
+        const frac = p / this.phaseCount;
+        const base = p * this.filterTaps;
+        let wSum = 0;
+        for (let t = -this.halfWidth; t <= this.halfWidth; t++) {
+          const x = t - frac;
+          const norm = x / this.halfWidth;
+          let w = 0;
+          if (Math.abs(norm) <= 1) {
+            const win = besselI0(this.beta * Math.sqrt(Math.max(0, 1 - norm * norm))) * this.invI0Beta;
+            const sincArg = 2 * this.fc * x;
+            const sinc =
+              Math.abs(sincArg) < 1e-8 ? 2 * this.fc : Math.sin(Math.PI * sincArg) / (Math.PI * x);
+            w = sinc * win;
+          }
+          this.kernelTable[base + (t + this.halfWidth)] = w;
+          wSum += w;
+        }
+        if (wSum > 1e-9) {
+          const invW = 1 / wSum;
+          for (let k = 0; k < this.filterTaps; k++) {
+            this.kernelTable[base + k] *= invW;
+          }
+        }
+      }
     }
   }
 
@@ -285,24 +349,32 @@ export class StreamingKaiserSincResampler {
     center: number,
     centerInt: number,
   ): number {
-    const startTap = Math.max(bufStartGlobal, centerInt - this.halfWidth);
-    const endTap = Math.min(bufStartGlobal + buf.length - 1, centerInt + this.halfWidth);
-    let acc = 0;
-    let weightSum = 0;
+    const frac = center - centerInt;
+    const phaseIdx =
+      this.phaseCount === 1
+        ? 0
+        : Math.min(this.phaseCount - 1, Math.round(frac * this.phaseCount) % this.phaseCount);
+    const kernelBase = phaseIdx * this.filterTaps;
 
-    for (let inIdx = startTap; inIdx <= endTap; inIdx++) {
-      const x = inIdx - center;
-      const norm = x / this.halfWidth;
-      const windowArg = Math.max(0, 1 - norm * norm);
-      const win = besselI0(this.beta * Math.sqrt(windowArg)) * this.invI0Beta;
-      const sincArg = 2 * this.fc * x;
-      const sinc =
-        Math.abs(sincArg) < 1e-8 ? 2 * this.fc : Math.sin(Math.PI * sincArg) / (Math.PI * x);
-      const w = sinc * win;
-      acc += buf[inIdx - bufStartGlobal] * w;
-      weightSum += w;
+    const startOffset = centerInt - this.halfWidth - bufStartGlobal;
+    if (startOffset >= 0 && startOffset + this.filterTaps <= buf.length) {
+      let acc = 0;
+      for (let k = 0; k < this.filterTaps; k++) {
+        acc += buf[startOffset + k] * this.kernelTable[kernelBase + k];
+      }
+      return acc;
     }
 
+    let acc = 0;
+    let weightSum = 0;
+    for (let k = 0; k < this.filterTaps; k++) {
+      const idx = startOffset + k;
+      if (idx >= 0 && idx < buf.length) {
+        const w = this.kernelTable[kernelBase + k];
+        acc += buf[idx] * w;
+        weightSum += w;
+      }
+    }
     return weightSum > 1e-9 ? acc / weightSum : 0;
   }
 }

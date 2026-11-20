@@ -65,7 +65,12 @@ export const ModelFactoryModal: React.FC<ModelFactoryModalProps> = ({ isOpen, on
       const res = await fetch('/api/v1/model-factory/sandbox/overview');
       if (res.ok) {
         setData((await res.json()) as SandboxMlOpsSummary);
+      } else {
+        setNotice(`خطا در بارگذاری نمای کلی کارخانه مدل (کد ${res.status}).`);
       }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setNotice(`خطا در ارتباط با کارخانه مدل: ${msg}`);
     } finally {
       setLoading(false);
     }
@@ -77,30 +82,52 @@ export const ModelFactoryModal: React.FC<ModelFactoryModalProps> = ({ isOpen, on
     }
   }, [isOpen]);
 
+  useEffect(() => {
+    if (!isOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [isOpen, onClose]);
+
   if (!isOpen) return null;
 
   const handleRunOptimization = async (modelVersionId: string) => {
     setNotice(null);
-    const res = await fetch(`/api/v1/model-factory/sandbox/models/${modelVersionId}/optimize`, {
-      method: 'POST',
-    });
-    if (res.ok) {
-      setNotice('نسخه بهینه‌شده (Dynamic INT8 Quantization) به‌صورت نسخه مستقل و بدون دست‌کاری مدل والد ثبت شد.');
-      await loadSummary();
+    try {
+      const res = await fetch(`/api/v1/model-factory/sandbox/models/${modelVersionId}/optimize`, {
+        method: 'POST',
+      });
+      if (res.ok) {
+        setNotice('نسخه بهینه‌شده (Dynamic INT8 Quantization) به‌صورت نسخه مستقل و بدون دست‌کاری مدل والد ثبت شد.');
+        await loadSummary();
+      } else {
+        const err = (await res.json().catch(() => ({}))) as { message?: string };
+        setNotice(`خطا در بهینه‌سازی مدل: ${err.message ?? `کد ${res.status}`}`);
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setNotice(`خطا در بهینه‌سازی مدل: ${msg}`);
     }
   };
 
   const handleRollback = async (deploymentId: string) => {
     setNotice(null);
-    const res = await fetch(`/api/v1/model-factory/sandbox/deployments/${deploymentId}/rollback`, {
-      method: 'POST',
-    });
-    if (res.ok) {
-      setNotice('بازگشت اضطراری (Rollback) اجرا شد، نسخه قبلی بازیابی شد و شواهد نسخه خطادار حفظ گردید.');
-      await loadSummary();
-    } else {
-      const err = (await res.json()) as { message?: string };
-      setNotice(`خطای بازگشت: ${err.message ?? 'نامشخص'}`);
+    try {
+      const res = await fetch(`/api/v1/model-factory/sandbox/deployments/${deploymentId}/rollback`, {
+        method: 'POST',
+      });
+      if (res.ok) {
+        setNotice('بازگشت اضطراری (Rollback) اجرا شد، نسخه قبلی بازیابی شد و شواهد نسخه خطادار حفظ گردید.');
+        await loadSummary();
+      } else {
+        const err = (await res.json().catch(() => ({}))) as { message?: string };
+        setNotice(`خطای بازگشت: ${err.message ?? `کد ${res.status}`}`);
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setNotice(`خطای بازگشت: ${msg}`);
     }
   };
 

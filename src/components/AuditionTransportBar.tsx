@@ -111,7 +111,7 @@ export const AuditionTransportBar: React.FC<AuditionTransportBarProps> = ({
         </div>
 
         {/* Bottom Row: Adobe Audition Transport Controls, In/Out Markers, Speed & Live Peak/RMS Meter */}
-        <div className="flex flex-wrap items-center justify-between gap-3">
+        <div dir="rtl" className="flex flex-wrap items-center justify-between gap-3">
           {/* Primary Playback & Selection Play Controls */}
           <div className="flex items-center gap-1.5">
             <button

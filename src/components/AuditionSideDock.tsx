@@ -38,6 +38,7 @@ export const AuditionSideDock: React.FC<AuditionSideDockProps> = ({
 
   return (
     <aside
+      dir="rtl"
       data-testid="audition-side-dock"
       aria-label="پنل کناری فایل‌ها، افکت‌ها و تاریخچه ادیشن"
       className="border border-[#2A2F3B] bg-[#1B1E25] rounded-lg overflow-hidden flex flex-col"

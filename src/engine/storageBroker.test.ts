@@ -280,3 +280,103 @@ test('WorkerStorageCore persists honestly when OPFS is available', async () => {
   assert.equal(readRes.persisted, true);
   assert.deepEqual(Array.from(new Float32Array(readRes.buffer!)), [1, 2, 3, 4]);
 });
+
+test('WorkerStorageCore serializes concurrent SyncAccessHandle operations on the same fileKey without NoModificationAllowedError', async () => {
+  const fileBuffers = new Map<string, Uint8Array>();
+  const openHandleCount = new Map<string, number>();
+  let peakConcurrentOpen = 0;
+
+  const strictSyncDir: OpfsDirectoryLike = {
+    async getFileHandle(name) {
+      // Simulate real microtask yield during OPFS handle resolution
+      await new Promise((r) => setTimeout(r, 5));
+      return {
+        async createSyncAccessHandle() {
+          await new Promise((r) => setTimeout(r, 5));
+          const currentlyOpen = openHandleCount.get(name) ?? 0;
+          if (currentlyOpen > 0) {
+            const err = new Error(
+              'Access Handles cannot be created if there is another open Access Handle associated with the same file.',
+            );
+            err.name = 'NoModificationAllowedError';
+            throw err;
+          }
+          const nextOpen = currentlyOpen + 1;
+          openHandleCount.set(name, nextOpen);
+          peakConcurrentOpen = Math.max(peakConcurrentOpen, nextOpen);
+          let closed = false;
+          return {
+            truncate(size: number) {
+              const prev = fileBuffers.get(name) ?? new Uint8Array(0);
+              const resized = new Uint8Array(size);
+              resized.set(prev.subarray(0, Math.min(prev.length, size)));
+              fileBuffers.set(name, resized);
+            },
+            write(data: ArrayBufferView, options?: { at?: number }) {
+              const at = options?.at ?? 0;
+              const src = new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
+              const prev = fileBuffers.get(name) ?? new Uint8Array(0);
+              const out = new Uint8Array(Math.max(prev.length, at + src.length));
+              out.set(prev);
+              out.set(src, at);
+              fileBuffers.set(name, out);
+              return src.length;
+            },
+            flush() {},
+            getSize() {
+              return (fileBuffers.get(name) ?? new Uint8Array(0)).length;
+            },
+            read(data: ArrayBufferView, options?: { at?: number }) {
+              const at = options?.at ?? 0;
+              const src = fileBuffers.get(name) ?? new Uint8Array(0);
+              const dst = new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
+              const slice = src.subarray(at, at + dst.length);
+              dst.set(slice);
+              return slice.length;
+            },
+            close() {
+              if (!closed) {
+                closed = true;
+                openHandleCount.set(name, Math.max(0, (openHandleCount.get(name) ?? 1) - 1));
+              }
+            },
+          };
+        },
+        async getFile() {
+          const data = fileBuffers.get(name) ?? new Uint8Array(0);
+          return {
+            size: data.byteLength,
+            async arrayBuffer() {
+              return data.slice().buffer;
+            },
+          };
+        },
+      };
+    },
+    async removeEntry(name) {
+      fileBuffers.delete(name);
+    },
+  };
+
+  const core = new WorkerStorageCore(async () => strictSyncDir);
+  const initRes = await core.init(0);
+  assert.equal(initRes.opfsAvailable, true);
+  assert.equal(initRes.syncHandleAvailable, true);
+
+  const bufA = new Float32Array([10, 20, 30, 40]).buffer;
+  const bufB = new Float32Array([50, 60, 70, 80]).buffer;
+
+  // Fire concurrent writes and read on the exact same fileKey (like 2-Worker contention test)
+  const [w1, w2, r1] = await Promise.all([
+    core.writeBlock('shared_blk_999.f32', 'playback-feeder', bufA),
+    core.writeBlock('shared_blk_999.f32', 'ai-worker', bufB),
+    core.readBlock('shared_blk_999.f32', 'io-broker'),
+  ]);
+
+  assert.equal(w1.backend, 'OPFS-SyncAccessHandle');
+  assert.equal(w2.backend, 'OPFS-SyncAccessHandle');
+  assert.equal(r1.persisted, true);
+  assert.equal(peakConcurrentOpen, 1);
+  assert.ok(core.getState().lockConflictsPrevented >= 2);
+});
+

@@ -754,6 +754,11 @@ export class TimelineHistoryManager {
       if (params.afterDsp) prev.afterDsp = { ...params.afterDsp };
       if (params.afterPcmSources) prev.afterPcmSources = { ...params.afterPcmSources };
       if (params.afterAssets) prev.afterAssets = { ...params.afterAssets };
+      if (params.afterEqResponseCurveDb !== undefined) {
+        prev.afterEqResponseCurveDb = params.afterEqResponseCurveDb
+          ? params.afterEqResponseCurveDb.map((p) => ({ ...p }))
+          : null;
+      }
       prev.description = params.description;
       prev.timestamp = now;
       this.redoStack = [];
@@ -781,6 +786,18 @@ export class TimelineHistoryManager {
       afterPcmSources: params.afterPcmSources ? { ...params.afterPcmSources } : undefined,
       beforeAssets: params.beforeAssets ? { ...params.beforeAssets } : undefined,
       afterAssets: params.afterAssets ? { ...params.afterAssets } : undefined,
+      beforeEqResponseCurveDb:
+        params.beforeEqResponseCurveDb === undefined
+          ? undefined
+          : params.beforeEqResponseCurveDb
+            ? params.beforeEqResponseCurveDb.map((p) => ({ ...p }))
+            : null,
+      afterEqResponseCurveDb:
+        params.afterEqResponseCurveDb === undefined
+          ? undefined
+          : params.afterEqResponseCurveDb
+            ? params.afterEqResponseCurveDb.map((p) => ({ ...p }))
+            : null,
       commitStatus: 'committed',
     };
 

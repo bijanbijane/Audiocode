@@ -146,7 +146,8 @@ async function startServer() {
     if (!apiKey) {
       res.status(503).json({
         error: 'ASR_API_KEY_UNAVAILABLE',
-        messageFa: 'کلید سرور ابری تنظیم نشده است؛ موتور هم‌ترازی آوایی محلی (Local Acoustic Forced Aligner) اجرا می‌شود.',
+        messageFa:
+          'کلید سرویس‌دهنده ابری روی سرور تنظیم نشده است؛ برای حفظ شفافیت، بازگشت خودکار پنهان به پردازش محلی انجام نمی‌شود.',
       });
       return;
     }
@@ -187,7 +188,12 @@ async function startServer() {
         },
       });
 
-      const transcriptText = (response.text ?? '').trim();
+      const rawText = (response.text ?? '').trim();
+      const transcriptText = rawText
+        .replace(/^```(?:text|txt)?\s*/i, '')
+        .replace(/\s*```$/i, '')
+        .replace(/^["«»]|["«»]$/g, '')
+        .trim();
       res.json({
         transcriptText,
         model: 'gemini-3.5-transcribe-trilingual-fa-en-ar',
@@ -327,12 +333,17 @@ async function startServer() {
 
   app.get('/api/v1/asr/health', (_req, res) => {
     const activeCheckpoint = GLOBAL_PHASE4_CHECKPOINT_MANAGER.getActiveCheckpoint();
+    const cloudGeminiAsrConfigured = Boolean(
+      process.env.GEMINI_API_KEY && process.env.GEMINI_API_KEY.trim().length > 0,
+    );
     res.json({
       status: 'OK',
       hardwareProfile: 'G0_CPU_ONLY',
       activeCheckpointId: activeCheckpoint.checkpointId,
       globalStep: activeCheckpoint.globalStep,
       releaseStatus: 'PARTIAL',
+      cloudGeminiAsrConfigured,
+      cloudGeminiModel: 'gemini-3.5-transcribe',
     });
   });
 

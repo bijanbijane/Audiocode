@@ -61,6 +61,7 @@ export const SuggestionsPanel: React.FC<SuggestionsPanelProps> = ({
 
   return (
     <section
+      dir="rtl"
       aria-label="پیشنهادهای تدوین هوشمند"
       className="border border-[#252F42] bg-[#131924] rounded-lg flex flex-col"
     >

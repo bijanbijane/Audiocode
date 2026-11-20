@@ -193,7 +193,7 @@ export function buildTranscriptSegmentsFromTokens(
       startSec: Number(flicksToSeconds(first.range.startFlicks).toFixed(3)),
       endSec: Number(flicksToSeconds(last.range.endFlicks).toFixed(3)),
       rawText,
-      editedText: rawText,
+      editedText: normalizedText,
       normalizedText,
       tokenIds: bucket.map((t) => t.id),
       alignmentQuality,
@@ -659,6 +659,95 @@ export class StudioWorkflowController {
     return { ok: true, newVersion };
   }
 
+  /**
+   * Synchronizes updated transcript segments from ASR, forced alignment, linguistic edits,
+   * or Undo/Redo into the versioned transcript registry without mutating rawTranscriptVersion.
+   */
+  public syncTranscriptFromSegments(params: {
+    readonly segments: readonly TranscriptSegmentRecord[];
+    readonly changeSummary: string;
+    readonly establishRawIfEmpty?: boolean;
+    readonly invalidateEdl?: boolean;
+    readonly nowMs?: number;
+  }): TranscriptVersionRecord | null {
+    const nowMs =
+      typeof params.nowMs === 'number' && Number.isFinite(params.nowMs) && params.nowMs >= 0
+        ? Math.trunc(params.nowMs)
+        : Date.now();
+    const frozenSegments = Object.freeze(
+      params.segments.map((s) => Object.freeze({ ...s })),
+    );
+
+    if (!this.state.rawTranscriptVersion && params.establishRawIfEmpty) {
+      if (frozenSegments.length === 0) return null;
+      const rawVersion: TranscriptVersionRecord = Object.freeze({
+        versionId: `tr_raw_${deterministicHexHash(`${this.state.projectId}:${nowMs}:${frozenSegments.length}`)}`,
+        versionNumber: 0,
+        kind: 'RAW_ASR_IMMUTABLE' as const,
+        createdAtMs: nowMs,
+        changeSummary: params.changeSummary || 'نسخه خام اولیه ASR (غیرقابل بازنویسی)',
+        segments: frozenSegments,
+      });
+
+      let updatedEdl = this.state.edlSnapshot;
+      if (updatedEdl && this.state.sourceAudio && params.invalidateEdl) {
+        updatedEdl = EditDecisionEngine.revalidateAndMarkStale(updatedEdl, {
+          sourceAudioHash: this.state.sourceAudio.sourceAudioHash,
+          transcriptVersion: rawVersion.versionId,
+          nowMs,
+        });
+      }
+
+      this.setState({
+        rawTranscriptVersion: rawVersion,
+        transcriptVersions: [rawVersion],
+        activeTranscriptVersionId:
+          this.state.edlSnapshot && !params.invalidateEdl
+            ? this.state.activeTranscriptVersionId
+            : rawVersion.versionId,
+        edlSnapshot: updatedEdl,
+      });
+      return rawVersion;
+    }
+
+    if (frozenSegments.length === 0 && this.state.transcriptVersions.length === 0) {
+      return null;
+    }
+
+    const nextVersionNumber = this.state.transcriptVersions.length;
+    const contentSig = frozenSegments
+      .map((s) => `${s.segmentId}:${s.editedText}:${s.normalizedText}`)
+      .join('|');
+    const newVersion: TranscriptVersionRecord = Object.freeze({
+      versionId: `tr_v${nextVersionNumber}_${deterministicHexHash(`${this.state.projectId}:${nowMs}:${contentSig}`)}`,
+      versionNumber: nextVersionNumber,
+      kind: 'USER_CORRECTED',
+      createdAtMs: nowMs,
+      changeSummary: params.changeSummary,
+      segments: frozenSegments,
+    });
+
+    const hasExistingEdl = this.state.edlSnapshot !== null;
+    let updatedEdl = this.state.edlSnapshot;
+    if (updatedEdl && this.state.sourceAudio && params.invalidateEdl) {
+      updatedEdl = EditDecisionEngine.revalidateAndMarkStale(updatedEdl, {
+        sourceAudioHash: this.state.sourceAudio.sourceAudioHash,
+        transcriptVersion: newVersion.versionId,
+        nowMs,
+      });
+    }
+
+    this.setState({
+      transcriptVersions: [...this.state.transcriptVersions, newVersion],
+      activeTranscriptVersionId:
+        hasExistingEdl && !params.invalidateEdl
+          ? this.state.activeTranscriptVersionId
+          : newVersion.versionId,
+      edlSnapshot: updatedEdl,
+    });
+    return newVersion;
+  }
+
   public getActiveTranscriptVersion(): TranscriptVersionRecord | null {
     if (!this.state.activeTranscriptVersionId) return this.state.rawTranscriptVersion;
     return (
@@ -710,8 +799,12 @@ export class StudioWorkflowController {
         return { ok: false, eventResult: null, edl: null };
       }
 
+      const latestRecordedVersion =
+        this.state.transcriptVersions.length > 0
+          ? this.state.transcriptVersions[this.state.transcriptVersions.length - 1]
+          : this.getActiveTranscriptVersion();
       const activeTrVersion =
-        this.getActiveTranscriptVersion()?.versionId ?? `tr_v0_${this.state.projectId}`;
+        latestRecordedVersion?.versionId ?? `tr_v0_${this.state.projectId}`;
 
       const edl = await EditDecisionEngine.generateEdl(
         {
@@ -737,6 +830,7 @@ export class StudioWorkflowController {
       }
 
       this.setState({
+        activeTranscriptVersionId: latestRecordedVersion?.versionId ?? this.state.activeTranscriptVersionId,
         speechEventResult: eventResult,
         edlSnapshot: edl,
         edlUndoStack: [],

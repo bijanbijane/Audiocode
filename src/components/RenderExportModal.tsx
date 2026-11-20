@@ -42,7 +42,7 @@ function downloadTextBlob(content: string, fileName: string, mime: string): void
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
-  URL.revokeObjectURL(url);
+  window.setTimeout(() => URL.revokeObjectURL(url), 2000);
 }
 
 function formatSrtTime(sec: number): string {
@@ -127,7 +127,7 @@ export const RenderExportModal: React.FC<RenderExportModalProps> = ({
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
-    URL.revokeObjectURL(url);
+    window.setTimeout(() => URL.revokeObjectURL(url), 2000);
     onMarkDownloaded(fileName);
   };
 
@@ -410,7 +410,7 @@ export const RenderExportModal: React.FC<RenderExportModalProps> = ({
                 type="button"
                 onClick={handleExportEdl}
                 disabled={!workflowState.edlSnapshot}
-                className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded border border-slate-300 dark:border-[#252F42] hover:bg-slate-100 dark:hover:bg-[#1E2738] disabled:opacity-40 cursor-pointer"
+                className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded border border-slate-300 dark:border-[#252F42] hover:bg-slate-100 dark:hover:bg-[#1E2738] disabled:opacity-40 cursor-pointer disabled:cursor-not-allowed"
               >
                 <FileJson className="w-3.5 h-3.5" />
                 <span>EDL JSON</span>

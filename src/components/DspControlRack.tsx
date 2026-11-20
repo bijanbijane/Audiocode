@@ -55,7 +55,7 @@ export const DspControlRack: React.FC<DspControlRackProps> = ({
     JSON.stringify(ephemeralParams) !== JSON.stringify(committedParams);
 
   return (
-    <div className="space-y-4">
+    <div dir="rtl" className="space-y-4">
       <section
         aria-label="پردازشگر صوتی و کنترل گذرا"
         className="border border-[#252F42] bg-[#131924] rounded-lg"

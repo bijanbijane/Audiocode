@@ -121,7 +121,11 @@ export const DeveloperPlatformPortalModal: React.FC<DeveloperPlatformPortalModal
       if (res.ok) {
         const data = (await res.json()) as PortalOverviewPayload;
         setOverview(data);
+      } else {
+        setNotice(`خطا در بارگذاری نمای کلی پورتال توسعه‌دهندگان (کد ${res.status}).`);
       }
+    } catch (err) {
+      setNotice(`خطا در ارتباط با پورتال توسعه‌دهندگان: ${err instanceof Error ? err.message : String(err)}`);
     } finally {
       setLoading(false);
     }
@@ -133,58 +137,92 @@ export const DeveloperPlatformPortalModal: React.FC<DeveloperPlatformPortalModal
     }
   }, [isOpen]);
 
+  useEffect(() => {
+    if (!isOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [isOpen, onClose]);
+
   if (!isOpen) return null;
 
   const handleIssueApiKey = async () => {
-    const projectId = overview?.projects[0]?.id ?? 'prj_avapardaz_dev_01';
-    const res = await fetch('/api/v1/platform/api-keys', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        projectId,
-        name: newKeyName,
-        scopes: ['audio:transcribe', 'audio:stream', 'transcripts:read', 'models:read', 'usage:read'],
-      }),
-    });
-    if (res.ok) {
-      const data = (await res.json()) as { plaintextSecretOnce: string };
-      setIssuedSecretOnce(data.plaintextSecretOnce);
-      setCopiedKey(false);
-      setNotice('کلید جدید صادر شد. مقدار Secret فقط همین یک‌بار نمایش داده می‌شود و در سرور فقط هش HMAC نگهداری می‌شود.');
-      await loadOverview();
+    try {
+      const projectId = overview?.projects[0]?.id ?? 'prj_avapardaz_dev_01';
+      const res = await fetch('/api/v1/platform/api-keys', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          projectId,
+          name: newKeyName,
+          scopes: ['audio:transcribe', 'audio:stream', 'transcripts:read', 'models:read', 'usage:read'],
+        }),
+      });
+      if (res.ok) {
+        const data = (await res.json()) as { plaintextSecretOnce: string };
+        setIssuedSecretOnce(data.plaintextSecretOnce);
+        setCopiedKey(false);
+        setNotice('کلید جدید صادر شد. مقدار Secret فقط همین یک‌بار نمایش داده می‌شود و در سرور فقط هش HMAC نگهداری می‌شود.');
+        await loadOverview();
+      } else {
+        setNotice(`خطا در صدور کلید API (کد ${res.status}).`);
+      }
+    } catch (err) {
+      setNotice(`خطا در صدور کلید API: ${err instanceof Error ? err.message : String(err)}`);
     }
   };
 
   const handleRotateKey = async (credId: string) => {
-    const res = await fetch(`/api/v1/platform/api-keys/${credId}/rotate`, { method: 'POST' });
-    if (res.ok) {
-      const data = (await res.json()) as { plaintextSecretOnce: string };
-      setIssuedSecretOnce(data.plaintextSecretOnce);
-      setNotice('چرخش کلید انجام شد؛ کلید قبلی با پنجره هم‌پوشانی ۲۴ ساعته فعال می‌ماند.');
-      await loadOverview();
+    try {
+      const res = await fetch(`/api/v1/platform/api-keys/${credId}/rotate`, { method: 'POST' });
+      if (res.ok) {
+        const data = (await res.json()) as { plaintextSecretOnce: string };
+        setIssuedSecretOnce(data.plaintextSecretOnce);
+        setCopiedKey(false);
+        setNotice('چرخش کلید انجام شد؛ کلید قبلی با پنجره هم‌پوشانی ۲۴ ساعته فعال می‌ماند.');
+        await loadOverview();
+      } else {
+        setNotice(`خطا در چرخش کلید API (کد ${res.status}).`);
+      }
+    } catch (err) {
+      setNotice(`خطا در چرخش کلید API: ${err instanceof Error ? err.message : String(err)}`);
     }
   };
 
   const handleRevokeKey = async (credId: string) => {
-    const res = await fetch(`/api/v1/platform/api-keys/${credId}/revoke`, { method: 'POST' });
-    if (res.ok) {
-      setNotice('کلید بلافاصله باطل شد و هر درخواست با آن با کد 401 رد می‌شود.');
-      await loadOverview();
+    try {
+      const res = await fetch(`/api/v1/platform/api-keys/${credId}/revoke`, { method: 'POST' });
+      if (res.ok) {
+        setNotice('کلید بلافاصله باطل شد و هر درخواست با آن با کد 401 رد می‌شود.');
+        await loadOverview();
+      } else {
+        setNotice(`خطا در ابطال کلید API (کد ${res.status}).`);
+      }
+    } catch (err) {
+      setNotice(`خطا در ابطال کلید API: ${err instanceof Error ? err.message : String(err)}`);
     }
   };
 
   const handleCreateProject = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newProjectName.trim()) return;
-    const res = await fetch('/api/v1/platform/projects', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ projectName: newProjectName, environment: 'DEVELOPMENT' }),
-    });
-    if (res.ok) {
-      setNewProjectName('');
-      setNotice('پروژه جدید با جداسازی محیطی و ردیابی مصرف مستقل ایجاد شد.');
-      await loadOverview();
+    try {
+      const res = await fetch('/api/v1/platform/projects', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ projectName: newProjectName, environment: 'DEVELOPMENT' }),
+      });
+      if (res.ok) {
+        setNewProjectName('');
+        setNotice('پروژه جدید با جداسازی محیطی و ردیابی مصرف مستقل ایجاد شد.');
+        await loadOverview();
+      } else {
+        setNotice(`خطا در ایجاد پروژه جدید (کد ${res.status}).`);
+      }
+    } catch (err) {
+      setNotice(`خطا در ایجاد پروژه جدید: ${err instanceof Error ? err.message : String(err)}`);
     }
   };
 
@@ -193,19 +231,26 @@ export const DeveloperPlatformPortalModal: React.FC<DeveloperPlatformPortalModal
       setNotice('ابتدا در تب «کلیدها و پروژه‌ها» یک کلید تست بسازید تا درخواست با Bearer Token واقعی ارسال شود.');
       return;
     }
-    const res = await fetch('/v1/audio/estimates', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${issuedSecretOnce}`,
-      },
-      body: JSON.stringify({
-        model: playgroundModel,
-        duration_seconds: Math.round(playgroundDurationMs / 1000),
-      }),
-    });
-    const json = (await res.json()) as Record<string, unknown>;
-    setEstimateResult(json);
+    try {
+      const res = await fetch('/v1/audio/estimates', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${issuedSecretOnce}`,
+        },
+        body: JSON.stringify({
+          model: playgroundModel,
+          duration_seconds: Math.round(playgroundDurationMs / 1000),
+        }),
+      });
+      const json = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+      setEstimateResult(json);
+      if (!res.ok) {
+        setNotice(`برآورد هزینه با کد ${res.status} بازگشت.`);
+      }
+    } catch (err) {
+      setNotice(`خطا در برآورد هزینه API: ${err instanceof Error ? err.message : String(err)}`);
+    }
   };
 
   const handleExecutePlaygroundTranscription = async () => {
@@ -213,98 +258,133 @@ export const DeveloperPlatformPortalModal: React.FC<DeveloperPlatformPortalModal
       setNotice('ابتدا یک کلید API در تب کلیدها بسازید.');
       return;
     }
-    const res = await fetch('/v1/audio/transcriptions', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${issuedSecretOnce}`,
-        'Idempotency-Key': playgroundIdempKey,
-      },
-      body: JSON.stringify({
-        model: playgroundModel,
-        language: 'fa-en',
-        timestamps: true,
-        domain_profile: 'technology',
-        audio_duration_ms: playgroundDurationMs,
-        raw_text_hint: playgroundRawHint,
-      }),
-    });
-    const json = (await res.json()) as Record<string, unknown>;
-    setApiPlayResult(json);
-    await loadOverview();
+    try {
+      const res = await fetch('/v1/audio/transcriptions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${issuedSecretOnce}`,
+          'Idempotency-Key': playgroundIdempKey,
+        },
+        body: JSON.stringify({
+          model: playgroundModel,
+          language: 'fa-en',
+          timestamps: true,
+          domain_profile: 'technology',
+          audio_duration_ms: playgroundDurationMs,
+          raw_text_hint: playgroundRawHint,
+        }),
+      });
+      const json = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+      setApiPlayResult(json);
+      if (!res.ok) {
+        setNotice(`اجرای درخواست رونویسی API با کد ${res.status} بازگشت.`);
+      }
+      await loadOverview();
+    } catch (err) {
+      setNotice(`خطا در اجرای درخواست رونویسی API: ${err instanceof Error ? err.message : String(err)}`);
+    }
   };
 
   const handleIssueInvoice = async () => {
-    const res = await fetch('/api/v1/platform/invoices/issue', { method: 'POST' });
-    if (res.ok) {
-      setNotice('فاکتور تغییرناپذیر با اسنپ‌شات قیمت‌گذاری و هش SHA-256 صادر شد.');
-      await loadOverview();
+    try {
+      const res = await fetch('/api/v1/platform/invoices/issue', { method: 'POST' });
+      if (res.ok) {
+        setNotice('فاکتور تغییرناپذیر با اسنپ‌شات قیمت‌گذاری و هش SHA-256 صادر شد.');
+        await loadOverview();
+      } else {
+        setNotice(`خطا در صدور فاکتور (کد ${res.status}).`);
+      }
+    } catch (err) {
+      setNotice(`خطا در صدور فاکتور: ${err instanceof Error ? err.message : String(err)}`);
     }
   };
 
   const handleRegisterWebhook = async (e: React.FormEvent) => {
     e.preventDefault();
-    const res = await fetch('/api/v1/platform/webhooks', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        url: webhookUrl,
-        eventSubscriptions: ['transcription.completed', 'transcription.failed'],
-      }),
-    });
-    if (res.ok) {
-      setNotice('نقطه انتهایی Webhook با کلید امضای HMAC-SHA256 ثبت شد.');
-      await loadOverview();
+    try {
+      const res = await fetch('/api/v1/platform/webhooks', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          url: webhookUrl,
+          eventSubscriptions: ['transcription.completed', 'transcription.failed'],
+        }),
+      });
+      if (res.ok) {
+        setNotice('نقطه انتهایی Webhook با کلید امضای HMAC-SHA256 ثبت شد.');
+        await loadOverview();
+      } else {
+        setNotice(`خطا در ثبت Webhook (کد ${res.status}).`);
+      }
+    } catch (err) {
+      setNotice(`خطا در ثبت Webhook: ${err instanceof Error ? err.message : String(err)}`);
     }
   };
 
   const handleDispatchWebhook = async (simulateFailure: boolean) => {
-    const res = await fetch('/api/v1/platform/webhooks/test-dispatch', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ simulateFailure }),
-    });
-    if (res.ok) {
-      setNotice(
-        simulateFailure
-          ? 'رویداد تست پس از ۶ تلاش به Dead-Letter Queue منتقل شد.'
-          : 'رویداد امضاشده (t=..., v1=...) ارسال شد.'
-      );
-      await loadOverview();
+    try {
+      const res = await fetch('/api/v1/platform/webhooks/test-dispatch', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ simulateFailure }),
+      });
+      if (res.ok) {
+        setNotice(
+          simulateFailure
+            ? 'رویداد تست پس از ۶ تلاش به Dead-Letter Queue منتقل شد.'
+            : 'رویداد امضاشده (t=..., v1=...) ارسال شد.'
+        );
+        await loadOverview();
+      } else {
+        setNotice(`خطا در ارسال رویداد تست Webhook (کد ${res.status}).`);
+      }
+    } catch (err) {
+      setNotice(`خطا در ارسال رویداد تست Webhook: ${err instanceof Error ? err.message : String(err)}`);
     }
   };
 
   const handleReplayWebhook = async (deliveryId: string) => {
-    const res = await fetch(`/api/v1/platform/webhooks/${deliveryId}/replay`, { method: 'POST' });
-    if (res.ok) {
-      setNotice('رویداد DLQ با حفظ شناسه اصلی Event دوباره ارسال شد.');
-      await loadOverview();
+    try {
+      const res = await fetch(`/api/v1/platform/webhooks/${deliveryId}/replay`, { method: 'POST' });
+      if (res.ok) {
+        setNotice('رویداد DLQ با حفظ شناسه اصلی Event دوباره ارسال شد.');
+        await loadOverview();
+      } else {
+        setNotice(`خطا در بازپخش رویداد DLQ (کد ${res.status}).`);
+      }
+    } catch (err) {
+      setNotice(`خطا در بازپخش رویداد DLQ: ${err instanceof Error ? err.message : String(err)}`);
     }
   };
 
   const handleTestRegionResidency = async () => {
-    const res = await fetch('/api/v1/platform/region-check', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ regionId: selectedTestRegion }),
-    });
-    const json = (await res.json()) as {
-      allowed?: boolean;
-      region?: { regionId: string };
-      errorEnvelope?: { error?: { code: string; message: string } };
-    };
-    if (res.ok && json.allowed) {
-      setRegionCheckResult({
-        allowed: true,
-        message: `منطقه ${json.region?.regionId} مجاز و فعال است (Single-Region G0).`,
+    try {
+      const res = await fetch('/api/v1/platform/region-check', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ regionId: selectedTestRegion }),
       });
-    } else {
-      setRegionCheckResult({
-        allowed: false,
-        message: `رد شده طبق سیاست اقامت داده (${json.errorEnvelope?.error?.code}): ${json.errorEnvelope?.error?.message}`,
-      });
+      const json = (await res.json().catch(() => ({}))) as {
+        allowed?: boolean;
+        region?: { regionId: string };
+        errorEnvelope?: { error?: { code: string; message: string } };
+      };
+      if (res.ok && json.allowed) {
+        setRegionCheckResult({
+          allowed: true,
+          message: `منطقه ${json.region?.regionId} مجاز و فعال است (Single-Region G0).`,
+        });
+      } else {
+        setRegionCheckResult({
+          allowed: false,
+          message: `رد شده طبق سیاست اقامت داده (${json.errorEnvelope?.error?.code ?? `HTTP_${res.status}`}): ${json.errorEnvelope?.error?.message ?? 'نامشخص'}`,
+        });
+      }
+      await loadOverview();
+    } catch (err) {
+      setNotice(`خطا در بررسی سیاست اقامت داده: ${err instanceof Error ? err.message : String(err)}`);
     }
-    await loadOverview();
   };
 
   const tsSnippet = `import { ASRClient } from "@asr-platform/sdk";
@@ -540,8 +620,16 @@ print(result["text"], result["usage"])`;
                     <button
                       type="button"
                       onClick={() => {
-                        void navigator.clipboard?.writeText(issuedSecretOnce);
-                        setCopiedKey(true);
+                        if (!navigator.clipboard?.writeText) {
+                          setNotice('دسترسی خودکار کلیپ‌بورد در این محیط در دسترس نیست؛ کلید را به‌صورت دستی کپی کنید.');
+                          return;
+                        }
+                        navigator.clipboard
+                          .writeText(issuedSecretOnce)
+                          .then(() => setCopiedKey(true))
+                          .catch(() =>
+                            setNotice('امکان کپی خودکار در کلیپ‌بورد نبود؛ لطفاً کلید را به‌صورت دستی کپی کنید.')
+                          );
                       }}
                       className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded bg-[#0B0F17] border border-emerald-500/40 text-emerald-200 cursor-pointer"
                     >

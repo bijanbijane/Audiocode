@@ -54,7 +54,12 @@ export const DataFactoryModal: React.FC<DataFactoryModalProps> = ({ isOpen, onCl
       const res = await fetch('/api/v1/data-factory/sandbox/dashboard');
       if (res.ok) {
         setPayload((await res.json()) as SandboxDashboardPayload);
+      } else {
+        setNotice(`خطا در بارگذاری داشبورد کارخانه داده (کد ${res.status}).`);
       }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setNotice(`خطا در ارتباط با کارخانه داده: ${msg}`);
     } finally {
       setLoading(false);
     }
@@ -66,34 +71,56 @@ export const DataFactoryModal: React.FC<DataFactoryModalProps> = ({ isOpen, onCl
     }
   }, [isOpen]);
 
+  useEffect(() => {
+    if (!isOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [isOpen, onClose]);
+
   if (!isOpen) return null;
 
   const handleBuildNewRelease = async () => {
     if (!payload?.datasets[0]) return;
     setNotice(null);
-    const res = await fetch(`/api/v1/data-factory/sandbox/datasets/${payload.datasets[0].datasetId}/build`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ releaseType: 'MIXED_RELEASE' }),
-    });
-    if (res.ok) {
-      setNotice('نسخه جدید و تغییرناپذیر دیتاست با ممیزی عدم نشت گوینده ساخته شد.');
-      await loadData();
-    } else {
-      const err = (await res.json()) as { message?: string };
-      setNotice(`خطا در ساخت نسخه دیتاست: ${err.message ?? 'نامشخص'}`);
+    try {
+      const res = await fetch(`/api/v1/data-factory/sandbox/datasets/${payload.datasets[0].datasetId}/build`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ releaseType: 'MIXED_RELEASE' }),
+      });
+      if (res.ok) {
+        setNotice('نسخه جدید و تغییرناپذیر دیتاست با ممیزی عدم نشت گوینده ساخته شد.');
+        await loadData();
+      } else {
+        const err = (await res.json().catch(() => ({}))) as { message?: string };
+        setNotice(`خطا در ساخت نسخه دیتاست: ${err.message ?? `کد ${res.status}`}`);
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setNotice(`خطا در ساخت نسخه دیتاست: ${msg}`);
     }
   };
 
   const handleRevokeRecording = async (recordingId: string) => {
-    const res = await fetch(`/api/v1/data-factory/sandbox/rights/${recordingId}/revoke`, {
-      method: 'POST',
-    });
-    if (res.ok) {
-      const rep = (await res.json()) as RevocationCascadeReport;
-      setRevocationReport(rep);
-      setNotice(`لغو مجوز ${recordingId} با اثر آبشاری روی ${rep.affectedArtifactIds.length} آرتیفکت و ${rep.excludedAnnotationIds.length} رونویسی ثبت شد.`);
-      await loadData();
+    try {
+      const res = await fetch(`/api/v1/data-factory/sandbox/rights/${recordingId}/revoke`, {
+        method: 'POST',
+      });
+      if (res.ok) {
+        const rep = (await res.json()) as RevocationCascadeReport;
+        setRevocationReport(rep);
+        setNotice(`لغو مجوز ${recordingId} با اثر آبشاری روی ${rep.affectedArtifactIds.length} آرتیفکت و ${rep.excludedAnnotationIds.length} رونویسی ثبت شد.`);
+        await loadData();
+      } else {
+        const err = (await res.json().catch(() => ({}))) as { message?: string };
+        setNotice(`خطا در لغو مجوز ${recordingId}: ${err.message ?? `کد ${res.status}`}`);
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setNotice(`خطا در لغو مجوز ${recordingId}: ${msg}`);
     }
   };
 

@@ -239,6 +239,7 @@ export function alignPersianScriptToAudio(params: {
   rawTranscriptText: string;
   acousticProfile: AcousticProfile;
   alignmentSource?: PersianWordToken['alignmentSource'];
+  precomputed16k?: Float32Array;
 }): {
   tokens: PersianWordToken[];
   recommendations: SmartRecommendation[];
@@ -251,14 +252,18 @@ export function alignPersianScriptToAudio(params: {
     rawTranscriptText,
     acousticProfile,
     alignmentSource = 'ForcedAlignment',
+    precomputed16k,
   } = params;
 
   const words = tokenizePersianTranscriptWords(rawTranscriptText);
   const totalDurationSec = Math.max(0.5, pcm.length / Math.max(1, sampleRate));
   const bursts = extractAcousticSpeechBursts(pcm, sampleRate, acousticProfile);
 
-  const resampled16k = resampleTo16kMono([pcm], sampleRate, 16_000);
-  const plateaus = detectPitchPlateauSegments(resampled16k.samples, 16_000, 240);
+  const samples16k =
+    precomputed16k && precomputed16k.length > 0
+      ? precomputed16k
+      : resampleTo16kMono([pcm], sampleRate, 16_000).samples;
+  const plateaus = detectPitchPlateauSegments(samples16k, 16_000, 240);
   const pauses = detectLongPauses(pcm, sampleRate, acousticProfile, 600);
 
   const tokens: PersianWordToken[] = [];
@@ -705,6 +710,99 @@ export function buildHonestAcousticSpeechSegments(params: {
     burstCount: bursts.length,
     plateauCount: plateaus.length,
     pauseCount: pauses.length,
+  };
+}
+
+export interface AsrTranscriptionChunkPlan {
+  readonly chunkIndex: number;
+  readonly startSample: number;
+  readonly endSample: number;
+  readonly startSec: number;
+}
+
+/**
+ * Splits a PCM buffer into bounded time chunks (default 60s) so 16kHz WAV Base64
+ * requests remain well beneath server JSON limits while keeping word alignment tight.
+ */
+export function planAsrTranscriptionChunks(
+  totalSamples: number,
+  sampleRate: number,
+  maxChunkSeconds = 60,
+): AsrTranscriptionChunkPlan[] {
+  if (!Number.isFinite(totalSamples) || totalSamples <= 0 || !Number.isFinite(sampleRate) || sampleRate <= 0) {
+    return [];
+  }
+  const safeMaxSec = Math.max(5, Math.min(180, maxChunkSeconds));
+  const maxSamplesPerChunk = Math.max(1, Math.floor(sampleRate * safeMaxSec));
+  const chunks: AsrTranscriptionChunkPlan[] = [];
+  let cursor = 0;
+  let chunkIndex = 0;
+  while (cursor < totalSamples) {
+    const endSample = Math.min(totalSamples, cursor + maxSamplesPerChunk);
+    chunks.push({
+      chunkIndex,
+      startSample: cursor,
+      endSample,
+      startSec: cursor / sampleRate,
+    });
+    cursor = endSample;
+    chunkIndex++;
+  }
+  return chunks;
+}
+
+/**
+ * Shifts aligned tokens, recommendations, and cut boundaries by a chunk's timeline offset
+ * and namespaces IDs so multi-chunk transcripts merge without timestamp or ID collisions.
+ */
+export function shiftTokensAndRecommendationsByOffset(params: {
+  tokens: readonly PersianWordToken[];
+  recommendations: readonly SmartRecommendation[];
+  offsetSec: number;
+  chunkIndex: number;
+}): {
+  tokens: PersianWordToken[];
+  recommendations: SmartRecommendation[];
+} {
+  const { tokens, recommendations, offsetSec, chunkIndex } = params;
+  const offsetFlicks = Number.isFinite(offsetSec) && offsetSec > 0 ? secondsToFlicks(offsetSec) : 0;
+  const prefix = `c${chunkIndex}_`;
+
+  const shiftedTokens: PersianWordToken[] = tokens.map((tok) => {
+    const nextId = `${prefix}${tok.id}`;
+    return {
+      ...tok,
+      id: nextId,
+      range: {
+        startFlicks: tok.range.startFlicks + offsetFlicks,
+        endFlicks: tok.range.endFlicks + offsetFlicks,
+      },
+    };
+  });
+
+  const shiftedRecommendations: SmartRecommendation[] = recommendations.map((rec) => ({
+    ...rec,
+    id: `${prefix}${rec.id}`,
+    range: {
+      startFlicks: rec.range.startFlicks + offsetFlicks,
+      endFlicks: rec.range.endFlicks + offsetFlicks,
+    },
+    boundary: {
+      ...rec.boundary,
+      rawRange: {
+        startFlicks: rec.boundary.rawRange.startFlicks + offsetFlicks,
+        endFlicks: rec.boundary.rawRange.endFlicks + offsetFlicks,
+      },
+      snappedRange: {
+        startFlicks: rec.boundary.snappedRange.startFlicks + offsetFlicks,
+        endFlicks: rec.boundary.snappedRange.endFlicks + offsetFlicks,
+      },
+    },
+  }));
+
+  return {
+    tokens: shiftedTokens,
+    recommendations: shiftedRecommendations,
   };
 }
 

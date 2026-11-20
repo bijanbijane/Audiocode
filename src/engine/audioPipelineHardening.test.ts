@@ -17,6 +17,8 @@ import {
   encodeMono16kWavBase64,
   exportTranscriptToSrt,
   exportTranscriptToVtt,
+  planAsrTranscriptionChunks,
+  shiftTokensAndRecommendationsByOffset,
 } from './persianAsrTranscriber';
 import { buildSyntheticMicRecordingPcm } from './audioFixtures';
 import { secondsToFlicks } from './timebase';
@@ -3636,5 +3638,67 @@ test('49. extractAcousticProfile and ingestAudioFileStreaming handle digital-zer
     acousticProfile: asset.acousticProfile,
   });
   assert.equal(streamedSeg.burstCount, 3, `Expected 3 bursts after streaming ingest, got ${streamedSeg.burstCount}`);
+});
+
+test('50. planAsrTranscriptionChunks and shiftTokensAndRecommendationsByOffset preserve monotonic multi-chunk timestamps and unique IDs', () => {
+  const sampleRate = 16_000;
+  const totalSamples = sampleRate * 135; // 135 seconds -> 3 chunks (60s, 60s, 15s)
+  const chunks = planAsrTranscriptionChunks(totalSamples, sampleRate, 60);
+  assert.equal(chunks.length, 3);
+  assert.deepEqual(
+    chunks.map((c) => c.startSec),
+    [0, 60, 120],
+  );
+  assert.equal(chunks[2].endSample, totalSamples);
+  assert.deepEqual(planAsrTranscriptionChunks(0, sampleRate, 60), []);
+
+  const shifted = shiftTokensAndRecommendationsByOffset({
+    tokens: [
+      {
+        id: 'tok-1',
+        trackId: 'track-host',
+        speakerName: 'سارا',
+        originalText: 'سلام',
+        normalizedText: 'سلام',
+        displayText: 'سلام',
+        range: { startFlicks: secondsToFlicks(1.2), endFlicks: secondsToFlicks(1.8) },
+        confidence: 0.95,
+        alignmentSource: 'ASR',
+      },
+    ],
+    recommendations: [
+      {
+        id: 'rec-1',
+        trackId: 'track-host',
+        kind: 'standalone-filler',
+        recommendedMode: 'sync-locked-ripple-cut',
+        range: { startFlicks: secondsToFlicks(1.2), endFlicks: secondsToFlicks(1.8) },
+        relatedText: 'سلام',
+        reasonFa: 'تست',
+        confidence: 0.9,
+        sourceTier: 'Group-B-Persian-ASR',
+        status: 'Pending',
+        boundary: {
+          rawRange: { startFlicks: secondsToFlicks(1.2), endFlicks: secondsToFlicks(1.8) },
+          snappedRange: { startFlicks: secondsToFlicks(1.2), endFlicks: secondsToFlicks(1.8) },
+          rmsValleyShiftMs: 0,
+          zeroCrossingAdjusted: true,
+          microCrossfadeMs: 10,
+          pitchPlateauDetected: false,
+          trailingEzafeRisk: false,
+          reasonFa: 'تست',
+        },
+      },
+    ],
+    offsetSec: 60,
+    chunkIndex: 1,
+  });
+
+  assert.equal(shifted.tokens[0].id, 'c1_tok-1');
+  assert.equal(shifted.tokens[0].range.startFlicks, secondsToFlicks(61.2));
+  assert.equal(shifted.tokens[0].range.endFlicks, secondsToFlicks(61.8));
+  assert.equal(shifted.recommendations[0].id, 'c1_rec-1');
+  assert.equal(shifted.recommendations[0].range.startFlicks, secondsToFlicks(61.2));
+  assert.equal(shifted.recommendations[0].boundary.snappedRange.startFlicks, secondsToFlicks(61.2));
 });
 

@@ -30,6 +30,7 @@ import {
   computeMultiWordCutRange,
   determineSyncSafeEditMode,
 } from '../engine/timeline';
+import { resolveSpeakerTurnLabel } from '../utils/transcriptDisplay';
 import {
   compareReferenceScriptWithTranscript,
   computeTrilingualTranscriptStats,
@@ -48,6 +49,7 @@ export interface AsrInlineFeedbackState {
   readonly kind:
     | 'MODEL_NOT_INSTALLED'
     | 'CLOUD_UNCONFIGURED'
+    | 'INFERENCE_ERROR'
     | 'NO_SPEECH'
     | 'READ_ONLY'
     | 'AUDIO_MISSING'
@@ -64,9 +66,12 @@ interface TranscriptPanelProps {
   playheadSec: number;
   totalDurationSec?: number;
   isTranscribingAsr?: boolean;
+  executionMode?: 'LOCAL' | 'CLOUD';
+  cloudAsrConfigured?: boolean;
   projectSessionNonce?: number;
   asrInlineFeedback?: AsrInlineFeedbackState | null;
   onDismissAsrInlineFeedback?: () => void;
+  onRunCloudGeminiAsr?: () => void;
   onRunAcousticSegmentation?: () => void;
   onOpenLocalModelInstaller?: () => void;
   onSwitchToLocalExecutionMode?: () => void;
@@ -104,9 +109,12 @@ export const TranscriptPanel: React.FC<TranscriptPanelProps> = ({
   playheadSec,
   totalDurationSec = 12,
   isTranscribingAsr = false,
+  executionMode = 'LOCAL',
+  cloudAsrConfigured = false,
   projectSessionNonce = 0,
   asrInlineFeedback = null,
   onDismissAsrInlineFeedback,
+  onRunCloudGeminiAsr,
   onRunAcousticSegmentation,
   onOpenLocalModelInstaller,
   onSwitchToLocalExecutionMode,
@@ -423,6 +431,7 @@ export const TranscriptPanel: React.FC<TranscriptPanelProps> = ({
 
   return (
     <section
+      dir="rtl"
       aria-label="متن همگام‌شده فارسی و تدوین متن‌محور"
       className="border border-[#252F42] bg-[#131924] rounded-lg flex flex-col"
     >
@@ -1254,6 +1263,30 @@ export const TranscriptPanel: React.FC<TranscriptPanelProps> = ({
 
           {asrInlineFeedback.kind !== 'SUCCESS' && (
             <div className="flex flex-wrap items-center gap-2 pt-0.5">
+              {cloudAsrConfigured &&
+                onRunCloudGeminiAsr &&
+                asrInlineFeedback.kind !== 'READ_ONLY' &&
+                asrInlineFeedback.kind !== 'AUDIO_MISSING' && (
+                  <button
+                    type="button"
+                    data-testid="btn-inline-cloud-gemini-asr"
+                    disabled={isTranscribingAsr}
+                    onClick={onRunCloudGeminiAsr}
+                    className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded bg-emerald-500 text-slate-950 font-semibold text-xs hover:bg-emerald-400 disabled:opacity-50 cursor-pointer"
+                  >
+                    {isTranscribingAsr ? (
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" aria-hidden="true" />
+                    ) : (
+                      <Sparkles className="w-3.5 h-3.5" aria-hidden="true" />
+                    )}
+                    <span>
+                      {executionMode === 'CLOUD'
+                        ? 'اجرای تبدیل صوت به متن (Gemini ASR)'
+                        : 'تشخیص واقعی کلمات با Gemini ASR (انتقال صریح به حالت ابری)'}
+                    </span>
+                  </button>
+                )}
+
               {asrInlineFeedback.kind === 'CLOUD_UNCONFIGURED' && onSwitchToLocalExecutionMode && (
                 <button
                   type="button"
@@ -1273,10 +1306,10 @@ export const TranscriptPanel: React.FC<TranscriptPanelProps> = ({
                     data-testid="btn-run-acoustic-segmentation"
                     disabled={isTranscribingAsr}
                     onClick={onRunAcousticSegmentation}
-                    className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded bg-sky-500 text-slate-950 font-semibold text-xs hover:bg-sky-400 disabled:opacity-50 cursor-pointer"
+                    className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded border border-sky-500/40 bg-sky-500/15 text-sky-200 font-medium text-xs hover:bg-sky-500/25 disabled:opacity-50 cursor-pointer"
                   >
-                    <Wand2 className="w-3.5 h-3.5" aria-hidden="true" />
-                    <span>بخش‌بندی و هم‌ترازی آوایی موج صوت (بدون مدل ONNX)</span>
+                    <Wand2 className="w-3.5 h-3.5 text-sky-400" aria-hidden="true" />
+                    <span>بخش‌بندی زمانی موج صوت بدون تشخیص کلمه</span>
                   </button>
                 )}
 
@@ -1315,6 +1348,27 @@ export const TranscriptPanel: React.FC<TranscriptPanelProps> = ({
               هنوز هیچ واژه‌ای در تایم‌لاین باقی نمانده یا استخراج نشده است.
             </p>
             <div className="flex flex-wrap items-center justify-center gap-2">
+              {cloudAsrConfigured && onRunCloudGeminiAsr && (
+                <button
+                  type="button"
+                  data-testid="btn-empty-cloud-gemini-asr"
+                  disabled={isTranscribingAsr}
+                  onClick={onRunCloudGeminiAsr}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-emerald-500 text-slate-950 font-semibold text-xs hover:bg-emerald-400 disabled:opacity-50 cursor-pointer"
+                >
+                  {isTranscribingAsr ? (
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" aria-hidden="true" />
+                  ) : (
+                    <Sparkles className="w-3.5 h-3.5" aria-hidden="true" />
+                  )}
+                  <span>
+                    {isTranscribingAsr
+                      ? 'در حال تشخیص کلمات فارسی...'
+                      : 'تشخیص هوشمند کلمات فارسی (Gemini ASR)'}
+                  </span>
+                </button>
+              )}
+
               <button
                 type="button"
                 data-testid="btn-empty-run-persian-asr"
@@ -1343,7 +1397,7 @@ export const TranscriptPanel: React.FC<TranscriptPanelProps> = ({
                   className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-sky-500/40 bg-sky-500/15 text-sky-200 hover:bg-sky-500/25 disabled:opacity-50 text-xs font-medium cursor-pointer"
                 >
                   <Wand2 className="w-3.5 h-3.5 text-sky-400" aria-hidden="true" />
-                  <span>بخش‌بندی آوایی خودکار (بدون مدل)</span>
+                  <span>بخش‌بندی زمانی بدون تشخیص کلمه</span>
                 </button>
               )}
 
@@ -1360,11 +1414,12 @@ export const TranscriptPanel: React.FC<TranscriptPanelProps> = ({
           </div>
         ) : (
           <div className="flex flex-wrap items-baseline gap-x-2 gap-y-3 leading-8">
-            {tokens.map((tok) => {
+            {tokens.map((tok, tokIdx) => {
               const isActivePlayhead =
                 playheadFlicks >= tok.range.startFlicks && playheadFlicks < tok.range.endFlicks;
               const isSelected = activeSelectedIds.includes(tok.id);
               const isSearchHit = searchMatchedTokenIdSet.has(tok.id);
+              const speakerTurnPrefix = resolveSpeakerTurnLabel(tokens, tokIdx);
               const textValue =
                 layer === 'original'
                   ? tok.originalText
@@ -1398,13 +1453,15 @@ export const TranscriptPanel: React.FC<TranscriptPanelProps> = ({
                                 : 'text-slate-200 hover:bg-[#1E2738]'
                   }`}
                 >
-                  <span
-                    className={`text-[11px] font-normal ${
-                      isSelected ? 'text-slate-800' : 'text-slate-500'
-                    }`}
-                  >
-                    {tok.speakerName === 'آرش' ? 'آرش:' : ''}
-                  </span>
+                  {speakerTurnPrefix && (
+                    <span
+                      className={`text-[11px] font-medium ${
+                        isSelected ? 'text-slate-800' : 'text-slate-400'
+                      }`}
+                    >
+                      {speakerTurnPrefix}
+                    </span>
+                  )}
                   <span
                     className={
                       tok.isDisfluency && !isSelected

@@ -615,11 +615,14 @@ export const WaveformCanvas: React.FC<WaveformCanvasProps> = ({
     onZoomChange(nextZoom);
   };
 
+  const hasSyncedPeerTrack = tracks.some((t, idx) => idx > 0 && Boolean(t.syncGroupId));
   const hasDetectedDrift =
-    Math.abs(detectedSyncOffsetMs) > 0.1 || Math.abs(detectedClockDriftPpm) > 1.0;
+    hasSyncedPeerTrack &&
+    (Math.abs(detectedSyncOffsetMs) > 0.1 || Math.abs(detectedClockDriftPpm) > 1.0);
 
   return (
     <section
+      dir="rtl"
       aria-label="نوار زمان و شکل‌موج چندترک ادیشن"
       className="border border-[#2A2F3B] bg-[#16181D] rounded-lg overflow-hidden"
     >
@@ -805,16 +808,28 @@ export const WaveformCanvas: React.FC<WaveformCanvasProps> = ({
                 <button
                   type="button"
                   data-testid="btn-nudge-sync-minus"
+                  disabled={!hasSyncedPeerTrack}
+                  title={
+                    hasSyncedPeerTrack
+                      ? 'عقب بردن ترک همگام به میزان ۵ میلی‌ثانیه'
+                      : 'در پروژه تک‌ترک، ترک همگام دومی وجود ندارد'
+                  }
                   onClick={() => onNudgeSyncedTracksMs(-5)}
-                  className="px-2 py-1 rounded border border-[#2D323E] bg-[#14161B] hover:bg-[#232732] text-slate-200 font-mono text-[11px] cursor-pointer"
+                  className="px-2 py-1 rounded border border-[#2D323E] bg-[#14161B] hover:bg-[#232732] disabled:opacity-40 disabled:hover:bg-[#14161B] text-slate-200 font-mono text-[11px] cursor-pointer disabled:cursor-not-allowed"
                 >
                   <span dir="ltr">-5ms</span>
                 </button>
                 <button
                   type="button"
                   data-testid="btn-nudge-sync-plus"
+                  disabled={!hasSyncedPeerTrack}
+                  title={
+                    hasSyncedPeerTrack
+                      ? 'جلو بردن ترک همگام به میزان ۵ میلی‌ثانیه'
+                      : 'در پروژه تک‌ترک، ترک همگام دومی وجود ندارد'
+                  }
                   onClick={() => onNudgeSyncedTracksMs(5)}
-                  className="px-2 py-1 rounded border border-[#2D323E] bg-[#14161B] hover:bg-[#232732] text-slate-200 font-mono text-[11px] cursor-pointer"
+                  className="px-2 py-1 rounded border border-[#2D323E] bg-[#14161B] hover:bg-[#232732] disabled:opacity-40 disabled:hover:bg-[#14161B] text-slate-200 font-mono text-[11px] cursor-pointer disabled:cursor-not-allowed"
                 >
                   <span dir="ltr">+5ms</span>
                 </button>
@@ -860,7 +875,7 @@ export const WaveformCanvas: React.FC<WaveformCanvasProps> = ({
 
       {/* Track Headers + Interactive Audition Waveform/Spectral Canvas */}
       <div className="grid grid-cols-1 lg:grid-cols-[210px_1fr]">
-        <div className="border-b lg:border-b-0 lg:border-l border-[#2A2F3B] bg-[#191C23] flex flex-col">
+        <div className="border-b lg:border-b-0 lg:border-e border-[#2A2F3B] bg-[#191C23] flex flex-col">
           <div className="h-[28px] px-3 flex items-center text-[11px] text-[#2EE59D] border-b border-[#2A2F3B] font-mono tabular-nums">
             {formatTimecode(secondsToFlicks(playheadSec))}
           </div>

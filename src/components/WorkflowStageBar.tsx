@@ -35,6 +35,8 @@ interface WorkflowStageBarProps {
   workflowState: StudioWorkflowState;
   executionMode: 'LOCAL' | 'CLOUD';
   cloudProviderStatusLabel: string;
+  cloudAsrConfigured?: boolean;
+  onRunCloudGeminiAsr?: () => void;
   onChangeExecutionMode: (nextMode: 'LOCAL' | 'CLOUD') => void;
   activeFailure: UserFacingFailureModel | null;
   canInstallPwa: boolean;
@@ -85,6 +87,8 @@ export const WorkflowStageBar: React.FC<WorkflowStageBarProps> = ({
   workflowState,
   executionMode,
   cloudProviderStatusLabel,
+  cloudAsrConfigured = false,
+  onRunCloudGeminiAsr,
   onChangeExecutionMode,
   activeFailure,
   canInstallPwa,
@@ -413,6 +417,22 @@ export const WorkflowStageBar: React.FC<WorkflowStageBarProps> = ({
           </div>
 
           <div className="flex flex-wrap items-center gap-2 ps-6">
+            {activeFailure.code === 'MODEL_NOT_INSTALLED' &&
+              cloudAsrConfigured &&
+              onRunCloudGeminiAsr && (
+                <button
+                  type="button"
+                  data-testid="btn-banner-cloud-gemini-asr"
+                  onClick={onRunCloudGeminiAsr}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded bg-emerald-500 text-slate-950 font-semibold hover:bg-emerald-400 cursor-pointer"
+                >
+                  <span>
+                    {isFa
+                      ? 'تشخیص واقعی کلمات با Gemini ASR (انتقال صریح به ابری)'
+                      : 'Transcribe Real Words via Gemini ASR (Opt-In Cloud)'}
+                  </span>
+                </button>
+              )}
             {activeFailure.canRetry && onRetryFailure && (
               <button
                 type="button"

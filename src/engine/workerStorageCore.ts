@@ -230,6 +230,7 @@ export type WorkerBrokerRequest =
 
 export class WorkerStorageCore {
   private readonly activeLeases = new Map<string, FileHandleLease>();
+  private readonly keyMutexTails = new Map<string, Promise<void>>();
   private lockConflictsPrevented = 0;
   private opfsAvailable = false;
   private syncHandleAvailable = false;
@@ -241,6 +242,35 @@ export class WorkerStorageCore {
   constructor(
     private readonly getOpfsDirectoryFn?: () => Promise<OpfsDirectoryLike | null>,
   ) {}
+
+  private async runWithKeyMutex<T>(
+    mutexKey: string,
+    fn: () => Promise<T>,
+    onContention?: () => void,
+  ): Promise<T> {
+    const prevTail = this.keyMutexTails.get(mutexKey);
+    if (prevTail) {
+      onContention?.();
+    }
+    let releaseCurrent!: () => void;
+    const currentGate = new Promise<void>((resolve) => {
+      releaseCurrent = resolve;
+    });
+    const nextTail = (prevTail ?? Promise.resolve()).then(() => currentGate);
+    this.keyMutexTails.set(mutexKey, nextTail);
+
+    if (prevTail) {
+      await prevTail.catch(() => {});
+    }
+    try {
+      return await fn();
+    } finally {
+      releaseCurrent();
+      if (this.keyMutexTails.get(mutexKey) === nextTail) {
+        this.keyMutexTails.delete(mutexKey);
+      }
+    }
+  }
 
   async init(workerCacheMaxBytes = 0): Promise<{
     opfsAvailable: boolean;
@@ -327,9 +357,9 @@ export class WorkerStorageCore {
     return lease;
   }
 
-  private releaseLease(fileKey: string): void {
+  private releaseLease(fileKey: string, leaseId?: string): void {
     const lease = this.activeLeases.get(fileKey);
-    if (lease) {
+    if (lease && (!leaseId || lease.leaseId === leaseId)) {
       lease.status = 'released';
     }
   }
@@ -415,50 +445,55 @@ export class WorkerStorageCore {
   }
 
   private async readManifestRaw(assetId: string): Promise<PersistedAudioAssetManifest | null> {
-    if (this.opfsAvailable && this.rootDir) {
-      const dir = await this.getAssetDir(assetId, false);
-      if (!dir) return null;
-      const manifestName = this.assetFileName(
-        assetId,
-        ASSET_MANIFEST_FILE,
-        this.hasHierarchicalSubdirs(),
-      );
-      try {
-        const fh = await dir.getFileHandle(manifestName, { create: false });
-        const buf = await this.readBytesFromFileHandle(fh);
-        const text = new TextDecoder().decode(new Uint8Array(buf));
-        return JSON.parse(text) as PersistedAudioAssetManifest;
-      } catch {
-        return null;
+    const safeAssetId = this.sanitizeName(assetId);
+    return this.runWithKeyMutex(`manifest:${safeAssetId}`, async () => {
+      if (this.opfsAvailable && this.rootDir) {
+        const dir = await this.getAssetDir(safeAssetId, false);
+        if (!dir) return null;
+        const manifestName = this.assetFileName(
+          safeAssetId,
+          ASSET_MANIFEST_FILE,
+          this.hasHierarchicalSubdirs(),
+        );
+        try {
+          const fh = await dir.getFileHandle(manifestName, { create: false });
+          const buf = await this.readBytesFromFileHandle(fh);
+          const text = new TextDecoder().decode(new Uint8Array(buf));
+          return JSON.parse(text) as PersistedAudioAssetManifest;
+        } catch {
+          return null;
+        }
       }
-    }
-    return this.fallbackManifests.get(this.sanitizeName(assetId)) ?? null;
+      return this.fallbackManifests.get(safeAssetId) ?? null;
+    });
   }
 
   private async writeManifestRaw(manifest: PersistedAudioAssetManifest): Promise<void> {
     const safeAssetId = this.sanitizeName(manifest.assetId);
-    if (this.opfsAvailable && this.rootDir) {
-      const dir = await this.getAssetDir(safeAssetId, true);
-      if (!dir) {
-        throw new Error(`OPFS directory unavailable for asset ${safeAssetId}`);
-      }
-      const manifestName = this.assetFileName(
-        safeAssetId,
-        ASSET_MANIFEST_FILE,
-        this.hasHierarchicalSubdirs(),
-      );
-      try {
-        const fh = await dir.getFileHandle(manifestName, { create: true });
-        const encoded = new TextEncoder().encode(JSON.stringify(manifest));
-        await this.writeBytesToFileHandle(fh, encoded);
-      } catch (err) {
-        if (isQuotaExceededError(err)) {
-          throw new StorageQuotaExceededError(undefined, err);
+    await this.runWithKeyMutex(`manifest:${safeAssetId}`, async () => {
+      if (this.opfsAvailable && this.rootDir) {
+        const dir = await this.getAssetDir(safeAssetId, true);
+        if (!dir) {
+          throw new Error(`OPFS directory unavailable for asset ${safeAssetId}`);
         }
-        throw err;
+        const manifestName = this.assetFileName(
+          safeAssetId,
+          ASSET_MANIFEST_FILE,
+          this.hasHierarchicalSubdirs(),
+        );
+        try {
+          const fh = await dir.getFileHandle(manifestName, { create: true });
+          const encoded = new TextEncoder().encode(JSON.stringify(manifest));
+          await this.writeBytesToFileHandle(fh, encoded);
+        } catch (err) {
+          if (isQuotaExceededError(err)) {
+            throw new StorageQuotaExceededError(undefined, err);
+          }
+          throw err;
+        }
       }
-    }
-    this.fallbackManifests.set(safeAssetId, manifest);
+      this.fallbackManifests.set(safeAssetId, manifest);
+    });
   }
 
   async beginAssetIngest(manifest: PersistedAudioAssetManifest): Promise<{
@@ -467,33 +502,35 @@ export class WorkerStorageCore {
     backend: WorkerPersistenceBackend;
   }> {
     const safeAssetId = this.sanitizeName(manifest.assetId);
-    const initialManifest: PersistedAudioAssetManifest = {
-      ...manifest,
-      assetId: safeAssetId,
-      state: 'ingesting',
-      updatedAtMs: Date.now(),
-      finalizedAtMs: null,
-    };
-
-    try {
-      await this.writeManifestRaw(initialManifest);
-      const backend: WorkerPersistenceBackend = this.opfsAvailable
-        ? this.syncHandleAvailable
-          ? 'OPFS-SyncAccessHandle'
-          : 'OPFS-Writable'
-        : 'OPFS-Unavailable';
-      return {
-        manifest: initialManifest,
-        persisted: this.opfsAvailable,
-        backend,
+    return this.runWithKeyMutex(`lifecycle:${safeAssetId}`, async () => {
+      const initialManifest: PersistedAudioAssetManifest = {
+        ...manifest,
+        assetId: safeAssetId,
+        state: 'ingesting',
+        updatedAtMs: Date.now(),
+        finalizedAtMs: null,
       };
-    } catch (err) {
-      if (isQuotaExceededError(err)) {
-        this.boundedWorkerCache?.clear();
-        throw new StorageQuotaExceededError(undefined, err);
+
+      try {
+        await this.writeManifestRaw(initialManifest);
+        const backend: WorkerPersistenceBackend = this.opfsAvailable
+          ? this.syncHandleAvailable
+            ? 'OPFS-SyncAccessHandle'
+            : 'OPFS-Writable'
+          : 'OPFS-Unavailable';
+        return {
+          manifest: initialManifest,
+          persisted: this.opfsAvailable,
+          backend,
+        };
+      } catch (err) {
+        if (isQuotaExceededError(err)) {
+          this.boundedWorkerCache?.clear();
+          throw new StorageQuotaExceededError(undefined, err);
+        }
+        throw err;
       }
-      throw err;
-    }
+    });
   }
 
   async writeAssetChunk(
@@ -517,50 +554,58 @@ export class WorkerStorageCore {
     }
 
     const leaseKey = `${safeAssetId}:blk_${chunkIndex}`;
-    this.acquireLease(leaseKey, ownerWorker);
-    try {
-      const chunkFile = `blk_${chunkIndex}.f32`;
-      if (this.opfsAvailable && this.rootDir) {
-        const dir = await this.getAssetDir(safeAssetId, true);
-        if (dir) {
-          const targetName = this.assetFileName(
-            safeAssetId,
-            chunkFile,
-            this.hasHierarchicalSubdirs(),
-          );
-          try {
-            const fh = await dir.getFileHandle(targetName, { create: true });
-            const backend = await this.writeBytesToFileHandle(fh, new Uint8Array(buffer));
-            return {
-              bytesWritten: buffer.byteLength,
-              persisted: backend !== 'OPFS-Unavailable',
-              backend,
-              cachedInWorker: false,
-              workerCacheStats: this.boundedWorkerCache?.getStats() ?? null,
-            };
-          } catch (err) {
-            if (isQuotaExceededError(err)) {
-              this.boundedWorkerCache?.clear();
-              throw new StorageQuotaExceededError(undefined, err);
+    return this.runWithKeyMutex(
+      `chunk:${leaseKey}`,
+      async () => {
+        const lease = this.acquireLease(leaseKey, ownerWorker);
+        try {
+          const chunkFile = `blk_${chunkIndex}.f32`;
+          if (this.opfsAvailable && this.rootDir) {
+            const dir = await this.getAssetDir(safeAssetId, true);
+            if (dir) {
+              const targetName = this.assetFileName(
+                safeAssetId,
+                chunkFile,
+                this.hasHierarchicalSubdirs(),
+              );
+              try {
+                const fh = await dir.getFileHandle(targetName, { create: true });
+                const backend = await this.writeBytesToFileHandle(fh, new Uint8Array(buffer));
+                return {
+                  bytesWritten: buffer.byteLength,
+                  persisted: backend !== 'OPFS-Unavailable',
+                  backend,
+                  cachedInWorker: false,
+                  workerCacheStats: this.boundedWorkerCache?.getStats() ?? null,
+                };
+              } catch (err) {
+                if (isQuotaExceededError(err)) {
+                  this.boundedWorkerCache?.clear();
+                  throw new StorageQuotaExceededError(undefined, err);
+                }
+                throw err;
+              }
             }
-            throw err;
           }
-        }
-      }
 
-      const cachedInWorker = this.boundedWorkerCache
-        ? this.boundedWorkerCache.put(`${safeAssetId}__${chunkFile}`, buffer)
-        : false;
-      return {
-        bytesWritten: 0,
-        persisted: false,
-        backend: 'OPFS-Unavailable',
-        cachedInWorker,
-        workerCacheStats: this.boundedWorkerCache?.getStats() ?? null,
-      };
-    } finally {
-      this.releaseLease(leaseKey);
-    }
+          const cachedInWorker = this.boundedWorkerCache
+            ? this.boundedWorkerCache.put(`${safeAssetId}__${chunkFile}`, buffer)
+            : false;
+          return {
+            bytesWritten: 0,
+            persisted: false,
+            backend: 'OPFS-Unavailable',
+            cachedInWorker,
+            workerCacheStats: this.boundedWorkerCache?.getStats() ?? null,
+          };
+        } finally {
+          this.releaseLease(leaseKey, lease.leaseId);
+        }
+      },
+      () => {
+        this.lockConflictsPrevented++;
+      },
+    );
   }
 
   async finalizeAsset(
@@ -568,77 +613,80 @@ export class WorkerStorageCore {
     patch?: Partial<PersistedAudioAssetManifest>,
   ): Promise<PersistedAudioAssetManifest> {
     const safeAssetId = this.sanitizeName(assetId);
-    const existing = await this.readManifestRaw(safeAssetId);
-    if (!existing) {
-      throw new Error(`ASSET_NOT_FOUND: Cannot finalize missing asset ${safeAssetId}`);
-    }
-    if (existing.state === 'abandoned' || existing.state === 'failed') {
-      throw new Error(
-        `ASSET_LIFECYCLE_ERROR: Cannot finalize ${existing.state} asset ${safeAssetId}`,
-      );
-    }
-
-    const finalizing: PersistedAudioAssetManifest = {
-      ...existing,
-      ...patch,
-      assetId: safeAssetId,
-      state: 'finalizing',
-      updatedAtMs: Date.now(),
-    };
-    await this.writeManifestRaw(finalizing);
-
-    // Verify all expected chunk files exist on OPFS before marking 'ready'
-    if (this.opfsAvailable && this.rootDir && finalizing.totalBlocks > 0) {
-      const dir = await this.getAssetDir(safeAssetId, false);
-      if (!dir) {
-        await this.abortAssetIngest(safeAssetId, 'OPFS directory missing during finalization', 'failed');
-        throw new Error(`ASSET_FINALIZE_VERIFICATION_FAILED: Directory missing for ${safeAssetId}`);
+    return this.runWithKeyMutex(`lifecycle:${safeAssetId}`, async () => {
+      const existing = await this.readManifestRaw(safeAssetId);
+      if (!existing) {
+        throw new Error(`ASSET_NOT_FOUND: Cannot finalize missing asset ${safeAssetId}`);
       }
-      for (let idx = 0; idx < finalizing.totalBlocks; idx++) {
-        const expectedSamples = Math.min(
-          finalizing.blockSizeSamples,
-          Math.max(0, finalizing.totalSamples - idx * finalizing.blockSizeSamples),
+      if (existing.state === 'abandoned' || existing.state === 'failed') {
+        throw new Error(
+          `ASSET_LIFECYCLE_ERROR: Cannot finalize ${existing.state} asset ${safeAssetId}`,
         );
-        const expectedBytes = expectedSamples * finalizing.bytesPerSample * finalizing.channels;
-        const targetName = this.assetFileName(
-          safeAssetId,
-          `blk_${idx}.f32`,
-          this.hasHierarchicalSubdirs(),
-        );
-        try {
-          const fh = await dir.getFileHandle(targetName, { create: false });
-          const file = await fh.getFile();
-          const actualBytes = typeof file.size === 'number' ? file.size : (await file.arrayBuffer()).byteLength;
-          if (actualBytes !== expectedBytes) {
-            throw new Error(
-              `Chunk #${idx} size mismatch: expected ${expectedBytes} bytes, got ${actualBytes}`,
-            );
+      }
+
+      const finalizing: PersistedAudioAssetManifest = {
+        ...existing,
+        ...patch,
+        assetId: safeAssetId,
+        state: 'finalizing',
+        updatedAtMs: Date.now(),
+      };
+      await this.writeManifestRaw(finalizing);
+
+      // Verify all expected chunk files exist on OPFS before marking 'ready'
+      if (this.opfsAvailable && this.rootDir && finalizing.totalBlocks > 0) {
+        const dir = await this.getAssetDir(safeAssetId, false);
+        if (!dir) {
+          await this.abortAssetIngestUnlocked(safeAssetId, 'OPFS directory missing during finalization', 'failed');
+          throw new Error(`ASSET_FINALIZE_VERIFICATION_FAILED: Directory missing for ${safeAssetId}`);
+        }
+        for (let idx = 0; idx < finalizing.totalBlocks; idx++) {
+          const expectedSamples = Math.min(
+            finalizing.blockSizeSamples,
+            Math.max(0, finalizing.totalSamples - idx * finalizing.blockSizeSamples),
+          );
+          const expectedBytes = expectedSamples * finalizing.bytesPerSample * finalizing.channels;
+          const targetName = this.assetFileName(
+            safeAssetId,
+            `blk_${idx}.f32`,
+            this.hasHierarchicalSubdirs(),
+          );
+          try {
+            await this.runWithKeyMutex(`chunk:${safeAssetId}:blk_${idx}`, async () => {
+              const fh = await dir.getFileHandle(targetName, { create: false });
+              const file = await fh.getFile();
+              const actualBytes = typeof file.size === 'number' ? file.size : (await file.arrayBuffer()).byteLength;
+              if (actualBytes !== expectedBytes) {
+                throw new Error(
+                  `Chunk #${idx} size mismatch: expected ${expectedBytes} bytes, got ${actualBytes}`,
+                );
+              }
+            });
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            await this.abortAssetIngestUnlocked(safeAssetId, `Chunk verification failed: ${msg}`, 'failed');
+            throw new Error(`ASSET_FINALIZE_VERIFICATION_FAILED: ${msg}`);
           }
-        } catch (err) {
-          const msg = err instanceof Error ? err.message : String(err);
-          await this.abortAssetIngest(safeAssetId, `Chunk verification failed: ${msg}`, 'failed');
-          throw new Error(`ASSET_FINALIZE_VERIFICATION_FAILED: ${msg}`);
         }
       }
-    }
 
-    const now = Date.now();
-    const ready: PersistedAudioAssetManifest = {
-      ...finalizing,
-      state: 'ready',
-      updatedAtMs: now,
-      finalizedAtMs: now,
-    };
-    await this.writeManifestRaw(ready);
-    return ready;
+      const now = Date.now();
+      const ready: PersistedAudioAssetManifest = {
+        ...finalizing,
+        state: 'ready',
+        updatedAtMs: now,
+        finalizedAtMs: now,
+      };
+      await this.writeManifestRaw(ready);
+      return ready;
+    });
   }
 
-  async abortAssetIngest(
-    assetId: string,
+  private async abortAssetIngestUnlocked(
+    safeAssetId: string,
     reason: string,
     targetState: 'abandoned' | 'failed' = 'abandoned',
   ): Promise<{ cleaned: boolean; state: AssetStorageLifecycleState }> {
-    const safeAssetId = this.sanitizeName(assetId);
     const existing = await this.readManifestRaw(safeAssetId);
     if (existing) {
       const failedManifest: PersistedAudioAssetManifest = {
@@ -652,8 +700,19 @@ export class WorkerStorageCore {
       await this.writeManifestRaw(failedManifest).catch(() => {});
     }
 
-    await this.deleteAsset(safeAssetId);
+    await this.deleteAssetUnlocked(safeAssetId);
     return { cleaned: true, state: targetState };
+  }
+
+  async abortAssetIngest(
+    assetId: string,
+    reason: string,
+    targetState: 'abandoned' | 'failed' = 'abandoned',
+  ): Promise<{ cleaned: boolean; state: AssetStorageLifecycleState }> {
+    const safeAssetId = this.sanitizeName(assetId);
+    return this.runWithKeyMutex(`lifecycle:${safeAssetId}`, () =>
+      this.abortAssetIngestUnlocked(safeAssetId, reason, targetState),
+    );
   }
 
   async getReadyAssetManifest(assetId: string): Promise<PersistedAudioAssetManifest | null> {
@@ -697,36 +756,43 @@ export class WorkerStorageCore {
     }
 
     const leaseKey = `${safeAssetId}:blk_${chunkIndex}`;
-    this.acquireLease(leaseKey, ownerWorker);
-    try {
-      const chunkFile = `blk_${chunkIndex}.f32`;
-      if (this.opfsAvailable && this.rootDir) {
-        const dir = await this.getAssetDir(safeAssetId, false);
-        if (!dir) return { buffer: null, persisted: false };
-        const targetName = this.assetFileName(
-          safeAssetId,
-          chunkFile,
-          this.hasHierarchicalSubdirs(),
-        );
-        const fh = await dir.getFileHandle(targetName, { create: false });
-        const buf = await this.readBytesFromFileHandle(fh);
-        return { buffer: buf, persisted: true };
-      }
+    return this.runWithKeyMutex(
+      `chunk:${leaseKey}`,
+      async () => {
+        const lease = this.acquireLease(leaseKey, ownerWorker);
+        try {
+          const chunkFile = `blk_${chunkIndex}.f32`;
+          if (this.opfsAvailable && this.rootDir) {
+            const dir = await this.getAssetDir(safeAssetId, false);
+            if (!dir) return { buffer: null, persisted: false };
+            const targetName = this.assetFileName(
+              safeAssetId,
+              chunkFile,
+              this.hasHierarchicalSubdirs(),
+            );
+            const fh = await dir.getFileHandle(targetName, { create: false });
+            const buf = await this.readBytesFromFileHandle(fh);
+            return { buffer: buf, persisted: true };
+          }
 
-      if (this.boundedWorkerCache) {
-        const cached = this.boundedWorkerCache.get(`${safeAssetId}__${chunkFile}`);
-        if (cached) return { buffer: cached.slice(0), persisted: false };
-      }
-      return { buffer: null, persisted: false };
-    } catch {
-      return { buffer: null, persisted: false };
-    } finally {
-      this.releaseLease(leaseKey);
-    }
+          if (this.boundedWorkerCache) {
+            const cached = this.boundedWorkerCache.get(`${safeAssetId}__${chunkFile}`);
+            if (cached) return { buffer: cached.slice(0), persisted: false };
+          }
+          return { buffer: null, persisted: false };
+        } catch {
+          return { buffer: null, persisted: false };
+        } finally {
+          this.releaseLease(leaseKey, lease.leaseId);
+        }
+      },
+      () => {
+        this.lockConflictsPrevented++;
+      },
+    );
   }
 
-  async deleteAsset(assetId: string): Promise<{ deleted: boolean }> {
-    const safeAssetId = this.sanitizeName(assetId);
+  private async deleteAssetUnlocked(safeAssetId: string): Promise<{ deleted: boolean }> {
     this.fallbackManifests.delete(safeAssetId);
     this.boundedWorkerCache?.deleteByPrefix(`${safeAssetId}__`);
     this.boundedWorkerCache?.deleteByPrefix(`${safeAssetId}_blk_`);
@@ -752,6 +818,13 @@ export class WorkerStorageCore {
       }
     }
     return { deleted: true };
+  }
+
+  async deleteAsset(assetId: string): Promise<{ deleted: boolean }> {
+    const safeAssetId = this.sanitizeName(assetId);
+    return this.runWithKeyMutex(`lifecycle:${safeAssetId}`, () =>
+      this.deleteAssetUnlocked(safeAssetId),
+    );
   }
 
   async recoverStartupAssets(maxIngestingAgeMs = 0): Promise<{
@@ -828,83 +901,101 @@ export class WorkerStorageCore {
     cachedInWorker: boolean;
     workerCacheStats: RollingCacheStats | null;
   }> {
-    this.acquireLease(fileKey, ownerWorker);
-    try {
-      const safeName = this.sanitizeName(fileKey);
-      if (this.opfsAvailable && this.rootDir) {
+    const safeName = this.sanitizeName(fileKey);
+    return this.runWithKeyMutex(
+      `file:${safeName}`,
+      async () => {
+        const lease = this.acquireLease(fileKey, ownerWorker);
         try {
-          const fh = await this.rootDir.getFileHandle(safeName, { create: true });
-          const backend = await this.writeBytesToFileHandle(fh, new Uint8Array(buffer));
-          if (backend !== 'OPFS-Unavailable') {
-            return {
-              bytesWritten: buffer.byteLength,
-              persisted: true,
-              backend,
-              cachedInWorker: false,
-              workerCacheStats: this.boundedWorkerCache?.getStats() ?? null,
-            };
+          if (this.opfsAvailable && this.rootDir) {
+            try {
+              const fh = await this.rootDir.getFileHandle(safeName, { create: true });
+              const backend = await this.writeBytesToFileHandle(fh, new Uint8Array(buffer));
+              if (backend !== 'OPFS-Unavailable') {
+                return {
+                  bytesWritten: buffer.byteLength,
+                  persisted: true,
+                  backend,
+                  cachedInWorker: false,
+                  workerCacheStats: this.boundedWorkerCache?.getStats() ?? null,
+                };
+              }
+            } catch (err) {
+              if (isQuotaExceededError(err)) {
+                this.boundedWorkerCache?.clear();
+                throw new StorageQuotaExceededError(undefined, err);
+              }
+              throw err;
+            }
           }
-        } catch (err) {
-          if (isQuotaExceededError(err)) {
-            this.boundedWorkerCache?.clear();
-            throw new StorageQuotaExceededError(undefined, err);
-          }
-          throw err;
-        }
-      }
 
-      // OPFS is unavailable: NEVER pretend durable persistence or keep unbounded memory.
-      // Only store in an explicitly bounded (<= 8 MiB) LRU cache if configured.
-      const cachedInWorker = this.boundedWorkerCache
-        ? this.boundedWorkerCache.put(safeName, buffer)
-        : false;
-      return {
-        bytesWritten: 0,
-        persisted: false,
-        backend: 'OPFS-Unavailable',
-        cachedInWorker,
-        workerCacheStats: this.boundedWorkerCache?.getStats() ?? null,
-      };
-    } finally {
-      this.releaseLease(fileKey);
-    }
+          // OPFS is unavailable: NEVER pretend durable persistence or keep unbounded memory.
+          // Only store in an explicitly bounded (<= 8 MiB) LRU cache if configured.
+          const cachedInWorker = this.boundedWorkerCache
+            ? this.boundedWorkerCache.put(safeName, buffer)
+            : false;
+          return {
+            bytesWritten: 0,
+            persisted: false,
+            backend: 'OPFS-Unavailable',
+            cachedInWorker,
+            workerCacheStats: this.boundedWorkerCache?.getStats() ?? null,
+          };
+        } finally {
+          this.releaseLease(fileKey, lease.leaseId);
+        }
+      },
+      () => {
+        this.lockConflictsPrevented++;
+      },
+    );
   }
 
   async readBlock(
     fileKey: string,
     ownerWorker: FileHandleLease['ownerWorker'],
   ): Promise<{ buffer: ArrayBuffer | null; persisted: boolean }> {
-    this.acquireLease(fileKey, ownerWorker);
-    try {
-      const safeName = this.sanitizeName(fileKey);
-      if (this.opfsAvailable && this.rootDir) {
-        const fh = await this.rootDir.getFileHandle(safeName);
-        const buf = await this.readBytesFromFileHandle(fh);
-        return { buffer: buf, persisted: true };
-      }
+    const safeName = this.sanitizeName(fileKey);
+    return this.runWithKeyMutex(
+      `file:${safeName}`,
+      async () => {
+        const lease = this.acquireLease(fileKey, ownerWorker);
+        try {
+          if (this.opfsAvailable && this.rootDir) {
+            const fh = await this.rootDir.getFileHandle(safeName);
+            const buf = await this.readBytesFromFileHandle(fh);
+            return { buffer: buf, persisted: true };
+          }
 
-      if (this.boundedWorkerCache) {
-        const cached = this.boundedWorkerCache.get(safeName);
-        if (cached) {
-          return { buffer: cached.slice(0), persisted: false };
+          if (this.boundedWorkerCache) {
+            const cached = this.boundedWorkerCache.get(safeName);
+            if (cached) {
+              return { buffer: cached.slice(0), persisted: false };
+            }
+          }
+          return { buffer: null, persisted: false };
+        } catch {
+          return { buffer: null, persisted: false };
+        } finally {
+          this.releaseLease(fileKey, lease.leaseId);
         }
-      }
-      return { buffer: null, persisted: false };
-    } catch {
-      return { buffer: null, persisted: false };
-    } finally {
-      this.releaseLease(fileKey);
-    }
+      },
+      () => {
+        this.lockConflictsPrevented++;
+      },
+    );
   }
 
   async deleteFile(fileKey: string): Promise<{ deleted: boolean }> {
     const safeName = this.sanitizeName(fileKey);
-    if (this.opfsAvailable && this.rootDir) {
-      await this.rootDir.removeEntry(safeName).catch(() => {});
-    }
-    this.boundedWorkerCache?.delete(safeName);
-    this.activeLeases.delete(fileKey);
-    return { deleted: true };
+    return this.runWithKeyMutex(`file:${safeName}`, async () => {
+      if (this.opfsAvailable && this.rootDir) {
+        await this.rootDir.removeEntry(safeName).catch(() => {});
+      }
+      this.boundedWorkerCache?.delete(safeName);
+      this.activeLeases.delete(fileKey);
+      return { deleted: true };
+    });
   }
 
   getState() {

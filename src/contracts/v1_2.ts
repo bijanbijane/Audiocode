@@ -170,6 +170,8 @@ export interface EditTransaction {
   afterPcmSources?: Record<string, Float32Array>;
   beforeAssets?: Record<string, AudioAsset>;
   afterAssets?: Record<string, AudioAsset>;
+  beforeEqResponseCurveDb?: { freqHz: number; gainDb: number }[] | null;
+  afterEqResponseCurveDb?: { freqHz: number; gainDb: number }[] | null;
   affectedRecommendationId?: string;
   commitStatus: 'committed' | 'reverted';
 }

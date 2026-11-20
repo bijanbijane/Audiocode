@@ -53,7 +53,7 @@ test.describe('Avapardaz CORE-08 Audition Studio End-to-End Verification', () =>
     // Core landmarks & default LOCAL execution mode
     await expect(page.getByTestId('btn-mode-local')).toHaveAttribute('aria-pressed', 'true');
     await expect(page.getByTestId('btn-mode-cloud')).toHaveAttribute('aria-pressed', 'false');
-    await expect(page.getByRole('button', { name: /پخش/ })).toBeVisible();
+    await expect(page.getByTestId('toolbar-btn-play-pause')).toBeVisible();
     await expect(page.locator('canvas').first()).toBeVisible();
 
     expect(pageErrors, `Uncaught page errors: ${pageErrors.join(' | ')}`).toEqual([]);
@@ -139,21 +139,28 @@ test.describe('Avapardaz CORE-08 Audition Studio End-to-End Verification', () =>
       }
     });
 
-    // Click local ASR action when no ONNX model weights are installed -> honest MODEL_NOT_INSTALLED notice
-    const runAsrBtn = page.getByRole('button', { name: /اجرای ASR فارسی/ });
+    // Click local ASR action when no ONNX model weights are installed -> honest MODEL_NOT_INSTALLED notice, zero cloud requests
+    const runAsrBtn = page.getByTestId('btn-run-persian-asr');
     await expect(runAsrBtn).toBeVisible();
     await runAsrBtn.click();
 
     await expect(page.getByTestId('reliability-failure-banner')).toBeVisible();
+    await expect(page.getByTestId('transcript-asr-inline-panel')).toBeVisible();
     await expect(page.getByTestId('studio-status-notice')).toContainText('مدل عصبی محلی نصب نشده است');
     expect(asrRequests).toEqual([]);
 
-    // Explicit opt-in CLOUD switch -> honest CLOUD_PROVIDER_UNAVAILABLE without silent Local fallback
+    // Explicit opt-in CLOUD switch -> either invokes /api/v1/asr/transcribe (when Gemini key is configured)
+    // or reports honest CLOUD_PROVIDER_UNAVAILABLE without silent Local fallback
     await page.getByTestId('btn-mode-cloud').click();
     await expect(page.getByTestId('btn-mode-cloud')).toHaveAttribute('aria-pressed', 'true');
+    const asrStatusText = (await page.getByTestId('btn-asr-status-inspect').textContent()) ?? '';
     await runAsrBtn.click();
-    await expect(page.getByTestId('studio-status-notice')).toContainText('سرویس‌دهنده ابری پیکربندی نشده است');
-    expect(asrRequests).toEqual([]);
+    if (asrStatusText.includes('Gemini ASR')) {
+      await expect.poll(() => asrRequests.length, { timeout: 15_000 }).toBeGreaterThan(0);
+    } else {
+      await expect(page.getByTestId('studio-status-notice')).toContainText('سرویس‌دهنده ابری پیکربندی نشده است');
+      expect(asrRequests).toEqual([]);
+    }
 
     // Switch back to LOCAL default
     await page.getByTestId('btn-mode-local').click();

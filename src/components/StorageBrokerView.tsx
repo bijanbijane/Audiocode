@@ -145,7 +145,7 @@ export const StorageBrokerView: React.FC<StorageBrokerViewProps> = ({
   };
 
   return (
-    <div className="space-y-6">
+    <div dir="rtl" className="space-y-6">
       {/* Acceptance Gate Benchmark Runner (PoC #1, #2 & #3) */}
       <section className="border border-[#252F42] bg-[#131924] rounded-lg p-5 space-y-4">
         <div className="flex flex-wrap items-center justify-between gap-3">

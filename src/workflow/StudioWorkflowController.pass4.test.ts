@@ -209,3 +209,80 @@ test('TranscriptTransformationEngine.revertCandidateById reverts only the target
   assert.equal(afterTok0?.readableText, tok0.readableText, 'Targeted cand_A must be reverted');
   assert.equal(afterTok3?.readableText, 'خانه‌ها', 'Unrelated cand_B must stay intact');
 });
+
+test('StudioWorkflowController.syncTranscriptFromSegments preserves raw baseline immutability and tracks subsequent versions', () => {
+  const ctrl = new StudioWorkflowController();
+  ctrl.openProject({
+    projectId: 'proj_sync_transcript',
+    projectName: 'Sync Transcript Test',
+    sourceAudio: {
+      sourceAudioId: 'src_sync_1',
+      sourceAudioHash: 'hash_sync_123',
+      fileName: 'audio.wav',
+      format: 'wav',
+      sampleRate: 48000,
+      channelCount: 1,
+      bitDepth: 32,
+      totalSamples: 48_000,
+      durationSec: 1,
+      fileSizeBytes: 192_000,
+      importStatus: 'VALIDATED',
+      isDemoFixture: false,
+    },
+    nowMs: 1_700_000_000_000,
+  });
+
+  // Initial raw upload has no transcript yet
+  assert.equal(ctrl.getState().rawTranscriptVersion, null);
+  assert.equal(ctrl.getState().transcriptVersions.length, 0);
+
+  // First ASR sync establishes immutable raw version
+  const rawVer = ctrl.syncTranscriptFromSegments({
+    establishRawIfEmpty: true,
+    changeSummary: 'ASR initial',
+    nowMs: 1_700_000_001_000,
+    segments: [
+      {
+        segmentId: 'seg_1',
+        trackId: 'track-host',
+        speakerLabel: 'میزبان',
+        startSec: 0,
+        endSec: 0.9,
+        rawText: 'سلام دنیا',
+        editedText: 'سلام دنیا',
+        normalizedText: 'سلام دنیا',
+        tokenIds: ['t1', 't2'],
+        alignmentQuality: 'ASR_TIMESTAMP',
+        alignmentConfidence: 0.92,
+      },
+    ],
+  });
+  assert.equal(rawVer?.kind, 'RAW_ASR_IMMUTABLE');
+  assert.equal(ctrl.getState().transcriptVersions.length, 1);
+
+  // Subsequent edit appends USER_CORRECTED without mutating rawTranscriptVersion
+  const v2 = ctrl.syncTranscriptFromSegments({
+    changeSummary: 'Normalized punctuation',
+    nowMs: 1_700_000_002_000,
+    segments: [
+      {
+        segmentId: 'seg_1',
+        trackId: 'track-host',
+        speakerLabel: 'میزبان',
+        startSec: 0,
+        endSec: 0.9,
+        rawText: 'سلام دنیا',
+        editedText: 'سلام، دنیا!',
+        normalizedText: 'سلام، دنیا!',
+        tokenIds: ['t1', 't2'],
+        alignmentQuality: 'ASR_TIMESTAMP',
+        alignmentConfidence: 0.92,
+      },
+    ],
+  });
+  assert.equal(v2?.kind, 'USER_CORRECTED');
+  assert.equal(ctrl.getState().transcriptVersions.length, 2);
+  assert.equal(ctrl.getState().rawTranscriptVersion?.segments[0]?.rawText, 'سلام دنیا');
+  assert.equal(ctrl.getActiveTranscriptVersion()?.segments[0]?.editedText, 'سلام، دنیا!');
+});
+

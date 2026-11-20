@@ -1686,5 +1686,32 @@ test('Editing Engine Pass-2 Fixes: bounded split clip IDs, clamped fades on shor
   assert.equal(flicksToSeconds(computeTimelineDurationFlicks(batchOut.tracks)), 10);
 });
 
+test('TimelineHistoryManager preserves 8-band EQ response curve snapshots across Undo and Redo', () => {
+  const tracks = makeSyncedTracks();
+  const mgr = new TimelineHistoryManager(10);
+  const eqCurve = [
+    { freqHz: 50, gainDb: -18 },
+    { freqHz: 3200, gainDb: 3.5 },
+  ];
+
+  mgr.commitTransaction({
+    coalescingKey: '',
+    type: 'dsp-parameter-change',
+    description: 'EQ 8-Band',
+    beforeTracks: tracks,
+    afterTracks: tracks,
+    beforeEqResponseCurveDb: null,
+    afterEqResponseCurveDb: eqCurve,
+  });
+
+  const undone = mgr.undo()!;
+  assert.equal(undone.beforeEqResponseCurveDb, null);
+  assert.equal(undone.afterEqResponseCurveDb?.length, 2);
+
+  const redone = mgr.redo()!;
+  assert.equal(redone.afterEqResponseCurveDb?.[1].gainDb, 3.5);
+});
+
+
 
 
