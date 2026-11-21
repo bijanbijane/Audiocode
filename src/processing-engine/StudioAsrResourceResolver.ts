@@ -10,8 +10,8 @@ import {
 } from '../runtime/memory/MemoryBudgetManager';
 import { IncrementalSha256 } from '../utils/StreamingSha256';
 import { UnifiedProcessingError } from './UnifiedProcessingContract';
-import { MAX_STUDIO_CLOUD_AUDIO_SECONDS } from '../security/CloudAsrConsentRegistry';
 
+const MAX_STUDIO_CLOUD_AUDIO_SECONDS = 120 as const;
 const SHA256_HEX_RE = /^[a-f0-9]{64}$/;
 export const STUDIO_ASR_SAMPLE_RATE = 16_000 as const;
 

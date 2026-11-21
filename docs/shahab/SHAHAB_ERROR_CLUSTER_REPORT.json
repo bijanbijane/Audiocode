@@ -1,0 +1,50 @@
+{
+  "generatedAtIso": "2026-11-21T19:06:52.408Z",
+  "clusters": [
+    {
+      "clusterId": "CLUSTER_NOISE_AND_SIGNAL_DEGRADATION",
+      "errorCategory": "DIFFICULT_ACOUSTICS_NOISE_CLIPPING",
+      "evidenceLevel": "VERIFIED_CAUSE",
+      "affectedSampleIds": [
+        "field_catE_noisy_002",
+        "field_catE_clipped_003"
+      ],
+      "affectedSampleCount": 2,
+      "totalAudioDurationSec": 24.24,
+      "referenceEvidence": [
+        "شکلات داغ در حد استانداردهای بلژیکی است آبمیوهها گران قیمت ولی عالی میباشند",
+        "شکلات داغ در حد استانداردهای بلژیکی است آبمیوهها گران قیمت ولی عالی میباشند"
+      ],
+      "rawOutputEvidence": [
+        "شکلات گاو در حد ساندارهای بلژیکی از نگاه مس ول قانونی باشند",
+        "شکلات و باغ در حد ساندارهای بلژیکی از آب نگاه گران قیمت ولی آنین باشند"
+      ],
+      "runtimeConfiguration": "SHAHAB-R1.4.0 / BALANCED (beam=4) / onnxruntime-web@1.31.1 WASM CPU",
+      "reproductionSteps": "Compare clean sample.wav against SNR-degraded / low-gain / clipped acoustic stress samples.",
+      "minimumRemediationLayer": "RUNTIME_OPTIMIZATION",
+      "candidateRemediation": "Apply Avapardaz front-end gain normalization + spectral Wiener denoise before FBANK extraction; re-evaluate before attributing to neural core.",
+      "diagnosisConfidence": "MEDIUM"
+    },
+    {
+      "clusterId": "CLUSTER_RESIDUAL_PHONETIC_AND_LEXICAL_SUBS",
+      "errorCategory": "PERSIAN_PHONETIC_OR_SUBWORD_DECISION",
+      "evidenceLevel": "POSSIBLE_CAUSE",
+      "affectedSampleIds": [
+        "field_catA_clean_001"
+      ],
+      "affectedSampleCount": 1,
+      "totalAudioDurationSec": 12.12,
+      "referenceEvidence": [
+        "شکلات داغ در حد استانداردهای بلژیکی است آبمیوهها گران قیمت ولی عالی میباشند"
+      ],
+      "rawOutputEvidence": [
+        "شکلات داغ در حد ساندارهای بلژیکی از آبیگاه گران قیمت ولی آنین باشند"
+      ],
+      "runtimeConfiguration": "SHAHAB-R1.4.0 / BALANCED (beam=4) / onnxruntime-web@1.31.1 WASM CPU",
+      "reproductionSteps": "Run SHAHABFrozenModelAdapter on sample.wav with SPEED vs PRECISION policy and inspect BPE token transitions.",
+      "minimumRemediationLayer": "MODEL_OR_DECODER_LIMITATION",
+      "candidateRemediation": "Verify on larger multi-speaker Persian field corpus before recommending neural adaptation; single-recording error cannot prove systematic acoustic model deficiency.",
+      "diagnosisConfidence": "LOW"
+    }
+  ]
+}

@@ -1,0 +1,793 @@
+{
+  "schemaVersion": "1.0.0",
+  "updatedAtIso": "2026-11-21T19:06:52.510Z",
+  "missionId": "SHAHAB-015",
+  "missionStatus": "PARTIALLY_VERIFIED",
+  "engineVersion": "SHAHAB-R2.0.0-RELEASE-CANDIDATE",
+  "modelId": "INHERITED-PERSIAN-ASR-CORE",
+  "entryGate": {
+    "schemaVersion": "1.0.0",
+    "evaluatedAtIso": "2026-11-21T19:06:52.411Z",
+    "overallGateState": "PARTIALLY_VERIFIED",
+    "prerequisites": [
+      {
+        "prerequisiteId": "SHAHAB_013_RELEASE_INTEGRITY",
+        "title": "SHAHAB-013 Release & Artifact Integrity",
+        "state": "PARTIALLY_VERIFIED",
+        "inspectedPaths": [
+          "src/shahab/ShahabReleaseHardening.ts",
+          "docs/shahab/SHAHAB_RELEASE_MANIFEST.json",
+          "docs/shahab/SHAHAB_SECURITY_VERIFICATION.json"
+        ],
+        "detail": "SHAHAB-013 entry gate evaluated as PARTIALLY_VERIFIED (release=SHAHAB-R2.0.0-RELEASE-CANDIDATE).",
+        "limitations": [
+          "External cryptographic signing infrastructure not provisioned (automatic production rollout disabled)."
+        ]
+      },
+      {
+        "prerequisiteId": "SHAHAB_014_OBSERVABILITY",
+        "title": "SHAHAB-014 Operational Observability & Safe Lifecycle",
+        "state": "PARTIALLY_VERIFIED",
+        "inspectedPaths": [
+          "src/shahab/ShahabOperationsGovernance.ts",
+          "docs/shahab/SHAHAB_OPERATIONAL_STATE.json",
+          "docs/shahab/SHAHAB_RUNTIME_EVENTS.jsonl"
+        ],
+        "detail": "Local-first operational observer, PII scrubber, consent records, feedback admission gate, and 14-state update lifecycle present and persisted.",
+        "limitations": [
+          "External remote telemetry collector endpoint is intentionally disabled by default (local-first privacy).",
+          "Automatic rollout remains disabled pending SHAHAB-013 cryptographic signing."
+        ]
+      },
+      {
+        "prerequisiteId": "LOCAL_CLOUD_UNIFIED_ARCHITECTURE",
+        "title": "Unified Local/Cloud Execution Architecture",
+        "state": "VERIFIED",
+        "inspectedPaths": [
+          "src/shahab/ShahabEngineUnified.ts",
+          "src/processing-engine/UnifiedProcessingContract.ts"
+        ],
+        "detail": "Shared 19-stage SHAHABEngine contract with LOCAL, CLOUD, and AUTO modes and explicit no-silent-fallback enforcement.",
+        "limitations": [
+          "Browser WASM execution and Native sherpa-onnx C++ binary are not verified in this Linux CPU sandbox."
+        ]
+      },
+      {
+        "prerequisiteId": "AUDIO_PROCESSING_JOB_LIFECYCLE",
+        "title": "Audio-Processing Job Lifecycle",
+        "state": "PARTIALLY_VERIFIED",
+        "inspectedPaths": [
+          "src/reliability/OperationLifecycleManager.ts",
+          "src/shahab/ShahabEngineUnified.ts"
+        ],
+        "detail": "Existing OperationLifecycleManager handles generic operation tracking; SHAHAB-015 formalizes the crash-safe 14-state SHAHAB ASR job state machine with atomic persistence and idempotency keys.",
+        "limitations": [
+          "Prior to SHAHAB-015, SHAHAB ASR jobs did not persist stage-level crash-recovery checkpoints."
+        ]
+      },
+      {
+        "prerequisiteId": "EXISTING_PERSISTENCE_AND_RECOVERY",
+        "title": "Existing Persistence & Crash Recovery Mechanisms",
+        "state": "VERIFIED",
+        "inspectedPaths": [
+          "src/runtime/CrashRecoveryAndSessionLock.ts",
+          "src/reliability/CrashSafeRecoveryCoordinator.ts",
+          "src/shahab/ShahabEvidenceStore.ts"
+        ],
+        "detail": "Existing Avapardaz project checkpointing (CrashRecoveryAndSessionLock) and SHAHAB atomic JSON/JSONL store verified; extended for SHAHAB ASR stage checkpoints and disaster recovery.",
+        "limitations": [
+          "Filesystem rename durability varies across OS/filesystems; parent-directory fsync is best-effort on non-POSIX hosts."
+        ]
+      },
+      {
+        "prerequisiteId": "CANCELLATION_AND_INTERRUPTION",
+        "title": "Existing Cancellation & Interruption Behavior",
+        "state": "VERIFIED",
+        "inspectedPaths": [
+          "src/shahab/ShahabEngineUnified.ts",
+          "src/shahab/ShahabZipformerEngine.ts"
+        ],
+        "detail": "AbortSignal propagation exists across SHAHABEngine and Zipformer decoding stages; SHAHAB-015 enforces non-destructive cancellation preserving committed user transcripts.",
+        "limitations": [
+          "In-flight native/WASM ONNX kernel invocations cannot be preempted mid-op; cancellation takes effect at chunk/stage boundaries."
+        ]
+      },
+      {
+        "prerequisiteId": "ERROR_HANDLING_AND_RETRY_POLICIES",
+        "title": "Existing Error Handling & Retry Policies",
+        "state": "VERIFIED",
+        "inspectedPaths": [
+          "src/reliability/ErrorClassifier.ts",
+          "src/reliability/RecoveryPolicy.ts",
+          "src/shahab/ShahabEngineUnified.ts"
+        ],
+        "detail": "Avapardaz reliability error classifier and SHAHAB-010 21-code taxonomy present; SHAHAB-015 extends them with the complete 33-code centralized resilience taxonomy and bounded idempotency-aware retry controller.",
+        "limitations": []
+      }
+    ],
+    "blockedCapabilities": [
+      "Automatic unattended release-update rollout remains disabled while SHAHAB-013 Ed25519 signing is BLOCKED."
+    ],
+    "reusedExistingModules": [
+      "src/runtime/CrashRecoveryAndSessionLock.ts",
+      "src/reliability/ErrorClassifier.ts",
+      "src/reliability/RecoveryPolicy.ts",
+      "src/reliability/CrashSafeRecoveryCoordinator.ts",
+      "src/runtime/memory/MemoryBudgetManager.ts",
+      "src/shahab/ShahabEvidenceStore.ts",
+      "src/shahab/ShahabEngineUnified.ts",
+      "src/shahab/ShahabReleaseHardening.ts",
+      "src/shahab/ShahabOperationsGovernance.ts"
+    ]
+  },
+  "pipelineBoundaries": [
+    {
+      "boundaryId": "B01_AUDIO_INGESTION",
+      "order": 1,
+      "name": "Audio Ingestion",
+      "realImplementationFiles": [
+        "src/shahab/ShahabEngineUnified.ts",
+        "src/shahab/ShahabZipformerEngine.ts"
+      ],
+      "inputs": "WAV file path, raw buffer, or chunked PCM stream + request metadata",
+      "outputs": "Immutable audio reference + SHA-256 content hash + byte size",
+      "persistentState": "Source audio file (read-only; never mutated by SHAHAB)",
+      "temporaryState": "In-memory read buffer during hash computation",
+      "externalDependencies": [
+        "Local filesystem / browser File API"
+      ],
+      "failureModes": [
+        "INVALID_AUDIO",
+        "DISK_WRITE_FAILURE",
+        "OUT_OF_MEMORY"
+      ],
+      "retrySafety": "IDEMPOTENT_SAFE",
+      "resumableCheckpointSupported": false,
+      "recoveryStrategy": "Re-read immutable source audio reference; never mutate source recording.",
+      "dataLossRisk": "NONE",
+      "userVisibleFailureBehavior": "Clear error explaining source file could not be read; source audio remains untouched."
+    },
+    {
+      "boundaryId": "B02_AUDIO_VALIDATION",
+      "order": 2,
+      "name": "Audio Validation",
+      "realImplementationFiles": [
+        "src/shahab/ShahabEngineUnified.ts",
+        "src/shahab/ShahabZipformerEngine.ts"
+      ],
+      "inputs": "Raw audio bytes / RIFF WAV header",
+      "outputs": "Validated audio descriptor (sampleRate, channels, durationSec, pcmSha256)",
+      "persistentState": "POST_AUDIO_VALIDATION checkpoint manifest (optional)",
+      "temporaryState": "Header parse buffer",
+      "externalDependencies": [],
+      "failureModes": [
+        "INVALID_AUDIO",
+        "UNSUPPORTED_AUDIO_FORMAT",
+        "AUDIO_DECODE_FAILURE"
+      ],
+      "retrySafety": "NON_RETRYABLE_DETERMINISTIC",
+      "resumableCheckpointSupported": true,
+      "recoveryStrategy": "Fail fast without retrying invalid media; instruct user to provide valid PCM WAV.",
+      "dataLossRisk": "NONE",
+      "userVisibleFailureBehavior": "Immediate non-retried explanation identifying unsupported format or corrupted header."
+    },
+    {
+      "boundaryId": "B03_PREPROCESSING",
+      "order": 3,
+      "name": "Preprocessing (Mono 16kHz Normalization & Chunking)",
+      "realImplementationFiles": [
+        "src/shahab/ShahabZipformerEngine.ts",
+        "src/shahab/ShahabEngineUnified.ts"
+      ],
+      "inputs": "Validated audio buffer",
+      "outputs": "Float32 mono 16kHz PCM normalized to [-1, 1] + overlap chunk windows",
+      "persistentState": "None required (deterministic recomputation from immutable source)",
+      "temporaryState": "Float32Array PCM buffers bounded by SHAHABMemoryGovernor",
+      "externalDependencies": [],
+      "failureModes": [
+        "PREPROCESSING_FAILURE",
+        "OUT_OF_MEMORY",
+        "MEMORY_PRESSURE"
+      ],
+      "retrySafety": "IDEMPOTENT_SAFE",
+      "resumableCheckpointSupported": false,
+      "recoveryStrategy": "Release temporary buffers and re-run with smaller chunk window under memory pressure.",
+      "dataLossRisk": "LOW_TEMP_ONLY",
+      "userVisibleFailureBehavior": "Reports preprocessing failure or reduced-concurrency memory-safe mode."
+    },
+    {
+      "boundaryId": "B04_MODEL_INITIALIZATION",
+      "order": 4,
+      "name": "Model & Tokenizer Initialization",
+      "realImplementationFiles": [
+        "src/shahab/ShahabZipformerEngine.ts",
+        "src/shahab/ShahabReleaseHardening.ts",
+        "src/shahab/ShahabArtifactAcquisition.ts"
+      ],
+      "inputs": "Installed model directory + SHAHAB_RELEASE_MANIFEST.json + tokens.txt",
+      "outputs": "Verified ONNX Runtime sessions (encoder, decoder, joiner) + BPE token map",
+      "persistentState": "Verified read-only model artifacts under models/ + active release manifest",
+      "temporaryState": "ONNX Runtime WASM/CPU session allocations",
+      "externalDependencies": [
+        "onnxruntime-web (WASM CPU)",
+        "Local verified model files"
+      ],
+      "failureModes": [
+        "MODEL_LOAD_FAILURE",
+        "MODEL_ARTIFACT_CORRUPTED",
+        "TOKENIZER_INCOMPATIBLE",
+        "RUNTIME_INITIALIZATION_FAILURE",
+        "PROVIDER_FAILURE",
+        "OUT_OF_MEMORY"
+      ],
+      "retrySafety": "REQUIRES_CLEAN_REINIT",
+      "resumableCheckpointSupported": false,
+      "recoveryStrategy": "Serialize concurrent model loads (max 1); verify SHA-256 before load; if corrupted stop and request verified reacquisition or rollback to last known-good release.",
+      "dataLossRisk": "NONE",
+      "userVisibleFailureBehavior": "Blocks inference safely; identifies integrity mismatch or runtime unavailability without crashing workspace."
+    },
+    {
+      "boundaryId": "B05_FEATURE_EXTRACTION",
+      "order": 5,
+      "name": "Feature Extraction (80-dim Kaldi Log-Mel FBANK)",
+      "realImplementationFiles": [
+        "src/shahab/ShahabZipformerEngine.ts"
+      ],
+      "inputs": "Float32 mono 16kHz PCM chunk",
+      "outputs": "80-dim FBANK feature matrix [T, 80] + config digest",
+      "persistentState": "Optional SHA-256 verified feature checkpoint on disk or SHAHABAudioFeatureCache",
+      "temporaryState": "FFT/Mel scratch buffers",
+      "externalDependencies": [],
+      "failureModes": [
+        "PREPROCESSING_FAILURE",
+        "OUT_OF_MEMORY",
+        "MEMORY_PRESSURE"
+      ],
+      "retrySafety": "IDEMPOTENT_SAFE",
+      "resumableCheckpointSupported": true,
+      "recoveryStrategy": "Evict feature cache on memory pressure; recompute deterministically from immutable source audio if checkpoint missing/corrupted.",
+      "dataLossRisk": "LOW_TEMP_ONLY",
+      "userVisibleFailureBehavior": "Transparently bypasses cache with degraded-mode operational event if cache integrity is uncertain."
+    },
+    {
+      "boundaryId": "B06_ENCODER_EXECUTION",
+      "order": 6,
+      "name": "Zipformer Encoder Execution",
+      "realImplementationFiles": [
+        "src/shahab/ShahabZipformerEngine.ts"
+      ],
+      "inputs": "80-dim FBANK tensor + verified encoder ONNX session",
+      "outputs": "Encoder acoustic representations [1, T_out, D] cached in SHAHABEncoderOutputCache",
+      "persistentState": "Optional POST_ENCODER_EXECUTION checkpoint with model/tokenizer/audio/preprocessing hashes",
+      "temporaryState": "ONNX intermediate tensors & encoder cache entry",
+      "externalDependencies": [
+        "onnxruntime-web"
+      ],
+      "failureModes": [
+        "ENCODER_FAILURE",
+        "INFERENCE_TIMEOUT",
+        "INFERENCE_CRASH",
+        "OUT_OF_MEMORY",
+        "MEMORY_PRESSURE",
+        "UNSUPPORTED_OPERATION"
+      ],
+      "retrySafety": "REQUIRES_CLEAN_REINIT",
+      "resumableCheckpointSupported": true,
+      "recoveryStrategy": "Checkpoint encoder output per completed chunk; on worker crash, verify checkpoint digest & model compatibility before skipping already-encoded chunks.",
+      "dataLossRisk": "MEDIUM_PARTIAL_PROGRESS",
+      "userVisibleFailureBehavior": "Marks job RECOVERY_PENDING if prior chunks were committed, or FAILED_RECOVERABLE with clear resume option."
+    },
+    {
+      "boundaryId": "B07_DECODER_EXECUTION",
+      "order": 7,
+      "name": "Transducer Decoder & Joiner Execution (Greedy / Adaptive Beam)",
+      "realImplementationFiles": [
+        "src/shahab/ShahabZipformerEngine.ts",
+        "src/shahab/ShahabEngineUnified.ts"
+      ],
+      "inputs": "Cached encoder output + decoder/joiner sessions + decode policy",
+      "outputs": "Raw acoustic BPE token sequence, frame indices, log-probabilities",
+      "persistentState": "Optional POST_CHUNK_TRANSCRIPT_ASSEMBLY checkpoint",
+      "temporaryState": "Beam hypotheses & joiner logits",
+      "externalDependencies": [
+        "onnxruntime-web"
+      ],
+      "failureModes": [
+        "DECODER_FAILURE",
+        "INFERENCE_TIMEOUT",
+        "INFERENCE_CRASH",
+        "OUT_OF_MEMORY"
+      ],
+      "retrySafety": "IDEMPOTENT_SAFE",
+      "resumableCheckpointSupported": true,
+      "recoveryStrategy": "Reuse verified cached encoder output without re-running encoder; never silently downgrade decode policy without explicit degraded-mode record.",
+      "dataLossRisk": "MEDIUM_PARTIAL_PROGRESS",
+      "userVisibleFailureBehavior": "Preserves completed chunk outputs with explicit PARTIAL designation; never labels incomplete output as COMPLETED."
+    },
+    {
+      "boundaryId": "B08_CONTEXTUAL_VOCABULARY",
+      "order": 8,
+      "name": "Persian Context Memory & False-Insertion Guard",
+      "realImplementationFiles": [
+        "src/shahab/ShahabPersianMemoryAndContext.ts",
+        "src/asr-core/PersianEvidenceCorrectionEngine.ts",
+        "src/asr-core/PersianLexicalDisambiguationEngine.ts"
+      ],
+      "inputs": "Raw acoustic output + 4-scope Persian context memory + tokens.txt",
+      "outputs": "Context-assisted output + evidence ledger records (raw acoustic preserved verbatim)",
+      "persistentState": "SHAHAB_IMPLEMENTATION_STATE.json (verified Persian memory entries)",
+      "temporaryState": "Candidate BPE bias table",
+      "externalDependencies": [
+        "P0-010 Evidence Correction Engine",
+        "P0-012 Lexical Disambiguation Engine"
+      ],
+      "failureModes": [
+        "TOKENIZER_INCOMPATIBLE",
+        "DECODER_FAILURE",
+        "INCONSISTENT_PROCESSING_STATE"
+      ],
+      "retrySafety": "IDEMPOTENT_SAFE",
+      "resumableCheckpointSupported": false,
+      "recoveryStrategy": "Graceful degradation: disable optional contextual biasing, record CONTEXTUAL_BIASING_DISABLED event, and preserve raw acoustic transcript.",
+      "dataLossRisk": "NONE",
+      "userVisibleFailureBehavior": "Displays explicit degraded-mode notice that contextual vocabulary assistance was bypassed while raw acoustic output succeeded."
+    },
+    {
+      "boundaryId": "B09_ALIGNMENT_TIMESTAMPS",
+      "order": 9,
+      "name": "Frame-to-Word Alignment & Timestamp Generation",
+      "realImplementationFiles": [
+        "src/shahab/ShahabEngineUnified.ts"
+      ],
+      "inputs": "Decoded BPE token frame indices + chunk offsets + sample rate",
+      "outputs": "Word-level start/end timestamps (seconds & flicks) + overlap deduplication",
+      "persistentState": "None (derived deterministically from decoded frame indices)",
+      "temporaryState": "Overlap boundary merge buffer",
+      "externalDependencies": [],
+      "failureModes": [
+        "ALIGNMENT_FAILURE",
+        "INCONSISTENT_PROCESSING_STATE"
+      ],
+      "retrySafety": "IDEMPOTENT_SAFE",
+      "resumableCheckpointSupported": false,
+      "recoveryStrategy": "Recompute alignment from verified chunk token frames; fail cleanly if monotonic timestamp invariants are violated.",
+      "dataLossRisk": "NONE",
+      "userVisibleFailureBehavior": "Reports timestamp alignment failure instead of emitting corrupted timeline spans."
+    },
+    {
+      "boundaryId": "B10_TRANSCRIPT_ASSEMBLY",
+      "order": 10,
+      "name": "Four-Layer Transcript Assembly & P0-009 Normalization",
+      "realImplementationFiles": [
+        "src/shahab/ShahabEngineUnified.ts",
+        "src/asr-core/PersianLinguisticQualityEngine.ts"
+      ],
+      "inputs": "Raw acoustic tokens, context-assisted tokens, P0-009 normalization rules",
+      "outputs": "Transcript preserving rawAcoustic, contextAssisted, normalized, and authorizedFinal provenance",
+      "persistentState": "Durable transcript artifact after B12 commit",
+      "temporaryState": "In-memory assembled transcript document",
+      "externalDependencies": [
+        "P0-009 Persian Linguistic Quality Engine"
+      ],
+      "failureModes": [
+        "TRANSCRIPT_ASSEMBLY_FAILURE",
+        "INCONSISTENT_PROCESSING_STATE"
+      ],
+      "retrySafety": "IDEMPOTENT_SAFE",
+      "resumableCheckpointSupported": true,
+      "recoveryStrategy": "Reassemble deterministically from verified chunk checkpoints; never replace an existing authorizedFinal transcript with partial recovery.",
+      "dataLossRisk": "MEDIUM_PARTIAL_PROGRESS",
+      "userVisibleFailureBehavior": "Flags partial transcript clearly; requires explicit commit before marking job COMPLETED."
+    },
+    {
+      "boundaryId": "B11_AVAPARDAZ_EDITING_INTEGRATION",
+      "order": 11,
+      "name": "Avapardaz Editing Timeline Bridge",
+      "realImplementationFiles": [
+        "src/shahab/ShahabEngineUnified.ts",
+        "src/runtime/CrashRecoveryAndSessionLock.ts"
+      ],
+      "inputs": "Assembled SHAHAB transcript (ONNX-free contract)",
+      "outputs": "PersianWordToken[] synchronized to Avapardaz timeline without overwriting user-authorized edits",
+      "persistentState": "Avapardaz project checkpoint via CrashRecoveryAndSessionLock",
+      "temporaryState": "Pending UI timeline patch",
+      "externalDependencies": [
+        "CrashRecoveryAndSessionLock"
+      ],
+      "failureModes": [
+        "SESSION_RECOVERY_FAILURE",
+        "INCONSISTENT_PROCESSING_STATE",
+        "DUPLICATE_JOB_DETECTED"
+      ],
+      "retrySafety": "BOUNDED_WITH_IDEMPOTENCY_KEY",
+      "resumableCheckpointSupported": false,
+      "recoveryStrategy": "Deduplicate completion events by jobId + idempotencyKey; protect committed user edits from overwrite.",
+      "dataLossRisk": "HIGH_IF_NON_ATOMIC",
+      "userVisibleFailureBehavior": "Prevents duplicate timeline insertion and alerts user if session lock or project state is inconsistent."
+    },
+    {
+      "boundaryId": "B12_PERSISTENCE_AND_EXPORT",
+      "order": 12,
+      "name": "Atomic Persistence & Operational Export",
+      "realImplementationFiles": [
+        "src/shahab/ShahabEvidenceStore.ts",
+        "src/shahab/ShahabResilienceEngine.ts"
+      ],
+      "inputs": "Finalized transcript / job state / manifest payload",
+      "outputs": "Atomically committed JSON/JSONL file with verified SHA-256 integrity",
+      "persistentState": "Canonical docs/shahab/* and workspace project storage",
+      "temporaryState": "Sibling .tmp.<pid>.<nonce> file cleaned on failure",
+      "externalDependencies": [
+        "Local filesystem / OPFS"
+      ],
+      "failureModes": [
+        "DISK_FULL",
+        "DISK_WRITE_FAILURE",
+        "PERSISTENCE_FAILURE",
+        "CHECKPOINT_CORRUPTED"
+      ],
+      "retrySafety": "IDEMPOTENT_SAFE",
+      "resumableCheckpointSupported": false,
+      "recoveryStrategy": "Write temp -> flush/fsync -> parse & hash verify -> atomic rename; previous committed file remains untouched on any error.",
+      "dataLossRisk": "NONE",
+      "userVisibleFailureBehavior": "Job stays FAILED_RECOVERABLE (never COMPLETED) on persistence failure; existing committed data stays intact."
+    }
+  ],
+  "failureTaxonomyCount": 33,
+  "degradedModesCatalog": [
+    {
+      "modeId": "CONTEXTUAL_BIASING_DISABLED",
+      "activationCondition": "Contextual vocabulary subsystem or P0-010/P0-012 hook throws or fails compatibility check.",
+      "knownImpact": "Domain terminology biasing skipped; raw acoustic recognition preserved verbatim.",
+      "equivalentToNormalOutput": false,
+      "recoveryCondition": "Contextual memory & tokens.txt verified healthy on next job.",
+      "userVisibleStatus": "Degraded: Contextual vocabulary disabled (raw acoustic output active)."
+    },
+    {
+      "modeId": "FEATURE_CACHE_BYPASSED",
+      "activationCondition": "Memory pressure or cache integrity mismatch detected.",
+      "knownImpact": "Higher latency (features/encoder recomputed); acoustic output identical.",
+      "equivalentToNormalOutput": true,
+      "recoveryCondition": "Process RSS returns below soft threshold and cache reinitializes cleanly.",
+      "userVisibleStatus": "Degraded: Acoustic cache bypassed for safety."
+    },
+    {
+      "modeId": "CONCURRENCY_REDUCED",
+      "activationCondition": "Process memory pressure or CPU exhaustion.",
+      "knownImpact": "New jobs queued sequentially (max 1 active inference).",
+      "equivalentToNormalOutput": true,
+      "recoveryCondition": "Active RSS and queue pressure normalize.",
+      "userVisibleStatus": "Degraded: Concurrency reduced to 1 active job."
+    },
+    {
+      "modeId": "NEW_JOBS_PAUSED_STORAGE",
+      "activationCondition": "Measured available disk space falls below manifest requirement + safety margin.",
+      "knownImpact": "New processing jobs paused; existing committed transcripts remain readable.",
+      "equivalentToNormalOutput": false,
+      "recoveryCondition": "Measured available disk space exceeds threshold.",
+      "userVisibleStatus": "Degraded: New jobs paused due to low disk space."
+    },
+    {
+      "modeId": "PARTIAL_TRANSCRIPT_PRESERVED",
+      "activationCondition": "Inference interrupted or cancelled after >= 1 chunk committed durably.",
+      "knownImpact": "Only completed chunks available; explicitly tagged PARTIAL (never COMPLETED).",
+      "equivalentToNormalOutput": false,
+      "recoveryCondition": "Full job recovery completes remaining chunks and commits atomically.",
+      "userVisibleStatus": "Degraded: Partial transcript preserved (incomplete recording)."
+    }
+  ],
+  "activeDegradedModes": [],
+  "backupScopePolicy": [
+    {
+      "assetClass": "USER_CREATED_CONTENT",
+      "includeInLocalBackup": true,
+      "includeInExternalBackupWithoutConsent": false,
+      "rationale": "Critical user recordings/edits; NEVER uploaded externally without explicit authorization."
+    },
+    {
+      "assetClass": "AUTHORIZED_FINAL_TRANSCRIPTS",
+      "includeInLocalBackup": true,
+      "includeInExternalBackupWithoutConsent": false,
+      "rationale": "Irreplaceable human-reviewed transcripts; protected from partial-recovery overwrite."
+    },
+    {
+      "assetClass": "PROJECT_METADATA",
+      "includeInLocalBackup": true,
+      "includeInExternalBackupWithoutConsent": false,
+      "rationale": "Small structured JSON metadata essential for timeline and provenance restoration."
+    },
+    {
+      "assetClass": "MODEL_MANIFESTS",
+      "includeInLocalBackup": true,
+      "includeInExternalBackupWithoutConsent": false,
+      "rationale": "Tiny SHA-256 lineage manifests enabling verified reacquisition of exact model revisions."
+    },
+    {
+      "assetClass": "MODEL_ARTIFACTS_WEIGHTS",
+      "includeInLocalBackup": false,
+      "includeInExternalBackupWithoutConsent": false,
+      "rationale": "Excluded (~115.77 MB); securely reacquirable by pinned 40-char commit SHA + SHA-256 manifest."
+    },
+    {
+      "assetClass": "RUNTIME_CONFIGURATION",
+      "includeInLocalBackup": true,
+      "includeInExternalBackupWithoutConsent": false,
+      "rationale": "Small local runtime & consent preference files."
+    },
+    {
+      "assetClass": "OPERATIONAL_TELEMETRY",
+      "includeInLocalBackup": true,
+      "includeInExternalBackupWithoutConsent": false,
+      "rationale": "Sanitized local operational ledger; external sharing strictly opt-in."
+    },
+    {
+      "assetClass": "TEMPORARY_INFERENCE_STATE",
+      "includeInLocalBackup": false,
+      "includeInExternalBackupWithoutConsent": false,
+      "rationale": "Ephemeral FFT/encoder buffers and .tmp files are disposable and excluded."
+    }
+  ],
+  "latestResourceSnapshot": {
+    "capturedAtIso": "2026-11-21T19:06:52.507Z",
+    "processRssBytes": 1013161984,
+    "processHeapUsedBytes": 22062112,
+    "processHeapTotalBytes": 27942912,
+    "processExternalBytes": 126947509,
+    "processPeakRssBytes": 1013161984,
+    "hostFreeMemoryBytes": 10877595648,
+    "hostTotalMemoryBytes": 12884901888,
+    "storageTargetPath": "/app/applet/docs/shahab",
+    "storageAvailableBytes": 540332933120,
+    "storageMeasurementStatus": "MEASURED",
+    "activeModelLoads": 0,
+    "activeInferenceJobs": 0,
+    "queuedJobs": 0,
+    "memoryPressureActive": false
+  },
+  "faultInjectionSummary": {
+    "runId": "fi-run-eca4abe1-5",
+    "executedAtIso": "2026-11-21T19:06:52.493Z",
+    "totalScenarios": 11,
+    "passedScenarios": 11,
+    "failedScenarios": 0,
+    "scenarios": [
+      {
+        "testId": "FI-PROC-01",
+        "category": "PROCESS",
+        "faultInjected": "Terminate worker during preprocessing",
+        "initialState": "PROCESSING (chunk 0, no durable output)",
+        "expectedBehavior": "Transition to FAILED_RECOVERABLE; forbid invalid jump to COMPLETED",
+        "actualBehavior": "State=FAILED_RECOVERABLE; invalid COMPLETED jump rejected=true",
+        "recoveryResult": "CONTAINED_SAFELY",
+        "dataIntegrityResult": "INTACT_VERIFIED",
+        "passed": true,
+        "evidenceRef": "docs/shahab/SHAHAB_FAULT_INJECTION_RESULTS.json#FI-PROC-01"
+      },
+      {
+        "testId": "FI-PROC-02",
+        "category": "PROCESS",
+        "faultInjected": "Crash/restart during encoder execution on chunk 1 + duplicate completion event",
+        "initialState": "PROCESSING with verified chunk-0 POST_ENCODER_EXECUTION checkpoint",
+        "expectedBehavior": "Verify checkpoint integrity, resume chunk 1, commit full transcript, reject duplicate COMPLETED",
+        "actualBehavior": "CheckpointValid=true, FinalCompleted=true, DuplicateBlocked=true",
+        "recoveryResult": "RECOVERED_VERIFIED",
+        "dataIntegrityResult": "INTACT_VERIFIED",
+        "passed": true,
+        "evidenceRef": "docs/shahab/SHAHAB_FAULT_INJECTION_RESULTS.json#FI-PROC-02"
+      },
+      {
+        "testId": "FI-PROC-03",
+        "category": "PROCESS",
+        "faultInjected": "Decoder/persistence interruption attempting partial overwrite + user cancellation",
+        "initialState": "Existing authorizedFinalTranscript committed",
+        "expectedBehavior": "Reject partial recovery overwrite; cancellation preserves committed user transcript",
+        "actualBehavior": "OverwriteBlocked=true, AuthorizedPreserved=true",
+        "recoveryResult": "CONTAINED_SAFELY",
+        "dataIntegrityResult": "INTACT_VERIFIED",
+        "passed": true,
+        "evidenceRef": "docs/shahab/SHAHAB_FAULT_INJECTION_RESULTS.json#FI-PROC-03"
+      },
+      {
+        "testId": "FI-STOR-01",
+        "category": "STORAGE",
+        "faultInjected": "Simulated ENOSPC disk full during atomic write + low-space preflight",
+        "initialState": "Previously committed transcript file with verified SHA-256",
+        "expectedBehavior": "Abort write without retry, pause new jobs, preserve prior committed file bit-for-bit",
+        "actualBehavior": "ENOSPC=true, PreflightBlocked=true, NoRetry=true, PriorShaIntact=true",
+        "recoveryResult": "CONTAINED_SAFELY",
+        "dataIntegrityResult": "INTACT_VERIFIED",
+        "passed": true,
+        "evidenceRef": "docs/shahab/SHAHAB_FAULT_INJECTION_RESULTS.json#FI-STOR-01"
+      },
+      {
+        "testId": "FI-STOR-02",
+        "category": "STORAGE",
+        "faultInjected": "Mid-write EIO interruption after writing 1/3 of temp file",
+        "initialState": "Valid atomic_io_guard.json (commitSeq=42)",
+        "expectedBehavior": "Reject partial write, clean temp file, keep commitSeq=42 intact",
+        "actualBehavior": "EIO=true, TempLeftovers=0, PriorIntact=true",
+        "recoveryResult": "CONTAINED_SAFELY",
+        "dataIntegrityResult": "INTACT_VERIFIED",
+        "passed": true,
+        "evidenceRef": "docs/shahab/SHAHAB_FAULT_INJECTION_RESULTS.json#FI-STOR-02"
+      },
+      {
+        "testId": "FI-STOR-03",
+        "category": "STORAGE",
+        "faultInjected": "Post-write tampering of checkpoint payload JSON",
+        "initialState": "Valid POST_FEATURE_EXTRACTION checkpoint",
+        "expectedBehavior": "Detect SHA-256 mismatch and reject recovery with CHECKPOINT_CORRUPTED",
+        "actualBehavior": "Valid=false, Code=CHECKPOINT_CORRUPTED",
+        "recoveryResult": "CONTAINED_SAFELY",
+        "dataIntegrityResult": "CORRUPTION_BLOCKED",
+        "passed": true,
+        "evidenceRef": "docs/shahab/SHAHAB_FAULT_INJECTION_RESULTS.json#FI-STOR-03"
+      },
+      {
+        "testId": "FI-MEM-01",
+        "category": "MEMORY",
+        "faultInjected": "Memory pressure cache eviction + 3 simultaneous model initialization calls",
+        "initialState": "Idle SHAHABResourceGuard (maxConcurrentModelLoads=1)",
+        "expectedBehavior": "Serialize concurrent model loads (peak=1), evict cache safely, emit degraded event",
+        "actualBehavior": "PeakConcurrentLoads=1, SerializedWait=true, CacheEvicted=true",
+        "recoveryResult": "CONTAINED_SAFELY",
+        "dataIntegrityResult": "INTACT_VERIFIED",
+        "passed": true,
+        "evidenceRef": "docs/shahab/SHAHAB_FAULT_INJECTION_RESULTS.json#FI-MEM-01"
+      },
+      {
+        "testId": "FI-NET-01",
+        "category": "NETWORK",
+        "faultInjected": "Unauthorized LOCAL->CLOUD fallback + Cloud REQUEST_TIMEOUT + duplicate Cloud delivery",
+        "initialState": "Isolated Local/Cloud guard and bounded Cloud retry policy",
+        "expectedBehavior": "Block silent LOCAL->CLOUD upload, recover Cloud timeout within retry limit, suppress duplicate Cloud request",
+        "actualBehavior": "SilentFallbackBlocked=true, CloudRecoveredOnAttempt=2, DuplicateSuppressed=true",
+        "recoveryResult": "RECOVERED_VERIFIED",
+        "dataIntegrityResult": "INTACT_VERIFIED",
+        "passed": true,
+        "evidenceRef": "docs/shahab/SHAHAB_FAULT_INJECTION_RESULTS.json#FI-NET-01"
+      },
+      {
+        "testId": "FI-INT-01",
+        "category": "INTEGRITY",
+        "faultInjected": "Post-manifest artifact tamper + incompatible tokenizer + mismatched recording + unsupported schema version 99.0.0",
+        "initialState": "Verified model manifest and valid checkpoint",
+        "expectedBehavior": "Block tampered artifact and reject all 3 incompatible checkpoints with exact failure codes",
+        "actualBehavior": "TamperBlocked=true, Tok=TOKENIZER_INCOMPATIBLE, Audio=UNVERIFIED_RECOVERY_DATA, Ver=STATE_VERSION_MISMATCH",
+        "recoveryResult": "CONTAINED_SAFELY",
+        "dataIntegrityResult": "CORRUPTION_BLOCKED",
+        "passed": true,
+        "evidenceRef": "docs/shahab/SHAHAB_FAULT_INJECTION_RESULTS.json#FI-INT-01"
+      },
+      {
+        "testId": "FI-UPD-01",
+        "category": "UPDATE_INSTALL",
+        "faultInjected": "Interrupted/corrupted artifact extraction during staged installation + simulated activation crash rollback",
+        "initialState": "Active known-good release SHAHAB-R2.0.0-GOOD",
+        "expectedBehavior": "Reject interrupted candidate, keep last known-good release active and intact, complete lifecycle rollback",
+        "actualBehavior": "InterruptedRejected=true, Staged=STAGED, CrashRollback=ROLLED_BACK, CorruptStage=UPDATE_REJECTED, Active=SHAHAB-R2.0.0-GOOD",
+        "recoveryResult": "ROLLBACK_VERIFIED",
+        "dataIntegrityResult": "INTACT_VERIFIED",
+        "passed": true,
+        "evidenceRef": "docs/shahab/SHAHAB_FAULT_INJECTION_RESULTS.json#FI-UPD-01"
+      },
+      {
+        "testId": "FI-DEG-01",
+        "category": "INTEGRITY",
+        "faultInjected": "Optional contextual vocabulary subsystem exception",
+        "initialState": "Normal recognition with contextual biasing enabled",
+        "expectedBehavior": "Activate CONTEXTUAL_BIASING_DISABLED (marked non-equivalent), preserve raw acoustic output",
+        "actualBehavior": "DegradedActive=true, EquivalentToNormal=false, RawAcousticPreserved=true",
+        "recoveryResult": "RECOVERED_VERIFIED",
+        "dataIntegrityResult": "INTACT_VERIFIED",
+        "passed": true,
+        "evidenceRef": "docs/shahab/SHAHAB_FAULT_INJECTION_RESULTS.json#FI-DEG-01"
+      }
+    ]
+  },
+  "restoreVerification": {
+    "schemaVersion": "1.0.0",
+    "reportId": "restore-d43f02cc-b",
+    "executedAtIso": "2026-11-21T19:06:52.506Z",
+    "isolatedSandboxDir": "<ISOLATED_OS_TMPDIR_CLEANED>",
+    "backedUpAssetClasses": [
+      "AUTHORIZED_FINAL_TRANSCRIPTS",
+      "PROJECT_METADATA",
+      "MODEL_MANIFESTS",
+      "RUNTIME_CONFIGURATION"
+    ],
+    "excludedLargeModelWeights": true,
+    "externalUploadPerformed": false,
+    "checks": {
+      "readabilityPassed": true,
+      "schemaCompatibilityPassed": true,
+      "contentIntegritySha256Passed": true,
+      "referentialIntegrityPassed": true,
+      "postRestoreUsabilityPassed": true
+    },
+    "verifiedFileCount": 5,
+    "allChecksPassed": true,
+    "notes": [
+      "Executed in isolated temporary sandbox; production files untouched.",
+      "Large ONNX model artifacts intentionally excluded from backup bundle (reacquirable via SHA-256 manifest).",
+      "Verified post-restore protection against partial recovery overwriting an authorized final transcript."
+    ]
+  },
+  "serviceLevelIndicators": [
+    {
+      "indicatorId": "SLI_JOB_COMPLETION_RATE",
+      "name": "Production Job Completion Rate",
+      "formula": "completed_production_jobs / total_production_jobs",
+      "measurementSource": "docs/shahab/SHAHAB_RUNTIME_EVENTS.jsonl",
+      "timeWindow": "Current release lifecycle (production runs only)",
+      "sampleCount": 1,
+      "value": 1,
+      "unit": "ratio",
+      "status": "MEASURED",
+      "exclusionRules": "Excludes synthetic fault-injection tests and user-cancelled jobs.",
+      "limitations": "Production telemetry sample count is limited to sandbox verification runs until field deployment."
+    },
+    {
+      "indicatorId": "SLI_RECOVERABLE_VS_NON_RECOVERABLE_RATE",
+      "name": "Recoverable Failure Ratio",
+      "formula": "recoverable_failures / (recoverable_failures + non_recoverable_failures)",
+      "measurementSource": "docs/shahab/SHAHAB_FAILURE_EVENTS.jsonl",
+      "timeWindow": "Current release lifecycle",
+      "sampleCount": 0,
+      "value": null,
+      "unit": "ratio",
+      "status": "INSUFFICIENT_EVIDENCE",
+      "exclusionRules": "Excludes intentionally injected test failures.",
+      "limitations": "Zero production failures observed so far -> reported as INSUFFICIENT_EVIDENCE rather than fabricated 0."
+    },
+    {
+      "indicatorId": "SLI_MEDIAN_INFERENCE_LATENCY_MS",
+      "name": "Observed Median Inference Latency",
+      "formula": "median(inference_duration_ms)",
+      "measurementSource": "docs/shahab/SHAHAB_RUNTIME_EVENTS.jsonl",
+      "timeWindow": "Verified local runs on current host",
+      "sampleCount": 3,
+      "value": 878,
+      "unit": "ms",
+      "status": "MEASURED",
+      "exclusionRules": "Excludes cold model initialization time (measured separately).",
+      "limitations": "Measured on Linux CPU WASM sandbox only; desktop/mobile targets not yet measured."
+    },
+    {
+      "indicatorId": "SLI_FAULT_INJECTION_CONTAINMENT_RATE",
+      "name": "Isolated Fault-Injection Containment & Integrity Rate",
+      "formula": "passed_fault_injection_scenarios / total_fault_injection_scenarios",
+      "measurementSource": "docs/shahab/SHAHAB_FAULT_INJECTION_RESULTS.json",
+      "timeWindow": "Latest isolated resilience test suite run",
+      "sampleCount": 11,
+      "value": 1,
+      "unit": "ratio",
+      "status": "MEASURED",
+      "exclusionRules": "Isolated sandbox only; never extrapolates to untested OS power-loss firmware.",
+      "limitations": "Controlled fault injection verifies software containment, not hardware power-loss guarantees."
+    },
+    {
+      "indicatorId": "SLI_BACKUP_RESTORE_INTEGRITY",
+      "name": "Restore Verification Integrity Rate",
+      "formula": "passed_restore_checks / 5",
+      "measurementSource": "docs/shahab/SHAHAB_RESTORE_VERIFICATION_REPORTS.json",
+      "timeWindow": "Latest restore drill",
+      "sampleCount": 5,
+      "value": 1,
+      "unit": "ratio",
+      "status": "MEASURED",
+      "exclusionRules": "Model binary weights excluded by backup scope policy.",
+      "limitations": "Verified on local filesystem sandbox; browser OPFS restore drill requires live browser session."
+    }
+  ],
+  "unsupportedRecoveryScenarios": [
+    "Mid-kernel ONNX WASM preemption cannot resume inside an active tensor op; recovery resumes from the last verified chunk checkpoint.",
+    "Hardware power-loss directory-entry durability depends on host OS/filesystem write barriers; zero data loss on sudden power cut is not guaranteed.",
+    "Unattended automatic production update rollout remains disabled until external Ed25519 signing infrastructure is provisioned (SHAHAB-013).",
+    "Browser OPFS and native desktop companion crash-recovery drills require a live desktop/browser host outside this Linux CPU container."
+  ],
+  "remainingRisksAndBlockers": [
+    "Automatic unattended release-update rollout remains disabled while SHAHAB-013 Ed25519 signing is BLOCKED.",
+    "Production SLI sample counts remain limited to controlled sandbox runs until live user workloads operate under consent."
+  ]
+}

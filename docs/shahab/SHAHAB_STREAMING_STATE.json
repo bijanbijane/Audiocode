@@ -1,0 +1,58 @@
+{
+  "missionId": "SHAHAB-017",
+  "generatedAtUtc": "2026-11-21T19:07:13.327Z",
+  "capabilityAudit": {
+    "modelId": "INHERITED-PERSIAN-ASR-CORE",
+    "encoderInputs": [
+      "x",
+      "x_lens"
+    ],
+    "hasStatefulCacheTensors": false,
+    "trueStatefulStreamingStatus": "NOT_SUPPORTED_BY_MODEL",
+    "selectedStreamingMode": "INCREMENTAL_WINDOWED_INFERENCE",
+    "rationale": "Encoder graph exposes only offline inputs [x, x_lens] with zero cache tensors; true stateful streaming is NOT_SUPPORTED_BY_MODEL. SHAHAB implements bounded INCREMENTAL_WINDOWED_INFERENCE with timestamp-aligned overlap reconciliation."
+  },
+  "liveValidationRun": {
+    "sessionId": "stream_9c3ad814",
+    "streamingMode": "INCREMENTAL_WINDOWED_INFERENCE",
+    "windowSec": 2,
+    "stepSec": 1,
+    "audioDurationSec": 12.12,
+    "chunksReceived": 13,
+    "windowsProcessed": 13,
+    "timeToFirstPartialMs": 155.508,
+    "finalizationLatencyMs": 972.358,
+    "totalSessionMs": 3167.995,
+    "backpressureEvents": 0,
+    "revisionsEmitted": 13,
+    "finalTranscript": "شکلات داغ در حد ساندارهای بلژیکی از آبیگاه گران قیمت ولی آنین باشند",
+    "finalState": "COMPLETED"
+  },
+  "repetitionPreservationProof": {
+    "inputWithPersianRepetition": "من نه [overlap: نه] نه درست",
+    "reconciledOutput": "من نه نه درست",
+    "genuineRepetitionPreserved": true,
+    "overlapDuplicateRemoved": true
+  },
+  "editorEditProtectionProof": {
+    "userEditedText": "شکلات داغ خانگی",
+    "subsequentPartialBlocked": true,
+    "effectiveTextAfterLatePartial": "شکلات داغ خانگی",
+    "undoRestoredCorrectly": true
+  },
+  "continuityValidationProof": {
+    "duplicateRejected": true,
+    "outOfOrderRejected": true,
+    "gapFlaggedNotFaked": true
+  },
+  "backpressureProof": {
+    "queueCapacity": 2,
+    "backpressureTriggered": true,
+    "silentChunkDrops": 0
+  },
+  "finalStatus": "VERIFIED",
+  "limitations": [
+    "Inherited encoder.int8.onnx is offline-only (inputs: x, x_lens); TRUE_STATEFUL_STREAMING is honestly marked NOT_SUPPORTED_BY_MODEL.",
+    "INCREMENTAL_WINDOWED_INFERENCE re-encodes sliding windows with timestamp-aligned reconciliation and runs a final EOS pass to avoid boundary truncation."
+  ]
+}

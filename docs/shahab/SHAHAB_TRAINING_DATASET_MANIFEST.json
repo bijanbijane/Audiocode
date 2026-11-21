@@ -1,0 +1,5 @@
+{
+  "status": "NO_TRAINING_EXECUTED",
+  "mission012Status": "NOT_REQUIRED_BY_EVIDENCE",
+  "note": "SHAHAB-011 selected Decision A (CONTINUE_FROZEN_WEIGHT_RUNTIME). No training dataset was assembled or used."
+}

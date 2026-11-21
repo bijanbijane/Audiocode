@@ -1,0 +1,185 @@
+{
+  "schemaVersion": "1.0.0",
+  "generatedAtIso": "2026-11-21T19:06:52.398Z",
+  "platforms": [
+    {
+      "targetId": "NATIVE_CPU",
+      "displayName": "Native CPU (Node v22 + onnxruntime-web WASM SIMD)",
+      "status": "VERIFIED",
+      "supportedEngineReleases": [
+        "SHAHAB-R1.4.0",
+        "SHAHAB-R1.5.0-VALIDATION",
+        "SHAHAB-R2.0.0-RELEASE-CANDIDATE"
+      ],
+      "supportedRuntimeVersion": "onnxruntime-web@1.31.1 on Node v22.23.2",
+      "requiredOpsetRange": "ONNX opset 11–21 (model opset 14)",
+      "executionProvider": "wasm (CPU)",
+      "audioConfig": "16kHz Mono Float32 PCM, Kaldi 80-dim Log-Mel FBANK",
+      "tokenizerCompatible": true,
+      "decoderInterface": "stateless7 RNN-T (context_size=2, vocab=1024 BPE)",
+      "supportedPolicies": [
+        "SPEED",
+        "BALANCED",
+        "PRECISION",
+        "VOCABULARY",
+        "VERBATIM"
+      ],
+      "alignmentFeatures": "Segment-level timestamps only (word alignment unavailable)",
+      "verificationEvidence": "Real Persian Zipformer inference + encoder-reuse + rollback verified on sample.wav."
+    },
+    {
+      "targetId": "NATIVE_ACCELERATED",
+      "displayName": "Native GPU / CUDA / ROCm / sherpa-onnx C++",
+      "status": "BLOCKED",
+      "supportedEngineReleases": [
+        "SHAHAB-R2.0.0-RELEASE-CANDIDATE"
+      ],
+      "supportedRuntimeVersion": "NOT_INSTALLED (0 GPUs, no CUDA/ROCm, no sherpa-onnx binary)",
+      "requiredOpsetRange": "ONNX opset 14",
+      "executionProvider": "UNAVAILABLE",
+      "audioConfig": "16kHz Mono Float32 PCM",
+      "tokenizerCompatible": true,
+      "decoderInterface": "stateless7 RNN-T",
+      "supportedPolicies": [],
+      "alignmentFeatures": "NOT_MEASURED",
+      "verificationEvidence": "BLOCKED: Hardware discovery verified 0 GPUs, no /dev/nvidia*, no cuda/rocm, no sherpa-onnx native binary."
+    },
+    {
+      "targetId": "BROWSER_WASM",
+      "displayName": "Browser Local WASM (OPFS + onnxruntime-web)",
+      "status": "NOT_VERIFIED",
+      "supportedEngineReleases": [
+        "SHAHAB-R2.0.0-RELEASE-CANDIDATE"
+      ],
+      "supportedRuntimeVersion": "onnxruntime-web@1.31.1 (Browser WASM)",
+      "requiredOpsetRange": "ONNX opset 14",
+      "executionProvider": "wasm",
+      "audioConfig": "16kHz Mono Float32 PCM",
+      "tokenizerCompatible": true,
+      "decoderInterface": "stateless7 RNN-T",
+      "supportedPolicies": [
+        "SPEED",
+        "BALANCED",
+        "PRECISION",
+        "VOCABULARY",
+        "VERBATIM"
+      ],
+      "alignmentFeatures": "Segment-level only",
+      "verificationEvidence": "NOT_VERIFIED: Headless browser verified SHAHAB LAB UI & API; full 116 MB OPFS model inference in-browser requires live user OPFS download."
+    },
+    {
+      "targetId": "BROWSER_WEBGPU",
+      "displayName": "Browser WebGPU Acceleration",
+      "status": "BLOCKED",
+      "supportedEngineReleases": [
+        "SHAHAB-R2.0.0-RELEASE-CANDIDATE"
+      ],
+      "supportedRuntimeVersion": "WebGPU unavailable in headless CPU container",
+      "requiredOpsetRange": "ONNX opset 14",
+      "executionProvider": "webgpu (UNAVAILABLE)",
+      "audioConfig": "16kHz Mono Float32 PCM",
+      "tokenizerCompatible": true,
+      "decoderInterface": "stateless7 RNN-T",
+      "supportedPolicies": [],
+      "alignmentFeatures": "NOT_MEASURED",
+      "verificationEvidence": "BLOCKED: No GPU hardware or WebGPU adapter available in current container."
+    },
+    {
+      "targetId": "CLOUD_AUTHORIZED",
+      "displayName": "Cloud Execution (Authorized Zero-Retention Container Worker)",
+      "status": "VERIFIED",
+      "supportedEngineReleases": [
+        "SHAHAB-R1.4.0",
+        "SHAHAB-R2.0.0-RELEASE-CANDIDATE"
+      ],
+      "supportedRuntimeVersion": "onnxruntime-web@1.31.1 (Isolated zero-retention worker)",
+      "requiredOpsetRange": "ONNX opset 14",
+      "executionProvider": "wasm (Authorized Cloud Container)",
+      "audioConfig": "16kHz Mono Float32 PCM",
+      "tokenizerCompatible": true,
+      "decoderInterface": "stateless7 RNN-T",
+      "supportedPolicies": [
+        "SPEED",
+        "BALANCED",
+        "PRECISION",
+        "VOCABULARY",
+        "VERBATIM"
+      ],
+      "alignmentFeatures": "Segment-level only",
+      "verificationEvidence": "Verified Local/Cloud semantic parity & explicit CLOUD_AUTHORIZATION_REQUIRED privacy gate in SHAHAB-010 conformance tests."
+    }
+  ],
+  "runtimeRegistryProfiles": [
+    {
+      "runtimeId": "shahab-browser-wasm-cpu",
+      "executionLocation": "LOCAL_BROWSER",
+      "executionProvider": "onnxruntime-web@1.31.1 (wasm)",
+      "verifiedInCurrentContainer": true,
+      "supportedTensorDtypes": [
+        "FLOAT",
+        "INT8",
+        "UINT8",
+        "INT64",
+        "INT32",
+        "BOOL"
+      ],
+      "int4MatMulNBitsSupported": false,
+      "streamingEncoderSupported": false,
+      "encoderOutputReuseSupported": true,
+      "maxRecommendedPackageBytes": 268435456,
+      "localAudioUploadPolicy": "NEVER_UPLOAD",
+      "statusNote": "Verified with real unmocked Persian Zipformer INT8 inference on sample.wav in this container."
+    },
+    {
+      "runtimeId": "shahab-browser-webgpu",
+      "executionLocation": "LOCAL_BROWSER",
+      "executionProvider": "onnxruntime-web (webgpu)",
+      "verifiedInCurrentContainer": false,
+      "supportedTensorDtypes": [
+        "FLOAT",
+        "FLOAT16"
+      ],
+      "int4MatMulNBitsSupported": "NOT_VERIFIED",
+      "streamingEncoderSupported": false,
+      "encoderOutputReuseSupported": true,
+      "maxRecommendedPackageBytes": 268435456,
+      "localAudioUploadPolicy": "NEVER_UPLOAD",
+      "statusNote": "UNVERIFIED: No physical GPU / WebGPU adapter in headless Linux container; dynamic INT8 ConvInteger/MatMulInteger ops typically fall back to WASM."
+    },
+    {
+      "runtimeId": "shahab-native-sherpa-cpu",
+      "executionLocation": "LOCAL_NATIVE",
+      "executionProvider": "sherpa-onnx C++ / ONNX Runtime CPU",
+      "verifiedInCurrentContainer": false,
+      "supportedTensorDtypes": [
+        "FLOAT",
+        "INT8",
+        "UINT8",
+        "INT64"
+      ],
+      "int4MatMulNBitsSupported": "NOT_VERIFIED",
+      "streamingEncoderSupported": false,
+      "encoderOutputReuseSupported": true,
+      "maxRecommendedPackageBytes": 2147483648,
+      "localAudioUploadPolicy": "NEVER_UPLOAD",
+      "statusNote": "UNVERIFIED in container: sherpa-onnx-offline binary not installed in Linux sandbox; supported on desktop Companion deployments."
+    },
+    {
+      "runtimeId": "shahab-cloud-unified-contract",
+      "executionLocation": "CLOUD_AUTHORIZED",
+      "executionProvider": "Unified Avapardaz Local/Cloud Contract (explicit opt-in only)",
+      "verifiedInCurrentContainer": true,
+      "supportedTensorDtypes": [
+        "FLOAT",
+        "FLOAT16",
+        "INT8"
+      ],
+      "int4MatMulNBitsSupported": "NOT_VERIFIED",
+      "streamingEncoderSupported": false,
+      "encoderOutputReuseSupported": true,
+      "maxRecommendedPackageBytes": 4294967296,
+      "localAudioUploadPolicy": "EXPLICIT_USER_AUTHORIZATION_REQUIRED",
+      "statusNote": "Contract parity verified; local mode never implicitly uploads audio (AVP-P01-006 / SHAHAB-010 §2)."
+    }
+  ]
+}

@@ -1,0 +1,32 @@
+{
+  "schemaVersion": "1.0.0",
+  "benchmarkExecutionId": "shahab_bench_1795287969425_e345b2",
+  "modelRevision": "0408facbcf3f670121def48e0802c395c225d150",
+  "aggregateTrackA": {
+    "wer": 0.5192,
+    "cer": 0.2567,
+    "substitutions": 24,
+    "deletions": 1,
+    "insertions": 2,
+    "sentenceErrorRate": 1
+  },
+  "aggregateTrackB": {
+    "wer": 0.5192,
+    "cer": 0.2778,
+    "substitutions": 24,
+    "deletions": 1,
+    "insertions": 2,
+    "sentenceErrorRate": 1
+  },
+  "performance": {
+    "coldLatencyMs": 1313,
+    "warmLatencyMs": 952,
+    "p50LatencyMs": 1062,
+    "p95LatencyMs": 1313,
+    "realTimeFactor": 0.09,
+    "throughputAudioSecPerWallSec": 11.114,
+    "peakRamBytes": 762404864,
+    "cpuUserMs": 9570,
+    "cpuSystemMs": 60
+  }
+}

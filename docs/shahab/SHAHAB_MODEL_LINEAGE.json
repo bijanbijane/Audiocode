@@ -1,0 +1,63 @@
+{
+  "schemaVersion": "1.0.0",
+  "generatedAtIso": "2026-11-21T19:06:52.397Z",
+  "lineageRecords": [
+    {
+      "lineageId": "lineage_upstream_zipformer_int8",
+      "category": "UPSTREAM_ORIGINAL",
+      "originalRepository": "ramin-mahmoodi/persian-zipformer-asr",
+      "immutableUpstreamRevision": "0408facbcf3f670121def48e0802c395c225d150",
+      "originalModelIdentity": "persian-zipformer-transducer (stateless7 INT8)",
+      "parentArtifactHashes": {},
+      "finalArtifactHashes": {
+        "encoder.int8.onnx": "08735923618e196bd093b369f6843c8a390a6113a391e7b7095115582fd2cd27",
+        "decoder.int8.onnx": "9d4ad2da0335d86d8638ff026e6b37247d97df940af6ad40bba671af5fd4aa9d",
+        "joiner.int8.onnx": "a2a4a30585dc53e46afafd03690181107a610f67ff0e29cab460ec16df5cc00b",
+        "tokens.txt": "435f9e09a290c764670044e54c2450670fc2eab50176cd912734fa6f92ab166f"
+      },
+      "transformationHistory": [
+        "Downloaded immutable upstream INT8 ONNX artifacts directly from Hugging Face at pinned commit SHA."
+      ],
+      "quantizationHistory": "Dynamic INT8 quantization performed upstream by ramin-mahmoodi via k2-fsa/icefall + sherpa-onnx.",
+      "exportHistory": "Upstream ONNX opset 14 stateless7 3-graph export.",
+      "licenseSpdx": "Apache-2.0",
+      "requiredAttributionNotices": [
+        "Copyright ramin-mahmoodi & k2-fsa/icefall contributors (Apache-2.0)"
+      ],
+      "isIndependentlyTrainedNeuralModel": false
+    },
+    {
+      "lineageId": "lineage_variant_b_lossless_cleaned",
+      "category": "SHAHAB_RUNTIME_DERIVED_ARTIFACT",
+      "originalRepository": "ramin-mahmoodi/persian-zipformer-asr",
+      "immutableUpstreamRevision": "0408facbcf3f670121def48e0802c395c225d150",
+      "originalModelIdentity": "persian-zipformer-transducer-cleaned (metadata-stripped INT8)",
+      "parentArtifactHashes": {
+        "encoder.int8.onnx": "08735923618e196bd093b369f6843c8a390a6113a391e7b7095115582fd2cd27",
+        "decoder.int8.onnx": "9d4ad2da0335d86d8638ff026e6b37247d97df940af6ad40bba671af5fd4aa9d",
+        "joiner.int8.onnx": "a2a4a30585dc53e46afafd03690181107a610f67ff0e29cab460ec16df5cc00b",
+        "tokens.txt": "435f9e09a290c764670044e54c2450670fc2eab50176cd912734fa6f92ab166f"
+      },
+      "finalArtifactHashes": {
+        "encoder.int8.onnx": "bf4d351c0cbeedf6bdde11ae359e2e343ab20edd5bfa3ef270bdce9e9f1f833f",
+        "decoder.int8.onnx": "ba85ae3ec45d91d48b6d28ae03c27eca17b730228897bd1820c53be3666eb830",
+        "joiner.int8.onnx": "1f0d1ade36d917aab81b339c0f76982ae52fa5e41e23c813d530f3ff998ec326",
+        "tokens.txt": "435f9e09a290c764670044e54c2450670fc2eab50176cd912734fa6f92ab166f"
+      },
+      "transformationHistory": [
+        "Lossless ONNX top-level doc_string/metadata stripping via ShahabOnnxInspector (zero weight tensor mutation)."
+      ],
+      "quantizationHistory": "Unchanged upstream INT8 initializers.",
+      "exportHistory": "Binary protobuf re-serialization preserving exact initializers & graph nodes.",
+      "licenseSpdx": "Apache-2.0",
+      "requiredAttributionNotices": [
+        "Derived from ramin-mahmoodi/persian-zipformer-asr (Apache-2.0)"
+      ],
+      "isIndependentlyTrainedNeuralModel": false
+    }
+  ],
+  "parentChildConsistency": {
+    "consistent": true,
+    "errors": []
+  }
+}

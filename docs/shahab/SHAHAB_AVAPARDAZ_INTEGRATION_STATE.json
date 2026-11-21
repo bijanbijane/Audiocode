@@ -1,0 +1,51 @@
+{
+  "missionId": "SHAHAB-023",
+  "generatedAtUtc": "2026-11-21T19:07:38.963Z",
+  "sdkApiVersionConsumed": "1.0.0",
+  "architectureMapCount": 10,
+  "integrationChecks": [
+    {
+      "checkId": "AVP-MEDIA-TIMELINE-01",
+      "area": "Non-Destructive Media Input & Flick/Sample Timeline Mapping",
+      "passed": true,
+      "detail": "hashUnchanged=true, srcSamples=[16000,96000), timelineStartSec=10"
+    },
+    {
+      "checkId": "AVP-TIMESTRETCH-01",
+      "area": "Playback-Rate & Time-Stretch Honest Mapping Guard",
+      "passed": true,
+      "detail": "status=MAPPING_UNAVAILABLE_TIME_STRETCHED"
+    },
+    {
+      "checkId": "AVP-EDITOR-AUTH-01",
+      "area": "User Edit Protection, Reversible Layers & P0-009/010/012 Authority",
+      "passed": true,
+      "detail": "editProtected=true, rawPreserved=true"
+    },
+    {
+      "checkId": "AVP-PRIVACY-ISO-01",
+      "area": "Project Isolation & Explicit Cloud Consent Boundary",
+      "passed": true,
+      "detail": "crossProjectBlocked=true, unauthorizedCloudBlocked=true"
+    },
+    {
+      "checkId": "AVP-EXPORT-REV-01",
+      "area": "Persian UTF-8/ZWNJ Exports, JSON Sidecar Round-Trip & Media Revision Staleness",
+      "passed": true,
+      "detail": "exports=TXT/SRT/JSON, invalidatedOnRev2=2, validity=STALE_SOURCE_REVISION_CHANGED"
+    }
+  ],
+  "supportedExportFormats": [
+    "TXT_UTF8",
+    "SRT_UTF8",
+    "JSON_SIDECAR"
+  ],
+  "p0AuthorityPreserved": true,
+  "nonDestructiveSourceVerified": true,
+  "finalStatus": "VERIFIED",
+  "knownLimitations": [
+    "Word-level forced alignment is unsupported; text-to-timeline navigation operates at verified segment level.",
+    "Pitch-preserving time-stretched or non-1.0 playback-rate clips explicitly disable linear timeline mapping rather than estimating inaccurate timestamps.",
+    "P0-011 does not exist as a standalone module in workspace; P0-009, P0-010, and P0-012 remain authoritative."
+  ]
+}

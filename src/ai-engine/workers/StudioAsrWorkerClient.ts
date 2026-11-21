@@ -30,6 +30,7 @@ export class StudioAsrWorkerError extends Error {
 interface PendingRequest {
   readonly command: StudioAsrWorkerCommand;
   readonly jobId: string;
+  readonly generation: number;
   readonly resolve: (value: StudioAsrWorkerResponseMessage) => void;
   readonly reject: (reason: Error) => void;
   readonly timer: ReturnType<typeof setTimeout> | null;
@@ -38,21 +39,65 @@ interface PendingRequest {
 export interface StudioAsrWorkerClientOptions {
   readonly workerFactory?: () => StudioAsrWorkerLike;
   readonly requestTimeoutMs?: number;
+  readonly initTimeoutMs?: number;
+}
+
+const VALID_WORKER_COMMANDS = new Set<StudioAsrWorkerCommand>([
+  'INITIALIZE_MODEL',
+  'DETECT_VAD',
+  'TRANSCRIBE_WINDOW',
+  'UNLOAD_MODEL',
+  'CANCEL_JOB',
+  'DISPOSE',
+]);
+
+/**
+ * Validates incoming worker response frames strictly before accepting them on main thread
+ * (AVP-P0-006 §9 Browser Worker Message Hardening).
+ */
+export function isValidStudioAsrWorkerResponse(
+  raw: unknown,
+): raw is StudioAsrWorkerResponseMessage {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return false;
+  const r = raw as Record<string, unknown>;
+  if (typeof r.requestId !== 'string' || r.requestId.length === 0 || r.requestId.length > 128) {
+    return false;
+  }
+  if (typeof r.jobId !== 'string' || r.jobId.length === 0 || r.jobId.length > 128) {
+    return false;
+  }
+  if (typeof r.ok !== 'boolean') return false;
+  if (typeof r.command !== 'string' || !VALID_WORKER_COMMANDS.has(r.command as StudioAsrWorkerCommand)) {
+    return false;
+  }
+  if (!r.ok) {
+    return typeof r.errorCode === 'string' && typeof r.message === 'string';
+  }
+  return true;
 }
 
 /**
- * Typed main-thread client for the dedicated Studio ONNX ASR Web Worker.
- * Implements `AsrModelRunnerAdapter` so `PersianChunkedAsrEngine` runs genuine
- * local ONNX inference off the main thread while transferring ONLY per-window PCM slices.
+ * Typed main-thread client for the dedicated Studio ONNX ASR Web Worker (AVP-P0-001 A2 & AVP-P0-006 §9).
+ *
+ * Reliability guarantees:
+ * - Explicit initialization timeout (`initTimeoutMs`) separate from per-window timeout
+ * - Job admission control (single active job guard prevents duplicate concurrent inference)
+ * - Strict request/job correlation + worker generation tracking (stale responses rejected)
+ * - Automatic clean recovery: after a worker crash or timeout, the worker is terminated,
+ *   pending promises reject cleanly, and the next `initializeModel()` spawns a fresh worker.
  */
 export class StudioAsrWorkerClient implements AsrModelRunnerAdapter {
   private worker: StudioAsrWorkerLike | null = null;
+  private workerGeneration = 0;
   private readonly pending = new Map<string, PendingRequest>();
   private reqCounter = 0;
   private currentJobId = 'studio-local-asr';
+  private activeLockedJobId: string | null = null;
   private initialized = false;
   private decoderConfigured = false;
   private disposed = false;
+  private crashCount = 0;
+  private staleResponseCount = 0;
 
   public modelId = '';
   public modelVersion = '';
@@ -61,6 +106,7 @@ export class StudioAsrWorkerClient implements AsrModelRunnerAdapter {
 
   private readonly workerFactory: () => StudioAsrWorkerLike;
   private readonly requestTimeoutMs: number;
+  private readonly initTimeoutMs: number;
 
   constructor(options?: StudioAsrWorkerClientOptions) {
     this.workerFactory =
@@ -80,6 +126,10 @@ export class StudioAsrWorkerClient implements AsrModelRunnerAdapter {
       typeof options?.requestTimeoutMs === 'number' && options.requestTimeoutMs > 0
         ? options.requestTimeoutMs
         : 60_000;
+    this.initTimeoutMs =
+      typeof options?.initTimeoutMs === 'number' && options.initTimeoutMs > 0
+        ? options.initTimeoutMs
+        : 45_000;
   }
 
   public isReady(): boolean {
@@ -88,6 +138,44 @@ export class StudioAsrWorkerClient implements AsrModelRunnerAdapter {
 
   public hasDecoderConfiguration(): boolean {
     return this.decoderConfigured;
+  }
+
+  public getDiagnosticsSnapshot(): {
+    readonly workerActive: boolean;
+    readonly workerGeneration: number;
+    readonly crashCount: number;
+    readonly staleResponseCount: number;
+    readonly activeLockedJobId: string | null;
+    readonly initialized: boolean;
+  } {
+    return {
+      workerActive: this.worker !== null,
+      workerGeneration: this.workerGeneration,
+      crashCount: this.crashCount,
+      staleResponseCount: this.staleResponseCount,
+      activeLockedJobId: this.activeLockedJobId,
+      initialized: this.initialized,
+    };
+  }
+
+  /**
+   * Acquires exclusive job admission slot to prevent duplicate concurrent transcription jobs.
+   */
+  public acquireJobSlot(jobId: string): void {
+    if (this.activeLockedJobId && this.activeLockedJobId !== jobId) {
+      throw new StudioAsrWorkerError(
+        'JOB_ALREADY_RUNNING',
+        `Another local transcription job (${this.activeLockedJobId}) is already running.`,
+      );
+    }
+    this.activeLockedJobId = jobId;
+    this.currentJobId = jobId;
+  }
+
+  public releaseJobSlot(jobId: string): void {
+    if (this.activeLockedJobId === jobId) {
+      this.activeLockedJobId = null;
+    }
   }
 
   public setActiveJobId(jobId: string): void {
@@ -100,38 +188,53 @@ export class StudioAsrWorkerClient implements AsrModelRunnerAdapter {
     return frames * 80 * Float32Array.BYTES_PER_ELEMENT * 4;
   }
 
-  private ensureWorker(): StudioAsrWorkerLike {
+  private ensureWorker(): { readonly worker: StudioAsrWorkerLike; readonly generation: number } {
     if (this.disposed) {
       throw new StudioAsrWorkerError(
         'LOCAL_RUNTIME_UNAVAILABLE',
         'StudioAsrWorkerClient has been disposed.',
       );
     }
-    if (this.worker) return this.worker;
+    if (this.worker) {
+      return { worker: this.worker, generation: this.workerGeneration };
+    }
 
+    const gen = ++this.workerGeneration;
     const w = this.workerFactory();
     w.onmessage = (event: MessageEvent<StudioAsrWorkerResponseMessage>) => {
+      // Reject messages from superseded/crashed worker generations
+      if (gen !== this.workerGeneration || this.worker !== w) {
+        this.staleResponseCount++;
+        return;
+      }
       const data = event.data;
-      if (!data || typeof data.requestId !== 'string') return;
+      if (!isValidStudioAsrWorkerResponse(data)) {
+        this.staleResponseCount++;
+        return;
+      }
       const entry = this.pending.get(data.requestId);
-      if (!entry) return;
+      if (!entry || entry.generation !== gen || entry.jobId !== data.jobId || entry.command !== data.command) {
+        this.staleResponseCount++;
+        return;
+      }
       this.pending.delete(data.requestId);
       if (entry.timer) clearTimeout(entry.timer);
       entry.resolve(data);
     };
     w.onerror = (event: ErrorEvent) => {
+      if (gen !== this.workerGeneration) return;
+      this.crashCount++;
       const errMsg = event?.message || 'Dedicated Studio ASR Worker crashed unexpectedly.';
-      this.terminateAndResetWorker(
-        new StudioAsrWorkerError('LOCAL_RUNTIME_UNAVAILABLE', errMsg),
-      );
+      this.terminateAndResetWorker(new StudioAsrWorkerError('WORKER_CRASHED', errMsg));
     };
     this.worker = w;
-    return w;
+    return { worker: w, generation: gen };
   }
 
   private terminateAndResetWorker(reason: Error): void {
     const activeWorker = this.worker;
     this.worker = null;
+    this.workerGeneration++;
     this.initialized = false;
     this.decoderConfigured = false;
     if (activeWorker) {
@@ -149,6 +252,13 @@ export class StudioAsrWorkerClient implements AsrModelRunnerAdapter {
       if (entry.timer) clearTimeout(entry.timer);
       entry.reject(reason);
     }
+  }
+
+  /**
+   * Simulates or triggers explicit worker crash recovery (terminates worker so next init recreates it).
+   */
+  public resetWorkerAfterFailure(reasonMessage = 'Worker forcibly reset for recovery.'): void {
+    this.terminateAndResetWorker(new StudioAsrWorkerError('WORKER_CRASHED', reasonMessage));
   }
 
   private sendCommand(
@@ -169,9 +279,10 @@ export class StudioAsrWorkerClient implements AsrModelRunnerAdapter {
       );
     }
 
-    const worker = this.ensureWorker();
+    const { worker, generation } = this.ensureWorker();
     const requestId = `asr_req_${++this.reqCounter}`;
-    const timeoutMs = extra?.timeoutMs ?? this.requestTimeoutMs;
+    const timeoutMs =
+      extra?.timeoutMs ?? (command === 'INITIALIZE_MODEL' ? this.initTimeoutMs : this.requestTimeoutMs);
 
     return new Promise<StudioAsrWorkerResponseMessage>((resolve, reject) => {
       let settled = false;
@@ -191,10 +302,10 @@ export class StudioAsrWorkerClient implements AsrModelRunnerAdapter {
           ? setTimeout(() => {
               finish(() => {
                 const timeoutErr = new StudioAsrWorkerError(
-                  'LOCAL_RUNTIME_UNAVAILABLE',
+                  'INFERENCE_TIMEOUT',
                   `Studio ASR Worker timed out after ${timeoutMs}ms on ${command}.`,
                 );
-                // Hard terminate hung worker and reset state cleanly
+                // Hard terminate hung worker and reset state cleanly so next job can recreate it
                 this.terminateAndResetWorker(timeoutErr);
                 reject(timeoutErr);
               });
@@ -224,6 +335,7 @@ export class StudioAsrWorkerClient implements AsrModelRunnerAdapter {
       this.pending.set(requestId, {
         command,
         jobId,
+        generation,
         timer,
         resolve: (resp) => finish(() => resolve(resp)),
         reject: (err) => finish(() => reject(err)),
@@ -262,7 +374,7 @@ export class StudioAsrWorkerClient implements AsrModelRunnerAdapter {
 
   public async initializeModel(
     payload: StudioAsrInitializePayload,
-    options?: { readonly jobId?: string; readonly signal?: AbortSignal },
+    options?: { readonly jobId?: string; readonly signal?: AbortSignal; readonly timeoutMs?: number },
   ): Promise<{
     readonly modelId: string;
     readonly modelVersion: string;
@@ -276,6 +388,7 @@ export class StudioAsrWorkerClient implements AsrModelRunnerAdapter {
     const response = await this.sendCommand('INITIALIZE_MODEL', jobId, {
       initPayload: payload,
       signal: options?.signal,
+      timeoutMs: options?.timeoutMs ?? this.initTimeoutMs,
     });
 
     if (!response.ok) {
@@ -312,7 +425,6 @@ export class StudioAsrWorkerClient implements AsrModelRunnerAdapter {
         'Local ONNX model must be initialized before VAD.',
       );
     }
-    // Copy exact per-window slice into a dedicated transferable ArrayBuffer (never detaches caller buffer)
     const copy = new Float32Array(pcm16kMono.length);
     copy.set(pcm16kMono);
     const buffer = copy.buffer;
@@ -335,7 +447,6 @@ export class StudioAsrWorkerClient implements AsrModelRunnerAdapter {
         'Local ONNX model must be initialized before window transcription.',
       );
     }
-    // Transfer ONLY this single bounded window buffer
     const copy = new Float32Array(pcm16kMono.length);
     copy.set(pcm16kMono);
     const buffer = copy.buffer;
@@ -376,6 +487,7 @@ export class StudioAsrWorkerClient implements AsrModelRunnerAdapter {
   public async dispose(): Promise<void> {
     if (this.disposed) return;
     this.disposed = true;
+    this.activeLockedJobId = null;
     const worker = this.worker;
     if (worker) {
       try {

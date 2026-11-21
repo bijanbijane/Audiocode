@@ -1,0 +1,102 @@
+{
+  "missionId": "SHAHAB-019",
+  "generatedAtUtc": "2026-11-21T19:07:23.379Z",
+  "authorityBoundaryMap": {
+    "p009_qualityEngine": "VERIFIED_REUSED (src/asr-core/PersianLinguisticQualityEngine.ts)",
+    "p010_evidenceCorrection": "VERIFIED_REUSED (src/asr-core/PersianEvidenceCorrectionEngine.ts)",
+    "p011_status": "NOT_PRESENT_IN_WORKSPACE",
+    "p012_lexicalDisambiguation": "VERIFIED_REUSED (src/asr-core/PersianLexicalDisambiguationEngine.ts)",
+    "parallelCorrectionEngineCreated": false
+  },
+  "sixLayerSampleRecord": {
+    "recordId": "shahab_019_sample_01",
+    "rawAcousticTranscript": "شکلات داغ در حد ساندارهای بلژیکی از آبی گران قیمت ولی آنین باشند",
+    "contextAssistedTranscript": "شکلات داغ در حد ساندارهای بلژیکی از آبیگاه گران قیمت ولی آنین باشند",
+    "verbatimTranscript": "شکلات داغ در حد ساندارهای بلژیکی از آبی گران قیمت ولی آنین باشند",
+    "normalizedTranscript": "شکلات داغ در حد ساندارهای بلژیکی از آبی گران قیمت ولی آنین باشند",
+    "userEditedTranscript": null,
+    "authorizedFinalTranscript": null,
+    "modelId": "INHERITED-PERSIAN-ASR-CORE",
+    "provider": "wasm",
+    "authorizedByUser": false,
+    "layerTransitions": [
+      {
+        "from": "RAW_ACOUSTIC_TRANSCRIPT",
+        "to": "NORMALIZED_TRANSCRIPT",
+        "transformationClass": "EVALUATION_ONLY",
+        "explicitAuthorization": false,
+        "timestampUtc": "2026-11-21T19:07:23.379Z"
+      }
+    ]
+  },
+  "orthographyAudit": {
+    "input": "شکلات داغ در حد ساندارهای بلژیکی از آبی گران قیمت ولی آنین باشند",
+    "normalized": "شکلات داغ در حد ساندارهای بلژیکی از آبی گران قیمت ولی آنین باشند",
+    "arabicYeKafConverted": false,
+    "zwnjAppliedCount": 0,
+    "digitsNormalized": false,
+    "transformationClass": "EVALUATION_ONLY",
+    "rawPreservedSeparately": true
+  },
+  "verbatimEvaluation": {
+    "referenceRepetitions": 1,
+    "preservedRepetitions": 1,
+    "repetitionPreservationRate": 1,
+    "referenceFillers": 1,
+    "preservedFillers": 1,
+    "colloquialFormsDetected": [
+      "می‌خوام",
+      "بگو"
+    ],
+    "colloquialFormsPreserved": [
+      "می‌خوام",
+      "بگو"
+    ],
+    "verbatimFidelityPassed": true
+  },
+  "scoreGuardDemo": {
+    "rawLogProbSum": -5.3255,
+    "isCalibratedProbability": false,
+    "safeDisplayLabel": "Uncalibrated RNN-T log-score: -5.33 (NOT a confidence %)",
+    "probabilityDisplayBlocked": true
+  },
+  "taxonomyCategoryCount": 18,
+  "observedErrorsOnSample": [
+    {
+      "category": "ERR_18_UNCLASSIFIED_ACOUSTIC_SUBSTITUTION",
+      "observedMismatch": "Lexical difference: ref=\"شکلات داغ در حد استانداردهای بلژیکی است آبمیوهها گران قیمت ولی عالی میباشند\" vs hyp=\"شکلات داغ در حد ساندارهای بلژیکی از آبی گران قیمت ولی آنین باشند\".",
+      "hypothesizedOriginStage": "ACOUSTIC_ENCODER",
+      "evidenceStatus": "OBSERVED_MISMATCH_ONLY"
+    }
+  ],
+  "referenceAdjudicationRecords": [
+    {
+      "sampleId": "sample_clean_fa_01",
+      "currentLevel": "L5_ADJUDICATED_GOLD_VERBATIM",
+      "currentText": "شکلات داغ در حد استانداردهای بلژیکی است آبمیوهها گران قیمت ولی عالی میباشند",
+      "disputeHistory": [
+        {
+          "version": 1,
+          "annotatorA": "شکلات داغ و آبمیوه ها و بستنی ها",
+          "annotatorB": "شکلات داغ و آبمیوه‌ها و بستنی‌ها",
+          "adjudicatedText": "شکلات داغ در حد استانداردهای بلژیکی است آبمیوهها گران قیمت ولی عالی میباشند",
+          "rationale": "Preserved canonical Persian ZWNJ («آبمیوه‌ها», «بستنی‌ها») per P0-009 guidelines while preserving raw annotator history.",
+          "recordedAtUtc": "2026-11-21T19:07:23.380Z"
+        }
+      ],
+      "eligibleForBenchmarkClaims": true
+    }
+  ],
+  "dualTrackBaseline": {
+    "trackAWer": 0.384615,
+    "trackACer": 0.213333,
+    "trackBWer": 0.384615,
+    "trackBCer": 0.238095
+  },
+  "researchAdmissionBoundary": {
+    "explicitConsentRequired": true,
+    "frozenTestSetProtectedFromTuning": true,
+    "unauthorizedAutoLearningBlocked": true
+  },
+  "finalStatus": "VERIFIED"
+}

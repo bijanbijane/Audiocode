@@ -1,0 +1,632 @@
+/**
+ * AVP-P0-007 — Production Installation, Update Orchestration, First-Run Readiness,
+ * Recovery, Storage Migration & Safe Uninstallation Engine
+ *
+ * Implements:
+ * 1. Independent component versioning & compatibility contract across Browser, Companion,
+ *    IPC Protocol, CEP Extension, Canonical Processing Contract, Project Schema, Model Manifest,
+ *    and Native Runtime.
+ * 2. Deterministic First-Run Initialization (strictly separating installed != initialized !=
+ *    runtime available != model installed != model verified != inference ready != Audition connected).
+ * 3. Exact 17-state Update Orchestration state machine with manifest/signature/SHA-256 verification,
+ *    compatibility gating, staging, atomic activation, post-update verification, rollback, and
+ *    interrupted-update recovery without destroying user projects or last known-good versions.
+ * 4. Storage category separation & safe uninstallation (never deletes user projects/media implicitly).
+ * 5. Environment-separated browser deployment validator (development vs staging vs production).
+ */
+
+import { AVAPARDAZ_VERSION_CONTRACT } from './VersionCompatibilityContract';
+import { CANONICAL_MODEL_MANIFEST_SCHEMA_VERSION } from './CanonicalModelProvenance';
+import { AVAPARDAZ_ASR_CONTRACT_VERSION } from '../asr-core/UnifiedLocalAsrRuntime';
+
+export type ReleaseComponentKind =
+  | 'BROWSER_APP'
+  | 'NATIVE_COMPANION'
+  | 'AUDITION_CEP_EXTENSION'
+  | 'MODEL_ARTIFACT';
+
+export interface ComponentVersionRegistry {
+  readonly browserAppVersion: string;
+  readonly nativeCompanionVersion: string;
+  readonly ipcProtocolVersion: string;
+  readonly cepExtensionVersion: string;
+  readonly canonicalProcessingContractVersion: string;
+  readonly projectSchemaVersion: number;
+  readonly modelManifestSchemaVersion: string;
+  readonly nativeRuntimeDependencyVersion: string;
+}
+
+export const CURRENT_COMPONENT_VERSIONS: ComponentVersionRegistry = Object.freeze({
+  browserAppVersion: AVAPARDAZ_VERSION_CONTRACT.appVersion,
+  nativeCompanionVersion: '1.0.0',
+  ipcProtocolVersion: '1.0.0',
+  cepExtensionVersion: '1.0.0',
+  canonicalProcessingContractVersion: AVAPARDAZ_ASR_CONTRACT_VERSION,
+  projectSchemaVersion: AVAPARDAZ_VERSION_CONTRACT.projectSchemaVersion,
+  modelManifestSchemaVersion: CANONICAL_MODEL_MANIFEST_SCHEMA_VERSION,
+  nativeRuntimeDependencyVersion: 'sherpa-onnx>=1.10.0',
+});
+
+export type CompatibilityMatrixStatus =
+  | 'VERIFIED'
+  | 'COMPATIBLE_BUT_UNTESTED'
+  | 'INCOMPATIBLE'
+  | 'BLOCKED'
+  | 'NOT_SUPPORTED'
+  | 'NOT_TESTED';
+
+export interface ComponentCompatibilityCheckResult {
+  readonly compatible: boolean;
+  readonly status: CompatibilityMatrixStatus;
+  readonly blockingReasons: readonly string[];
+  readonly requiresMigration: boolean;
+}
+
+function parseSemver(v: string): [number, number, number] | null {
+  const m = v.trim().match(/^(\d+)\.(\d+)\.(\d+)/);
+  if (!m) return null;
+  return [Number(m[1]), Number(m[2]), Number(m[3])];
+}
+
+/**
+ * Evaluates cross-component version compatibility before permitting activation or job start.
+ */
+export function evaluateComponentCompatibility(params: {
+  readonly cepRequiredIpcProtocol?: string;
+  readonly companionIpcProtocol?: string;
+  readonly projectSchemaVersion?: number;
+  readonly modelManifestSchemaVersion?: string;
+  readonly modelRequiresWebGpu?: boolean;
+  readonly browserHasWebGpu?: boolean;
+  readonly companionSupportsModelFormat?: boolean;
+}): ComponentCompatibilityCheckResult {
+  const blockingReasons: string[] = [];
+  let requiresMigration = false;
+
+  if (params.cepRequiredIpcProtocol && params.companionIpcProtocol) {
+    const req = parseSemver(params.cepRequiredIpcProtocol);
+    const cur = parseSemver(params.companionIpcProtocol);
+    if (!req || !cur || req[0] !== cur[0] || cur[1] < req[1]) {
+      blockingReasons.push(
+        `IPC_PROTOCOL_INCOMPATIBLE: CEP requires IPC ${params.cepRequiredIpcProtocol}, Companion provides ${params.companionIpcProtocol}.`,
+      );
+    }
+  }
+
+  if (params.projectSchemaVersion !== undefined) {
+    if (params.projectSchemaVersion > AVAPARDAZ_VERSION_CONTRACT.projectSchemaVersion) {
+      blockingReasons.push(
+        `PROJECT_SCHEMA_FUTURE_VERSION: Project schema v${params.projectSchemaVersion} exceeds supported v${AVAPARDAZ_VERSION_CONTRACT.projectSchemaVersion}.`,
+      );
+    } else if (params.projectSchemaVersion < AVAPARDAZ_VERSION_CONTRACT.minSupportedProjectSchemaVersion) {
+      blockingReasons.push(
+        `PROJECT_SCHEMA_UNSUPPORTED_LEGACY: Project schema v${params.projectSchemaVersion} is below minimum supported v${AVAPARDAZ_VERSION_CONTRACT.minSupportedProjectSchemaVersion}.`,
+      );
+    } else if (params.projectSchemaVersion < AVAPARDAZ_VERSION_CONTRACT.projectSchemaVersion) {
+      requiresMigration = true;
+    }
+  }
+
+  if (params.modelManifestSchemaVersion) {
+    const mVer = parseSemver(params.modelManifestSchemaVersion);
+    const curVer = parseSemver(CANONICAL_MODEL_MANIFEST_SCHEMA_VERSION);
+    if (!mVer || !curVer || mVer[0] > curVer[0]) {
+      blockingReasons.push(
+        `MODEL_MANIFEST_SCHEMA_TOO_NEW: Manifest schema ${params.modelManifestSchemaVersion} exceeds supported ${CANONICAL_MODEL_MANIFEST_SCHEMA_VERSION}.`,
+      );
+    }
+  }
+
+  if (params.modelRequiresWebGpu && !params.browserHasWebGpu) {
+    blockingReasons.push('BROWSER_CAPABILITY_MISSING: Model requires WebGPU which is unavailable.');
+  }
+
+  if (params.companionSupportsModelFormat === false) {
+    blockingReasons.push('COMPANION_MODEL_FORMAT_UNSUPPORTED: Installed Native Companion does not support this model format.');
+  }
+
+  return {
+    compatible: blockingReasons.length === 0,
+    status: blockingReasons.length === 0 ? 'VERIFIED' : 'INCOMPATIBLE',
+    blockingReasons,
+    requiresMigration,
+  };
+}
+
+/**
+ * Deterministic First-Run Initialization (`AVP-P0-007 §6`).
+ * Strictly distinguishes installed vs initialized vs runtime vs model vs verified vs inference ready.
+ */
+export interface FirstRunProbeInput {
+  readonly mode: 'BROWSER_ONLY' | 'NATIVE_AUDITION' | 'HYBRID';
+  readonly appIntegrityVerified: boolean;
+  readonly storageWritable: boolean;
+  readonly browserWasmAvailable?: boolean;
+  readonly companionInstalled?: boolean;
+  readonly companionIpcProtocol?: string;
+  readonly nativeDependencyAvailable?: boolean;
+  readonly modelCatalogReadable: boolean;
+  readonly modelInstalled: boolean;
+  readonly modelChecksumVerified: boolean;
+  readonly modelRuntimeCompatible: boolean;
+  readonly realInferenceProbePassed: boolean;
+  readonly auditionCepConnected?: boolean;
+}
+
+export interface FirstRunReadinessReport {
+  readonly applicationInstalled: boolean;
+  readonly applicationInitialized: boolean;
+  readonly runtimeAvailable: boolean;
+  readonly modelInstalled: boolean;
+  readonly modelVerified: boolean;
+  readonly inferenceReady: boolean;
+  readonly adobeAuditionConnected: boolean;
+  readonly modelAcquisitionRequired: boolean;
+  readonly blockingReasons: readonly string[];
+  readonly warnings: readonly string[];
+}
+
+export function evaluateFirstRunReadiness(probe: FirstRunProbeInput): FirstRunReadinessReport {
+  const blockingReasons: string[] = [];
+  const warnings: string[] = [];
+
+  if (!probe.appIntegrityVerified) blockingReasons.push('APP_INTEGRITY_FAILED');
+  if (!probe.storageWritable) blockingReasons.push('STORAGE_PERMISSION_DENIED');
+
+  let runtimeAvailable = false;
+  if (probe.mode === 'BROWSER_ONLY') {
+    // Companion is NEVER mandatory for browser-only operation
+    runtimeAvailable = Boolean(probe.browserWasmAvailable);
+    if (!runtimeAvailable) blockingReasons.push('BROWSER_WASM_UNAVAILABLE');
+  } else if (probe.mode === 'NATIVE_AUDITION') {
+    // Browser app is NEVER mandatory for native Audition operation
+    runtimeAvailable = Boolean(probe.companionInstalled && probe.nativeDependencyAvailable);
+    if (!probe.companionInstalled) blockingReasons.push('NATIVE_COMPANION_MISSING');
+    if (!probe.nativeDependencyAvailable) blockingReasons.push('NATIVE_RUNTIME_DEPENDENCY_MISSING');
+  } else {
+    runtimeAvailable = Boolean(
+      probe.browserWasmAvailable || (probe.companionInstalled && probe.nativeDependencyAvailable),
+    );
+    if (!runtimeAvailable) blockingReasons.push('NO_LOCAL_RUNTIME_AVAILABLE');
+  }
+
+  if (!probe.modelCatalogReadable) {
+    warnings.push('Model catalog unavailable; offline local model import still possible.');
+  }
+  if (!probe.modelInstalled) {
+    blockingReasons.push('MODEL_ACQUISITION_REQUIRED');
+  } else if (!probe.modelChecksumVerified) {
+    blockingReasons.push('MODEL_INTEGRITY_UNVERIFIED');
+  } else if (!probe.modelRuntimeCompatible) {
+    blockingReasons.push('MODEL_RUNTIME_INCOMPATIBLE');
+  }
+
+  const applicationInstalled = probe.appIntegrityVerified;
+  const applicationInitialized = applicationInstalled && probe.storageWritable;
+  const modelVerified = probe.modelInstalled && probe.modelChecksumVerified && probe.modelRuntimeCompatible;
+  const inferenceReady = applicationInitialized && runtimeAvailable && modelVerified && probe.realInferenceProbePassed;
+
+  return {
+    applicationInstalled,
+    applicationInitialized,
+    runtimeAvailable,
+    modelInstalled: probe.modelInstalled,
+    modelVerified,
+    inferenceReady,
+    adobeAuditionConnected: Boolean(probe.auditionCepConnected),
+    modelAcquisitionRequired: !probe.modelInstalled,
+    blockingReasons,
+    warnings,
+  };
+}
+
+/**
+ * Exact 17-State Update Orchestration State Machine (`AVP-P0-007 §7 & §8`).
+ */
+export type ComponentUpdateState =
+  | 'UPDATE_DISCOVERED'
+  | 'UPDATE_METADATA_VERIFIED'
+  | 'UPDATE_COMPATIBILITY_CHECKED'
+  | 'UPDATE_AUTHENTICITY_VERIFIED'
+  | 'UPDATE_DOWNLOAD_PENDING'
+  | 'UPDATE_DOWNLOADING'
+  | 'UPDATE_DOWNLOADED'
+  | 'UPDATE_INTEGRITY_VERIFIED'
+  | 'UPDATE_STAGED'
+  | 'UPDATE_READY'
+  | 'UPDATE_ACTIVATING'
+  | 'UPDATE_ACTIVATED'
+  | 'UPDATE_VERIFICATION_PENDING'
+  | 'UPDATE_VERIFIED'
+  | 'UPDATE_FAILED'
+  | 'UPDATE_ROLLBACK_PENDING'
+  | 'UPDATE_ROLLED_BACK';
+
+const LEGAL_UPDATE_TRANSITIONS: Readonly<Record<ComponentUpdateState, readonly ComponentUpdateState[]>> = {
+  UPDATE_DISCOVERED: ['UPDATE_METADATA_VERIFIED', 'UPDATE_FAILED'],
+  UPDATE_METADATA_VERIFIED: ['UPDATE_COMPATIBILITY_CHECKED', 'UPDATE_FAILED'],
+  UPDATE_COMPATIBILITY_CHECKED: ['UPDATE_AUTHENTICITY_VERIFIED', 'UPDATE_FAILED'],
+  UPDATE_AUTHENTICITY_VERIFIED: ['UPDATE_DOWNLOAD_PENDING', 'UPDATE_FAILED'],
+  UPDATE_DOWNLOAD_PENDING: ['UPDATE_DOWNLOADING', 'UPDATE_FAILED'],
+  UPDATE_DOWNLOADING: ['UPDATE_DOWNLOADED', 'UPDATE_FAILED'],
+  UPDATE_DOWNLOADED: ['UPDATE_INTEGRITY_VERIFIED', 'UPDATE_FAILED'],
+  UPDATE_INTEGRITY_VERIFIED: ['UPDATE_STAGED', 'UPDATE_FAILED'],
+  UPDATE_STAGED: ['UPDATE_READY', 'UPDATE_FAILED'],
+  UPDATE_READY: ['UPDATE_ACTIVATING', 'UPDATE_FAILED'],
+  UPDATE_ACTIVATING: ['UPDATE_ACTIVATED', 'UPDATE_ROLLBACK_PENDING', 'UPDATE_FAILED'],
+  UPDATE_ACTIVATED: ['UPDATE_VERIFICATION_PENDING', 'UPDATE_ROLLBACK_PENDING'],
+  UPDATE_VERIFICATION_PENDING: ['UPDATE_VERIFIED', 'UPDATE_ROLLBACK_PENDING'],
+  UPDATE_VERIFIED: ['UPDATE_DISCOVERED'],
+  UPDATE_FAILED: ['UPDATE_ROLLBACK_PENDING', 'UPDATE_DISCOVERED'],
+  UPDATE_ROLLBACK_PENDING: ['UPDATE_ROLLED_BACK', 'UPDATE_FAILED'],
+  UPDATE_ROLLED_BACK: ['UPDATE_DISCOVERED'],
+};
+
+export interface UpdateManifest {
+  readonly component: ReleaseComponentKind;
+  readonly version: string;
+  readonly minCompatibleIpcProtocol?: string;
+  readonly sha256Hex: string;
+  readonly sizeBytes: number;
+  readonly signatureStatus: 'SIGNATURE_VERIFIED' | 'UNSIGNED_CHECKSUM_ONLY' | 'SIGNATURE_INVALID';
+  readonly releaseNotes?: string;
+}
+
+export interface ComponentSlotRecord {
+  readonly component: ReleaseComponentKind;
+  readonly activeVersion: string;
+  readonly previousKnownGoodVersion: string | null;
+  readonly candidateVersion: string | null;
+  readonly state: ComponentUpdateState;
+  readonly stagingDir: string | null;
+  readonly lastError: string | null;
+  readonly history: readonly { readonly from: ComponentUpdateState; readonly to: ComponentUpdateState; readonly reason: string }[];
+}
+
+export class ComponentUpdateOrchestrator {
+  private readonly slots = new Map<ReleaseComponentKind, ComponentSlotRecord>();
+  private readonly activePinnedJobs = new Set<string>();
+
+  constructor(initialVersions: Readonly<Record<ReleaseComponentKind, string>>) {
+    for (const [comp, ver] of Object.entries(initialVersions) as [ReleaseComponentKind, string][]) {
+      this.slots.set(comp, {
+        component: comp,
+        activeVersion: ver,
+        previousKnownGoodVersion: null,
+        candidateVersion: null,
+        state: 'UPDATE_VERIFIED',
+        stagingDir: null,
+        lastError: null,
+        history: [],
+      });
+    }
+  }
+
+  public getSlot(component: ReleaseComponentKind): ComponentSlotRecord {
+    const s = this.slots.get(component);
+    if (!s) throw new Error(`Unknown component: ${component}`);
+    return s;
+  }
+
+  public pinActiveJob(jobId: string): void {
+    this.activePinnedJobs.add(jobId);
+  }
+
+  public releasePinnedJob(jobId: string): void {
+    this.activePinnedJobs.delete(jobId);
+  }
+
+  public transition(
+    component: ReleaseComponentKind,
+    next: ComponentUpdateState,
+    reason: string,
+    patch?: Partial<Pick<ComponentSlotRecord, 'activeVersion' | 'previousKnownGoodVersion' | 'candidateVersion' | 'stagingDir' | 'lastError'>>,
+  ): ComponentSlotRecord {
+    const cur = this.getSlot(component);
+    if (!LEGAL_UPDATE_TRANSITIONS[cur.state].includes(next)) {
+      throw new Error(`ILLEGAL_UPDATE_TRANSITION: ${component} cannot move ${cur.state} -> ${next}`);
+    }
+    const updated: ComponentSlotRecord = {
+      ...cur,
+      ...patch,
+      state: next,
+      history: [...cur.history, { from: cur.state, to: next, reason }],
+    };
+    this.slots.set(component, updated);
+    return updated;
+  }
+
+  /**
+   * Executes the full verified, atomic-activation, rollback-safe update pipeline for a component.
+   * Never activates an unverified or incompatible update; automatically rolls back to
+   * `previousKnownGoodVersion` if post-activation health verification fails.
+   */
+  public async executeSafeUpdate(params: {
+    readonly manifest: UpdateManifest;
+    readonly requireCryptographicSignature?: boolean;
+    readonly availableDiskBytes: number;
+    readonly downloadAndVerifySha256: () => Promise<{ readonly ok: boolean; readonly actualSha256Hex?: string; readonly error?: string }>;
+    readonly stageArtifact: () => Promise<{ readonly ok: boolean; readonly stagingDir?: string; readonly error?: string }>;
+    readonly activateArtifact: (stagingDir: string) => Promise<{ readonly ok: boolean; readonly error?: string }>;
+    readonly verifyPostActivationHealth: () => Promise<{ readonly ok: boolean; readonly error?: string }>;
+    readonly restorePreviousVersion: (prevVersion: string) => Promise<boolean>;
+  }): Promise<{ readonly ok: boolean; readonly slot: ComponentSlotRecord; readonly rolledBack: boolean }> {
+    const { manifest } = params;
+    const comp = manifest.component;
+    const initial = this.getSlot(comp);
+
+    this.transition(comp, 'UPDATE_DISCOVERED', `Discovered ${comp}@${manifest.version}`, {
+      candidateVersion: manifest.version,
+      lastError: null,
+    });
+
+    // 1. Metadata validation
+    if (!parseSemver(manifest.version) || !/^[a-f0-9]{64}$/i.test(manifest.sha256Hex) || manifest.sizeBytes <= 0) {
+      const failed = this.transition(comp, 'UPDATE_FAILED', 'Invalid update manifest metadata.', {
+        lastError: 'INVALID_UPDATE_MANIFEST',
+      });
+      return { ok: false, slot: failed, rolledBack: false };
+    }
+    this.transition(comp, 'UPDATE_METADATA_VERIFIED', 'Manifest schema & checksum format valid.');
+
+    // 2. Compatibility check
+    if (manifest.minCompatibleIpcProtocol) {
+      const compat = evaluateComponentCompatibility({
+        cepRequiredIpcProtocol: manifest.minCompatibleIpcProtocol,
+        companionIpcProtocol: CURRENT_COMPONENT_VERSIONS.ipcProtocolVersion,
+      });
+      if (!compat.compatible) {
+        const failed = this.transition(comp, 'UPDATE_FAILED', compat.blockingReasons.join(' | '), {
+          lastError: 'INCOMPATIBLE_UPDATE_VERSION',
+        });
+        return { ok: false, slot: failed, rolledBack: false };
+      }
+    }
+    this.transition(comp, 'UPDATE_COMPATIBILITY_CHECKED', 'Component compatibility verified.');
+
+    // 3. Authenticity check (NEVER accept INVALID signature; enforce signature when required)
+    if (
+      manifest.signatureStatus === 'SIGNATURE_INVALID' ||
+      (params.requireCryptographicSignature && manifest.signatureStatus !== 'SIGNATURE_VERIFIED')
+    ) {
+      const failed = this.transition(comp, 'UPDATE_FAILED', `Authenticity rejected (${manifest.signatureStatus}).`, {
+        lastError: 'UPDATE_AUTHENTICITY_FAILED',
+      });
+      return { ok: false, slot: failed, rolledBack: false };
+    }
+    this.transition(comp, 'UPDATE_AUTHENTICITY_VERIFIED', `Authenticity checked (${manifest.signatureStatus}).`);
+
+    // 4. Storage preflight (require 2x size headroom for staging + active preservation)
+    if (params.availableDiskBytes < manifest.sizeBytes * 2) {
+      const failed = this.transition(comp, 'UPDATE_FAILED', 'Insufficient disk space for safe staged update.', {
+        lastError: 'INSUFFICIENT_DISK_SPACE',
+      });
+      return { ok: false, slot: failed, rolledBack: false };
+    }
+    this.transition(comp, 'UPDATE_DOWNLOAD_PENDING', 'Disk preflight passed.');
+    this.transition(comp, 'UPDATE_DOWNLOADING', 'Downloading artifact.');
+
+    // 5. Download & SHA-256 verification
+    const dl = await params.downloadAndVerifySha256();
+    if (!dl.ok) {
+      const failed = this.transition(comp, 'UPDATE_FAILED', dl.error ?? 'Download failed.', {
+        lastError: 'UPDATE_DOWNLOAD_FAILED',
+      });
+      return { ok: false, slot: failed, rolledBack: false };
+    }
+    this.transition(comp, 'UPDATE_DOWNLOADED', 'Artifact download finished.');
+
+    if (!dl.actualSha256Hex || dl.actualSha256Hex.toLowerCase() !== manifest.sha256Hex.toLowerCase()) {
+      const failed = this.transition(comp, 'UPDATE_FAILED', 'SHA-256 checksum mismatch after download.', {
+        lastError: 'UPDATE_HASH_MISMATCH',
+      });
+      return { ok: false, slot: failed, rolledBack: false };
+    }
+    this.transition(comp, 'UPDATE_INTEGRITY_VERIFIED', 'SHA-256 checksum matched manifest.');
+
+    // 6. Staging
+    const staged = await params.stageArtifact();
+    if (!staged.ok || !staged.stagingDir) {
+      const failed = this.transition(comp, 'UPDATE_FAILED', staged.error ?? 'Staging failed.', {
+        lastError: 'UPDATE_STAGING_FAILED',
+      });
+      return { ok: false, slot: failed, rolledBack: false };
+    }
+    this.transition(comp, 'UPDATE_STAGED', 'Staged outside active installation.', {
+      stagingDir: staged.stagingDir,
+    });
+
+    // Defer activation if active inference/render job is pinned
+    if (this.activePinnedJobs.size > 0) {
+      const ready = this.transition(comp, 'UPDATE_READY', 'Update staged & ready; waiting for active jobs to complete.');
+      return { ok: false, slot: ready, rolledBack: false };
+    }
+    this.transition(comp, 'UPDATE_READY', 'Ready for atomic activation.');
+
+    // 7. Atomic activation (preserving previousKnownGoodVersion!)
+    const prevKnownGood = initial.activeVersion;
+    this.transition(comp, 'UPDATE_ACTIVATING', `Activating ${manifest.version} (previous known-good=${prevKnownGood}).`, {
+      previousKnownGoodVersion: prevKnownGood,
+    });
+
+    const act = await params.activateArtifact(staged.stagingDir);
+    if (!act.ok) {
+      return this.performRollback(comp, prevKnownGood, act.error ?? 'Activation failed.', params.restorePreviousVersion);
+    }
+
+    this.transition(comp, 'UPDATE_ACTIVATED', 'Switched active pointer.', {
+      activeVersion: manifest.version,
+    });
+    this.transition(comp, 'UPDATE_VERIFICATION_PENDING', 'Running post-update health verification.');
+
+    const health = await params.verifyPostActivationHealth();
+    if (!health.ok) {
+      return this.performRollback(
+        comp,
+        prevKnownGood,
+        health.error ?? 'Post-activation health check failed.',
+        params.restorePreviousVersion,
+      );
+    }
+
+    const verified = this.transition(comp, 'UPDATE_VERIFIED', 'Post-update verification succeeded.', {
+      candidateVersion: null,
+      stagingDir: null,
+      lastError: null,
+    });
+    return { ok: true, slot: verified, rolledBack: false };
+  }
+
+  /** Recovers safely from a power-loss / interrupted update found at next startup */
+  public recoverInterruptedUpdate(component: ReleaseComponentKind): ComponentSlotRecord {
+    const cur = this.getSlot(component);
+    const interruptedStates: ComponentUpdateState[] = [
+      'UPDATE_DOWNLOADING',
+      'UPDATE_DOWNLOADED',
+      'UPDATE_STAGED',
+      'UPDATE_ACTIVATING',
+      'UPDATE_VERIFICATION_PENDING',
+      'UPDATE_ROLLBACK_PENDING',
+    ];
+    if (!interruptedStates.includes(cur.state)) {
+      return cur;
+    }
+    const targetVersion = cur.previousKnownGoodVersion ?? cur.activeVersion;
+    if (cur.state !== 'UPDATE_ROLLBACK_PENDING') {
+      if (LEGAL_UPDATE_TRANSITIONS[cur.state].includes('UPDATE_ROLLBACK_PENDING')) {
+        this.transition(component, 'UPDATE_ROLLBACK_PENDING', 'Detected interrupted update on restart.');
+      } else {
+        this.transition(component, 'UPDATE_FAILED', 'Detected interrupted pre-activation update on restart.');
+        this.transition(component, 'UPDATE_ROLLBACK_PENDING', 'Cleaning up interrupted staging state.');
+      }
+    }
+    return this.transition(component, 'UPDATE_ROLLED_BACK', `Recovered cleanly to known-good version ${targetVersion}.`, {
+      activeVersion: targetVersion,
+      candidateVersion: null,
+      stagingDir: null,
+      lastError: 'RECOVERED_FROM_INTERRUPTED_UPDATE',
+    });
+  }
+
+  private async performRollback(
+    component: ReleaseComponentKind,
+    prevKnownGood: string,
+    reason: string,
+    restoreFn: (prevVersion: string) => Promise<boolean>,
+  ): Promise<{ readonly ok: boolean; readonly slot: ComponentSlotRecord; readonly rolledBack: boolean }> {
+    this.transition(component, 'UPDATE_ROLLBACK_PENDING', reason, { lastError: reason });
+    const restored = await restoreFn(prevKnownGood);
+    if (!restored) {
+      const failed = this.transition(component, 'UPDATE_FAILED', 'Rollback restoration failed.', {
+        lastError: `ROLLBACK_FAILED: ${reason}`,
+      });
+      return { ok: false, slot: failed, rolledBack: false };
+    }
+    const rolled = this.transition(component, 'UPDATE_ROLLED_BACK', `Restored previous known-good ${prevKnownGood}.`, {
+      activeVersion: prevKnownGood,
+      candidateVersion: null,
+      stagingDir: null,
+    });
+    return { ok: false, slot: rolled, rolledBack: true };
+  }
+}
+
+/**
+ * Storage Categories & Safe Uninstallation Planner (`AVP-P0-007 §11 & §12`).
+ * Guarantees user-owned projects & source media are NEVER implicitly deleted.
+ */
+export type StorageCategory =
+  | 'APP_BINARIES'
+  | 'APP_CONFIG'
+  | 'COMPANION_RUNTIME'
+  | 'CEP_EXTENSION'
+  | 'MODEL_ARTIFACTS'
+  | 'TEMP_PROCESSING_FILES'
+  | 'DIAGNOSTIC_LOGS'
+  | 'USER_PROJECTS'
+  | 'USER_SOURCE_MEDIA'
+  | 'USER_EXPORTS';
+
+export interface UninstallAuthorizationOptions {
+  readonly removeAppBinaries: boolean;
+  readonly removeCompanion: boolean;
+  readonly removeCepExtension: boolean;
+  readonly removeTempAndCache: boolean;
+  readonly removeDownloadedModels: boolean;
+  readonly removeDiagnosticLogs: boolean;
+  /** Explicit authorization required — defaults to false, NEVER implicitly deleted */
+  readonly explicitlyAuthorizedDeleteUserProjects?: boolean;
+  readonly explicitlyAuthorizedDeleteUserMedia?: boolean;
+}
+
+export function buildSafeUninstallPlan(opts: UninstallAuthorizationOptions): {
+  readonly categoriesToDelete: readonly StorageCategory[];
+  readonly categoriesPreserved: readonly StorageCategory[];
+  readonly mustStopCompanionProcessFirst: boolean;
+  readonly mustCleanStaleLockAndIpcEndpoints: boolean;
+} {
+  const del: StorageCategory[] = [];
+  const preserve: StorageCategory[] = [];
+
+  const route = (cat: StorageCategory, shouldDelete: boolean) => {
+    if (shouldDelete) del.push(cat);
+    else preserve.push(cat);
+  };
+
+  route('APP_BINARIES', opts.removeAppBinaries);
+  route('COMPANION_RUNTIME', opts.removeCompanion);
+  route('CEP_EXTENSION', opts.removeCepExtension);
+  route('TEMP_PROCESSING_FILES', opts.removeTempAndCache);
+  route('MODEL_ARTIFACTS', opts.removeDownloadedModels);
+  route('DIAGNOSTIC_LOGS', opts.removeDiagnosticLogs);
+  route('APP_CONFIG', false);
+  // User-owned assets NEVER deleted unless explicitly authorized
+  route('USER_PROJECTS', opts.explicitlyAuthorizedDeleteUserProjects === true);
+  route('USER_SOURCE_MEDIA', opts.explicitlyAuthorizedDeleteUserMedia === true);
+  route('USER_EXPORTS', false);
+
+  return {
+    categoriesToDelete: del,
+    categoriesPreserved: preserve,
+    mustStopCompanionProcessFirst: opts.removeCompanion || opts.removeAppBinaries,
+    mustCleanStaleLockAndIpcEndpoints: opts.removeCompanion,
+  };
+}
+
+/**
+ * Environment-separated browser deployment validator (`AVP-P0-007 §14`).
+ */
+export type DeploymentEnvironment = 'development' | 'internal_testing' | 'staging' | 'production';
+
+export function validateDeploymentConfiguration(config: {
+  readonly environment: DeploymentEnvironment;
+  readonly allowCloudAsr: boolean;
+  readonly hasDebugEndpointsEnabled: boolean;
+  readonly cspHeader: string;
+  readonly coopHeader: string;
+  readonly coepHeader: string;
+  readonly ortAssetsPresent: boolean;
+}): { readonly valid: boolean; readonly errors: readonly string[] } {
+  const errors: string[] = [];
+  if (config.allowCloudAsr) {
+    errors.push('LOCAL_ONLY_VIOLATION: Browser deployment must never enable Cloud ASR.');
+  }
+  if (!config.ortAssetsPresent) {
+    errors.push('MISSING_ORT_WASM_ASSETS: Self-hosted /ort/ ONNX Runtime Web WASM assets are mandatory.');
+  }
+  if (config.environment === 'production') {
+    if (config.hasDebugEndpointsEnabled) {
+      errors.push('PROD_DEBUG_LEAK: Development/debug endpoints must be disabled in production.');
+    }
+    if (!config.cspHeader.includes("default-src 'self'")) {
+      errors.push("PROD_CSP_WEAK: Production CSP must enforce default-src 'self'.");
+    }
+    if (config.cspHeader.includes('unsafe-eval') && !config.cspHeader.includes('wasm-unsafe-eval')) {
+      errors.push('PROD_CSP_UNSAFE_EVAL: Use wasm-unsafe-eval instead of broad unsafe-eval.');
+    }
+    if (config.coopHeader !== 'same-origin') {
+      errors.push('PROD_COOP_MISSING: Cross-Origin-Opener-Policy must be same-origin.');
+    }
+  }
+  return { valid: errors.length === 0, errors };
+}

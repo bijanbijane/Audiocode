@@ -1,0 +1,71 @@
+{
+  "engineName": "SHAHAB — Avapardaz Native Persian Speech Recognition Engine",
+  "engineVersion": "SHAHAB-R2.0.0-RELEASE-CANDIDATE",
+  "releaseCandidateId": "SHAHAB-R2.0.0-RELEASE-CANDIDATE",
+  "releaseBranch": "BRANCH_B_FROZEN_INHERITED_NEURAL_CORE_CONTINUES",
+  "neuralModelIdentity": "INHERITED-PERSIAN-ASR-CORE",
+  "independentlyTrainedNeuralModel": false,
+  "gitCommit": "NO_GIT_METADATA_IN_SANDBOX",
+  "buildEnvironment": {
+    "os": "Linux 4.19.0-gvisor (x64)",
+    "nodeVersion": "v22.23.2",
+    "ortWebVersion": "onnxruntime-web@1.31.1",
+    "gpuDetected": false
+  },
+  "modelIdentity": "ramin-mahmoodi/persian-zipformer-asr (stateless7 INT8)",
+  "modelRevision": "0408facbcf3f670121def48e0802c395c225d150",
+  "modelArtifactHashes": {
+    "encoder.int8.onnx": "08735923618e196bd093b369f6843c8a390a6113a391e7b7095115582fd2cd27",
+    "decoder.int8.onnx": "9d4ad2da0335d86d8638ff026e6b37247d97df940af6ad40bba671af5fd4aa9d",
+    "joiner.int8.onnx": "a2a4a30585dc53e46afafd03690181107a610f67ff0e29cab460ec16df5cc00b",
+    "tokens.txt": "435f9e09a290c764670044e54c2450670fc2eab50176cd912734fa6f92ab166f",
+    "bpe_fa_1024.model": "38ce80cf76e8535d41d625dcbf1a5a5e7d4cb7260a1d7b0dc1663385fc4fd075"
+  },
+  "packageHashes": {
+    "SHAHAB-STUDIO": "f6a9986d46dc550aa4019c090f7cfe13625d5bb1e618b2c17c9bbba62b6e5e19",
+    "SHAHAB-EDGE": "1e92f1d03f91314a287f307e45c56fe8dd2b44873f9d6910fa3a79eeb3e2afeb"
+  },
+  "benchmarkExecutionId": "shahab_bench_1795287969425_e345b2",
+  "supportedPlatforms": [
+    {
+      "targetId": "NATIVE_CPU",
+      "status": "VERIFIED"
+    },
+    {
+      "targetId": "NATIVE_ACCELERATED",
+      "status": "BLOCKED"
+    },
+    {
+      "targetId": "BROWSER_WASM",
+      "status": "NOT_VERIFIED"
+    },
+    {
+      "targetId": "BROWSER_WEBGPU",
+      "status": "BLOCKED"
+    },
+    {
+      "targetId": "CLOUD_AUTHORIZED",
+      "status": "VERIFIED"
+    }
+  ],
+  "verificationStatus": "RELEASE_CANDIDATE",
+  "signatureStatus": {
+    "status": "BLOCKED",
+    "algorithm": "NONE",
+    "keyId": null,
+    "signatureBase64": null,
+    "sha256OfPayload": "f92f6c859a1f6c87dde01598435f80bfd4911e0a1684ef0e37e4c920c1f03578",
+    "note": "Release signing infrastructure is NOT provisioned in this environment (SHAHAB_RELEASE_SIGNING_PRIVATE_KEY_PEM unset). SHA-256 integrity verified separately; cryptographic signing honestly marked BLOCKED."
+  },
+  "lineageConsistencyVerified": true,
+  "integrityVerified": true,
+  "installSmokeVerified": true,
+  "rollbackVerified": true,
+  "knownLimitations": [
+    "Uncompressed mandatory model package is 110.41 MiB (> 100 MiB uncompressed target).",
+    "Release cryptographic signing is BLOCKED (no external signing key infrastructure provisioned).",
+    "Native GPU / CUDA / ROCm and Browser WebGPU are BLOCKED (0 GPUs in container).",
+    "Offline stateless7 ONNX graph uses chunked overlap streaming rather than recurrent encoder streaming state.",
+    "Word-level forced alignment and speaker diarization are unavailable and not fabricated."
+  ]
+}

@@ -1,0 +1,59 @@
+{
+  "generatedAtIso": "2026-11-21T19:06:52.408Z",
+  "teacherInferenceRunsExecuted": 0,
+  "pseudoLabelsGenerated": 0,
+  "teachers": [
+    {
+      "repoId": "areffarhadi/Taraneh-WLarge",
+      "revisionSha": "876da71621f711fbd41e63310c166614caef0b31",
+      "licenseObserved": "MIT",
+      "inferencePermitted": "PERMITTED",
+      "pseudoLabelGenerationPermitted": "PERMITTED_WITH_ATTRIBUTION",
+      "commercialDistillationPermitted": "REQUIRES_LEGAL_CONFIRMATION",
+      "redistributionPermitted": "PERMITTED_WITH_NOTICE",
+      "eligibleForShahabTrainingTargets": true,
+      "exclusionReason": null,
+      "teacherInferenceRunsExecuted": 0,
+      "pseudoLabelsGenerated": 0
+    },
+    {
+      "repoId": "areffarhadi/Taraneh-Q1.7B",
+      "revisionSha": "faa6a524003687a80e16fd4312a26819391405aa",
+      "licenseObserved": "Apache-2.0",
+      "inferencePermitted": "PERMITTED",
+      "pseudoLabelGenerationPermitted": "PERMITTED_WITH_ATTRIBUTION",
+      "commercialDistillationPermitted": "REQUIRES_LEGAL_CONFIRMATION",
+      "redistributionPermitted": "PERMITTED_WITH_NOTICE",
+      "eligibleForShahabTrainingTargets": true,
+      "exclusionReason": null,
+      "teacherInferenceRunsExecuted": 0,
+      "pseudoLabelsGenerated": 0
+    },
+    {
+      "repoId": "areffarhadi/Taraneh-Q0.6B",
+      "revisionSha": "14939bc2e1f392aeca7b8f0d22218809b12882af",
+      "licenseObserved": "Apache-2.0",
+      "inferencePermitted": "PERMITTED",
+      "pseudoLabelGenerationPermitted": "PERMITTED_WITH_ATTRIBUTION",
+      "commercialDistillationPermitted": "REQUIRES_LEGAL_CONFIRMATION",
+      "redistributionPermitted": "PERMITTED_WITH_NOTICE",
+      "eligibleForShahabTrainingTargets": true,
+      "exclusionReason": null,
+      "teacherInferenceRunsExecuted": 0,
+      "pseudoLabelsGenerated": 0
+    },
+    {
+      "repoId": "mehdi-hf/nemotron-asr-streaming-farsi",
+      "revisionSha": "b70aff58c22da79ba7139ff13af7ba58a15cbeb9",
+      "licenseObserved": "other",
+      "inferencePermitted": "RESTRICTED_REVIEW_REQUIRED",
+      "pseudoLabelGenerationPermitted": "BLOCKED_LEGAL_REVIEW_REQUIRED",
+      "commercialDistillationPermitted": "EXCLUDED",
+      "redistributionPermitted": "EXCLUDED",
+      "eligibleForShahabTrainingTargets": false,
+      "exclusionReason": "Nemotron repository declares license=\"other\" (NVIDIA Open Model / non-standard terms); permanently excluded from commercial distillation unless explicitly reviewed and approved (SHAHAB-012 §5).",
+      "teacherInferenceRunsExecuted": 0,
+      "pseudoLabelsGenerated": 0
+    }
+  ]
+}

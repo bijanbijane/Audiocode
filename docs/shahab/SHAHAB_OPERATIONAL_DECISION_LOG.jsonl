@@ -1,0 +1,1 @@
+{"timestampIso":"2026-11-21T19:06:52.410Z","decision":"KEEP_AUTO_ROLLOUT_DISABLED_UNTIL_SIGNING_PROVISIONED","entryGateState":"PARTIALLY_VERIFIED","reason":"SHAHAB-013 core integrity/install/rollback passed, but cryptographic release signing is BLOCKED without external key infrastructure."}

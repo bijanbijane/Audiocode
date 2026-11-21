@@ -35,16 +35,43 @@ export interface CompanionHandshakeResponse {
   readonly incompatibility_reasons: readonly string[];
 }
 
+export const COMPANION_IPC_ERROR_CODES = [
+  'IPC_LOOPBACK_ONLY',
+  'IPC_TOKEN_MISSING',
+  'IPC_TOKEN_INVALID',
+  'IPC_SESSION_UNKNOWN',
+  'IPC_SESSION_EXPIRED',
+  'IPC_VERSION_MISMATCH',
+  'IPC_INVALID_ENVELOPE',
+  'IPC_TIMESTAMP_OUT_OF_WINDOW',
+  'IPC_REQUEST_EXPIRED',
+  'IPC_NONCE_REPLAY',
+  'IPC_DUPLICATE_REQUEST_ID',
+  'DNS_REBINDING_BLOCKED',
+  'UNTRUSTED_ORIGIN_BLOCKED',
+  'CONCURRENT_JOB_LIMIT_EXCEEDED',
+  'LOCAL_NEURAL_RUNTIME_UNAVAILABLE',
+  'SOURCE_CHANGED',
+  'PAYLOAD_TOO_LARGE',
+] as const;
+
+export type CompanionIpcErrorCode = (typeof COMPANION_IPC_ERROR_CODES)[number];
+
 export interface CompanionIpcEnvelope<TPayload = unknown> {
   readonly ipc_protocol_version: typeof COMPANION_IPC_PROTOCOL_VERSION;
   readonly session_id: string;
   readonly nonce: string;
   readonly timestamp_ms: number;
+  readonly request_id?: string;
+  readonly expires_at_ms?: number;
+  readonly execution_mode?: 'native-companion' | 'audition-cep' | 'web-client';
   readonly command:
     | 'CAPABILITY_LIST'
     | 'CAPABILITY_EXECUTE'
     | 'JOB_SUBMIT'
     | 'JOB_STATUS'
+    | 'JOB_LIST'
+    | 'JOB_RECONNECT'
     | 'JOB_CANCEL'
     | 'HOST_CAPABILITY_MATRIX';
   readonly payload: TPayload;
@@ -55,6 +82,7 @@ interface ActiveCompanionSession {
   readonly hostId: string;
   readonly expiresAtMs: number;
   readonly seenNonces: Set<string>;
+  readonly seenRequestIds: Set<string>;
 }
 
 function parseMajorVersion(semver: string): number | null {
@@ -79,6 +107,8 @@ const ALLOWED_COMPANION_IPC_COMMANDS = new Set<CompanionIpcEnvelope['command']>(
   'CAPABILITY_EXECUTE',
   'JOB_SUBMIT',
   'JOB_STATUS',
+  'JOB_LIST',
+  'JOB_RECONNECT',
   'JOB_CANCEL',
   'HOST_CAPABILITY_MATRIX',
 ]);
@@ -191,6 +221,7 @@ export class CompanionIpcBridge {
       hostId: typeof req.host_id === 'string' ? req.host_id : 'unknown',
       expiresAtMs,
       seenNonces: new Set<string>(),
+      seenRequestIds: new Set<string>(),
     });
 
     return {
@@ -305,6 +336,52 @@ export class CompanionIpcBridge {
         code: 'IPC_TOKEN_INVALID',
         message: 'Invalid Companion IPC session token.',
       };
+    }
+
+    // Optional per-request expiry enforcement
+    if (env.expires_at_ms !== undefined) {
+      if (typeof env.expires_at_ms !== 'number' || !Number.isFinite(env.expires_at_ms)) {
+        return {
+          ok: false,
+          statusCode: 400,
+          code: 'IPC_INVALID_ENVELOPE',
+          message: 'expires_at_ms must be a finite Unix timestamp in milliseconds.',
+        };
+      }
+      if (Date.now() > env.expires_at_ms) {
+        return {
+          ok: false,
+          statusCode: 401,
+          code: 'IPC_REQUEST_EXPIRED',
+          message: 'IPC request envelope has passed its expires_at_ms deadline.',
+        };
+      }
+    }
+
+    // Optional request_id correlation & duplicate execution protection
+    if (env.request_id !== undefined) {
+      if (typeof env.request_id !== 'string' || env.request_id.trim().length === 0 || env.request_id.length > 128) {
+        return {
+          ok: false,
+          statusCode: 400,
+          code: 'IPC_INVALID_ENVELOPE',
+          message: 'request_id must be a non-empty string (max 128 chars).',
+        };
+      }
+      const normReqId = env.request_id.trim();
+      if (session.seenRequestIds.has(normReqId)) {
+        return {
+          ok: false,
+          statusCode: 409,
+          code: 'IPC_DUPLICATE_REQUEST_ID',
+          message: 'Duplicate IPC request_id detected (idempotency guard rejected replay).',
+        };
+      }
+      session.seenRequestIds.add(normReqId);
+      if (session.seenRequestIds.size > 2000) {
+        const oldestReq = session.seenRequestIds.values().next().value;
+        if (oldestReq) session.seenRequestIds.delete(oldestReq);
+      }
     }
 
     // Nonce replay defense + clock skew guard (±5 min)

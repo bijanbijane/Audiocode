@@ -6,3 +6,8 @@ coverage/
 *.log
 .env*
 !.env.example
+models/**/*.onnx
+models/**/*.model
+models/**/*.wav
+dist-packages/
+

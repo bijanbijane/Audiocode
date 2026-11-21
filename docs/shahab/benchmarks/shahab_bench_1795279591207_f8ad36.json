@@ -1,0 +1,520 @@
+{
+  "executionId": "shahab_bench_1795279591207_f8ad36",
+  "createdAtUtc": "2026-11-21T16:46:36.105Z",
+  "profile": {
+    "modelRepository": "ramin-mahmoodi/persian-zipformer-asr",
+    "modelRevision": "0408facbcf3f670121def48e0802c395c225d150",
+    "artifactHashes": {
+      "encoder.int8.onnx": "08735923618e196bd093b369f6843c8a390a6113a391e7b7095115582fd2cd27",
+      "decoder.int8.onnx": "9d4ad2da0335d86d8638ff026e6b37247d97df940af6ad40bba671af5fd4aa9d",
+      "joiner.int8.onnx": "a2a4a30585dc53e46afafd03690181107a610f67ff0e29cab460ec16df5cc00b",
+      "tokens.txt": "435f9e09a290c764670044e54c2450670fc2eab50176cd912734fa6f92ab166f"
+    },
+    "tokenizerHash": "435f9e09a290c764670044e54c2450670fc2eab50176cd912734fa6f92ab166f",
+    "runtimeName": "onnxruntime-web",
+    "runtimeVersion": "1.31.1",
+    "inferenceProvider": "wasm",
+    "sampleRateHz": 16000,
+    "channels": 1,
+    "featureExtractorConfig": "KALDI_FBANK_80_16K_POVEY_25MS_10MS_V1",
+    "decoderType": "modified_beam_search",
+    "beamSize": 4,
+    "blankPenalty": 0,
+    "policyId": "BALANCED",
+    "hardwareProfile": "x64/4c/CPU-ONLY"
+  },
+  "datasetManifestId": "shahab-frozen-baseline-fa-v1",
+  "datasetRevision": "1.0.0",
+  "leakageReport": {
+    "clean": true,
+    "duplicateAudioHashes": [],
+    "duplicateTranscriptsAcrossRecordings": [
+      {
+        "normalizedTranscript": "شکلات داغ در حد استانداردهای بلژیکی است آبمیوهها گران قیمت ولی عالی میباشند",
+        "sampleIds": [
+          "fa_sample_clean_001",
+          "fa_stress_low_gain_002",
+          "fa_stress_noise_003",
+          "fa_stress_clipped_004"
+        ]
+      }
+    ],
+    "speakerSplitOverlap": [],
+    "sessionSplitOverlap": [],
+    "warnings": [
+      "1 repeated reference transcript(s) observed across recordings."
+    ]
+  },
+  "sampleCount": 4,
+  "completedCount": 0,
+  "failedCount": 4,
+  "totalAudioDurationSec": 0,
+  "aggregateTrackA": {
+    "wer": 0,
+    "cer": 0,
+    "substitutions": 0,
+    "deletions": 0,
+    "insertions": 0,
+    "sentenceErrorRate": 0
+  },
+  "aggregateTrackB": {
+    "wer": 0,
+    "cer": 0,
+    "substitutions": 0,
+    "deletions": 0,
+    "insertions": 0,
+    "sentenceErrorRate": 0
+  },
+  "errorCategoryDistribution": {},
+  "performance": {
+    "coldLatencyMs": 1399,
+    "warmLatencyMs": 1143,
+    "p50LatencyMs": 1169,
+    "p95LatencyMs": 1399,
+    "realTimeFactor": 0,
+    "throughputAudioSecPerWallSec": 0,
+    "peakRamBytes": 754794496,
+    "cpuUserMs": 10470,
+    "cpuSystemMs": 40
+  },
+  "confidenceIntervalNote": "NOT_COMPUTED (n=0 < 30 samples; statistical significance cannot be claimed from small local diagnostic corpus).",
+  "perSampleOutputs": [
+    {
+      "sampleId": "fa_sample_clean_001",
+      "split": "frozen_test",
+      "durationSec": 12.12,
+      "speechCategories": [
+        "CLEAN_FORMAL_PERSIAN",
+        "PROPER_NOUNS"
+      ],
+      "referenceTranscriptVerbatim": "شکلات داغ در حد استانداردهای بلژیکی است آبمیوهها گران قیمت ولی عالی میباشند",
+      "rawHypothesis": "",
+      "normalizedHypothesis": "",
+      "latencyMs": 0,
+      "realTimeFactor": 0,
+      "evaluation": {
+        "trackAVerbatim": {
+          "wer": 1,
+          "cer": 1,
+          "substitutions": 0,
+          "deletions": 13,
+          "insertions": 0,
+          "refWords": 13,
+          "sentenceError": true,
+          "wordOps": [
+            {
+              "op": "DEL",
+              "refToken": "شکلات",
+              "hypToken": null
+            },
+            {
+              "op": "DEL",
+              "refToken": "داغ",
+              "hypToken": null
+            },
+            {
+              "op": "DEL",
+              "refToken": "در",
+              "hypToken": null
+            },
+            {
+              "op": "DEL",
+              "refToken": "حد",
+              "hypToken": null
+            },
+            {
+              "op": "DEL",
+              "refToken": "استانداردهای",
+              "hypToken": null
+            },
+            {
+              "op": "DEL",
+              "refToken": "بلژیکی",
+              "hypToken": null
+            },
+            {
+              "op": "DEL",
+              "refToken": "است",
+              "hypToken": null
+            },
+            {
+              "op": "DEL",
+              "refToken": "آبمیوهها",
+              "hypToken": null
+            },
+            {
+              "op": "DEL",
+              "refToken": "گران",
+              "hypToken": null
+            },
+            {
+              "op": "DEL",
+              "refToken": "قیمت",
+              "hypToken": null
+            },
+            {
+              "op": "DEL",
+              "refToken": "ولی",
+              "hypToken": null
+            },
+            {
+              "op": "DEL",
+              "refToken": "عالی",
+              "hypToken": null
+            },
+            {
+              "op": "DEL",
+              "refToken": "میباشند",
+              "hypToken": null
+            }
+          ]
+        },
+        "trackBNormalized": {
+          "policyVersion": "SHAHAB-FA-NORM-EVAL-V1.0",
+          "wer": 1,
+          "cer": 1,
+          "substitutions": 0,
+          "deletions": 13,
+          "insertions": 0,
+          "refWords": 13,
+          "sentenceError": true,
+          "normalizedReference": "شکلات داغ در حد استانداردهای بلژیکی است آبمیوهها گران قیمت ولی عالی میباشند",
+          "normalizedHypothesis": ""
+        },
+        "properNounErrorRate": null,
+        "numericAccuracy": null,
+        "repetitionPreserved": null
+      },
+      "attributedErrors": [],
+      "status": "FAILED",
+      "errorMessage": "Cannot read properties of undefined (reading 'trim')"
+    },
+    {
+      "sampleId": "fa_stress_low_gain_002",
+      "split": "development",
+      "durationSec": 12.12,
+      "speechCategories": [
+        "NOISY_RECORDINGS"
+      ],
+      "referenceTranscriptVerbatim": "شکلات داغ در حد استانداردهای بلژیکی است آبمیوهها گران قیمت ولی عالی میباشند",
+      "rawHypothesis": "",
+      "normalizedHypothesis": "",
+      "latencyMs": 0,
+      "realTimeFactor": 0,
+      "evaluation": {
+        "trackAVerbatim": {
+          "wer": 1,
+          "cer": 1,
+          "substitutions": 0,
+          "deletions": 13,
+          "insertions": 0,
+          "refWords": 13,
+          "sentenceError": true,
+          "wordOps": [
+            {
+              "op": "DEL",
+              "refToken": "شکلات",
+              "hypToken": null
+            },
+            {
+              "op": "DEL",
+              "refToken": "داغ",
+              "hypToken": null
+            },
+            {
+              "op": "DEL",
+              "refToken": "در",
+              "hypToken": null
+            },
+            {
+              "op": "DEL",
+              "refToken": "حد",
+              "hypToken": null
+            },
+            {
+              "op": "DEL",
+              "refToken": "استانداردهای",
+              "hypToken": null
+            },
+            {
+              "op": "DEL",
+              "refToken": "بلژیکی",
+              "hypToken": null
+            },
+            {
+              "op": "DEL",
+              "refToken": "است",
+              "hypToken": null
+            },
+            {
+              "op": "DEL",
+              "refToken": "آبمیوهها",
+              "hypToken": null
+            },
+            {
+              "op": "DEL",
+              "refToken": "گران",
+              "hypToken": null
+            },
+            {
+              "op": "DEL",
+              "refToken": "قیمت",
+              "hypToken": null
+            },
+            {
+              "op": "DEL",
+              "refToken": "ولی",
+              "hypToken": null
+            },
+            {
+              "op": "DEL",
+              "refToken": "عالی",
+              "hypToken": null
+            },
+            {
+              "op": "DEL",
+              "refToken": "میباشند",
+              "hypToken": null
+            }
+          ]
+        },
+        "trackBNormalized": {
+          "policyVersion": "SHAHAB-FA-NORM-EVAL-V1.0",
+          "wer": 1,
+          "cer": 1,
+          "substitutions": 0,
+          "deletions": 13,
+          "insertions": 0,
+          "refWords": 13,
+          "sentenceError": true,
+          "normalizedReference": "شکلات داغ در حد استانداردهای بلژیکی است آبمیوهها گران قیمت ولی عالی میباشند",
+          "normalizedHypothesis": ""
+        },
+        "properNounErrorRate": null,
+        "numericAccuracy": null,
+        "repetitionPreserved": null
+      },
+      "attributedErrors": [],
+      "status": "FAILED",
+      "errorMessage": "Cannot read properties of undefined (reading 'trim')"
+    },
+    {
+      "sampleId": "fa_stress_noise_003",
+      "split": "development",
+      "durationSec": 12.12,
+      "speechCategories": [
+        "NOISY_RECORDINGS"
+      ],
+      "referenceTranscriptVerbatim": "شکلات داغ در حد استانداردهای بلژیکی است آبمیوهها گران قیمت ولی عالی میباشند",
+      "rawHypothesis": "",
+      "normalizedHypothesis": "",
+      "latencyMs": 0,
+      "realTimeFactor": 0,
+      "evaluation": {
+        "trackAVerbatim": {
+          "wer": 1,
+          "cer": 1,
+          "substitutions": 0,
+          "deletions": 13,
+          "insertions": 0,
+          "refWords": 13,
+          "sentenceError": true,
+          "wordOps": [
+            {
+              "op": "DEL",
+              "refToken": "شکلات",
+              "hypToken": null
+            },
+            {
+              "op": "DEL",
+              "refToken": "داغ",
+              "hypToken": null
+            },
+            {
+              "op": "DEL",
+              "refToken": "در",
+              "hypToken": null
+            },
+            {
+              "op": "DEL",
+              "refToken": "حد",
+              "hypToken": null
+            },
+            {
+              "op": "DEL",
+              "refToken": "استانداردهای",
+              "hypToken": null
+            },
+            {
+              "op": "DEL",
+              "refToken": "بلژیکی",
+              "hypToken": null
+            },
+            {
+              "op": "DEL",
+              "refToken": "است",
+              "hypToken": null
+            },
+            {
+              "op": "DEL",
+              "refToken": "آبمیوهها",
+              "hypToken": null
+            },
+            {
+              "op": "DEL",
+              "refToken": "گران",
+              "hypToken": null
+            },
+            {
+              "op": "DEL",
+              "refToken": "قیمت",
+              "hypToken": null
+            },
+            {
+              "op": "DEL",
+              "refToken": "ولی",
+              "hypToken": null
+            },
+            {
+              "op": "DEL",
+              "refToken": "عالی",
+              "hypToken": null
+            },
+            {
+              "op": "DEL",
+              "refToken": "میباشند",
+              "hypToken": null
+            }
+          ]
+        },
+        "trackBNormalized": {
+          "policyVersion": "SHAHAB-FA-NORM-EVAL-V1.0",
+          "wer": 1,
+          "cer": 1,
+          "substitutions": 0,
+          "deletions": 13,
+          "insertions": 0,
+          "refWords": 13,
+          "sentenceError": true,
+          "normalizedReference": "شکلات داغ در حد استانداردهای بلژیکی است آبمیوهها گران قیمت ولی عالی میباشند",
+          "normalizedHypothesis": ""
+        },
+        "properNounErrorRate": null,
+        "numericAccuracy": null,
+        "repetitionPreserved": null
+      },
+      "attributedErrors": [],
+      "status": "FAILED",
+      "errorMessage": "Cannot read properties of undefined (reading 'trim')"
+    },
+    {
+      "sampleId": "fa_stress_clipped_004",
+      "split": "development",
+      "durationSec": 12.12,
+      "speechCategories": [
+        "NOISY_RECORDINGS"
+      ],
+      "referenceTranscriptVerbatim": "شکلات داغ در حد استانداردهای بلژیکی است آبمیوهها گران قیمت ولی عالی میباشند",
+      "rawHypothesis": "",
+      "normalizedHypothesis": "",
+      "latencyMs": 0,
+      "realTimeFactor": 0,
+      "evaluation": {
+        "trackAVerbatim": {
+          "wer": 1,
+          "cer": 1,
+          "substitutions": 0,
+          "deletions": 13,
+          "insertions": 0,
+          "refWords": 13,
+          "sentenceError": true,
+          "wordOps": [
+            {
+              "op": "DEL",
+              "refToken": "شکلات",
+              "hypToken": null
+            },
+            {
+              "op": "DEL",
+              "refToken": "داغ",
+              "hypToken": null
+            },
+            {
+              "op": "DEL",
+              "refToken": "در",
+              "hypToken": null
+            },
+            {
+              "op": "DEL",
+              "refToken": "حد",
+              "hypToken": null
+            },
+            {
+              "op": "DEL",
+              "refToken": "استانداردهای",
+              "hypToken": null
+            },
+            {
+              "op": "DEL",
+              "refToken": "بلژیکی",
+              "hypToken": null
+            },
+            {
+              "op": "DEL",
+              "refToken": "است",
+              "hypToken": null
+            },
+            {
+              "op": "DEL",
+              "refToken": "آبمیوهها",
+              "hypToken": null
+            },
+            {
+              "op": "DEL",
+              "refToken": "گران",
+              "hypToken": null
+            },
+            {
+              "op": "DEL",
+              "refToken": "قیمت",
+              "hypToken": null
+            },
+            {
+              "op": "DEL",
+              "refToken": "ولی",
+              "hypToken": null
+            },
+            {
+              "op": "DEL",
+              "refToken": "عالی",
+              "hypToken": null
+            },
+            {
+              "op": "DEL",
+              "refToken": "میباشند",
+              "hypToken": null
+            }
+          ]
+        },
+        "trackBNormalized": {
+          "policyVersion": "SHAHAB-FA-NORM-EVAL-V1.0",
+          "wer": 1,
+          "cer": 1,
+          "substitutions": 0,
+          "deletions": 13,
+          "insertions": 0,
+          "refWords": 13,
+          "sentenceError": true,
+          "normalizedReference": "شکلات داغ در حد استانداردهای بلژیکی است آبمیوهها گران قیمت ولی عالی میباشند",
+          "normalizedHypothesis": ""
+        },
+        "properNounErrorRate": null,
+        "numericAccuracy": null,
+        "repetitionPreserved": null
+      },
+      "attributedErrors": [],
+      "status": "FAILED",
+      "errorMessage": "Cannot read properties of undefined (reading 'trim')"
+    }
+  ]
+}

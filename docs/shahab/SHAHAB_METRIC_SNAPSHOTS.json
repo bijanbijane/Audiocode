@@ -1,0 +1,32 @@
+{
+  "schemaVersion": "1.0.0",
+  "snapshots": [
+    {
+      "capturedAtIso": "2026-11-21T19:06:52.409Z",
+      "summary": {
+        "sampleCount": 1,
+        "timeRangeStartIso": "2026-11-21T19:06:52.402Z",
+        "timeRangeEndIso": "2026-11-21T19:06:52.402Z",
+        "monitoringActive": true,
+        "modelLoadsSucceeded": 1,
+        "modelLoadsFailed": 0,
+        "inferencesSucceeded": 1,
+        "inferencesFailed": 0,
+        "providerFallbacks": 0,
+        "cacheHits": 1,
+        "cacheMisses": 0,
+        "cacheEvictions": 0,
+        "updatesFailed": 0,
+        "rollbacksCompleted": 1,
+        "rollbacksFailed": 0,
+        "meanRtf": 0.2912,
+        "meanInferenceMs": 3529,
+        "totalAudioDurationSec": 12.12,
+        "lastModelLoadMs": 3321,
+        "peakProcessRssBytes": 1011699712,
+        "gpuUtilizationPct": "NOT_MEASURED",
+        "gpuMemoryBytes": "NOT_MEASURED"
+      }
+    }
+  ]
+}

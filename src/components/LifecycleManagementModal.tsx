@@ -38,6 +38,7 @@ import {
 import { getSharedMemoryBudgetManager } from '../runtime/memory/MemoryBudgetManager';
 import { LongSessionMonitor } from '../performance';
 import { StudioWorkflowState } from '../workflow/StudioWorkflowController';
+import { saveModelCtcVocabulary } from '../workflow/UnifiedLocalAsrWorkflowService';
 
 export type LifecycleModalTab =
   | 'model'
@@ -116,6 +117,37 @@ export const LifecycleManagementModal: React.FC<LifecycleManagementModalProps> =
   // Read snapshot after any modelTick update
   void modelTick;
   const modelSnap = modelManager.getSnapshot();
+
+  const handleImportCtcTokensTxt = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const inputEl = e.currentTarget;
+    const file = inputEl.files?.[0];
+    if (!file) return;
+    try {
+      const active = modelManager.getSnapshot().activeModel;
+      if (!active) {
+        setStatusMessage(
+          isFa
+            ? 'ابتدا فایل مدل .onnx را نصب کنید، سپس فایل واژگان tokens.txt را وارد نمایید.'
+            : 'Install the .onnx model file first before attaching tokens.txt.',
+        );
+        return;
+      }
+      const txt = await file.text();
+      const res = saveModelCtcVocabulary(active.modelId, active.version, txt);
+      if (!res.ok) {
+        setStatusMessage(res.error ?? 'Invalid tokens.txt file.');
+        return;
+      }
+      setStatusMessage(
+        isFa
+          ? `فایل واژگان tokens.txt با ${res.tokenCount} توکن برای مدل ${active.modelId} ذخیره شد.`
+          : `Saved CTC vocabulary (${res.tokenCount} tokens) for ${active.modelId}.`,
+      );
+      setModelTick((t) => t + 1);
+    } finally {
+      inputEl.value = '';
+    }
+  };
 
   const handleImportLocalOnnxModel = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const inputEl = e.currentTarget;
@@ -623,6 +655,19 @@ export const LifecycleManagementModal: React.FC<LifecycleManagementModalProps> =
                     accept=".onnx,application/octet-stream"
                     disabled={isInstallingModel}
                     onChange={handleImportLocalOnnxModel}
+                    className="hidden"
+                  />
+                </label>
+
+                <label className="inline-flex items-center gap-1.5 px-3 py-2 rounded-md border border-slate-300 dark:border-[#2C3A52] bg-white dark:bg-[#141C2B] text-slate-800 dark:text-slate-200 font-medium hover:bg-slate-50 dark:hover:bg-[#1B2538] cursor-pointer">
+                  <Upload className="w-3.5 h-3.5" />
+                  <span>{isFa ? 'وارد کردن واژگان (tokens.txt)' : 'Import tokens.txt'}</span>
+                  <input
+                    data-testid="model-tokens-file-input"
+                    type="file"
+                    accept=".txt"
+                    disabled={isInstallingModel}
+                    onChange={handleImportCtcTokensTxt}
                     className="hidden"
                   />
                 </label>

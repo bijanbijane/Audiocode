@@ -1,0 +1,97 @@
+{
+  "qualificationRunId": "qual_20261121190723_c51f",
+  "configDigestSha256": "f75ecc87d351d8a9187d1cedf3ecec4efda6b48c803b386174de9e13e5c58730",
+  "generatedAtUtc": "2026-11-21T19:07:23.385Z",
+  "evidenceRefs": [
+    "docs/shahab/SHAHAB_SYSTEM_QUALIFICATION_STATE.json",
+    "docs/shahab/SHAHAB_RELEASE_MANIFEST.json",
+    "docs/shahab/SHAHAB_RESILIENCE_STATE.json",
+    "docs/shahab/SHAHAB_PERFORMANCE_STATE.json",
+    "docs/shahab/SHAHAB_STREAMING_STATE.json",
+    "docs/shahab/SHAHAB_RUNTIME_STATE.json",
+    "docs/shahab/SHAHAB_PERSIAN_FIDELITY_STATE.json",
+    "docs/shahab/SHAHAB_COMPACT_MODEL_STATE.json"
+  ],
+  "entryGateAudit": [
+    {
+      "missionId": "SHAHAB-013",
+      "sourceFile": "src/shahab/ShahabReleaseHardening.ts",
+      "sourceExists": true,
+      "persistedArtifactPath": "docs/shahab/SHAHAB_RELEASE_MANIFEST.json",
+      "persistedArtifactExists": true,
+      "testIdentifier": "ShahabProgram.test.ts::SHAHAB-013",
+      "evidenceState": "PARTIALLY_VERIFIED",
+      "remainingBlocker": "Ed25519 release artifact signing infrastructure is BLOCKED (no managed signing key in workspace)."
+    },
+    {
+      "missionId": "SHAHAB-014",
+      "sourceFile": "src/shahab/ShahabOperationsGovernance.ts",
+      "sourceExists": true,
+      "persistedArtifactPath": "docs/shahab/SHAHAB_OPERATIONAL_STATE.json",
+      "persistedArtifactExists": true,
+      "testIdentifier": "ShahabProgram.test.ts::SHAHAB-014",
+      "evidenceState": "PARTIALLY_VERIFIED",
+      "remainingBlocker": "Automatic production rollout disabled while cryptographic release signing remains BLOCKED."
+    },
+    {
+      "missionId": "SHAHAB-015",
+      "sourceFile": "src/shahab/ShahabResilienceEngine.ts",
+      "sourceExists": true,
+      "persistedArtifactPath": "docs/shahab/SHAHAB_RESILIENCE_STATE.json",
+      "persistedArtifactExists": true,
+      "testIdentifier": "ShahabProgram.test.ts::SHAHAB-015",
+      "evidenceState": "VERIFIED",
+      "remainingBlocker": "Production SLIs remain INSUFFICIENT_EVIDENCE until real production fleet traffic exists."
+    },
+    {
+      "missionId": "SHAHAB-016",
+      "sourceFile": "src/shahab/ShahabPerformanceEngine.ts",
+      "sourceExists": true,
+      "persistedArtifactPath": "docs/shahab/SHAHAB_PERFORMANCE_STATE.json",
+      "persistedArtifactExists": true,
+      "testIdentifier": "ShahabProgram.test.ts::SHAHAB-016",
+      "evidenceState": "VERIFIED",
+      "remainingBlocker": "Benchmarked on Node WASM CPU only; WebGPU and Native C++ providers are unavailable."
+    },
+    {
+      "missionId": "SHAHAB-017",
+      "sourceFile": "src/shahab/ShahabStreamingEngine.ts",
+      "sourceExists": true,
+      "persistedArtifactPath": "docs/shahab/SHAHAB_STREAMING_STATE.json",
+      "persistedArtifactExists": true,
+      "testIdentifier": "ShahabProgram.test.ts::SHAHAB-017",
+      "evidenceState": "VERIFIED",
+      "remainingBlocker": "TRUE_STATEFUL_STREAMING is NOT_SUPPORTED_BY_MODEL; runs verified INCREMENTAL_WINDOWED_INFERENCE."
+    },
+    {
+      "missionId": "SHAHAB-018",
+      "sourceFile": "src/shahab/ShahabRuntimeConformance.ts",
+      "sourceExists": true,
+      "persistedArtifactPath": "docs/shahab/SHAHAB_RUNTIME_STATE.json",
+      "persistedArtifactExists": true,
+      "testIdentifier": "ShahabProgram.test.ts::SHAHAB-018",
+      "evidenceState": "PARTIALLY_VERIFIED",
+      "remainingBlocker": "WebGPU/CUDA BLOCKED, Native C++ UNAVAILABLE, Browser Local WASM AVAILABLE_BUT_UNVERIFIED."
+    },
+    {
+      "missionId": "SHAHAB-019",
+      "sourceFile": "src/shahab/ShahabPersianFidelity.ts",
+      "sourceExists": true,
+      "persistedArtifactPath": "docs/shahab/SHAHAB_PERSIAN_FIDELITY_STATE.json",
+      "persistedArtifactExists": true,
+      "testIdentifier": "ShahabProgram.test.ts::SHAHAB-019",
+      "evidenceState": "VERIFIED",
+      "remainingBlocker": "P0-011 not present in workspace; P0-009/P0-010/P0-012 reused without parallel correction engine."
+    },
+    {
+      "missionId": "SHAHAB-020",
+      "sourceFile": "src/shahab/ShahabCompactModelResearch.ts",
+      "sourceExists": true,
+      "persistedArtifactPath": "docs/shahab/SHAHAB_COMPACT_MODEL_STATE.json",
+      "persistedArtifactExists": true,
+      "testIdentifier": "ShahabProgram.test.ts::SHAHAB-020",
+      "evidenceState": "VERIFIED",
+      "remainingBlocker": "No <100 MiB uncompressed runtime model available; Variant A (110.41 MiB) retained and protected."
+    }
+  ]
+}

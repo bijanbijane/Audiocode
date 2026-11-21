@@ -30,6 +30,7 @@ import { SuggestionsPanel } from './components/SuggestionsPanel';
 import { DspControlRack } from './components/DspControlRack';
 import { ProcessingGraphView } from './components/ProcessingGraphView';
 import { StorageBrokerView } from './components/StorageBrokerView';
+import { ShahabLabView } from './components/ShahabLabView';
 import { AsrResearchLabModal } from './components/AsrResearchLabModal';
 import { DeveloperPlatformPortalModal } from './components/DeveloperPlatformPortalModal';
 import { SpeechIntelligenceModal } from './components/SpeechIntelligenceModal';
@@ -155,6 +156,9 @@ import { buildPeakPyramid } from './engine/peakPyramid';
 import { flicksToSeconds, formatTimecode, msToFlicks, secondsToFlicks } from './engine/timebase';
 import { evaluateLocalAsrExecutionReadiness } from './runtime/LocalExecutionPolicy';
 import { CompanionWebClient } from './host-bridge/companion/CompanionWebClient';
+import { BrowserOnnxAsrRuntimeAdapter } from './asr-core/BrowserOnnxAsrRuntimeAdapter';
+import { NativeCompanionAsrRuntimeAdapter } from './asr-core/NativeCompanionAsrRuntimeAdapter';
+import { UnifiedLocalAsrWorkflowService } from './workflow/UnifiedLocalAsrWorkflowService';
 
 const DEFAULT_DSP_PARAMS: EphemeralDspParams = {
   highPassHz: 80,
@@ -1562,21 +1566,12 @@ export default function App() {
       return;
     }
 
-    const activeModel = modelManagerRef.current.getSnapshot().activeModel;
-
-    // Check Shared Local Companion Service first (same central ASR engine used by Adobe Audition plugin)
-    const companionClient = new CompanionWebClient(companionEndpoint);
-    const companionHealth = executionMode === 'LOCAL' ? await companionClient.getHealth() : null;
-    const companionNeuralReady = Boolean(companionHealth?.runtime?.available);
-
-    // AVP-P01-006: Strict 100% Local-Only Policy — zero Cloud ASR, zero fake transcripts.
-    const readiness = evaluateLocalAsrExecutionReadiness({
-      hasInstalledModelWeights: Boolean(activeModel) || companionNeuralReady,
-      hasVerifiedInferenceEngine: companionNeuralReady,
-      requestedCloudMode: executionMode === 'CLOUD',
-    });
-
-    if (readiness.code === 'LOCAL_ONLY_CLOUD_ASR_BLOCKED') {
+    if (executionMode === 'CLOUD') {
+      const readiness = evaluateLocalAsrExecutionReadiness({
+        hasInstalledModelWeights: false,
+        hasVerifiedInferenceEngine: false,
+        requestedCloudMode: true,
+      });
       const err = classifyError(new Error(readiness.reasonEn), { subsystem: 'ASR_RUNTIME' });
       getSharedDiagnosticLogger().log({
         severity: 'WARNING',
@@ -1594,155 +1589,134 @@ export default function App() {
       return;
     }
 
-    if (companionNeuralReady) {
-      const resolved = await resolveTrackAssetAndPcm(primaryTrack);
-      if (!resolved) {
-        setStatusNotice('داده‌های صوتی PCM برای ترک اصلی در دسترس نیست.');
-        return;
-      }
-
-      setIsTranscribingAsr(true);
-      setActiveFailure(null);
-      setStatusNotice('در حال رونویسی محلی با موتور عصبی Sherpa-ONNX (سرویس Companion)...');
-      try {
-        const result = await companionClient.transcribePcm({
-          pcm: resolved.pcm,
-          sampleRate: project.sampleRate,
-          filename: resolved.asset.name || 'studio-track.wav',
-          languageHint: 'fa',
-          onProgress: (job) => {
-            setStatusNotice(
-              `رونویسی محلی (${job.modelId ?? 'ONNX'}): ${job.progressPct}٪ (${job.currentChunk}/${job.totalChunks})`,
-            );
-          },
-        });
-
-        const speakerLabel = primaryTrack.speakerLabel || primaryTrack.name || 'گوینده ۱';
-        const nextTokens = buildCompanionTranscriptTokens({
-          segments: result.segments,
-          trackId: primaryTrack.id,
-          speakerName: speakerLabel,
-        });
-
-        if (nextTokens.length === 0) {
-          workflowRef.current?.setAsrState({
-            state: 'NO_SPEECH_DETECTED',
-            modelId: result.modelId,
-            modelVersion: result.quantization,
-            message: `موتور محلی ${result.modelId} گفتار انسانی قابل تشخیصی در این سیگنال صوتی پیدا نکرد.`,
-          });
-          setAsrInlineFeedback({
-            kind: 'NO_SPEECH',
-            titleFa: 'گفتاری توسط موتور محلی تشخیص داده نشد',
-            messageFa: `موتور ${result.modelId} فایل صوتی را بررسی کرد اما کلمه گفتاری قابل تشخیصی نیافت (فایل نمونه پیش‌فرض حاوی سیگنال آزمایشی مصنوعی است؛ برای تست واقعی یک فایل صوتی گفتار فارسی وارد کنید یا از بخش‌بندی زمانی / هم‌ترازی متن دلخواه استفاده کنید).`,
-          });
-          setStatusNotice(
-            `گفتاری در این فایل صوتی تشخیص داده نشد (${result.modelId} | RTF=${result.realTimeFactor}).`,
-          );
-          return;
-        }
-
-        const beforeTokensSnapshot = cloneTokens(tokens);
-        historyRef.current.commitTransaction({
-          coalescingKey: '',
-          type: 'restore-clip',
-          description: `رونویسی محلی عصبی (${result.modelId})`,
-          beforeTracks: tracks,
-          afterTracks: tracks,
-          beforeTokens: beforeTokensSnapshot,
-          afterTokens: nextTokens,
-          beforeRecommendations: recommendations,
-          afterRecommendations: recommendations,
-        });
-        setTokens(nextTokens);
-        syncWorkflowTranscript(nextTokens, `رونویسی محلی با ${result.modelId}`);
-        setHistoryTick((v) => v + 1);
-
-        workflowRef.current?.setAsrState({
-          state: 'TRANSCRIPTION_COMPLETED',
-          modelId: result.modelId,
-          modelVersion: result.quantization,
-          message: `رونویسی محلی با ${result.modelId} انجام شد (${nextTokens.length} واژه | RTF=${result.realTimeFactor}).`,
-        });
-        setAsrInlineFeedback(null);
-        setStatusNotice(
-          `رونویسی ۱۰۰٪ محلی کامل شد (${nextTokens.length} واژه | ${result.modelId} | RTF=${result.realTimeFactor} | زبان: ${result.dominantLanguage})`,
-        );
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        setAsrInlineFeedback({
-          kind: 'INFERENCE_ERROR',
-          titleFa: 'خطا در اجرای موتور محلی Companion',
-          messageFa: msg,
-        });
-        setStatusNotice(`خطای موتور محلی: ${msg}`);
-      } finally {
-        setIsTranscribingAsr(false);
-      }
+    const resolved = await resolveTrackAssetAndPcm(primaryTrack);
+    if (!resolved) {
+      setStatusNotice('داده‌های صوتی PCM برای ترک اصلی در دسترس نیست.');
       return;
     }
 
-    if (!activeModel) {
-      workflowRef.current?.setAsrState({
-        state: 'MODEL_NOT_INSTALLED',
-        message: readiness.messageFa,
-      });
-      const err = classifyError(new Error(readiness.reasonEn), {
-        subsystem: 'ASR_MODEL',
-      });
-      getSharedDiagnosticLogger().log({
-        severity: 'INFO',
-        subsystem: 'ASR_MODEL',
-        code: readiness.code,
-        message: readiness.reasonEn,
-      });
-      setActiveFailure(buildUserFacingFailure(err, workflowState.locale));
-      setAsrInlineFeedback({
-        kind: 'MODEL_NOT_INSTALLED',
-        titleFa: readiness.titleFa,
-        messageFa: readiness.messageFa,
-      });
-      setStatusNotice(
-        'مدل عصبی محلی نصب نشده است — خروجی ساختگی تولید نمی‌شود و هیچ صوتی به سرور ارسال نمی‌گردد.',
-      );
-      return;
-    }
+    const browserAdapter = new BrowserOnnxAsrRuntimeAdapter({
+      modelManager: modelManagerRef.current,
+      memoryBudgetManager: getSharedMemoryBudgetManager(),
+      wasmAssetsBasePath: '/ort/',
+    });
+    const nativeAdapter = new NativeCompanionAsrRuntimeAdapter({
+      companionClient: new CompanionWebClient(companionEndpoint),
+      memoryBudgetManager: getSharedMemoryBudgetManager(),
+    });
+    const workflowService = new UnifiedLocalAsrWorkflowService({
+      browserAdapter,
+      nativeCompanionAdapter: nativeAdapter,
+      modelManager: modelManagerRef.current,
+    });
+
+    const jobId = `studio_asr_${Date.now()}`;
+    const speakerLabel = primaryTrack.speakerLabel || primaryTrack.name || 'گوینده ۱';
+    const pcmData = resolved.pcm;
 
     setIsTranscribingAsr(true);
     setActiveFailure(null);
+    setStatusNotice('در حال آماده‌سازی موتور ۱۰۰٪ محلی آواپرداز (مرورگر ONNX / Companion)...');
+
     try {
-      const integrityCheck = await modelManagerRef.current.verifyInstalledActiveModelOffline();
-      if (!integrityCheck.ok) {
-        const integrityMsg =
-          integrityCheck.error ?? 'اصالت فایل وزن محلی (.onnx) تأیید نشد؛ لطفاً فایل مدل را دوباره نصب کنید.';
+      const outcome = await workflowService.runTranscription({
+        jobId,
+        projectId: workflowState.projectId,
+        trackId: primaryTrack.id,
+        speakerName: speakerLabel,
+        sourceAssetId: resolved.asset.id,
+        sourceAssetSha256: workflowState.sourceAudio?.sourceAudioHash ?? resolved.asset.id,
+        fileName: resolved.asset.name || 'studio-track.wav',
+        sampleRate: project.sampleRate,
+        totalSamples: pcmData.length,
+        readSourceRange: async (startSample, count) => {
+          const safeStart = Math.max(0, Math.min(pcmData.length, Math.floor(startSample)));
+          const safeEnd = Math.max(safeStart, Math.min(pcmData.length, safeStart + Math.floor(count)));
+          return pcmData.subarray(safeStart, safeEnd);
+        },
+        preference: 'AUTO_LOCAL',
+        requestedCloudMode: false,
+        languageHint: 'fa',
+        onProgress: (ev) => {
+          setStatusNotice(`${ev.messageFa} (${ev.percent}٪)`);
+        },
+      });
+
+      if (!outcome.ok || !outcome.result) {
+        const isNotInstalled = outcome.errorCode === 'MODEL_NOT_INSTALLED';
         workflowRef.current?.setAsrState({
-          state: 'INFERENCE_FAILED',
-          modelId: activeModel.modelId,
-          modelVersion: activeModel.version,
-          message: integrityMsg,
+          state: isNotInstalled ? 'MODEL_NOT_INSTALLED' : 'INFERENCE_FAILED',
+          message: outcome.errorMessageFa ?? outcome.errorMessageEn ?? 'Local ASR failed.',
         });
+        const err = classifyError(
+          new Error(outcome.errorMessageEn ?? outcome.errorCode ?? 'LOCAL_ASR_FAILED'),
+          { subsystem: isNotInstalled ? 'ASR_MODEL' : 'ASR_RUNTIME' },
+        );
+        getSharedDiagnosticLogger().log({
+          severity: isNotInstalled ? 'INFO' : 'ERROR',
+          subsystem: isNotInstalled ? 'ASR_MODEL' : 'ASR_RUNTIME',
+          code: outcome.errorCode ?? 'LOCAL_ASR_FAILED',
+          message: outcome.errorMessageEn ?? 'Local ASR execution could not proceed.',
+        });
+        setActiveFailure(buildUserFacingFailure(err, workflowState.locale));
         setAsrInlineFeedback({
-          kind: 'INFERENCE_ERROR',
-          titleFa: 'اصالت فایل مدل محلی تأیید نشد',
-          messageFa: integrityMsg,
+          kind: isNotInstalled ? 'MODEL_NOT_INSTALLED' : 'INFERENCE_ERROR',
+          titleFa: outcome.errorTitleFa ?? 'خطا در اجرای موتور محلی',
+          messageFa: outcome.errorMessageFa ?? outcome.errorMessageEn ?? 'اجرای محلی ناموفق بود.',
         });
-        setStatusNotice(`اجرای محلی متوقف شد: ${integrityMsg}`);
+        setStatusNotice(outcome.errorTitleFa ?? 'اجرای موتور محلی ناموفق بود.');
         return;
       }
 
+      const result = outcome.result;
+      const nextTokens = outcome.tokens;
+
+      if (nextTokens.length === 0) {
+        workflowRef.current?.setAsrState({
+          state: 'NO_SPEECH_DETECTED',
+          modelId: result.modelId,
+          modelVersion: result.modelVersion,
+          message: `موتور محلی ${result.modelId} (${result.runtimeTarget}) گفتار انسانی قابل تشخیصی در این سیگنال صوتی پیدا نکرد.`,
+        });
+        setAsrInlineFeedback({
+          kind: 'NO_SPEECH',
+          titleFa: 'گفتاری توسط موتور محلی تشخیص داده نشد',
+          messageFa: `موتور ${result.modelId} فایل صوتی را بررسی کرد اما کلمه گفتاری قابل تشخیصی نیافت. برای تست واقعی یک فایل گفتار فارسی وارد کنید.`,
+        });
+        setStatusNotice(
+          `گفتاری در این فایل صوتی تشخیص داده نشد (${result.modelId} | RTF=${result.realTimeFactor}).`,
+        );
+        return;
+      }
+
+      const beforeTokensSnapshot = cloneTokens(tokens);
+      historyRef.current.commitTransaction({
+        coalescingKey: '',
+        type: 'restore-clip',
+        description: `رونویسی محلی عصبی (${result.modelId} / ${result.runtimeTarget})`,
+        beforeTracks: tracks,
+        afterTracks: tracks,
+        beforeTokens: beforeTokensSnapshot,
+        afterTokens: nextTokens,
+        beforeRecommendations: recommendations,
+        afterRecommendations: recommendations,
+      });
+      setTokens(nextTokens);
+      syncWorkflowTranscript(nextTokens, `رونویسی محلی با ${result.modelId}`);
+      setHistoryTick((v) => v + 1);
+
       workflowRef.current?.setAsrState({
-        state: 'MODEL_NOT_INSTALLED',
-        modelId: activeModel.modelId,
-        modelVersion: activeModel.version,
-        message: readiness.messageFa,
+        state: 'TRANSCRIPTION_COMPLETED',
+        modelId: result.modelId,
+        modelVersion: result.modelVersion,
+        message: `رونویسی محلی با ${result.modelId} (${result.runtimeTarget}) انجام شد (${nextTokens.length} واژه | RTF=${result.realTimeFactor}).`,
       });
-      setAsrInlineFeedback({
-        kind: 'MODEL_NOT_INSTALLED',
-        titleFa: readiness.titleFa,
-        messageFa: readiness.messageFa,
-      });
-      setStatusNotice(readiness.titleFa);
+      setAsrInlineFeedback(null);
+      setStatusNotice(
+        `رونویسی ۱۰۰٪ محلی کامل شد (${nextTokens.length} واژه | ${result.modelId} | ${result.runtimeTarget} | RTF=${result.realTimeFactor})`,
+      );
     } finally {
+      await browserAdapter.dispose().catch(() => {});
       setIsTranscribingAsr(false);
     }
   };
@@ -3766,6 +3740,8 @@ export default function App() {
             onSimulateLruCacheFill={handleSimulateLruCacheFill}
           />
         )}
+
+        {activeTab === 'shahab' && <ShahabLabView />}
       </main>
 
       {/* Docked Bottom Adobe Audition Transport & Player Deck */}

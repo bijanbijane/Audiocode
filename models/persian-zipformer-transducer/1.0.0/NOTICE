@@ -1,0 +1,34 @@
+AVAPARDAZ — THIRD-PARTY MODEL ATTRIBUTION NOTICE
+================================================
+
+Model Package ID : persian-zipformer-transducer
+Package Version  : 1.0.0
+Architecture     : zipformer2-transducer (pruned_transducer_stateless7)
+Quantization     : INT8 (ONNX IR v7, ai.onnx opset 14)
+Runtime Target   : sherpa-onnx (transducer; NOT compatible with CTC engine)
+
+Upstream Model Attribution
+--------------------------
+Title            : Persian Zipformer-Transducer ASR Engine
+Author           : Ramin Mahmoodi
+Publisher        : Hugging Face
+Repository URL   : https://huggingface.co/ramin-mahmoodi/persian-zipformer-asr
+Pinned Commit    : 0408facbcf3f670121def48e0802c395c225d150
+Declared License : Apache-2.0 (per upstream README.md frontmatter & License section)
+Upstream LICENSE : Not present as a standalone file in upstream commit 0408facbcf3f670121def48e0802c395c225d150;
+                   standard Apache-2.0 text archived alongside upstream README.md for traceability.
+
+Framework Attribution
+---------------------
+ONNX Metadata    : model_author = "k2-fsa", model_type = "zipformer2", comment = "stateless7"
+Runtime Ecosystem: k2-fsa / sherpa-onnx (https://github.com/k2-fsa/sherpa-onnx)
+
+Citation (from upstream README.md)
+----------------------------------
+@misc{persian-zipformer-asr,
+  author = {Ramin Mahmoodi},
+  title = {Persian Zipformer-Transducer ASR Engine},
+  year = {2026},
+  publisher = {Hugging Face},
+  howpublished = {\url{https://huggingface.co/ramin-mahmoodi/persian-zipformer-asr}}
+}

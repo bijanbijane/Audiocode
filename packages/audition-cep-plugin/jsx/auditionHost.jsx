@@ -66,10 +66,26 @@ function avpGetActiveDocumentInfo() {
       }
     } catch (eSel) {}
 
+    var fileSizeBytes = 0;
+    var fileModifiedMs = 0;
+    try {
+      if (fullPath) {
+        var fObj = new File(fullPath);
+        if (fObj.exists) {
+          fileSizeBytes = Number(fObj.length || 0);
+          if (fObj.modified && typeof fObj.modified.getTime === "function") {
+            fileModifiedMs = Number(fObj.modified.getTime() || 0);
+          }
+        }
+      }
+    } catch (eMeta) {}
+
     return (
       '{"ok":true' +
       ',"displayName":"' + avpJsonEscape(docName) + '"' +
       ',"filePath":"' + avpJsonEscape(fullPath) + '"' +
+      ',"fileSizeBytes":' + (isNaN(fileSizeBytes) ? 0 : fileSizeBytes) +
+      ',"fileModifiedMs":' + (isNaN(fileModifiedMs) ? 0 : fileModifiedMs) +
       ',"sampleRateHz":' + (isNaN(sampleRate) ? 0 : sampleRate) +
       ',"channelCount":' + (isNaN(channels) ? 0 : channels) +
       ',"durationSec":' + (isNaN(durationSec) ? 0 : durationSec) +

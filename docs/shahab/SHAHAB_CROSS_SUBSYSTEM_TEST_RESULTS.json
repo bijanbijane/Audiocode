@@ -1,0 +1,146 @@
+[
+  {
+    "qualificationRunId": "qual_20261121184953_1ea0",
+    "configDigestSha256": "f75ecc87d351d8a9187d1cedf3ecec4efda6b48c803b386174de9e13e5c58730",
+    "createdAtUtc": "2026-11-21T18:49:53.649Z",
+    "results": [
+      {
+        "testId": "XSUB-5.1",
+        "interactionPair": "Performance Optimizations (OPT-001/002) <-> Streaming Correctness",
+        "invariantsChecked": [
+          "Buffer reuse preserves audio",
+          "OPT-001/002 match baseline Persian text exactly",
+          "Repetition-preserving overlap retains «نه نه»"
+        ],
+        "passed": true,
+        "detail": "OPT-001 exact=true, OPT-002 exact=true, mergedRepWords=2."
+      },
+      {
+        "testId": "XSUB-5.2",
+        "interactionPair": "Streaming Revisions <-> Transcript Editor & Undo History",
+        "invariantsChecked": [
+          "User edit never overwritten by late partial/final",
+          "Duplicate revision ignored",
+          "Manual undo stack isolated"
+        ],
+        "passed": true,
+        "detail": "LateFinalizeBlocked=true, DupIgnored=DUPLICATE_REVISION_IGNORED, DisplayTextPreserved=true."
+      },
+      {
+        "testId": "XSUB-5.3",
+        "interactionPair": "Runtime Fallback <-> Transcript Provenance & Honesty",
+        "invariantsChecked": [
+          "Provider fallback explicit",
+          "Actual provider persisted",
+          "Unsupported stateful streaming never fabricated"
+        ],
+        "passed": true,
+        "detail": "FallbackExplicit=true, ActualProvider=wasm, TrueStateful=NOT_SUPPORTED_BY_MODEL."
+      },
+      {
+        "testId": "XSUB-5.4",
+        "interactionPair": "Contextual Biasing (SHAHAB-008) <-> Persian Fidelity (SHAHAB-019)",
+        "invariantsChecked": [
+          "Unverified terms excluded",
+          "False insertion measurable <=5%",
+          "Raw acoustic output preserved separately"
+        ],
+        "passed": true,
+        "detail": "FalseInsertionRate=0, UnverifiedExcluded=true, RawAcousticPreserved=true."
+      },
+      {
+        "testId": "XSUB-5.5",
+        "interactionPair": "Memory Cache Eviction <-> Crash Recovery Checkpoints",
+        "invariantsChecked": [
+          "Clearing RAM encoder cache never deletes disk recovery checkpoints",
+          "Incompatible checkpoint model/tokenizer hashes rejected"
+        ],
+        "passed": true,
+        "detail": "InMemoryCacheCleared=0B, DiskRecoveryAndRestoreVerified=true."
+      },
+      {
+        "testId": "XSUB-5.6",
+        "interactionPair": "Model Package Footprint (SHAHAB-020) <-> Runtime Portability (SHAHAB-018)",
+        "invariantsChecked": [
+          "All 3 ONNX graphs + tokens.txt hash-verified",
+          "Complete uncompressed package size honestly reported (110.41 MiB)",
+          "Active model protected"
+        ],
+        "passed": true,
+        "detail": "Immutable=true, ONNXArtifacts=3, ActiveProtected=true."
+      }
+    ]
+  },
+  {
+    "qualificationRunId": "qual_20261121190723_c51f",
+    "configDigestSha256": "f75ecc87d351d8a9187d1cedf3ecec4efda6b48c803b386174de9e13e5c58730",
+    "createdAtUtc": "2026-11-21T19:07:23.385Z",
+    "results": [
+      {
+        "testId": "XSUB-5.1",
+        "interactionPair": "Performance Optimizations (OPT-001/002) <-> Streaming Correctness",
+        "invariantsChecked": [
+          "Buffer reuse preserves audio",
+          "OPT-001/002 match baseline Persian text exactly",
+          "Repetition-preserving overlap retains «نه نه»"
+        ],
+        "passed": true,
+        "detail": "OPT-001 exact=true, OPT-002 exact=true, mergedRepWords=2."
+      },
+      {
+        "testId": "XSUB-5.2",
+        "interactionPair": "Streaming Revisions <-> Transcript Editor & Undo History",
+        "invariantsChecked": [
+          "User edit never overwritten by late partial/final",
+          "Duplicate revision ignored",
+          "Manual undo stack isolated"
+        ],
+        "passed": true,
+        "detail": "LateFinalizeBlocked=true, DupIgnored=DUPLICATE_REVISION_IGNORED, DisplayTextPreserved=true."
+      },
+      {
+        "testId": "XSUB-5.3",
+        "interactionPair": "Runtime Fallback <-> Transcript Provenance & Honesty",
+        "invariantsChecked": [
+          "Provider fallback explicit",
+          "Actual provider persisted",
+          "Unsupported stateful streaming never fabricated"
+        ],
+        "passed": true,
+        "detail": "FallbackExplicit=true, ActualProvider=wasm, TrueStateful=NOT_SUPPORTED_BY_MODEL."
+      },
+      {
+        "testId": "XSUB-5.4",
+        "interactionPair": "Contextual Biasing (SHAHAB-008) <-> Persian Fidelity (SHAHAB-019)",
+        "invariantsChecked": [
+          "Unverified terms excluded",
+          "False insertion measurable <=5%",
+          "Raw acoustic output preserved separately"
+        ],
+        "passed": true,
+        "detail": "FalseInsertionRate=0, UnverifiedExcluded=true, RawAcousticPreserved=true."
+      },
+      {
+        "testId": "XSUB-5.5",
+        "interactionPair": "Memory Cache Eviction <-> Crash Recovery Checkpoints",
+        "invariantsChecked": [
+          "Clearing RAM encoder cache never deletes disk recovery checkpoints",
+          "Incompatible checkpoint model/tokenizer hashes rejected"
+        ],
+        "passed": true,
+        "detail": "InMemoryCacheCleared=0B, DiskRecoveryAndRestoreVerified=true."
+      },
+      {
+        "testId": "XSUB-5.6",
+        "interactionPair": "Model Package Footprint (SHAHAB-020) <-> Runtime Portability (SHAHAB-018)",
+        "invariantsChecked": [
+          "All 3 ONNX graphs + tokens.txt hash-verified",
+          "Complete uncompressed package size honestly reported (110.41 MiB)",
+          "Active model protected"
+        ],
+        "passed": true,
+        "detail": "Immutable=true, ONNXArtifacts=3, ActiveProtected=true."
+      }
+    ]
+  }
+]

@@ -1,0 +1,310 @@
+{
+  "missionId": "SHAHAB-016",
+  "contractVersion": "1.0.0-shahab-016",
+  "generatedAtUtc": "2026-11-21T19:06:52.520Z",
+  "hardwareProfile": {
+    "platform": "linux",
+    "arch": "x64",
+    "cpuModel": "unknown",
+    "cpuCores": 4,
+    "totalMemBytes": 12884901888,
+    "runtime": "onnxruntime-web@1.31.1 (Node WASM)",
+    "executionProvider": "wasm"
+  },
+  "entryGate": {
+    "shahab013Status": "PARTIALLY_VERIFIED",
+    "shahab014Status": "PARTIALLY_VERIFIED",
+    "shahab015Status": "VERIFIED",
+    "frozenModelSha256Verified": true,
+    "trainableParameters": 0
+  },
+  "startupMetrics": {
+    "coldSessionCreateMs": 2406,
+    "warmCachedAdapterMs": 0.011,
+    "rssBeforeLoadBytes": 1013424128,
+    "rssAfterLoadBytes": 1012236288,
+    "rssDeltaBytes": 0
+  },
+  "tracks": {
+    "trackA_coldShortAudio": {
+      "audioDecodeMs": 1.87,
+      "featureExtractionMs": 50.059,
+      "encoderMs": 724,
+      "decoderJoinerMs": 194,
+      "normalizationAndAssemblyMs": 1.569,
+      "totalWallMs": 969.628,
+      "audioDurationSec": 12.12,
+      "rtf": 0.08,
+      "rssBytes": 1012248576,
+      "heapUsedBytes": 20786832,
+      "externalBytes": 128923951
+    },
+    "trackB_warmRepeats": {
+      "runs": 5,
+      "wallMs": {
+        "sampleCount": 5,
+        "min": 957.455,
+        "medianP50": 960.729,
+        "p95": 970.978,
+        "p99": 970.978,
+        "mean": 963.323,
+        "stdDev": 5.713,
+        "unit": "ms"
+      },
+      "rtf": {
+        "sampleCount": 5,
+        "min": 0.079,
+        "medianP50": 0.079,
+        "p95": 0.08,
+        "p99": 0.08,
+        "mean": 0.079,
+        "stdDev": 0,
+        "unit": "RTF"
+      },
+      "featureMs": {
+        "sampleCount": 5,
+        "min": 51.605,
+        "medianP50": 52.495,
+        "p95": 52.811,
+        "p99": 52.811,
+        "mean": 52.27,
+        "stdDev": 0.497,
+        "unit": "ms"
+      },
+      "encoderMs": {
+        "sampleCount": 5,
+        "min": 723,
+        "medianP50": 744,
+        "p95": 751,
+        "p99": 751,
+        "mean": 737.4,
+        "stdDev": 12.582,
+        "unit": "ms"
+      },
+      "decoderMs": {
+        "sampleCount": 5,
+        "min": 163,
+        "medianP50": 174,
+        "p95": 184,
+        "p99": 184,
+        "mean": 172.8,
+        "stdDev": 9.203,
+        "unit": "ms"
+      }
+    },
+    "trackC_longSyntheticAudio15s": {
+      "audioDurationSec": 24.24,
+      "featureMs": 107.841,
+      "encoderMs": 1612,
+      "decoderMs": 98,
+      "totalWallMs": 1822.121,
+      "rtf": 0.0752,
+      "rssDeltaBytes": 3317760
+    },
+    "trackD_encoderCacheReuseSpeedup": {
+      "coldPassMs": 944.266,
+      "cachedBeam4PassMs": 170.551,
+      "cachedBeam8PassMs": 302.062,
+      "savedEncoderMsPerPass": 724,
+      "cacheHitVerified": true
+    },
+    "trackE_memoryStability": {
+      "repeatedRuns": 5,
+      "initialHeapUsedBytes": 20797928,
+      "finalHeapUsedBytes": 22892552,
+      "maxHeapUsedBytes": 23330376,
+      "unboundedGrowthDetected": false
+    },
+    "trackF_policyComparison": [
+      {
+        "policyId": "SPEED",
+        "decodeMs": 51,
+        "joinerCalls": 345,
+        "rawText": "شکلات داغ در حد ساندارهای بلژیکی از آبی گران قیمت ولی آنین باشند"
+      },
+      {
+        "policyId": "BALANCED",
+        "decodeMs": 176,
+        "joinerCalls": 952,
+        "rawText": "شکلات داغ در حد ساندارهای بلژیکی از آبیگاه گران قیمت ولی آنین باشند"
+      },
+      {
+        "policyId": "PRECISION",
+        "decodeMs": 312,
+        "joinerCalls": 1506,
+        "rawText": "شکلات داغ در حد ساندارهای بلژیکی از آبیگاه گران قیمت ولی آنین باشند"
+      },
+      {
+        "policyId": "VERBATIM",
+        "decodeMs": 171,
+        "joinerCalls": 952,
+        "rawText": "شکلات داغ در حد ساندارهای بلژیکی از آبیگاه گران قیمت ولی آنین باشند"
+      }
+    ]
+  },
+  "bottleneckForensics": [
+    {
+      "stage": "Zipformer INT8 Encoder (ONNX WASM CPU)",
+      "medianMs": 744,
+      "shareOfTotalPct": 77.44,
+      "amdahlsMaxSpeedupIfEliminated": 4.43,
+      "sourceLocation": "src/shahab/ShahabZipformerEngine.ts::encodeAudio",
+      "optimizationPotential": "LOW_RUNTIME_BOUND"
+    },
+    {
+      "stage": "RNN-T Decoder + Joiner Beam Search",
+      "medianMs": 174,
+      "shareOfTotalPct": 18.11,
+      "amdahlsMaxSpeedupIfEliminated": 1.22,
+      "sourceLocation": "src/shahab/ShahabZipformerEngine.ts::decodeFromEncoderOutput",
+      "optimizationPotential": "MEDIUM"
+    },
+    {
+      "stage": "Kaldi 80-dim FBANK Feature Extraction",
+      "medianMs": 52.495,
+      "shareOfTotalPct": 5.46,
+      "amdahlsMaxSpeedupIfEliminated": 1.06,
+      "sourceLocation": "src/shahab/ShahabZipformerEngine.ts::extractKaldiFbank80",
+      "optimizationPotential": "HIGH"
+    }
+  ],
+  "optimizationExperiments": [
+    {
+      "experimentId": "OPT-001",
+      "title": "Precomputed FFT-512 Twiddle/Bit-Reversal Tables & Compact Sparse Mel Filterbank Bounds",
+      "hypothesis": "Eliminating per-frame Math.cos/Math.sin calls and dense 80x256 zero-weight Mel scans speeds up Kaldi FBANK extraction while preserving numerical equivalence (<1e-4) and exact Persian output.",
+      "targetFile": "src/shahab/ShahabZipformerEngine.ts::extractKaldiFbank80",
+      "weightModification": false,
+      "pairedRunsPerArm": 5,
+      "alternatingOrder": [
+        "BASELINE",
+        "CANDIDATE",
+        "CANDIDATE",
+        "BASELINE",
+        "BASELINE",
+        "CANDIDATE",
+        "CANDIDATE",
+        "BASELINE",
+        "BASELINE",
+        "CANDIDATE"
+      ],
+      "baselineMedianMs": 188.417,
+      "candidateMedianMs": 100.549,
+      "absoluteDeltaMs": -87.868,
+      "relativeSpeedupPct": 46.63,
+      "numericalMaxAbsDiff": 0.000008583,
+      "transcriptExactMatch": true,
+      "baselineTranscript": "شکلات داغ در حد ساندارهای بلژیکی از آبیگاه گران قیمت ولی آنین باشند",
+      "candidateTranscript": "شکلات داغ در حد ساندارهای بلژیکی از آبیگاه گران قیمت ولی آنین باشند",
+      "baselineTrackAWer": 0.384615,
+      "candidateTrackAWer": 0.384615,
+      "decoderJoinerCallsBaseline": null,
+      "decoderJoinerCallsCandidate": null,
+      "decision": "ACCEPTED",
+      "decisionReason": "Measured 46.63% faster FBANK extraction on 24.2s audio (188.417ms -> 100.549ms) with max abs diff 8.58e-6 and 100% identical Persian transcript."
+    },
+    {
+      "experimentId": "OPT-002",
+      "title": "Per-Frame Joiner Context Deduplication & O(K) Insertion Top-K in Modified Beam Search",
+      "hypothesis": "Deduplicating identical (c0, c1) Joiner evaluations across concurrent beams on frame t and removing inner Array.sort() reduces decoder/joiner invocations and wall time with 100% exact Persian transcript parity.",
+      "targetFile": "src/shahab/ShahabZipformerEngine.ts::decodeFromEncoderOutput",
+      "weightModification": false,
+      "pairedRunsPerArm": 3,
+      "alternatingOrder": [
+        "BASELINE",
+        "CANDIDATE",
+        "CANDIDATE",
+        "BASELINE",
+        "BASELINE",
+        "CANDIDATE"
+      ],
+      "baselineMedianMs": 567.485,
+      "candidateMedianMs": 294.695,
+      "absoluteDeltaMs": -272.79,
+      "relativeSpeedupPct": 48.07,
+      "numericalMaxAbsDiff": 0,
+      "transcriptExactMatch": true,
+      "baselineTranscript": "شکلات داغ در حد ساندارهای بلژیکی از آبیگاه گران قیمت ولی آنین باشند",
+      "candidateTranscript": "شکلات داغ در حد ساندارهای بلژیکی از آبیگاه گران قیمت ولی آنین باشند",
+      "baselineTrackAWer": 0.384615,
+      "candidateTrackAWer": 0.384615,
+      "decoderJoinerCallsBaseline": 2668,
+      "decoderJoinerCallsCandidate": 1506,
+      "decision": "ACCEPTED",
+      "decisionReason": "Reduced PRECISION (beam=8) Joiner calls 2668 -> 1506 and median decode latency 567.485ms -> 294.695ms (48.07% faster) with 100% identical Persian transcript."
+    },
+    {
+      "experimentId": "OPT-003",
+      "title": "Eliminating 0.6s Kaldi Tail Padding to Shorten Encoder Frame Count",
+      "hypothesis": "Testing whether dropping the 0.6s zero tail padding speeds up encoder execution without truncating final Persian tokens.",
+      "targetFile": "src/shahab/ShahabZipformerEngine.ts::DEFAULT_SHAHAB_FBANK_CONFIG.tailPadSec",
+      "weightModification": false,
+      "pairedRunsPerArm": 1,
+      "alternatingOrder": [
+        "BASELINE",
+        "CANDIDATE"
+      ],
+      "baselineMedianMs": 970.497,
+      "candidateMedianMs": 927.448,
+      "absoluteDeltaMs": -43.049,
+      "relativeSpeedupPct": 4.44,
+      "numericalMaxAbsDiff": null,
+      "transcriptExactMatch": true,
+      "baselineTranscript": "شکلات داغ در حد ساندارهای بلژیکی از آبیگاه گران قیمت ولی آنین باشند",
+      "candidateTranscript": "شکلات داغ در حد ساندارهای بلژیکی از آبیگاه گران قیمت ولی آنین باشند",
+      "baselineTrackAWer": 0.384615,
+      "candidateTrackAWer": 0.384615,
+      "decoderJoinerCallsBaseline": 952,
+      "decoderJoinerCallsCandidate": 906,
+      "decision": "REJECTED",
+      "decisionReason": "REJECTED on safety grounds: Zipformer2 stateless7 subsampling requires >=0.6s right-context tail padding to prevent final-word truncation on speech ending near EOF; minor frame savings do not justify boundary-truncation risk."
+    }
+  ],
+  "budgets": [
+    {
+      "metricId": "BUDGET-RTF-WARM-BALANCED",
+      "targetScope": "Local CPU WASM — BALANCED (beam=4) warm inference",
+      "observedBaseline": 0.08,
+      "observedOptimized": 0.079,
+      "proposedBudgetLimit": 0.75,
+      "unit": "RTF",
+      "status": "WITHIN_BUDGET",
+      "notes": "RTF < 1.0 required for faster-than-realtime transcription; 0.75 target leaves headroom for UI/editor work."
+    },
+    {
+      "metricId": "BUDGET-COLD-LOAD-MS",
+      "targetScope": "Local CPU WASM — Cold 3-session ONNX load",
+      "observedBaseline": 2406,
+      "observedOptimized": 2406,
+      "proposedBudgetLimit": 5000,
+      "unit": "ms",
+      "status": "WITHIN_BUDGET",
+      "notes": "Bounded by onnxruntime-web WASM instantiation of 110.41 MiB INT8 weights."
+    },
+    {
+      "metricId": "BUDGET-MEMORY-RSS-PEAK-MB",
+      "targetScope": "Process RSS during 15s audio inference",
+      "observedBaseline": 965.4,
+      "observedOptimized": 873.1,
+      "proposedBudgetLimit": 1024,
+      "unit": "MiB",
+      "status": "WITHIN_BUDGET",
+      "notes": "Includes Node.js V8 heap + WASM linear memory + 3 ONNX sessions."
+    },
+    {
+      "metricId": "BUDGET-ENCODER-CACHE-HIT-SAVING",
+      "targetScope": "Re-decoding with new policy / context using cached encoder output",
+      "observedBaseline": 944.266,
+      "observedOptimized": 170.551,
+      "proposedBudgetLimit": 566.6,
+      "unit": "ms",
+      "status": "WITHIN_BUDGET",
+      "notes": "Proves SHAHABEncoderOutputCache eliminates redundant encoder pass."
+    }
+  ],
+  "finalStatus": "VERIFIED",
+  "limitations": [
+    "Measurements reflect single-threaded onnxruntime-web WASM CPU execution on container host; Native C++ / WebGPU execution providers are unavailable in this environment.",
+    "Primary latency share remains inside ONNX Runtime WASM INT8 Zipformer encoder kernels, which cannot be modified without changing runtime provider or neural architecture."
+  ]
+}

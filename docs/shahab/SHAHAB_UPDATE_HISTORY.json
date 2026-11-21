@@ -1,0 +1,16 @@
+{
+  "activeReleaseId": "SHAHAB-R1.4.0",
+  "previousVerifiedReleaseId": null,
+  "stagedReleaseId": "SHAHAB-R2.0.0-RELEASE-CANDIDATE",
+  "rollbackAvailable": false,
+  "history": [
+    {
+      "updateId": "upd_1795288012403_72e0",
+      "releaseId": "SHAHAB-R2.0.0-RELEASE-CANDIDATE",
+      "state": "STAGED",
+      "previousActiveReleaseId": "SHAHAB-R1.4.0",
+      "reason": "Update SHAHAB-R2.0.0-RELEASE-CANDIDATE verified, compatibility-checked, and staged without overwriting active release.",
+      "timestampIso": "2026-11-21T19:06:52.403Z"
+    }
+  ]
+}

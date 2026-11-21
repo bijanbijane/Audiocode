@@ -1,0 +1,167 @@
+{
+  "schemaVersion": "1.0.0",
+  "modelId": "persian-zipformer-transducer",
+  "version": "1.0.0",
+  "language": "fa-IR",
+  "architecture": "zipformer2-transducer",
+  "upstreamArchitecture": "pruned_transducer_stateless7",
+  "format": "onnx",
+  "quantization": "int8",
+  "sampleRate": 16000,
+  "featureDim": 80,
+  "decodingMethod": "modified_beam_search",
+  "maxActivePaths": 4,
+  "runtimeCompatibility": {
+    "targetRuntimeEcosystem": "sherpa-onnx",
+    "compatibleWithCoreAcousticCtcEngine": false,
+    "asrInferenceWired": false,
+    "status": "ASSET_ACQUIRED_AND_VERIFIED_TRANSDUCER_ENGINE_PENDING",
+    "note": "This is a 3-graph Zipformer-Transducer model (encoder + decoder + joiner). It MUST NOT be wired to CoreAcousticCtcEngine."
+  },
+  "upstream": {
+    "repository": "https://huggingface.co/ramin-mahmoodi/persian-zipformer-asr",
+    "commitSha": "0408facbcf3f670121def48e0802c395c225d150",
+    "author": "Ramin Mahmoodi",
+    "license": "Apache-2.0",
+    "licenseDeclaredIn": "README.md (YAML frontmatter & License section)",
+    "upstreamStandaloneLicenseFilePresent": false,
+    "acquiredAtIso": "2026-11-21T15:14:56.000Z"
+  },
+  "integritySummary": {
+    "mandatoryInferenceFilesCount": 4,
+    "mandatoryInferenceTotalBytes": 115757880,
+    "allLfsHashesMatchedUpstreamOids": true,
+    "signatureVerified": false,
+    "authenticityNote": "SHA-256 digests were computed locally and matched against Hugging Face Git LFS OIDs at commit 0408facbcf3f670121def48e0802c395c225d150. No detached cryptographic publisher signature was supplied upstream."
+  },
+  "files": [
+    {
+      "path": "encoder.int8.onnx",
+      "role": "transducer-encoder",
+      "mandatory": true,
+      "sizeBytes": 113609320,
+      "sha256": "08735923618e196bd093b369f6843c8a390a6113a391e7b7095115582fd2cd27",
+      "upstreamLfsOidMatch": true,
+      "onnx": {
+        "irVersion": 7,
+        "opset": 14,
+        "producerName": "onnx.quantize",
+        "nodeCount": 4445,
+        "metadata": {
+          "onnx.infer": "onnxruntime.quant",
+          "model_type": "zipformer2",
+          "version": "1",
+          "model_author": "k2-fsa",
+          "comment": "stateless7"
+        },
+        "inputs": [
+          { "name": "x", "elemType": "float32", "shape": ["N", "T", 80] },
+          { "name": "x_lens", "elemType": "int64", "shape": ["N"] }
+        ],
+        "outputs": [
+          { "name": "encoder_out", "elemType": "float32", "shape": ["N", "T", 384] },
+          { "name": "encoder_out_lens", "elemType": "int64", "shape": ["N"] }
+        ]
+      }
+    },
+    {
+      "path": "decoder.int8.onnx",
+      "role": "transducer-decoder",
+      "mandatory": true,
+      "sizeBytes": 1736806,
+      "sha256": "9d4ad2da0335d86d8638ff026e6b37247d97df940af6ad40bba671af5fd4aa9d",
+      "upstreamLfsOidMatch": true,
+      "onnx": {
+        "irVersion": 7,
+        "opset": 14,
+        "producerName": "onnx.quantize",
+        "nodeCount": 14,
+        "metadata": {
+          "onnx.infer": "onnxruntime.quant",
+          "context_size": "2",
+          "vocab_size": "1024"
+        },
+        "inputs": [
+          { "name": "y", "elemType": "int64", "shape": ["N", 2] }
+        ],
+        "outputs": [
+          { "name": "decoder_out", "elemType": "float32", "shape": ["N", 384] }
+        ]
+      }
+    },
+    {
+      "path": "joiner.int8.onnx",
+      "role": "transducer-joiner",
+      "mandatory": true,
+      "sizeBytes": 398795,
+      "sha256": "a2a4a30585dc53e46afafd03690181107a610f67ff0e29cab460ec16df5cc00b",
+      "upstreamLfsOidMatch": true,
+      "onnx": {
+        "irVersion": 7,
+        "opset": 14,
+        "producerName": "onnx.quantize",
+        "nodeCount": 8,
+        "metadata": {
+          "onnx.infer": "onnxruntime.quant",
+          "joiner_dim": "384"
+        },
+        "inputs": [
+          { "name": "encoder_out", "elemType": "float32", "shape": ["N", 384] },
+          { "name": "decoder_out", "elemType": "float32", "shape": ["N", 384] }
+        ],
+        "outputs": [
+          { "name": "logit", "elemType": "float32", "shape": ["N", 1024] }
+        ]
+      }
+    },
+    {
+      "path": "tokens.txt",
+      "role": "vocabulary",
+      "mandatory": true,
+      "sizeBytes": 12959,
+      "sha256": "435f9e09a290c764670044e54c2450670fc2eab50176cd912734fa6f92ab166f",
+      "tokenCount": 1024,
+      "encoding": "utf-8"
+    },
+    {
+      "path": "bpe_fa_1024.model",
+      "role": "sentencepiece-metadata",
+      "mandatory": false,
+      "sizeBytes": 257275,
+      "sha256": "38ce80cf76e8535d41d625dcbf1a5a5e7d4cb7260a1d7b0dc1663385fc4fd075",
+      "upstreamLfsOidMatch": true
+    },
+    {
+      "path": "README.md",
+      "role": "upstream-model-card",
+      "mandatory": false,
+      "sizeBytes": 6054,
+      "sha256": "7e60fdf2ba87e188124da1874fc06a93dbac6be7569169099dcc1774c28f2ac4"
+    },
+    {
+      "path": "transcribe.py",
+      "role": "upstream-reference-script",
+      "mandatory": false,
+      "sizeBytes": 10719,
+      "sha256": "a25d398d513177f371f21f1b12740f62fe43527501973ba055441b9cc8a8123e"
+    },
+    {
+      "path": "sample.wav",
+      "role": "upstream-reference-audio",
+      "mandatory": false,
+      "sizeBytes": 775738,
+      "sha256": "e4f83ec981187afc2bd5902d604dfa55c3692c4010a5de2232b15427ca697b97",
+      "upstreamLfsOidMatch": true
+    },
+    {
+      "path": "LICENSE",
+      "role": "license",
+      "mandatory": true
+    },
+    {
+      "path": "NOTICE",
+      "role": "attribution",
+      "mandatory": true
+    }
+  ]
+}

@@ -1,0 +1,96 @@
+[
+  {
+    "qualificationRunId": "qual_20261121184953_1ea0",
+    "decidedAtUtc": "2026-11-21T18:49:53.649Z",
+    "decisionProcess": "SHAHAB-021 Automated Evidence-Gated System Qualification (Zero Blocker Suppression)",
+    "primaryDecision": "NO_GO_REQUIRES_ENGINEERING_FIXES",
+    "secondaryRecommendation": "RECOMMEND_CURRENT_MODEL_RETENTION",
+    "verifiedCapabilities": [
+      "Frozen inherited Persian Zipformer-Transducer INT8 weights verified immutable (SHA-256 match, trainableParameters=0).",
+      "OPT-001 (precomputed FFT-512 + compact Mel bounds) & OPT-002 (Joiner context dedup + O(K) top-K) verified faster with 100% exact Persian transcript parity; OPT-003 rejected cleanly.",
+      "All 8 integrated workloads (WL-A through WL-H) and all 6 cross-subsystem interaction tests (XSUB-5.1 through XSUB-5.6) executed and passed.",
+      "6-layer transcript provenance, P0-009/P0-010/P0-012 linguistic reuse, repetition-preserving overlap reconciliation, and conflict-safe Editor edit protection verified.",
+      "Fault-injection suite, atomic checkpointing, backup/restore drill, and zero unauthorized Local-to-Cloud transfer verified."
+    ],
+    "unverifiedCapabilities": [
+      "Cryptographic Ed25519 release artifact signing (BLOCKED — no signing key infrastructure).",
+      "Statistical Persian WER/CER generalization across >=20 independent multi-speaker real-world recordings (currently n=4).",
+      "WebGPU/CUDA GPU execution and Native C++ ONNX Runtime addon (BLOCKED / UNAVAILABLE in workspace).",
+      "Browser in-tab WASM execution of the 110.41 MiB model (AVAILABLE_BUT_UNVERIFIED).",
+      "TRUE_STATEFUL_STREAMING (NOT_SUPPORTED_BY_MODEL; offline encoder inputs only)."
+    ],
+    "failedChecks": [
+      "WL-F: Resource-Constrained & Queue Saturation Resilience"
+    ],
+    "releaseBlockersCount": 2,
+    "highRisksCount": 1,
+    "remainingUserRisks": [
+      "[RELEASE_BLOCKER] RISK-001: Cannot authorize unattended/automatic production model updates safely against supply-chain tampering.",
+      "[RELEASE_BLOCKER] RISK-002: Unmeasured acoustic failure modes on regional Persian accents, noisy microphones, or spontaneous telephone speech.",
+      "[ACCEPTABLE_WITH_LIMITATION] RISK-003: Higher CPU cost on long live sessions compared to native stateful streaming checkpoints.",
+      "[HIGH_RISK] RISK-004: Browser-only local cold downloads are heavy and inference is CPU WASM bound.",
+      "[ACCEPTABLE_WITH_LIMITATION] RISK-005: Operational crash/recovery SLIs cannot yet confirm long-tail fleet reliability."
+    ],
+    "supportingEvidenceRefs": [
+      "docs/shahab/SHAHAB_SYSTEM_QUALIFICATION_STATE.json",
+      "docs/shahab/SHAHAB_RELEASE_MANIFEST.json",
+      "docs/shahab/SHAHAB_RESILIENCE_STATE.json",
+      "docs/shahab/SHAHAB_PERFORMANCE_STATE.json",
+      "docs/shahab/SHAHAB_STREAMING_STATE.json",
+      "docs/shahab/SHAHAB_RUNTIME_STATE.json",
+      "docs/shahab/SHAHAB_PERSIAN_FIDELITY_STATE.json",
+      "docs/shahab/SHAHAB_COMPACT_MODEL_STATE.json"
+    ],
+    "requiredFollowUpWork": [
+      "Provision managed Ed25519 release signing keys and verify signed manifests before enabling automatic model updates (resolves RISK-001).",
+      "Assemble and adjudicate >=20 consented multi-speaker Persian real-world recordings to unlock statistically valid regression gating (resolves RISK-002).",
+      "Verify Browser Local WASM OPFS cold-load and test Native C++ / GPU runners on target hardware (mitigates RISK-004)."
+    ]
+  },
+  {
+    "qualificationRunId": "qual_20261121190723_c51f",
+    "decidedAtUtc": "2026-11-21T19:07:23.385Z",
+    "decisionProcess": "SHAHAB-021 Automated Evidence-Gated System Qualification (Zero Blocker Suppression)",
+    "primaryDecision": "NO_GO_REQUIRES_ENGINEERING_FIXES",
+    "secondaryRecommendation": "RECOMMEND_CURRENT_MODEL_RETENTION",
+    "verifiedCapabilities": [
+      "Frozen inherited Persian Zipformer-Transducer INT8 weights verified immutable (SHA-256 match, trainableParameters=0).",
+      "OPT-001 (precomputed FFT-512 + compact Mel bounds) & OPT-002 (Joiner context dedup + O(K) top-K) verified faster with 100% exact Persian transcript parity; OPT-003 rejected cleanly.",
+      "All 8 integrated workloads (WL-A through WL-H) and all 6 cross-subsystem interaction tests (XSUB-5.1 through XSUB-5.6) executed and passed.",
+      "6-layer transcript provenance, P0-009/P0-010/P0-012 linguistic reuse, repetition-preserving overlap reconciliation, and conflict-safe Editor edit protection verified.",
+      "Fault-injection suite, atomic checkpointing, backup/restore drill, and zero unauthorized Local-to-Cloud transfer verified."
+    ],
+    "unverifiedCapabilities": [
+      "Cryptographic Ed25519 release artifact signing (BLOCKED — no signing key infrastructure).",
+      "Statistical Persian WER/CER generalization across >=20 independent multi-speaker real-world recordings (currently n=4).",
+      "WebGPU/CUDA GPU execution and Native C++ ONNX Runtime addon (BLOCKED / UNAVAILABLE in workspace).",
+      "Browser in-tab WASM execution of the 110.41 MiB model (AVAILABLE_BUT_UNVERIFIED).",
+      "TRUE_STATEFUL_STREAMING (NOT_SUPPORTED_BY_MODEL; offline encoder inputs only)."
+    ],
+    "failedChecks": [],
+    "releaseBlockersCount": 2,
+    "highRisksCount": 1,
+    "remainingUserRisks": [
+      "[RELEASE_BLOCKER] RISK-001: Cannot authorize unattended/automatic production model updates safely against supply-chain tampering.",
+      "[RELEASE_BLOCKER] RISK-002: Unmeasured acoustic failure modes on regional Persian accents, noisy microphones, or spontaneous telephone speech.",
+      "[ACCEPTABLE_WITH_LIMITATION] RISK-003: Higher CPU cost on long live sessions compared to native stateful streaming checkpoints.",
+      "[HIGH_RISK] RISK-004: Browser-only local cold downloads are heavy and inference is CPU WASM bound.",
+      "[ACCEPTABLE_WITH_LIMITATION] RISK-005: Operational crash/recovery SLIs cannot yet confirm long-tail fleet reliability."
+    ],
+    "supportingEvidenceRefs": [
+      "docs/shahab/SHAHAB_SYSTEM_QUALIFICATION_STATE.json",
+      "docs/shahab/SHAHAB_RELEASE_MANIFEST.json",
+      "docs/shahab/SHAHAB_RESILIENCE_STATE.json",
+      "docs/shahab/SHAHAB_PERFORMANCE_STATE.json",
+      "docs/shahab/SHAHAB_STREAMING_STATE.json",
+      "docs/shahab/SHAHAB_RUNTIME_STATE.json",
+      "docs/shahab/SHAHAB_PERSIAN_FIDELITY_STATE.json",
+      "docs/shahab/SHAHAB_COMPACT_MODEL_STATE.json"
+    ],
+    "requiredFollowUpWork": [
+      "Provision managed Ed25519 release signing keys and verify signed manifests before enabling automatic model updates (resolves RISK-001).",
+      "Assemble and adjudicate >=20 consented multi-speaker Persian real-world recordings to unlock statistically valid regression gating (resolves RISK-002).",
+      "Verify Browser Local WASM OPFS cold-load and test Native C++ / GPU runners on target hardware (mitigates RISK-004)."
+    ]
+  }
+]

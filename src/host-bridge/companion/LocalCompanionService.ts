@@ -26,6 +26,14 @@ import {
   isLoopbackRemoteAddress,
   type CompanionHandshakeRequest,
 } from './CompanionIpcBridge';
+import {
+  CompanionLifecycleManager,
+  type CompanionLifecycleState,
+} from './CompanionLifecycleManager';
+import {
+  CompanionAudioTransferManager,
+  type CompanionAudioTransferFormat,
+} from './CompanionAudioTransfer';
 import { AdobeAuditionHostAdapter } from '../audition/AuditionHostAdapter';
 import {
   LocalSherpaNeuralEngine,
@@ -46,12 +54,22 @@ export type CompanionJobState =
   | 'CANCELLED'
   | 'FAILED';
 
+export interface CompanionSourceIdentity {
+  readonly documentId?: string;
+  readonly displayName?: string;
+  readonly filePath?: string;
+  readonly fileSizeBytes?: number;
+  readonly fileModifiedMs?: number;
+  readonly audioSha256?: string;
+}
+
 export interface CompanionJobRecord {
   readonly jobId: string;
   readonly status: CompanionJobState;
   readonly modelId: string | null;
   readonly languageHint: 'fa' | 'en' | 'fa-en' | 'auto';
   readonly sourceName: string;
+  readonly sourceIdentity?: CompanionSourceIdentity;
   readonly progressPct: number;
   readonly currentChunk: number;
   readonly totalChunks: number;
@@ -190,32 +208,93 @@ export class LocalCompanionService {
   public readonly ipcBridge: CompanionIpcBridge;
   public readonly auditionAdapter: AdobeAuditionHostAdapter;
   public readonly neuralEngine: LocalSherpaNeuralEngine;
+  public readonly lifecycleManager: CompanionLifecycleManager;
+  public readonly audioTransfers: CompanionAudioTransferManager;
   private readonly jobs = new Map<string, InternalJobEntry>();
   private readonly stagedUploads = new Map<string, StagedAudioUpload>();
   private readonly maxRetainedJobs: number;
+  private readonly maxConcurrentJobs: number;
 
   constructor(options?: {
     readonly neuralEngine?: LocalSherpaNeuralEngine;
     readonly maxRetainedJobs?: number;
+    readonly maxConcurrentJobs?: number;
+    readonly bindHost?: string;
+    readonly bindPort?: number;
+    readonly lockFilePath?: string;
   }) {
     this.ipcBridge = new CompanionIpcBridge();
     this.auditionAdapter = new AdobeAuditionHostAdapter();
     this.neuralEngine = options?.neuralEngine ?? new LocalSherpaNeuralEngine();
+    this.lifecycleManager = new CompanionLifecycleManager({
+      serviceVersion: COMPANION_SERVICE_VERSION,
+      ipcProtocolVersion: COMPANION_IPC_PROTOCOL_VERSION,
+      bindHost: options?.bindHost,
+      bindPort: options?.bindPort,
+      lockFilePath: options?.lockFilePath,
+      initialState: 'STARTING',
+    });
+    this.audioTransfers = new CompanionAudioTransferManager();
     this.maxRetainedJobs = Math.max(8, Math.min(200, options?.maxRetainedJobs ?? 50));
+    this.maxConcurrentJobs = Math.max(1, Math.min(16, options?.maxConcurrentJobs ?? 4));
+    this.markServerBound();
+  }
+
+  public markServerBound(): void {
+    if (this.lifecycleManager.getState() === 'STARTING') {
+      this.lifecycleManager.transition('PORT_BOUND', 'HTTP loopback listener bound');
+    }
+    if (this.lifecycleManager.getState() === 'PORT_BOUND') {
+      this.lifecycleManager.transition('AUTH_READY', 'HMAC session handshake ready');
+    }
+    this.syncLifecycleState();
+  }
+
+  private getActiveJobCount(): number {
+    return Array.from(this.jobs.values()).filter(
+      (j) => j.record.status === 'QUEUED' || j.record.status === 'RUNNING',
+    ).length;
+  }
+
+  private syncLifecycleState(): CompanionLifecycleState {
+    const runtime = this.neuralEngine.getStatus();
+    return this.lifecycleManager.syncOperationalState({
+      runtimeAvailable: runtime.available,
+      activeJobs: this.getActiveJobCount(),
+    });
+  }
+
+  public beginGracefulShutdown(reason: string): void {
+    for (const entry of this.jobs.values()) {
+      if (entry.record.status === 'RUNNING' || entry.record.status === 'QUEUED') {
+        entry.abortController.abort();
+      }
+    }
+    this.audioTransfers.cleanupAll();
+    this.neuralEngine.unloadActiveModel();
+    this.lifecycleManager.beginGracefulShutdown(reason);
   }
 
   public getHealth() {
     const runtime = this.neuralEngine.getStatus();
+    const activeJobs = this.getActiveJobCount();
+    const lifecycleState = this.lifecycleManager.syncOperationalState({
+      runtimeAvailable: runtime.available,
+      activeJobs,
+    });
     return {
       service: 'avapardaz-local-companion',
       serviceVersion: COMPANION_SERVICE_VERSION,
       ipcProtocolVersion: COMPANION_IPC_PROTOCOL_VERSION,
+      instanceId: this.lifecycleManager.identity.instanceId,
+      installationId: this.lifecycleManager.identity.installationId,
+      pid: this.lifecycleManager.identity.pid,
+      lifecycleState,
       offlineOnlyEnforced: true,
       cloudUploadDisabled: true,
       runtime,
-      activeJobs: Array.from(this.jobs.values()).filter(
-        (j) => j.record.status === 'QUEUED' || j.record.status === 'RUNNING',
-      ).length,
+      activeJobs,
+      maxConcurrentJobs: this.maxConcurrentJobs,
       timestampIso: new Date().toISOString(),
     };
   }
@@ -313,11 +392,31 @@ export class LocalCompanionService {
     readonly filePath?: string;
     readonly audioBase64?: string;
     readonly uploadId?: string;
+    readonly transferId?: string;
     readonly filename?: string;
+    readonly sourceIdentity?: CompanionSourceIdentity;
     readonly maxChunkDurationSec?: number;
     readonly overlapSec?: number;
     readonly numThreads?: number;
   }): { readonly ok: boolean; readonly statusCode: number; readonly job?: CompanionJobRecord; readonly code?: string; readonly message?: string } {
+    if (this.lifecycleManager.getState() === 'SHUTTING_DOWN') {
+      return {
+        ok: false,
+        statusCode: 503,
+        code: 'COMPANION_SHUTTING_DOWN',
+        message: 'Local Companion is shutting down and not accepting new jobs.',
+      };
+    }
+
+    if (this.getActiveJobCount() >= this.maxConcurrentJobs) {
+      return {
+        ok: false,
+        statusCode: 429,
+        code: 'CONCURRENT_JOB_LIMIT_EXCEEDED',
+        message: `Maximum concurrent transcription jobs (${this.maxConcurrentJobs}) reached; wait or cancel an active job.`,
+      };
+    }
+
     const runtime = this.neuralEngine.getStatus();
     if (!runtime.available) {
       return {
@@ -331,6 +430,7 @@ export class LocalCompanionService {
     let resolvedPath: string | undefined;
     let audioBytes: Buffer | undefined;
     let sourceName = typeof params.filename === 'string' && params.filename.trim() ? path.basename(params.filename.trim()) : 'audio.wav';
+    let mergedSourceIdentity: CompanionSourceIdentity | undefined = params.sourceIdentity;
 
     if (params.filePath !== undefined) {
       const pathCheck = validateLocalAudioFilePath(params.filePath);
@@ -344,6 +444,22 @@ export class LocalCompanionService {
       }
       resolvedPath = pathCheck.resolvedPath;
       sourceName = path.basename(resolvedPath);
+    } else if (typeof params.transferId === 'string' && params.transferId.trim().length > 0) {
+      const consumed = this.audioTransfers.consumeFinalizedTransferAsWav(params.transferId.trim());
+      if (!consumed.ok || !consumed.wavBytes || !consumed.transfer) {
+        return {
+          ok: false,
+          statusCode: consumed.statusCode,
+          code: consumed.code ?? 'TRANSFER_NOT_FOUND',
+          message: consumed.message ?? 'Audio transfer not found or not finalized.',
+        };
+      }
+      audioBytes = consumed.wavBytes;
+      sourceName = consumed.transfer.filename || sourceName;
+      mergedSourceIdentity = {
+        ...mergedSourceIdentity,
+        audioSha256: consumed.transfer.sha256,
+      };
     } else if (typeof params.uploadId === 'string' && params.uploadId.trim().length > 0) {
       this.sweepExpiredUploads();
       const staged = this.stagedUploads.get(params.uploadId.trim());
@@ -383,7 +499,7 @@ export class LocalCompanionService {
         ok: false,
         statusCode: 400,
         code: 'MISSING_AUDIO_INPUT',
-        message: 'Either filePath, uploadId, or audioBase64 must be provided.',
+        message: 'Either filePath, transferId, uploadId, or audioBase64 must be provided.',
       };
     }
 
@@ -415,6 +531,7 @@ export class LocalCompanionService {
       modelId: selectedModel.modelId,
       languageHint,
       sourceName,
+      sourceIdentity: mergedSourceIdentity,
       progressPct: 0,
       currentChunk: 0,
       totalChunks: 1,
@@ -430,6 +547,7 @@ export class LocalCompanionService {
     const entry: InternalJobEntry = { record: initialRecord, abortController };
     this.jobs.set(jobId, entry);
     this.trimOldJobs();
+    this.syncLifecycleState();
 
     const startedMs = performance.now();
     // Execute asynchronous local CPU neural inference (zero transcript logging)
@@ -492,6 +610,9 @@ export class LocalCompanionService {
           errorMessage: msg.slice(0, 320),
           updatedAtIso: new Date().toISOString(),
         };
+      })
+      .finally(() => {
+        this.syncLifecycleState();
       });
 
     return { ok: true, statusCode: 202, job: initialRecord };
@@ -499,6 +620,10 @@ export class LocalCompanionService {
 
   public getJob(jobId: string): CompanionJobRecord | null {
     return this.jobs.get(jobId)?.record ?? null;
+  }
+
+  public listJobs(): readonly CompanionJobRecord[] {
+    return Array.from(this.jobs.values()).map((j) => j.record);
   }
 
   public cancelJob(jobId: string): { readonly ok: boolean; readonly job?: CompanionJobRecord } {
@@ -513,6 +638,7 @@ export class LocalCompanionService {
         errorMessage: 'Transcription job cancelled by user.',
         updatedAtIso: new Date().toISOString(),
       };
+      this.syncLifecycleState();
     }
     return { ok: true, job: entry.record };
   }
@@ -645,13 +771,29 @@ export class LocalCompanionService {
         }
 
         case 'JOB_SUBMIT': {
+          const rawSrcId =
+            p.sourceIdentity && typeof p.sourceIdentity === 'object' && !Array.isArray(p.sourceIdentity)
+              ? (p.sourceIdentity as Record<string, unknown>)
+              : undefined;
+          const sourceIdentity: CompanionSourceIdentity | undefined = rawSrcId
+            ? {
+                documentId: typeof rawSrcId.documentId === 'string' ? rawSrcId.documentId : undefined,
+                displayName: typeof rawSrcId.displayName === 'string' ? rawSrcId.displayName : undefined,
+                filePath: typeof rawSrcId.filePath === 'string' ? rawSrcId.filePath : undefined,
+                fileSizeBytes: typeof rawSrcId.fileSizeBytes === 'number' ? rawSrcId.fileSizeBytes : undefined,
+                fileModifiedMs: typeof rawSrcId.fileModifiedMs === 'number' ? rawSrcId.fileModifiedMs : undefined,
+                audioSha256: typeof rawSrcId.audioSha256 === 'string' ? rawSrcId.audioSha256 : undefined,
+              }
+            : undefined;
           const submitted = this.submitTranscriptionJob({
             modelId: typeof p.modelId === 'string' ? p.modelId : undefined,
             languageHint: typeof p.languageHint === 'string' ? (p.languageHint as 'fa' | 'en' | 'fa-en' | 'auto') : 'auto',
             filePath: typeof p.filePath === 'string' ? p.filePath : undefined,
             audioBase64: typeof p.audioBase64 === 'string' ? p.audioBase64 : undefined,
             uploadId: typeof p.uploadId === 'string' ? p.uploadId : undefined,
+            transferId: typeof p.transferId === 'string' ? p.transferId : undefined,
             filename: typeof p.filename === 'string' ? p.filename : undefined,
+            sourceIdentity,
             maxChunkDurationSec: typeof p.maxChunkDurationSec === 'number' ? p.maxChunkDurationSec : undefined,
             overlapSec: typeof p.overlapSec === 'number' ? p.overlapSec : undefined,
             numThreads: typeof p.numThreads === 'number' ? p.numThreads : undefined,
@@ -661,21 +803,28 @@ export class LocalCompanionService {
               ok: false,
               error: submitted.code,
               message: submitted.message,
+              request_id: auth.envelope.request_id,
             });
             return;
           }
-          res.status(202).json({ ok: true, job: submitted.job });
+          res.status(202).json({ ok: true, job: submitted.job, request_id: auth.envelope.request_id });
           return;
         }
 
-        case 'JOB_STATUS': {
+        case 'JOB_STATUS':
+        case 'JOB_RECONNECT': {
           const jobId = typeof p.jobId === 'string' ? p.jobId : '';
           const job = this.getJob(jobId);
           if (!job) {
-            res.status(404).json({ ok: false, error: 'JOB_NOT_FOUND', message: 'Unknown jobId.' });
+            res.status(404).json({ ok: false, error: 'JOB_NOT_FOUND', message: 'Unknown jobId.', request_id: auth.envelope.request_id });
             return;
           }
-          res.json({ ok: true, job });
+          res.json({ ok: true, job, reconnected: command === 'JOB_RECONNECT', request_id: auth.envelope.request_id });
+          return;
+        }
+
+        case 'JOB_LIST': {
+          res.json({ ok: true, jobs: this.listJobs(), request_id: auth.envelope.request_id });
           return;
         }
 
@@ -683,15 +832,50 @@ export class LocalCompanionService {
           const jobId = typeof p.jobId === 'string' ? p.jobId : '';
           const cancelled = this.cancelJob(jobId);
           if (!cancelled.ok) {
-            res.status(404).json({ ok: false, error: 'JOB_NOT_FOUND', message: 'Unknown jobId.' });
+            res.status(404).json({ ok: false, error: 'JOB_NOT_FOUND', message: 'Unknown jobId.', request_id: auth.envelope.request_id });
             return;
           }
-          res.json({ ok: true, job: cancelled.job });
+          res.json({ ok: true, job: cancelled.job, request_id: auth.envelope.request_id });
           return;
         }
 
         case 'CAPABILITY_EXECUTE': {
           const action = typeof p.action === 'string' ? p.action : '';
+          if (action === 'AUDIO_TRANSFER_INIT') {
+            const initRes = this.audioTransfers.initTransfer({
+              filename: typeof p.filename === 'string' ? p.filename : undefined,
+              format: p.format as CompanionAudioTransferFormat,
+              sampleRateHz: Number(p.sampleRateHz),
+              channels: Number(p.channels),
+              endianness: p.endianness as 'little',
+              expectedBytes: Number(p.expectedBytes),
+              expectedFrames: Number(p.expectedFrames),
+              totalChunks: Number(p.totalChunks),
+              expectedSha256: typeof p.expectedSha256 === 'string' ? p.expectedSha256 : undefined,
+            });
+            res.status(initRes.statusCode).json(initRes);
+            return;
+          }
+          if (action === 'AUDIO_TRANSFER_CHUNK') {
+            const chunkRes = this.audioTransfers.appendChunk({
+              transferId: typeof p.transferId === 'string' ? p.transferId : '',
+              chunkIndex: Number(p.chunkIndex),
+              chunkBase64: typeof p.chunkBase64 === 'string' ? p.chunkBase64 : '',
+              chunkSha256: typeof p.chunkSha256 === 'string' ? p.chunkSha256 : undefined,
+            });
+            res.status(chunkRes.statusCode).json(chunkRes);
+            return;
+          }
+          if (action === 'AUDIO_TRANSFER_FINALIZE') {
+            const finRes = this.audioTransfers.finalizeTransfer(typeof p.transferId === 'string' ? p.transferId : '');
+            res.status(finRes.statusCode).json(finRes);
+            return;
+          }
+          if (action === 'AUDIO_TRANSFER_ABORT') {
+            const aborted = this.audioTransfers.abortTransfer(typeof p.transferId === 'string' ? p.transferId : '');
+            res.json({ ok: true, aborted });
+            return;
+          }
           if (action === 'AUDIO_UPLOAD_INIT') {
             const init = this.initStagedUpload(typeof p.filename === 'string' ? p.filename : undefined);
             res.json(init);

@@ -1,7 +1,7 @@
 import React from 'react';
 import { Download } from 'lucide-react';
 
-export type WorkspaceTab = 'studio' | 'graph' | 'storage';
+export type WorkspaceTab = 'studio' | 'graph' | 'storage' | 'shahab';
 
 interface HeaderNavProps {
   activeTab: WorkspaceTab;
@@ -21,6 +21,7 @@ export const HeaderNav: React.FC<HeaderNavProps> = ({
     { id: 'studio', label: isFa ? 'محیط تدوین' : 'Editing Studio' },
     { id: 'graph', label: isFa ? 'گراف پردازش و PDC' : 'Processing Graph & PDC' },
     { id: 'storage', label: isFa ? 'ذخیره‌سازی OPFS و قراردادها' : 'OPFS Storage & Contracts' },
+    { id: 'shahab', label: 'SHAHAB LAB' },
   ];
 
   return (

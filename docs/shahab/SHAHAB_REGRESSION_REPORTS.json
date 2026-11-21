@@ -1,0 +1,51 @@
+{
+  "schemaVersion": "1.0.0",
+  "reports": [
+    {
+      "comparisonId": "reg_1795288012406",
+      "evaluatedAtIso": "2026-11-21T19:06:52.406Z",
+      "previousRelease": {
+        "releaseId": "SHAHAB-R1.4.0 (Variant A Original)",
+        "modelArtifactHash": "08735923618e196bd093b369f6843c8a390a6113a391e7b7095115582fd2cd27",
+        "datasetId": "shahab-frozen-baseline-fa-v1",
+        "datasetRevision": "1.0.0",
+        "hardwareProfile": "x64/4c/CPU-ONLY",
+        "runtimeVersion": "onnxruntime-web@1.31.1",
+        "sampleCount": 1,
+        "validReferenceCount": 1,
+        "excludedSamplesCount": 0,
+        "trackAWer": 0.384615,
+        "trackACer": 0.2,
+        "meanRtf": 0.2912,
+        "peakRssBytes": 990777344
+      },
+      "candidateRelease": {
+        "releaseId": "SHAHAB-R2.0.0-RELEASE-CANDIDATE (Variant B Cleaned)",
+        "modelArtifactHash": "bf4d351c0cbeedf6bdde11ae359e2e343ab20edd5bfa3ef270bdce9e9f1f833f",
+        "datasetId": "shahab-frozen-baseline-fa-v1",
+        "datasetRevision": "1.0.0",
+        "hardwareProfile": "x64/4c/CPU-ONLY",
+        "runtimeVersion": "onnxruntime-web@1.31.1",
+        "sampleCount": 1,
+        "validReferenceCount": 1,
+        "excludedSamplesCount": 0,
+        "trackAWer": 0.384615,
+        "trackACer": 0.2,
+        "meanRtf": 0.089,
+        "peakRssBytes": 1011699712
+      },
+      "recommendedThresholdsForApproval": {
+        "maxAllowedWerIncreaseAbsolute": 0.01,
+        "maxAllowedRtfIncreaseRatio": 1.15,
+        "minPairedSamplesForClaim": 20,
+        "policyApprovalStatus": "PROPOSED_AWAITING_PRODUCT_OWNER_APPROVAL"
+      },
+      "verdict": "INSUFFICIENT_EVIDENCE",
+      "deltaTrackAWer": 0,
+      "deltaTrackACer": 0,
+      "deltaRtf": -0.2022,
+      "statisticalLimitation": "Sample count (n=1) is below minimum paired sample threshold (20) for statistical significance.",
+      "reason": "Zero observed WER delta on matched samples, but sample count is insufficient for statistical population claims."
+    }
+  ]
+}

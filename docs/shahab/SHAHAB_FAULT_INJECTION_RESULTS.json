@@ -1,0 +1,551 @@
+{
+  "schemaVersion": "1.0.0",
+  "runId": "fi-run-eca4abe1-5",
+  "executedAtIso": "2026-11-21T19:06:52.493Z",
+  "isolatedEnvironmentOnly": true,
+  "productionDataTouched": false,
+  "totalScenarios": 11,
+  "passedScenarios": 11,
+  "failedScenarios": 0,
+  "scenarios": [
+    {
+      "testId": "FI-PROC-01",
+      "category": "PROCESS",
+      "faultInjected": "Terminate worker during preprocessing",
+      "initialState": "PROCESSING (chunk 0, no durable output)",
+      "expectedBehavior": "Transition to FAILED_RECOVERABLE; forbid invalid jump to COMPLETED",
+      "actualBehavior": "State=FAILED_RECOVERABLE; invalid COMPLETED jump rejected=true",
+      "recoveryResult": "CONTAINED_SAFELY",
+      "dataIntegrityResult": "INTACT_VERIFIED",
+      "passed": true,
+      "evidenceRef": "docs/shahab/SHAHAB_FAULT_INJECTION_RESULTS.json#FI-PROC-01"
+    },
+    {
+      "testId": "FI-PROC-02",
+      "category": "PROCESS",
+      "faultInjected": "Crash/restart during encoder execution on chunk 1 + duplicate completion event",
+      "initialState": "PROCESSING with verified chunk-0 POST_ENCODER_EXECUTION checkpoint",
+      "expectedBehavior": "Verify checkpoint integrity, resume chunk 1, commit full transcript, reject duplicate COMPLETED",
+      "actualBehavior": "CheckpointValid=true, FinalCompleted=true, DuplicateBlocked=true",
+      "recoveryResult": "RECOVERED_VERIFIED",
+      "dataIntegrityResult": "INTACT_VERIFIED",
+      "passed": true,
+      "evidenceRef": "docs/shahab/SHAHAB_FAULT_INJECTION_RESULTS.json#FI-PROC-02"
+    },
+    {
+      "testId": "FI-PROC-03",
+      "category": "PROCESS",
+      "faultInjected": "Decoder/persistence interruption attempting partial overwrite + user cancellation",
+      "initialState": "Existing authorizedFinalTranscript committed",
+      "expectedBehavior": "Reject partial recovery overwrite; cancellation preserves committed user transcript",
+      "actualBehavior": "OverwriteBlocked=true, AuthorizedPreserved=true",
+      "recoveryResult": "CONTAINED_SAFELY",
+      "dataIntegrityResult": "INTACT_VERIFIED",
+      "passed": true,
+      "evidenceRef": "docs/shahab/SHAHAB_FAULT_INJECTION_RESULTS.json#FI-PROC-03"
+    },
+    {
+      "testId": "FI-STOR-01",
+      "category": "STORAGE",
+      "faultInjected": "Simulated ENOSPC disk full during atomic write + low-space preflight",
+      "initialState": "Previously committed transcript file with verified SHA-256",
+      "expectedBehavior": "Abort write without retry, pause new jobs, preserve prior committed file bit-for-bit",
+      "actualBehavior": "ENOSPC=true, PreflightBlocked=true, NoRetry=true, PriorShaIntact=true",
+      "recoveryResult": "CONTAINED_SAFELY",
+      "dataIntegrityResult": "INTACT_VERIFIED",
+      "passed": true,
+      "evidenceRef": "docs/shahab/SHAHAB_FAULT_INJECTION_RESULTS.json#FI-STOR-01"
+    },
+    {
+      "testId": "FI-STOR-02",
+      "category": "STORAGE",
+      "faultInjected": "Mid-write EIO interruption after writing 1/3 of temp file",
+      "initialState": "Valid atomic_io_guard.json (commitSeq=42)",
+      "expectedBehavior": "Reject partial write, clean temp file, keep commitSeq=42 intact",
+      "actualBehavior": "EIO=true, TempLeftovers=0, PriorIntact=true",
+      "recoveryResult": "CONTAINED_SAFELY",
+      "dataIntegrityResult": "INTACT_VERIFIED",
+      "passed": true,
+      "evidenceRef": "docs/shahab/SHAHAB_FAULT_INJECTION_RESULTS.json#FI-STOR-02"
+    },
+    {
+      "testId": "FI-STOR-03",
+      "category": "STORAGE",
+      "faultInjected": "Post-write tampering of checkpoint payload JSON",
+      "initialState": "Valid POST_FEATURE_EXTRACTION checkpoint",
+      "expectedBehavior": "Detect SHA-256 mismatch and reject recovery with CHECKPOINT_CORRUPTED",
+      "actualBehavior": "Valid=false, Code=CHECKPOINT_CORRUPTED",
+      "recoveryResult": "CONTAINED_SAFELY",
+      "dataIntegrityResult": "CORRUPTION_BLOCKED",
+      "passed": true,
+      "evidenceRef": "docs/shahab/SHAHAB_FAULT_INJECTION_RESULTS.json#FI-STOR-03"
+    },
+    {
+      "testId": "FI-MEM-01",
+      "category": "MEMORY",
+      "faultInjected": "Memory pressure cache eviction + 3 simultaneous model initialization calls",
+      "initialState": "Idle SHAHABResourceGuard (maxConcurrentModelLoads=1)",
+      "expectedBehavior": "Serialize concurrent model loads (peak=1), evict cache safely, emit degraded event",
+      "actualBehavior": "PeakConcurrentLoads=1, SerializedWait=true, CacheEvicted=true",
+      "recoveryResult": "CONTAINED_SAFELY",
+      "dataIntegrityResult": "INTACT_VERIFIED",
+      "passed": true,
+      "evidenceRef": "docs/shahab/SHAHAB_FAULT_INJECTION_RESULTS.json#FI-MEM-01"
+    },
+    {
+      "testId": "FI-NET-01",
+      "category": "NETWORK",
+      "faultInjected": "Unauthorized LOCAL->CLOUD fallback + Cloud REQUEST_TIMEOUT + duplicate Cloud delivery",
+      "initialState": "Isolated Local/Cloud guard and bounded Cloud retry policy",
+      "expectedBehavior": "Block silent LOCAL->CLOUD upload, recover Cloud timeout within retry limit, suppress duplicate Cloud request",
+      "actualBehavior": "SilentFallbackBlocked=true, CloudRecoveredOnAttempt=2, DuplicateSuppressed=true",
+      "recoveryResult": "RECOVERED_VERIFIED",
+      "dataIntegrityResult": "INTACT_VERIFIED",
+      "passed": true,
+      "evidenceRef": "docs/shahab/SHAHAB_FAULT_INJECTION_RESULTS.json#FI-NET-01"
+    },
+    {
+      "testId": "FI-INT-01",
+      "category": "INTEGRITY",
+      "faultInjected": "Post-manifest artifact tamper + incompatible tokenizer + mismatched recording + unsupported schema version 99.0.0",
+      "initialState": "Verified model manifest and valid checkpoint",
+      "expectedBehavior": "Block tampered artifact and reject all 3 incompatible checkpoints with exact failure codes",
+      "actualBehavior": "TamperBlocked=true, Tok=TOKENIZER_INCOMPATIBLE, Audio=UNVERIFIED_RECOVERY_DATA, Ver=STATE_VERSION_MISMATCH",
+      "recoveryResult": "CONTAINED_SAFELY",
+      "dataIntegrityResult": "CORRUPTION_BLOCKED",
+      "passed": true,
+      "evidenceRef": "docs/shahab/SHAHAB_FAULT_INJECTION_RESULTS.json#FI-INT-01"
+    },
+    {
+      "testId": "FI-UPD-01",
+      "category": "UPDATE_INSTALL",
+      "faultInjected": "Interrupted/corrupted artifact extraction during staged installation + simulated activation crash rollback",
+      "initialState": "Active known-good release SHAHAB-R2.0.0-GOOD",
+      "expectedBehavior": "Reject interrupted candidate, keep last known-good release active and intact, complete lifecycle rollback",
+      "actualBehavior": "InterruptedRejected=true, Staged=STAGED, CrashRollback=ROLLED_BACK, CorruptStage=UPDATE_REJECTED, Active=SHAHAB-R2.0.0-GOOD",
+      "recoveryResult": "ROLLBACK_VERIFIED",
+      "dataIntegrityResult": "INTACT_VERIFIED",
+      "passed": true,
+      "evidenceRef": "docs/shahab/SHAHAB_FAULT_INJECTION_RESULTS.json#FI-UPD-01"
+    },
+    {
+      "testId": "FI-DEG-01",
+      "category": "INTEGRITY",
+      "faultInjected": "Optional contextual vocabulary subsystem exception",
+      "initialState": "Normal recognition with contextual biasing enabled",
+      "expectedBehavior": "Activate CONTEXTUAL_BIASING_DISABLED (marked non-equivalent), preserve raw acoustic output",
+      "actualBehavior": "DegradedActive=true, EquivalentToNormal=false, RawAcousticPreserved=true",
+      "recoveryResult": "RECOVERED_VERIFIED",
+      "dataIntegrityResult": "INTACT_VERIFIED",
+      "passed": true,
+      "evidenceRef": "docs/shahab/SHAHAB_FAULT_INJECTION_RESULTS.json#FI-DEG-01"
+    }
+  ],
+  "recordedFailures": [
+    {
+      "failureEventId": "fail-465ef075-b60",
+      "timestampIso": "2026-11-21T19:06:52.416Z",
+      "code": "INCONSISTENT_PROCESSING_STATE",
+      "category": "INTEGRITY",
+      "stage": "B10_TRANSCRIPT_ASSEMBLY",
+      "severity": "HIGH",
+      "recoverability": "NON_RECOVERABLE",
+      "retryEligible": false,
+      "correlationId": "corr-fi-proc-01",
+      "jobId": "job-9b804228-5e9",
+      "engineVersion": "SHAHAB-R2.0.0-RELEASE-CANDIDATE",
+      "modelId": "INHERITED-PERSIAN-ASR-CORE",
+      "runtimeId": "onnxruntime-web-wasm-cpu",
+      "observedFailure": "Rejected invalid job transition FAILED_RECOVERABLE -> COMPLETED (Must fail: cannot jump from FAILED_RECOVERABLE to COMPLETED).",
+      "verifiedTechnicalCause": "Transition FAILED_RECOVERABLE -> COMPLETED is not in SHAHAB_JOB_ALLOWED_TRANSITIONS.",
+      "suspectedRootCause": null,
+      "reproducible": "VERIFIED_REPRODUCIBLE",
+      "diagnosticEvidence": {
+        "fromState": "FAILED_RECOVERABLE",
+        "toState": "COMPLETED"
+      },
+      "userSafeExplanationEn": "Invalid processing state transition was rejected to protect transcript integrity.",
+      "userSafeExplanationFa": "تغییر وضعیت نامعتبر برای محافظت از یکپارچگی متن رد شد."
+    },
+    {
+      "failureEventId": "fail-4e550309-893",
+      "timestampIso": "2026-11-21T19:06:52.422Z",
+      "code": "DUPLICATE_JOB_DETECTED",
+      "category": "INTEGRITY",
+      "stage": "B10_TRANSCRIPT_ASSEMBLY",
+      "severity": "LOW",
+      "recoverability": "NON_RECOVERABLE",
+      "retryEligible": false,
+      "correlationId": "corr-fi-proc-02",
+      "jobId": "job-08424982-6d4",
+      "engineVersion": "SHAHAB-R2.0.0-RELEASE-CANDIDATE",
+      "modelId": "INHERITED-PERSIAN-ASR-CORE",
+      "runtimeId": "onnxruntime-web-wasm-cpu",
+      "observedFailure": "Rejected invalid job transition COMPLETED -> COMPLETED (Duplicate completion event test).",
+      "verifiedTechnicalCause": "Transition COMPLETED -> COMPLETED is not in SHAHAB_JOB_ALLOWED_TRANSITIONS.",
+      "suspectedRootCause": null,
+      "reproducible": "VERIFIED_REPRODUCIBLE",
+      "diagnosticEvidence": {
+        "fromState": "COMPLETED",
+        "toState": "COMPLETED"
+      },
+      "userSafeExplanationEn": "Duplicate processing request with the same idempotency key was suppressed.",
+      "userSafeExplanationFa": "درخواست تکراری با کلید یکتای مشابه شناسایی و مسدود شد."
+    }
+  ],
+  "recordedResourceEvents": [
+    {
+      "eventId": "rg-26aa73e9-a",
+      "timestampIso": "2026-11-21T19:06:52.428Z",
+      "guardType": "STORAGE_PREFLIGHT",
+      "actionTaken": "Aborted safely: measured available storage below manifest requirement + safety margin.",
+      "measuredProcessRssBytes": 1011953664,
+      "measuredStorageAvailableBytes": 52428800,
+      "requiredBytesEstimatedFromManifest": 226492416,
+      "allowed": false
+    },
+    {
+      "eventId": "rg-78e184ab-f",
+      "timestampIso": "2026-11-21T19:06:52.430Z",
+      "guardType": "CACHE_EVICTION",
+      "actionTaken": "Evicted 12 cache entries (~50331648 bytes) under memory pressure.",
+      "measuredProcessRssBytes": 1011953664,
+      "measuredStorageAvailableBytes": null,
+      "requiredBytesEstimatedFromManifest": null,
+      "allowed": true
+    },
+    {
+      "eventId": "rg-58d0101e-a",
+      "timestampIso": "2026-11-21T19:06:52.446Z",
+      "guardType": "MODEL_LOAD_SERIALIZED",
+      "actionTaken": "Serialized concurrent model load to prevent initialization memory storm.",
+      "measuredProcessRssBytes": 1011957760,
+      "measuredStorageAvailableBytes": null,
+      "requiredBytesEstimatedFromManifest": null,
+      "allowed": true
+    },
+    {
+      "eventId": "rg-5fc7bea8-f",
+      "timestampIso": "2026-11-21T19:06:52.461Z",
+      "guardType": "MODEL_LOAD_SERIALIZED",
+      "actionTaken": "Serialized concurrent model load to prevent initialization memory storm.",
+      "measuredProcessRssBytes": 1011957760,
+      "measuredStorageAvailableBytes": null,
+      "requiredBytesEstimatedFromManifest": null,
+      "allowed": true
+    }
+  ],
+  "recordedJobTransitions": [
+    {
+      "eventId": "jtr-3ecfde35-3bb",
+      "timestampIso": "2026-11-21T19:06:52.413Z",
+      "jobId": "job-9b804228-5e9",
+      "idempotencyKey": "fi-proc-01",
+      "fromState": null,
+      "toState": "CREATED",
+      "accepted": true,
+      "reason": "Job created with unique idempotency key.",
+      "rejectionCode": null
+    },
+    {
+      "eventId": "jtr-aebfde45-6b2",
+      "timestampIso": "2026-11-21T19:06:52.414Z",
+      "jobId": "job-9b804228-5e9",
+      "idempotencyKey": "fi-proc-01",
+      "fromState": "CREATED",
+      "toState": "VALIDATING",
+      "accepted": true,
+      "reason": "Validate WAV",
+      "rejectionCode": null
+    },
+    {
+      "eventId": "jtr-4e015b04-e3c",
+      "timestampIso": "2026-11-21T19:06:52.415Z",
+      "jobId": "job-9b804228-5e9",
+      "idempotencyKey": "fi-proc-01",
+      "fromState": "VALIDATING",
+      "toState": "QUEUED",
+      "accepted": true,
+      "reason": "Queued",
+      "rejectionCode": null
+    },
+    {
+      "eventId": "jtr-030729ed-4ff",
+      "timestampIso": "2026-11-21T19:06:52.415Z",
+      "jobId": "job-9b804228-5e9",
+      "idempotencyKey": "fi-proc-01",
+      "fromState": "QUEUED",
+      "toState": "INITIALIZING",
+      "accepted": true,
+      "reason": "Model ready",
+      "rejectionCode": null
+    },
+    {
+      "eventId": "jtr-8e0cd707-5dc",
+      "timestampIso": "2026-11-21T19:06:52.415Z",
+      "jobId": "job-9b804228-5e9",
+      "idempotencyKey": "fi-proc-01",
+      "fromState": "INITIALIZING",
+      "toState": "PROCESSING",
+      "accepted": true,
+      "reason": "Enter preprocessing",
+      "rejectionCode": null
+    },
+    {
+      "eventId": "jtr-ded36404-cdf",
+      "timestampIso": "2026-11-21T19:06:52.416Z",
+      "jobId": "job-9b804228-5e9",
+      "idempotencyKey": "fi-proc-01",
+      "fromState": "PROCESSING",
+      "toState": "FAILED_RECOVERABLE",
+      "accepted": true,
+      "reason": "Simulated worker termination during preprocessing",
+      "rejectionCode": null
+    },
+    {
+      "eventId": "jtr-2f011ff2-aa3",
+      "timestampIso": "2026-11-21T19:06:52.416Z",
+      "jobId": "job-9b804228-5e9",
+      "idempotencyKey": "fi-proc-01",
+      "fromState": "FAILED_RECOVERABLE",
+      "toState": "COMPLETED",
+      "accepted": false,
+      "reason": "Rejected invalid transition: FAILED_RECOVERABLE -> COMPLETED",
+      "rejectionCode": "INCONSISTENT_PROCESSING_STATE"
+    },
+    {
+      "eventId": "jtr-9bbeb455-cd5",
+      "timestampIso": "2026-11-21T19:06:52.417Z",
+      "jobId": "job-08424982-6d4",
+      "idempotencyKey": "fi-proc-02",
+      "fromState": null,
+      "toState": "CREATED",
+      "accepted": true,
+      "reason": "Job created with unique idempotency key.",
+      "rejectionCode": null
+    },
+    {
+      "eventId": "jtr-20a789eb-9b2",
+      "timestampIso": "2026-11-21T19:06:52.417Z",
+      "jobId": "job-08424982-6d4",
+      "idempotencyKey": "fi-proc-02",
+      "fromState": "CREATED",
+      "toState": "VALIDATING",
+      "accepted": true,
+      "reason": "Validated",
+      "rejectionCode": null
+    },
+    {
+      "eventId": "jtr-41f5e5f8-004",
+      "timestampIso": "2026-11-21T19:06:52.417Z",
+      "jobId": "job-08424982-6d4",
+      "idempotencyKey": "fi-proc-02",
+      "fromState": "VALIDATING",
+      "toState": "QUEUED",
+      "accepted": true,
+      "reason": "Queued",
+      "rejectionCode": null
+    },
+    {
+      "eventId": "jtr-e3d97e04-e65",
+      "timestampIso": "2026-11-21T19:06:52.418Z",
+      "jobId": "job-08424982-6d4",
+      "idempotencyKey": "fi-proc-02",
+      "fromState": "QUEUED",
+      "toState": "INITIALIZING",
+      "accepted": true,
+      "reason": "Initialized",
+      "rejectionCode": null
+    },
+    {
+      "eventId": "jtr-7ebaef39-907",
+      "timestampIso": "2026-11-21T19:06:52.419Z",
+      "jobId": "job-08424982-6d4",
+      "idempotencyKey": "fi-proc-02",
+      "fromState": "INITIALIZING",
+      "toState": "PROCESSING",
+      "accepted": true,
+      "reason": "Encoding chunks 0..1",
+      "rejectionCode": null
+    },
+    {
+      "eventId": "jtr-535c452d-6e2",
+      "timestampIso": "2026-11-21T19:06:52.420Z",
+      "jobId": "job-08424982-6d4",
+      "idempotencyKey": "fi-proc-02",
+      "fromState": "PROCESSING",
+      "toState": "RECOVERY_PENDING",
+      "accepted": true,
+      "reason": "App restart detected after chunk 0 encoder checkpoint",
+      "rejectionCode": null
+    },
+    {
+      "eventId": "jtr-561d6d0b-ffe",
+      "timestampIso": "2026-11-21T19:06:52.421Z",
+      "jobId": "job-08424982-6d4",
+      "idempotencyKey": "fi-proc-02",
+      "fromState": "RECOVERY_PENDING",
+      "toState": "RECOVERING",
+      "accepted": true,
+      "reason": "Verified checkpoint; resuming chunk 1",
+      "rejectionCode": null
+    },
+    {
+      "eventId": "jtr-20ca6ecd-b5c",
+      "timestampIso": "2026-11-21T19:06:52.421Z",
+      "jobId": "job-08424982-6d4",
+      "idempotencyKey": "fi-proc-02",
+      "fromState": "RECOVERING",
+      "toState": "COMPLETED",
+      "accepted": true,
+      "reason": "Chunk 1 recovered and full transcript durably committed",
+      "rejectionCode": null
+    },
+    {
+      "eventId": "jtr-95de77b9-ee4",
+      "timestampIso": "2026-11-21T19:06:52.422Z",
+      "jobId": "job-08424982-6d4",
+      "idempotencyKey": "fi-proc-02",
+      "fromState": "COMPLETED",
+      "toState": "COMPLETED",
+      "accepted": false,
+      "reason": "Rejected invalid transition: COMPLETED -> COMPLETED",
+      "rejectionCode": "DUPLICATE_JOB_DETECTED"
+    },
+    {
+      "eventId": "jtr-04aef882-ec0",
+      "timestampIso": "2026-11-21T19:06:52.422Z",
+      "jobId": "job-5fd8353d-7a2",
+      "idempotencyKey": "fi-proc-03",
+      "fromState": null,
+      "toState": "CREATED",
+      "accepted": true,
+      "reason": "Job created with unique idempotency key.",
+      "rejectionCode": null
+    },
+    {
+      "eventId": "jtr-968715db-bea",
+      "timestampIso": "2026-11-21T19:06:52.422Z",
+      "jobId": "job-5fd8353d-7a2",
+      "idempotencyKey": "fi-proc-03",
+      "fromState": "CREATED",
+      "toState": "VALIDATING",
+      "accepted": true,
+      "reason": "Re-run check",
+      "rejectionCode": null
+    },
+    {
+      "eventId": "jtr-5e82b53d-3d3",
+      "timestampIso": "2026-11-21T19:06:52.423Z",
+      "jobId": "job-5fd8353d-7a2",
+      "idempotencyKey": "fi-proc-03",
+      "fromState": "VALIDATING",
+      "toState": "CANCELLATION_REQUESTED",
+      "accepted": true,
+      "reason": "User cancelled",
+      "rejectionCode": null
+    },
+    {
+      "eventId": "jtr-762b4881-46a",
+      "timestampIso": "2026-11-21T19:06:52.423Z",
+      "jobId": "job-5fd8353d-7a2",
+      "idempotencyKey": "fi-proc-03",
+      "fromState": "CANCELLATION_REQUESTED",
+      "toState": "CANCELLED",
+      "accepted": true,
+      "reason": "Cancelled cleanly",
+      "rejectionCode": null
+    }
+  ],
+  "recordedCheckpointManifests": [
+    {
+      "schemaVersion": "1.0.0",
+      "checkpointId": "chk-5a25abb8-ce6",
+      "jobId": "job-08424982-6d4",
+      "stage": "POST_ENCODER_EXECUTION",
+      "createdAtIso": "2026-11-21T19:06:52.419Z",
+      "audioSourceId": "rec-proc-02.wav",
+      "audioContentSha256": "c596e2a11f1ccb2a9981db6220234ec28f5609c6a96bc8976dc1d9b969a74917",
+      "modelId": "INHERITED-PERSIAN-ASR-CORE",
+      "modelArtifactsDigestSha256": "474ce805ed56bfc9e51940e146f97b066e2601528070855cdd8c5eaa85268f63",
+      "tokenizerSha256": "611647fe6021c054a84626b0d7d69ad2def6492c0f3e1bec58ed0137300af1ba",
+      "preprocessingConfigSha256": "d9b05595a96a6720958cfb05a75df9e48dde535fd71d9aeee75cbb7e41848dc1",
+      "runtimeCompatibilityTag": "onnxruntime-web-wasm-cpu",
+      "completedChunkIndices": [
+        0
+      ],
+      "totalChunks": 2,
+      "payloadSha256": "7b6bf3bae569cc9c110463dd93c5df3690b46e33b659baded17f241aec58ab89",
+      "payloadRelativePath": "payloads/chk-5a25abb8-ce6.payload.json",
+      "envelopeSha256": "6db4a8ff2ee1e08e5ada9fa27ef8e709efe3bc644c1dd7d8ee1e522f662cbdb1"
+    },
+    {
+      "schemaVersion": "1.0.0",
+      "checkpointId": "chk-6a757490-4f7",
+      "jobId": "job-corrupt-chk",
+      "stage": "POST_FEATURE_EXTRACTION",
+      "createdAtIso": "2026-11-21T19:06:52.429Z",
+      "audioSourceId": "rec-corrupt.wav",
+      "audioContentSha256": "c596e2a11f1ccb2a9981db6220234ec28f5609c6a96bc8976dc1d9b969a74917",
+      "modelId": "INHERITED-PERSIAN-ASR-CORE",
+      "modelArtifactsDigestSha256": "474ce805ed56bfc9e51940e146f97b066e2601528070855cdd8c5eaa85268f63",
+      "tokenizerSha256": "611647fe6021c054a84626b0d7d69ad2def6492c0f3e1bec58ed0137300af1ba",
+      "preprocessingConfigSha256": "d9b05595a96a6720958cfb05a75df9e48dde535fd71d9aeee75cbb7e41848dc1",
+      "runtimeCompatibilityTag": "onnxruntime-web-wasm-cpu",
+      "completedChunkIndices": [
+        0
+      ],
+      "totalChunks": 2,
+      "payloadSha256": "ff553a5f7d0f81c7dbbf92ac1f8a0d703691916c3256b7fc06fb2ea72f2ee4e8",
+      "payloadRelativePath": "payloads/chk-6a757490-4f7.payload.json",
+      "envelopeSha256": "45c01c0e0183cd97ab64f7e1048ab6265def60be3c4d18df3eb11dd986498a63"
+    },
+    {
+      "schemaVersion": "1.0.0",
+      "checkpointId": "chk-0dbd2466-c20",
+      "jobId": "job-int-checks",
+      "stage": "POST_ENCODER_EXECUTION",
+      "createdAtIso": "2026-11-21T19:06:52.491Z",
+      "audioSourceId": "rec-A.wav",
+      "audioContentSha256": "c596e2a11f1ccb2a9981db6220234ec28f5609c6a96bc8976dc1d9b969a74917",
+      "modelId": "INHERITED-PERSIAN-ASR-CORE",
+      "modelArtifactsDigestSha256": "474ce805ed56bfc9e51940e146f97b066e2601528070855cdd8c5eaa85268f63",
+      "tokenizerSha256": "611647fe6021c054a84626b0d7d69ad2def6492c0f3e1bec58ed0137300af1ba",
+      "preprocessingConfigSha256": "d9b05595a96a6720958cfb05a75df9e48dde535fd71d9aeee75cbb7e41848dc1",
+      "runtimeCompatibilityTag": "onnxruntime-web-wasm-cpu",
+      "completedChunkIndices": [
+        0
+      ],
+      "totalChunks": 2,
+      "payloadSha256": "da007999ea64c7d60f3c6e7626db51e423e07418366e4f814064c7f7bfe1c9c8",
+      "payloadRelativePath": "payloads/chk-0dbd2466-c20.payload.json",
+      "envelopeSha256": "3043f1de2d5d785dcd0e95ad2ba74d373b4da1e51dbcba7aacc0614cd2865999"
+    }
+  ],
+  "recordedRecoveryEvents": [
+    {
+      "recoveryEventId": "rec-54b235f5-e",
+      "timestampIso": "2026-11-21T19:06:52.422Z",
+      "testId": "FI-PROC-02",
+      "jobId": "job-08424982-6d4",
+      "outcome": "SUCCEEDED",
+      "detail": "Recovered from chk-5a25abb8-ce6 (chunk 0 verified) and suppressed duplicate COMPLETED."
+    },
+    {
+      "recoveryEventId": "rec-ca797ff7-e",
+      "timestampIso": "2026-11-21T19:06:52.430Z",
+      "testId": "FI-STOR-03",
+      "jobId": "job-corrupt-chk",
+      "outcome": "REJECTED_UNSAFE",
+      "detail": "Corrupted checkpoint chk-6a757490-4f7 rejected (CHECKPOINT_CORRUPTED)."
+    },
+    {
+      "recoveryEventId": "rec-a5c8545e-2",
+      "timestampIso": "2026-11-21T19:06:52.492Z",
+      "testId": "FI-UPD-01",
+      "jobId": "upd-interrupted-01",
+      "outcome": "ROLLED_BACK",
+      "detail": "Interrupted update rejected; active release preserved as SHAHAB-R2.0.0-GOOD; lifecycle=ROLLED_BACK."
+    }
+  ]
+}

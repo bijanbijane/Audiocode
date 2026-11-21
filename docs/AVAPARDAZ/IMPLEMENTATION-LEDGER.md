@@ -65,3 +65,23 @@
 | `AVP-P14-001` | Commercial License Compliance & Offline Licensing Readiness | `BLOCKED` *(Payments/Signing)* | Commercial licenses cleared (`Apache-2.0`/`MIT`); Ed25519 offline licensing in `PlatformLicenseService.ts`; blocked on payment gateway, signing certs & CDN | 2026-11-20 |
 | `AVP-P15-001` | Final Independent 10-Gate Product Acceptance & Roadmap Termination | `ACCEPTED (VERDICT ISSUED)` | `PHASE-15-FINAL-ACCEPTANCE-DECISION.md` (`ADR-026`): **`BLOCKED`** (Public Commercial Release) / **`READY WITH RESTRICTIONS`** (Internal Linux Technical Alpha) | 2026-11-20 |
 
+---
+
+## 5. Post-ADR-026 Autonomous P0 Engineering Continuation Suite (`2026-11-21`)
+
+| Task ID | Task Title | Status | Direct Evidence / Exact Blocker | Date |
+| :--- | :--- | :---: | :--- | :---: |
+| `AVP-P0-001` | End-to-End Local ASR Runtime Productization | `VERIFIED` | `UnifiedLocalAsrRuntime.ts`, `BrowserOnnxAsrRuntimeAdapter.ts`, `NativeCompanionAsrRuntimeAdapter.ts`, `RealOnnxAndCrossRuntimeConformance.test.ts` (`3/3` PASS incl. real offline ORT WASM) | 2026-11-21 |
+| `AVP-P0-002` | Canonical Model Qualification, Provenance & Offline Delivery | `VERIFIED` *(`BLK-001` signing)* | `CanonicalModelProvenance.ts`, `ModelLifecycleStateMachine.ts`, `ChunkedModelDelivery.ts`, `ModelQualificationPipeline.ts`, `AVP-P0-002-MODEL-ARTIFACT-QUALIFICATION.md` | 2026-11-21 |
+| `AVP-P0-003` | End-to-End Project Workflow, State Integrity & Edit Execution | `VERIFIED` | `CanonicalProjectWorkflowEngine.ts`, `CanonicalProjectWorkflowAndDsp.test.ts` (`PASS`), `AVP-P0-003-END-TO-END-PROJECT-WORKFLOW.md` | 2026-11-21 |
+| `AVP-P0-004` | Adobe Audition CEP ↔ Native Companion Production IPC | `VERIFIED` *(`BLK-004` host GUI)* | `CompanionLifecycleManager.ts`, `CompanionAudioTransfer.ts`, `CompanionIpcBridge.ts`, `auditionHost.jsx`, `app.js`, `CompanionProductionIpcAndCep.test.ts` (`3/3` PASS) | 2026-11-21 |
+| `AVP-P0-005` | Cross-Runtime Conformance, Reliability & Release Qualification | `VERIFIED` *(`BLK-001..005`)* | `.github/workflows/avapardaz-quality-gates.yml`, `release-acceptance-manifest.json`, `30/30` tests PASS, `AVP-P0-005-CROSS-RUNTIME-RELIABILITY-AND-RELEASE-QUALIFICATION.md` | 2026-11-21 |
+| `AVP-P0-006` | Security Hardening, Local Data Protection & Supply-Chain Integrity | `VERIFIED` *(`BLK-001`/`BLK-005`)* | `SecurityTrustBoundaryGuards.ts`, `security-acceptance-register.json`, `ArchitectureAndSecurityGuardrails.test.ts` (`4/4` PASS), `AVP-P0-006-SECURITY-AND-LOCAL-DATA-PROTECTION.md` | 2026-11-21 |
+| `AVP-P0-007` | Production Installation, Update Orchestration, Recovery & Distribution | `VERIFIED` *(`BLK-001`/`BLK-004`)* | `ProductDeliveryAndUpdateEngine.ts`, `ModelProvenanceAndDelivery.test.ts` (`6/6` PASS), `AVP-P0-007-INSTALLATION-UPDATE-AND-DISTRIBUTION-ENGINEERING.md` | 2026-11-21 |
+| `AVP-P0-008` | Audio DSP Integrity, Sample-Accurate Timeline & Deterministic Rendering | `VERIFIED` | `CanonicalAudioDspEngine.ts`, `CanonicalProjectWorkflowAndDsp.test.ts` (`PASS`), `AVP-P0-008-AUDIO-DSP-AND-DETERMINISTIC-RENDERING.md` | 2026-11-21 |
+| `AVP-P0-009` | Persian ASR Linguistic Fidelity, Normalization & Transcript Quality | `VERIFIED` *(`BLK-003` corpus)* | `PersianLinguisticQualityEngine.ts`, `PersianLinguisticCorrectionAndLexical.test.ts` (`PASS`), `AVP-P0-009-PERSIAN-ASR-LINGUISTIC-QUALITY.md` | 2026-11-21 |
+| `AVP-P0-010` | Evidence-Based Persian Transcript Correction & Safe Repair Engine | `VERIFIED` | `PersianEvidenceCorrectionEngine.ts` (25 categories, 6-tier evidence, 19/19 adversarial PASS), `AVP-P0-010-EVIDENCE-BASED-PERSIAN-TRANSCRIPT-CORRECTION.md` | 2026-11-21 |
+| `AVP-PERSIAN-ZIPFORMER-ASSET-ACQUISITION-001` | Genuine Persian Zipformer-Transducer ONNX Asset Acquisition | `VERIFIED (ASSETS ONLY)` *(`BLK-002`)* | `models/persian-zipformer-transducer/1.0.0/` (`115,757,880` B mandatory verified via `scripts/acquire-persian-zipformer.mjs --verify-only`), NOT wired to CTC | 2026-11-21 |
+| `AVP-P0-012` | Persian Lexical Fidelity, Contextual Disambiguation & Proper-Noun Preservation | `VERIFIED` | `PersianLexicalDisambiguationEngine.ts` (10k O(1) index, guess quarantine, proper-noun guard, P0-010 routing), `AVP-P0-012-PERSIAN-LEXICAL-FIDELITY-AND-DISAMBIGUATION.md` | 2026-11-21 |
+
+

@@ -1,0 +1,72 @@
+[
+  {
+    "riskId": "RISK-001",
+    "affectedSubsystem": "Release Hardening & Model Lifecycle (SHAHAB-013 / SHAHAB-014)",
+    "failureScenario": "Distribution of model/engine updates without cryptographic Ed25519 signature verification.",
+    "userImpact": "Cannot authorize unattended/automatic production model updates safely against supply-chain tampering.",
+    "likelihoodEvidence": "ARCHITECTURAL_CERTAINTY",
+    "severity": "CRITICAL",
+    "detectability": "HIGH_DETERMINISTIC",
+    "existingMitigation": "SHA-256 manifest verification, isolated staging, smoke inference, and hard disable of automatic rollout.",
+    "missingMitigation": "Managed Ed25519 signing key & KMS/CI release signing pipeline.",
+    "reproducibility": "DETERMINISTIC",
+    "releaseImpact": "RELEASE_BLOCKER",
+    "evidenceReference": "docs/shahab/SHAHAB_RELEASE_MANIFEST.json"
+  },
+  {
+    "riskId": "RISK-002",
+    "affectedSubsystem": "Persian Quality Validation Corpus (SHAHAB-006 / SHAHAB-011 / SHAHAB-019)",
+    "failureScenario": "Broad Persian dialect/noise/speaker generalization claimed from frozen benchmark corpus of only n=4 recordings.",
+    "userImpact": "Unmeasured acoustic failure modes on regional Persian accents, noisy microphones, or spontaneous telephone speech.",
+    "likelihoodEvidence": "OBSERVED_IN_WORKSPACE",
+    "severity": "HIGH",
+    "detectability": "LOW_REQUIRES_FIELD_DATA",
+    "existingMitigation": "SHAHABRegressionAnalyzer blocks statistical superiority claims when n < 20; dual-track evaluation reports honest uncertainty.",
+    "missingMitigation": "Adjudicated multi-speaker real-world Persian evaluation set (>=20 paired recordings across domains).",
+    "reproducibility": "DETERMINISTIC",
+    "releaseImpact": "RELEASE_BLOCKER",
+    "evidenceReference": "docs/shahab/SHAHAB_OPERATIONAL_STATE.json"
+  },
+  {
+    "riskId": "RISK-003",
+    "affectedSubsystem": "Streaming Architecture (SHAHAB-017)",
+    "failureScenario": "Inherited encoder.int8.onnx has no stateful cache tensors; streaming uses incremental sliding windows.",
+    "userImpact": "Higher CPU cost on long live sessions compared to native stateful streaming checkpoints.",
+    "likelihoodEvidence": "ARCHITECTURAL_CERTAINTY",
+    "severity": "MEDIUM",
+    "detectability": "HIGH_DETERMINISTIC",
+    "existingMitigation": "Honestly labeled INCREMENTAL_WINDOWED_INFERENCE with bounded queues, explicit backpressure, and final EOS pass.",
+    "missingMitigation": "Streaming-capable Zipformer checkpoint with cached_key/cached_conv tensors.",
+    "reproducibility": "DETERMINISTIC",
+    "releaseImpact": "ACCEPTABLE_WITH_LIMITATION",
+    "evidenceReference": "docs/shahab/SHAHAB_STREAMING_CAPABILITY_REPORT.md"
+  },
+  {
+    "riskId": "RISK-004",
+    "affectedSubsystem": "Cross-Platform Portability & Footprint (SHAHAB-018 / SHAHAB-020)",
+    "failureScenario": "Uncompressed model package is 110.41 MiB (>100 MiB) and WebGPU/Native C++ providers are unavailable/blocked.",
+    "userImpact": "Browser-only local cold downloads are heavy and inference is CPU WASM bound.",
+    "likelihoodEvidence": "OBSERVED_IN_WORKSPACE",
+    "severity": "MEDIUM",
+    "detectability": "HIGH_DETERMINISTIC",
+    "existingMitigation": "Gzip transport bundle (55.66 MiB) for distribution; explicit Node WASM verification; Browser Local honestly marked AVAILABLE_BUT_UNVERIFIED.",
+    "missingMitigation": "Verified browser-tab OPFS E2E inference + Native C++ / WebGPU hardware benchmark.",
+    "reproducibility": "DETERMINISTIC",
+    "releaseImpact": "HIGH_RISK",
+    "evidenceReference": "docs/shahab/SHAHAB_RUNTIME_STATE.json"
+  },
+  {
+    "riskId": "RISK-005",
+    "affectedSubsystem": "Production Resilience SLIs (SHAHAB-015)",
+    "failureScenario": "Zero real production fleet invocations recorded so far.",
+    "userImpact": "Operational crash/recovery SLIs cannot yet confirm long-tail fleet reliability.",
+    "likelihoodEvidence": "OBSERVED_IN_WORKSPACE",
+    "severity": "LOW",
+    "detectability": "MEDIUM_MONITORABLE",
+    "existingMitigation": "100% isolated fault-injection suite + restore drill verified; SLIs honestly report INSUFFICIENT_EVIDENCE instead of fake 100%.",
+    "missingMitigation": "Opt-in canary telemetry after release signing is enabled.",
+    "reproducibility": "DETERMINISTIC",
+    "releaseImpact": "ACCEPTABLE_WITH_LIMITATION",
+    "evidenceReference": "docs/shahab/SHAHAB_RESILIENCE_STATE.json"
+  }
+]

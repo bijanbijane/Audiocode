@@ -1,0 +1,75 @@
+{
+  "schemaVersion": "1.0.0",
+  "generatedAtIso": "2026-11-21T19:06:52.399Z",
+  "selectedModelLicense": {
+    "repoId": "ramin-mahmoodi/persian-zipformer-asr",
+    "spdx": "Apache-2.0",
+    "licenseFilePresent": true,
+    "noticeFilePresent": true
+  },
+  "remoteRepositories": [
+    {
+      "repoId": "ramin-mahmoodi/persian-zipformer-asr",
+      "pinnedRevisionSha": "0408facbcf3f670121def48e0802c395c225d150",
+      "licenseSpdx": "Apache-2.0",
+      "licenseStatus": "PERMISSIVE_NO_STANDALONE_FILE",
+      "legalGateNote": "Permissive Apache-2.0 declared in README/card metadata, but standalone LICENSE file is absent at pinned commit 0408facbcf3f670121def48e0802c395c225d150."
+    },
+    {
+      "repoId": "k2-fsa/sherpa-onnx",
+      "pinnedRevisionSha": "8a667ab114e8a007f671678ddb031729dd81dce4",
+      "licenseSpdx": "Apache-2.0",
+      "licenseStatus": "PERMISSIVE_CLEAR",
+      "legalGateNote": "Permissive Apache-2.0 license verified via GitHub /license endpoint."
+    },
+    {
+      "repoId": "k2-fsa/icefall",
+      "pinnedRevisionSha": "ed16de9534d79252cac51f1729fdcee5699e9758",
+      "licenseSpdx": "Apache-2.0",
+      "licenseStatus": "PERMISSIVE_CLEAR",
+      "legalGateNote": "Permissive Apache-2.0 license verified via GitHub /license endpoint."
+    },
+    {
+      "repoId": "areffarhadi/persian-asr",
+      "pinnedRevisionSha": "08c2f83c5ae84075342f8e6f5e9be4150322b677",
+      "licenseSpdx": null,
+      "licenseStatus": "MISSING_OR_AMBIGUOUS",
+      "legalGateNote": "License file absent or undeclared via GitHub API; treat source code reuse as restricted until verified."
+    },
+    {
+      "repoId": "QwenLM/Qwen3-ASR",
+      "pinnedRevisionSha": "7c6daf77a2421100f5fb066495372c00129d39ff",
+      "licenseSpdx": "Apache-2.0",
+      "licenseStatus": "PERMISSIVE_CLEAR",
+      "legalGateNote": "Permissive Apache-2.0 license verified via GitHub /license endpoint."
+    },
+    {
+      "repoId": "areffarhadi/Taraneh-Q0.6B",
+      "pinnedRevisionSha": "14939bc2e1f392aeca7b8f0d22218809b12882af",
+      "licenseSpdx": "Apache-2.0",
+      "licenseStatus": "PERMISSIVE_NO_STANDALONE_FILE",
+      "legalGateNote": "Permissive Apache-2.0 declared in README/card metadata, but standalone LICENSE file is absent at pinned commit 14939bc2e1f392aeca7b8f0d22218809b12882af."
+    },
+    {
+      "repoId": "areffarhadi/Taraneh-Q1.7B",
+      "pinnedRevisionSha": "faa6a524003687a80e16fd4312a26819391405aa",
+      "licenseSpdx": "Apache-2.0",
+      "licenseStatus": "PERMISSIVE_NO_STANDALONE_FILE",
+      "legalGateNote": "Permissive Apache-2.0 declared in README/card metadata, but standalone LICENSE file is absent at pinned commit faa6a524003687a80e16fd4312a26819391405aa."
+    },
+    {
+      "repoId": "areffarhadi/Taraneh-WLarge",
+      "pinnedRevisionSha": "876da71621f711fbd41e63310c166614caef0b31",
+      "licenseSpdx": "MIT",
+      "licenseStatus": "PERMISSIVE_NO_STANDALONE_FILE",
+      "legalGateNote": "Permissive MIT declared in README/card metadata, but standalone LICENSE file is absent at pinned commit 876da71621f711fbd41e63310c166614caef0b31."
+    },
+    {
+      "repoId": "mehdi-hf/nemotron-asr-streaming-farsi",
+      "pinnedRevisionSha": "b70aff58c22da79ba7139ff13af7ba58a15cbeb9",
+      "licenseSpdx": "other",
+      "licenseStatus": "LEGAL_GATE_REQUIRED",
+      "legalGateNote": "LEGAL_GATE_REQUIRED: License is \"other\"/NVIDIA-derived. Do NOT download weights or use outputs as commercial distillation targets without explicit legal clearance (SHAHAB-003 §1 & §6)."
+    }
+  ]
+}

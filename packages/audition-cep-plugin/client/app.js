@@ -13,6 +13,8 @@
     sessionId: null,
     sessionToken: null,
     activeJobId: null,
+    activeSourceIdentity: null,
+    currentAuditionSourceIdentity: null,
     pollTimer: null,
     selectedFileBase64: null,
     selectedFileName: "",
@@ -20,6 +22,36 @@
     undoStack: [],
     redoStack: [],
   };
+
+  function persistActiveJob() {
+    try {
+      if (state.activeJobId) {
+        localStorage.setItem(
+          "avp_cep_active_job_v1",
+          JSON.stringify({
+            jobId: state.activeJobId,
+            sourceIdentity: state.activeSourceIdentity,
+          })
+        );
+      } else {
+        localStorage.removeItem("avp_cep_active_job_v1");
+      }
+    } catch (_e) {}
+  }
+
+  function isSourceIdentityMatching(expected, current) {
+    if (!expected || !current) return true;
+    if (expected.filePath && current.filePath && expected.filePath !== current.filePath) {
+      return false;
+    }
+    if (expected.fileSizeBytes && current.fileSizeBytes && expected.fileSizeBytes !== current.fileSizeBytes) {
+      return false;
+    }
+    if (expected.fileModifiedMs && current.fileModifiedMs && expected.fileModifiedMs !== current.fileModifiedMs) {
+      return false;
+    }
+    return true;
+  }
 
   function $(id) {
     return document.getElementById(id);
@@ -104,7 +136,10 @@
         ipc_protocol_version: "1.0.0",
         session_id: state.sessionId,
         nonce: makeNonce(),
+        request_id: makeNonce(),
         timestamp_ms: Date.now(),
+        expires_at_ms: Date.now() + 60000,
+        execution_mode: "audition-cep",
         command: command,
         payload: payload || {},
       }),
@@ -171,6 +206,12 @@
             "ch | " +
             Number(parsed.durationSec || 0).toFixed(1) +
             "s";
+          state.currentAuditionSourceIdentity = {
+            displayName: parsed.displayName || "",
+            filePath: parsed.filePath || "",
+            fileSizeBytes: Number(parsed.fileSizeBytes || 0),
+            fileModifiedMs: Number(parsed.fileModifiedMs || 0),
+          };
           if (parsed.filePath) {
             $("manualFilePath").value = parsed.filePath;
           }
@@ -278,10 +319,18 @@
 
   async function startTranscription() {
     var filePath = $("manualFilePath").value.trim();
+    var sourceIdentity = state.currentAuditionSourceIdentity
+      ? Object.assign({}, state.currentAuditionSourceIdentity, {
+          filePath: filePath || state.currentAuditionSourceIdentity.filePath,
+        })
+      : filePath
+      ? { filePath: filePath }
+      : { displayName: state.selectedFileName || "audio.wav" };
     var payload = {
       modelId: $("modelSelect").value || undefined,
       languageHint: $("languageSelect").value || "auto",
       numThreads: Number($("cpuThreadsInput").value) || 4,
+      sourceIdentity: sourceIdentity,
     };
     if (filePath) {
       payload.filePath = filePath;
@@ -302,6 +351,8 @@
     try {
       var res = await sendIpc("JOB_SUBMIT", payload);
       state.activeJobId = res.job.jobId;
+      state.activeSourceIdentity = sourceIdentity;
+      persistActiveJob();
       showNotice("پردازش محلی با مدل " + res.job.modelId + " آغاز شد.", false);
       pollJobStatus();
     } catch (err) {
@@ -323,6 +374,19 @@
         $("elapsedLabel").textContent = ((job.elapsedMs || 0) / 1000).toFixed(1) + " ثانیه";
 
         if (job.status === "COMPLETED" && job.result) {
+          var expectedSrc = job.sourceIdentity || state.activeSourceIdentity;
+          if (!isSourceIdentityMatching(expectedSrc, state.currentAuditionSourceIdentity)) {
+            $("btnStartJob").disabled = false;
+            $("btnCancelJob").disabled = true;
+            state.activeJobId = null;
+            state.activeSourceIdentity = null;
+            persistActiveJob();
+            showNotice(
+              "SOURCE_CHANGED: سند فعال Adobe Audition در حین پردازش تغییر کرده است؛ نتیجه منقضی‌شده به‌طور خودکار اعمال نشد.",
+              true
+            );
+            return;
+          }
           pushUndoSnapshot();
           state.segments = (job.result.segments || []).map(function (s) {
             return {
@@ -340,6 +404,8 @@
           $("btnStartJob").disabled = false;
           $("btnCancelJob").disabled = true;
           state.activeJobId = null;
+          state.activeSourceIdentity = null;
+          persistActiveJob();
           showNotice(
             "رونویسی کامل شد | RTF=" + job.result.realTimeFactor + " | زبان: " + job.result.dominantLanguage,
             false
@@ -350,6 +416,8 @@
           $("btnStartJob").disabled = false;
           $("btnCancelJob").disabled = true;
           state.activeJobId = null;
+          state.activeSourceIdentity = null;
+          persistActiveJob();
           showNotice(job.errorMessage || "پردازش متوقف شد.", true);
           return;
         }
@@ -360,6 +428,29 @@
         showNotice("قطع ارتباط با Companion: " + err.message, true);
       }
     }, 450);
+  }
+
+  async function tryReconnectPersistedJob() {
+    try {
+      var raw = localStorage.getItem("avp_cep_active_job_v1");
+      if (!raw) return;
+      var saved = JSON.parse(raw);
+      if (!saved || !saved.jobId) return;
+      var res = await sendIpc("JOB_RECONNECT", { jobId: saved.jobId });
+      if (res && res.ok && res.job) {
+        state.activeJobId = res.job.jobId;
+        state.activeSourceIdentity = res.job.sourceIdentity || saved.sourceIdentity || null;
+        if (res.job.status === "RUNNING" || res.job.status === "QUEUED") {
+          $("btnStartJob").disabled = true;
+          $("btnCancelJob").disabled = false;
+          $("progressWrap").hidden = false;
+          showNotice("اتصال مجدد به پردازش فعال انجام شد.", false);
+          pollJobStatus();
+        } else {
+          persistActiveJob();
+        }
+      }
+    } catch (_e) {}
   }
 
   async function cancelActiveJob() {
@@ -493,6 +584,6 @@
   document.addEventListener("DOMContentLoaded", function () {
     wireUi();
     restoreDraftLocal();
-    refreshHealth();
+    refreshHealth().then(tryReconnectPersistedJob);
   });
 })();

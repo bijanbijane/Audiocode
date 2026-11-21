@@ -1,0 +1,16 @@
+{
+  "schemaVersion": "1.0.0",
+  "generatedAtIso": "2026-11-21T19:06:52.399Z",
+  "benchmarkExecutionId": "shahab_bench_1795287969425_e345b2",
+  "variantA": {
+    "bytes": 115768868,
+    "transcript": "شکلات داغ در حد ساندارهای بلژیکی از آبیگاه گران قیمت ولی آنین باشند",
+    "balancedCachedMs": 182
+  },
+  "variantB": {
+    "bytes": 115440316,
+    "transcript": "شکلات داغ در حد ساندارهای بلژیکی از آبیگاه گران قیمت ولی آنین باشند",
+    "latencyMs": 1079,
+    "exactParity": true
+  }
+}

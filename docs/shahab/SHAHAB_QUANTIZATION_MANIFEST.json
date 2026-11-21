@@ -1,0 +1,28 @@
+{
+  "schemaVersion": "1.0.0",
+  "generatedAtIso": "2026-11-21T19:06:52.398Z",
+  "baselineQuantization": "UPSTREAM_DYNAMIC_INT8_ONNX",
+  "variantA_original": {
+    "bytes": 115768868,
+    "display": "115.77 MB (110.41 MiB) · 115,768,868 B",
+    "under100MiB": false
+  },
+  "variantB_losslessStripped": {
+    "bytes": 115440316,
+    "display": "115.44 MB (110.09 MiB) · 115,440,316 B",
+    "bytesSaved": 328552,
+    "exactTranscriptParity": true,
+    "under100MiB": false
+  },
+  "variantC_selectiveInt4Probe": {
+    "status": "BLOCKED",
+    "supportedInCurrentWasmRuntime": false,
+    "reason": "onnxruntime-web@1.31.1 WASM CPU does not ship com.microsoft::MatMulNBits INT4 weight-only kernels and Python onnxruntime/onnx quantization tools are NOT_INSTALLED in container."
+  },
+  "variantD_gzipTransferArchive": {
+    "bytes": 99244845,
+    "display": "99.24 MB (94.65 MiB) · 99,244,845 B",
+    "under100MiBGzipTransferOnly": true,
+    "note": "Compressed transfer size ONLY — does NOT satisfy uncompressed on-disk <100 MiB target."
+  }
+}

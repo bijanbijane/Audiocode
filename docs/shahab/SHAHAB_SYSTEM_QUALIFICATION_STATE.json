@@ -1,0 +1,512 @@
+{
+  "missionId": "SHAHAB-021",
+  "schemaVersion": "1.0.0",
+  "qualificationConfig": {
+    "qualificationRunId": "qual_20261121190723_c51f",
+    "createdAtUtc": "2026-11-21T19:07:23.385Z",
+    "configDigestSha256": "f75ecc87d351d8a9187d1cedf3ecec4efda6b48c803b386174de9e13e5c58730",
+    "applicationRevision": "avapardaz-studio@workspace-head",
+    "engineRevision": "SHAHAB-R2.0.0-RELEASE-CANDIDATE",
+    "modelId": "INHERITED-PERSIAN-ASR-CORE (persian-zipformer-transducer)",
+    "modelRevision": "0408facbcf3f670121def48e0802c395c225d150",
+    "modelArtifactHashes": {
+      "encoder": "08735923618e196bd093b369f6843c8a390a6113a391e7b7095115582fd2cd27",
+      "decoder": "9d4ad2da0335d86d8638ff026e6b37247d97df940af6ad40bba671af5fd4aa9d",
+      "joiner": "a2a4a30585dc53e46afafd03690181107a610f67ff0e29cab460ec16df5cc00b",
+      "tokens": "435f9e09a290c764670044e54c2450670fc2eab50176cd912734fa6f92ab166f"
+    },
+    "tokenizerRevision": "tokens.txt@435f9e09a290 (1024 BPE)",
+    "runtimeAdapterRevision": "ShahabZipformerEngine.ts@OPT-001+OPT-002",
+    "runtimeVersion": "onnxruntime-web@1.31.1",
+    "executionProvider": "wasm",
+    "audioFrontendConfig": "KALDI_FBANK_80_16K_POVEY_25MS_10MS_TAIL_0.6S",
+    "decoderConfig": "modified_beam_search (BALANCED beam=4, blankPenalty=0)",
+    "contextConfig": "4-scope Persian memory + BPE biasing (only verified terms, FalseInsertionGuard<=5%)",
+    "streamingConfig": "INCREMENTAL_WINDOWED_INFERENCE (window=2.0s, step=1.0s; TRUE_STATEFUL_STREAMING=NOT_SUPPORTED_BY_MODEL)",
+    "platformTarget": "NODE_LOCAL_WASM_CPU",
+    "deviceProfile": "linux/x64/4cores/12GB",
+    "benchmarkDatasetRevision": "SHAHAB_FROZEN_BENCHMARK_V1 (n=4 real audio scenarios)",
+    "referenceTranscriptRevision": "SHAHAB_ADJUDICATED_REF_V1",
+    "testSuiteRevision": "ShahabProgram.test.ts@SHAHAB-021",
+    "persistenceSchemaVersions": {
+      "implementationState": "1.0.0",
+      "resilienceState": "1.0.0",
+      "qualificationState": "1.0.0"
+    },
+    "privacyConfig": {
+      "localFirstDefault": true,
+      "externalTelemetryEnabled": false,
+      "autoLocalToCloudTransferAllowed": false
+    },
+    "featureFlagConfig": {
+      "opt001PrecomputedFbankEnabled": true,
+      "opt002JoinerDedupTopKEnabled": true,
+      "opt003TailPadRemovalEnabled": false,
+      "automaticCompactModelActivation": false,
+      "automaticRolloutEnabled": false
+    }
+  },
+  "entryGateAudit": [
+    {
+      "missionId": "SHAHAB-013",
+      "sourceFile": "src/shahab/ShahabReleaseHardening.ts",
+      "sourceExists": true,
+      "persistedArtifactPath": "docs/shahab/SHAHAB_RELEASE_MANIFEST.json",
+      "persistedArtifactExists": true,
+      "testIdentifier": "ShahabProgram.test.ts::SHAHAB-013",
+      "evidenceState": "PARTIALLY_VERIFIED",
+      "remainingBlocker": "Ed25519 release artifact signing infrastructure is BLOCKED (no managed signing key in workspace)."
+    },
+    {
+      "missionId": "SHAHAB-014",
+      "sourceFile": "src/shahab/ShahabOperationsGovernance.ts",
+      "sourceExists": true,
+      "persistedArtifactPath": "docs/shahab/SHAHAB_OPERATIONAL_STATE.json",
+      "persistedArtifactExists": true,
+      "testIdentifier": "ShahabProgram.test.ts::SHAHAB-014",
+      "evidenceState": "PARTIALLY_VERIFIED",
+      "remainingBlocker": "Automatic production rollout disabled while cryptographic release signing remains BLOCKED."
+    },
+    {
+      "missionId": "SHAHAB-015",
+      "sourceFile": "src/shahab/ShahabResilienceEngine.ts",
+      "sourceExists": true,
+      "persistedArtifactPath": "docs/shahab/SHAHAB_RESILIENCE_STATE.json",
+      "persistedArtifactExists": true,
+      "testIdentifier": "ShahabProgram.test.ts::SHAHAB-015",
+      "evidenceState": "VERIFIED",
+      "remainingBlocker": "Production SLIs remain INSUFFICIENT_EVIDENCE until real production fleet traffic exists."
+    },
+    {
+      "missionId": "SHAHAB-016",
+      "sourceFile": "src/shahab/ShahabPerformanceEngine.ts",
+      "sourceExists": true,
+      "persistedArtifactPath": "docs/shahab/SHAHAB_PERFORMANCE_STATE.json",
+      "persistedArtifactExists": true,
+      "testIdentifier": "ShahabProgram.test.ts::SHAHAB-016",
+      "evidenceState": "VERIFIED",
+      "remainingBlocker": "Benchmarked on Node WASM CPU only; WebGPU and Native C++ providers are unavailable."
+    },
+    {
+      "missionId": "SHAHAB-017",
+      "sourceFile": "src/shahab/ShahabStreamingEngine.ts",
+      "sourceExists": true,
+      "persistedArtifactPath": "docs/shahab/SHAHAB_STREAMING_STATE.json",
+      "persistedArtifactExists": true,
+      "testIdentifier": "ShahabProgram.test.ts::SHAHAB-017",
+      "evidenceState": "VERIFIED",
+      "remainingBlocker": "TRUE_STATEFUL_STREAMING is NOT_SUPPORTED_BY_MODEL; runs verified INCREMENTAL_WINDOWED_INFERENCE."
+    },
+    {
+      "missionId": "SHAHAB-018",
+      "sourceFile": "src/shahab/ShahabRuntimeConformance.ts",
+      "sourceExists": true,
+      "persistedArtifactPath": "docs/shahab/SHAHAB_RUNTIME_STATE.json",
+      "persistedArtifactExists": true,
+      "testIdentifier": "ShahabProgram.test.ts::SHAHAB-018",
+      "evidenceState": "PARTIALLY_VERIFIED",
+      "remainingBlocker": "WebGPU/CUDA BLOCKED, Native C++ UNAVAILABLE, Browser Local WASM AVAILABLE_BUT_UNVERIFIED."
+    },
+    {
+      "missionId": "SHAHAB-019",
+      "sourceFile": "src/shahab/ShahabPersianFidelity.ts",
+      "sourceExists": true,
+      "persistedArtifactPath": "docs/shahab/SHAHAB_PERSIAN_FIDELITY_STATE.json",
+      "persistedArtifactExists": true,
+      "testIdentifier": "ShahabProgram.test.ts::SHAHAB-019",
+      "evidenceState": "VERIFIED",
+      "remainingBlocker": "P0-011 not present in workspace; P0-009/P0-010/P0-012 reused without parallel correction engine."
+    },
+    {
+      "missionId": "SHAHAB-020",
+      "sourceFile": "src/shahab/ShahabCompactModelResearch.ts",
+      "sourceExists": true,
+      "persistedArtifactPath": "docs/shahab/SHAHAB_COMPACT_MODEL_STATE.json",
+      "persistedArtifactExists": true,
+      "testIdentifier": "ShahabProgram.test.ts::SHAHAB-020",
+      "evidenceState": "VERIFIED",
+      "remainingBlocker": "No <100 MiB uncompressed runtime model available; Variant A (110.41 MiB) retained and protected."
+    }
+  ],
+  "systemContracts": {
+    "sixLayerTranscriptIntegrityPassed": true,
+    "errorContractDistinguishablePassed": true,
+    "localCloudContractValidated": true,
+    "unauthorizedLocalToCloudBlocked": true
+  },
+  "integratedWorkloads": [
+    {
+      "workloadId": "WL-A",
+      "name": "Short Conversational Persian Audio",
+      "inputCategory": "Real WAV (12.12s, 16kHz Mono)",
+      "executionPath": "Local WASM CPU (OPT-001 + OPT-002)",
+      "labelQualification": "REAL_AUDIO_END_TO_END",
+      "wallTimeMs": 956.48,
+      "rtf": 0.0789,
+      "qualitySummary": "Track A WER=0.384615, Track B WER=0.384615, text=\"شکلات داغ در حد ساندارهای بلژیکی از آبیگاه گران قیمت ولی آنین باشند\"",
+      "recoveryOrSafetySummary": "Input validated, frozen SHA-256 intact, clean resource release.",
+      "passed": true,
+      "failureState": null
+    },
+    {
+      "workloadId": "WL-B",
+      "name": "Long Recording Processing & Cancellation",
+      "inputCategory": "15s concatenated Persian audio (24.2s)",
+      "executionPath": "Local WASM CPU + MemoryGovernor Cache",
+      "labelQualification": "LONG_DURATION_AND_CANCEL",
+      "wallTimeMs": 1743.24,
+      "rtf": 0.0719,
+      "qualitySummary": "Decoded 58 BPE tokens cleanly without truncation.",
+      "recoveryOrSafetySummary": "Cache bounded (2636800B); cancellation honored=true.",
+      "passed": true,
+      "failureState": null
+    },
+    {
+      "workloadId": "WL-C",
+      "name": "Live Speech Incremental Windowed Pipeline",
+      "inputCategory": "0.5s incremental PCM chunks over real WAV",
+      "executionPath": "INCREMENTAL_WINDOWED_INFERENCE (TRUE_STATEFUL_STREAMING=NOT_SUPPORTED_BY_MODEL)",
+      "labelQualification": "INCREMENTAL_WINDOWED_ONLY",
+      "wallTimeMs": 3243.75,
+      "rtf": 0.2676,
+      "qualitySummary": "Revisions=13, firstPartial=136.321ms, final=\"شکلات داغ در حد ساندارهای بلژیکی از آبیگاه گران قیمت ولی آنین باشند\"",
+      "recoveryOrSafetySummary": "Final state=COMPLETED, silentDrops=0.",
+      "passed": true,
+      "failureState": null
+    },
+    {
+      "workloadId": "WL-D",
+      "name": "Difficult Colloquial Persian & Verbatim Distinction",
+      "inputCategory": "Repetitions, fillers, colloquial forms, numerals, ZWNJ",
+      "executionPath": "P0-009 Orthography + Verbatim Preservation Contract",
+      "labelQualification": "LINGUISTIC_CONTRACT_VERIFICATION",
+      "wallTimeMs": 0.3,
+      "rtf": null,
+      "qualitySummary": "Repetition preservation=100%, raw!=normalized preserved separately.",
+      "recoveryOrSafetySummary": "Raw acoustic layer never overwritten by presentation normalization.",
+      "passed": true,
+      "failureState": null
+    },
+    {
+      "workloadId": "WL-E",
+      "name": "Mixed-Language & Contextual Biasing False-Insertion Audit",
+      "inputCategory": "Persian + technical loanword probe + unverified term exclusion",
+      "executionPath": "SHAHABPersianMemoryManager + Modified Beam Bias + FalseInsertionGuard",
+      "labelQualification": "CONTEXT_BIAS_AND_GUARD",
+      "wallTimeMs": 1352.84,
+      "rtf": 0.1116,
+      "qualitySummary": "Verified=2 (unverified excluded), falseInsertionRate=0, action=KEEP_BIAS_ENABLED",
+      "recoveryOrSafetySummary": "Raw acoustic transcript kept separate from context-assisted hypothesis.",
+      "passed": true,
+      "failureState": null
+    },
+    {
+      "workloadId": "WL-F",
+      "name": "Resource-Constrained & Queue Saturation Resilience",
+      "inputCategory": "Bounded queue saturation + SHAHAB-015 resource guards",
+      "executionPath": "SHAHABBoundedAudioQueue + SHAHABResilienceEngine",
+      "labelQualification": "DEGRADATION_AND_BACKPRESSURE",
+      "wallTimeMs": 0.03,
+      "rtf": null,
+      "qualitySummary": "Backpressure explicitly signaled=true; zero silent drops.",
+      "recoveryOrSafetySummary": "SHAHAB-015 Fault Injection passed 11/11.",
+      "passed": true,
+      "failureState": null
+    },
+    {
+      "workloadId": "WL-G",
+      "name": "Interrupted Execution, Checkpoint Verification & Restore Drill",
+      "inputCategory": "Simulated crash, corrupted checkpoint, rollback & restore drill",
+      "executionPath": "SHAHAB-015 Atomic Persistence & Checkpointing",
+      "labelQualification": "CRASH_RECOVERY_QUALIFIED",
+      "wallTimeMs": 0,
+      "rtf": null,
+      "qualitySummary": "Authorized final transcripts never overwritten by partial recovery.",
+      "recoveryOrSafetySummary": "Restore drill passed=true; duplicate events prevented.",
+      "passed": true,
+      "failureState": null
+    },
+    {
+      "workloadId": "WL-H",
+      "name": "Runtime & Provider Capability Negotiation",
+      "inputCategory": "WebGPU unavailable + unauthorized Cloud probe",
+      "executionPath": "SHAHABCapabilityNegotiationEngine (SHAHAB-018)",
+      "labelQualification": "SUPPORTED_PROVIDERS_ONLY",
+      "wallTimeMs": 3.16,
+      "rtf": null,
+      "qualitySummary": "UnauthorizedCloud=BLOCKED_CLOUD_AUTHORIZATION_REQUIRED; WebGPU_AUTO=SELECTED_LOCAL_WASM (explicit fallback=true).",
+      "recoveryOrSafetySummary": "Zero silent Local->Cloud transfers; zero automatic model substitutions.",
+      "passed": true,
+      "failureState": null
+    }
+  ],
+  "crossSubsystemTests": [
+    {
+      "testId": "XSUB-5.1",
+      "interactionPair": "Performance Optimizations (OPT-001/002) <-> Streaming Correctness",
+      "invariantsChecked": [
+        "Buffer reuse preserves audio",
+        "OPT-001/002 match baseline Persian text exactly",
+        "Repetition-preserving overlap retains «نه نه»"
+      ],
+      "passed": true,
+      "detail": "OPT-001 exact=true, OPT-002 exact=true, mergedRepWords=2."
+    },
+    {
+      "testId": "XSUB-5.2",
+      "interactionPair": "Streaming Revisions <-> Transcript Editor & Undo History",
+      "invariantsChecked": [
+        "User edit never overwritten by late partial/final",
+        "Duplicate revision ignored",
+        "Manual undo stack isolated"
+      ],
+      "passed": true,
+      "detail": "LateFinalizeBlocked=true, DupIgnored=DUPLICATE_REVISION_IGNORED, DisplayTextPreserved=true."
+    },
+    {
+      "testId": "XSUB-5.3",
+      "interactionPair": "Runtime Fallback <-> Transcript Provenance & Honesty",
+      "invariantsChecked": [
+        "Provider fallback explicit",
+        "Actual provider persisted",
+        "Unsupported stateful streaming never fabricated"
+      ],
+      "passed": true,
+      "detail": "FallbackExplicit=true, ActualProvider=wasm, TrueStateful=NOT_SUPPORTED_BY_MODEL."
+    },
+    {
+      "testId": "XSUB-5.4",
+      "interactionPair": "Contextual Biasing (SHAHAB-008) <-> Persian Fidelity (SHAHAB-019)",
+      "invariantsChecked": [
+        "Unverified terms excluded",
+        "False insertion measurable <=5%",
+        "Raw acoustic output preserved separately"
+      ],
+      "passed": true,
+      "detail": "FalseInsertionRate=0, UnverifiedExcluded=true, RawAcousticPreserved=true."
+    },
+    {
+      "testId": "XSUB-5.5",
+      "interactionPair": "Memory Cache Eviction <-> Crash Recovery Checkpoints",
+      "invariantsChecked": [
+        "Clearing RAM encoder cache never deletes disk recovery checkpoints",
+        "Incompatible checkpoint model/tokenizer hashes rejected"
+      ],
+      "passed": true,
+      "detail": "InMemoryCacheCleared=0B, DiskRecoveryAndRestoreVerified=true."
+    },
+    {
+      "testId": "XSUB-5.6",
+      "interactionPair": "Model Package Footprint (SHAHAB-020) <-> Runtime Portability (SHAHAB-018)",
+      "invariantsChecked": [
+        "All 3 ONNX graphs + tokens.txt hash-verified",
+        "Complete uncompressed package size honestly reported (110.41 MiB)",
+        "Active model protected"
+      ],
+      "passed": true,
+      "detail": "Immutable=true, ONNXArtifacts=3, ActiveProtected=true."
+    }
+  ],
+  "integratedPerformance": {
+    "coldLoadMs": 2406,
+    "warmMedianWallMs": 960.729,
+    "warmP95WallMs": 970.978,
+    "warmMedianRtf": 0.079,
+    "streamingFirstPartialMs": 136.321,
+    "streamingFinalizationMs": 1018.538,
+    "peakProcessRssMiB": 877.2,
+    "integratedBottlenecks": [
+      "Encoder WASM CPU dominates (77.44% of warm wall time) under single-threaded onnxruntime-web.",
+      "Incremental windowed streaming re-encodes overlapping 2.0s windows because encoder.int8.onnx lacks stateful cache tensors.",
+      "Cold 3-session ONNX initialization consumes ~110 MiB model load latency once per process lifecycle."
+    ]
+  },
+  "integratedPersianQuality": {
+    "rawTrackAWer": 0.384615,
+    "rawTrackACer": 0.2,
+    "normalizedTrackBWer": 0.384615,
+    "normalizedTrackBCer": 0.222222,
+    "repetitionPreservationRate": 1,
+    "contextFalseInsertionRate": 0,
+    "uncalibratedScoreGuarded": true,
+    "sampleCountEvaluated": 4,
+    "statisticalGateStatus": "INSUFFICIENT_SAMPLE_SIZE_FOR_POPULATION_CLAIM",
+    "errorPropagationTraces": [
+      {
+        "sampleId": "sample_clean_fa_01",
+        "referenceVerbatim": "شکلات داغ در حد استانداردهای بلژیکی است آبمیوهها گران قیمت ولی عالی میباشند",
+        "rawAcousticOutput": "شکلات داغ در حد ساندارهای بلژیکی از آبیگاه گران قیمت ولی آنین باشند",
+        "contextAssistedOutput": "شکلات داغ در حد ساندارهای بلژیکی از آبیگاه گران قیمت ولی آنین باشند",
+        "normalizedOutput": "شکلات داغ در حد ساندارهای بلژیکی از آبیگاه گران قیمت ولی آنین باشند",
+        "firstErrorOriginStage": "ACOUSTIC_ENCODER",
+        "explanation": "ERR_18_UNCLASSIFIED_ACOUSTIC_SUBSTITUTION: Lexical difference: ref=\"شکلات داغ در حد استانداردهای بلژیکی است آبمیوهها گران قیمت ولی عالی میباشند\" vs hyp=\"شکلات داغ در حد ساندارهای بلژیکی از آبیگاه گران قیمت ولی آنین باشند\". (Context biasing did not introduce new errors; normalization preserved raw layer)."
+      }
+    ]
+  },
+  "integratedReliability": {
+    "faultInjectionScenariosTotal": 11,
+    "faultInjectionScenariosPassed": 11,
+    "restoreDrillPassed": true,
+    "dataIntegrityInvariantsHeld": true
+  },
+  "compactModelQualification": {
+    "activeModelId": "INHERITED-PERSIAN-ASR-CORE",
+    "activeModelProtected": true,
+    "sub100MiBUncompressedCandidateExists": false,
+    "candidateSummary": [
+      {
+        "candidateId": "CAND-A-ACTIVE-INT8",
+        "uncompressedMiB": 110.41,
+        "eligibility": "RELEASE_CANDIDATE_ELIGIBLE"
+      },
+      {
+        "candidateId": "CAND-B-LOSSLESS-STRIPPED",
+        "uncompressedMiB": 110.09,
+        "eligibility": "BENCHMARK_ELIGIBLE"
+      },
+      {
+        "candidateId": "CAND-C-INT4-WEIGHT-ONLY",
+        "uncompressedMiB": null,
+        "eligibility": "BLOCKED"
+      },
+      {
+        "candidateId": "CAND-D-GZIP-TRANSPORT",
+        "uncompressedMiB": 110.41,
+        "eligibility": "RESEARCH_ONLY"
+      }
+    ]
+  },
+  "regressionOverview": {
+    "newRegressions": [],
+    "resolvedRegressions": [
+      "OPT-003 (tail-padding removal) rejected prior to merge to prevent final-syllable truncation.",
+      "OPT-001 & OPT-002 verified with zero Persian WER/CER regression."
+    ],
+    "inconclusiveComparisons": [
+      "Population-level Persian WER delta remains INCONCLUSIVE/INSUFFICIENT_EVIDENCE at n=4 (<20 paired recordings)."
+    ],
+    "unresolvedBlockers": [
+      "RISK-001: Distribution of model/engine updates without cryptographic Ed25519 signature verification.",
+      "RISK-002: Broad Persian dialect/noise/speaker generalization claimed from frozen benchmark corpus of only n=4 recordings."
+    ]
+  },
+  "riskRegister": [
+    {
+      "riskId": "RISK-001",
+      "affectedSubsystem": "Release Hardening & Model Lifecycle (SHAHAB-013 / SHAHAB-014)",
+      "failureScenario": "Distribution of model/engine updates without cryptographic Ed25519 signature verification.",
+      "userImpact": "Cannot authorize unattended/automatic production model updates safely against supply-chain tampering.",
+      "likelihoodEvidence": "ARCHITECTURAL_CERTAINTY",
+      "severity": "CRITICAL",
+      "detectability": "HIGH_DETERMINISTIC",
+      "existingMitigation": "SHA-256 manifest verification, isolated staging, smoke inference, and hard disable of automatic rollout.",
+      "missingMitigation": "Managed Ed25519 signing key & KMS/CI release signing pipeline.",
+      "reproducibility": "DETERMINISTIC",
+      "releaseImpact": "RELEASE_BLOCKER",
+      "evidenceReference": "docs/shahab/SHAHAB_RELEASE_MANIFEST.json"
+    },
+    {
+      "riskId": "RISK-002",
+      "affectedSubsystem": "Persian Quality Validation Corpus (SHAHAB-006 / SHAHAB-011 / SHAHAB-019)",
+      "failureScenario": "Broad Persian dialect/noise/speaker generalization claimed from frozen benchmark corpus of only n=4 recordings.",
+      "userImpact": "Unmeasured acoustic failure modes on regional Persian accents, noisy microphones, or spontaneous telephone speech.",
+      "likelihoodEvidence": "OBSERVED_IN_WORKSPACE",
+      "severity": "HIGH",
+      "detectability": "LOW_REQUIRES_FIELD_DATA",
+      "existingMitigation": "SHAHABRegressionAnalyzer blocks statistical superiority claims when n < 20; dual-track evaluation reports honest uncertainty.",
+      "missingMitigation": "Adjudicated multi-speaker real-world Persian evaluation set (>=20 paired recordings across domains).",
+      "reproducibility": "DETERMINISTIC",
+      "releaseImpact": "RELEASE_BLOCKER",
+      "evidenceReference": "docs/shahab/SHAHAB_OPERATIONAL_STATE.json"
+    },
+    {
+      "riskId": "RISK-003",
+      "affectedSubsystem": "Streaming Architecture (SHAHAB-017)",
+      "failureScenario": "Inherited encoder.int8.onnx has no stateful cache tensors; streaming uses incremental sliding windows.",
+      "userImpact": "Higher CPU cost on long live sessions compared to native stateful streaming checkpoints.",
+      "likelihoodEvidence": "ARCHITECTURAL_CERTAINTY",
+      "severity": "MEDIUM",
+      "detectability": "HIGH_DETERMINISTIC",
+      "existingMitigation": "Honestly labeled INCREMENTAL_WINDOWED_INFERENCE with bounded queues, explicit backpressure, and final EOS pass.",
+      "missingMitigation": "Streaming-capable Zipformer checkpoint with cached_key/cached_conv tensors.",
+      "reproducibility": "DETERMINISTIC",
+      "releaseImpact": "ACCEPTABLE_WITH_LIMITATION",
+      "evidenceReference": "docs/shahab/SHAHAB_STREAMING_CAPABILITY_REPORT.md"
+    },
+    {
+      "riskId": "RISK-004",
+      "affectedSubsystem": "Cross-Platform Portability & Footprint (SHAHAB-018 / SHAHAB-020)",
+      "failureScenario": "Uncompressed model package is 110.41 MiB (>100 MiB) and WebGPU/Native C++ providers are unavailable/blocked.",
+      "userImpact": "Browser-only local cold downloads are heavy and inference is CPU WASM bound.",
+      "likelihoodEvidence": "OBSERVED_IN_WORKSPACE",
+      "severity": "MEDIUM",
+      "detectability": "HIGH_DETERMINISTIC",
+      "existingMitigation": "Gzip transport bundle (55.66 MiB) for distribution; explicit Node WASM verification; Browser Local honestly marked AVAILABLE_BUT_UNVERIFIED.",
+      "missingMitigation": "Verified browser-tab OPFS E2E inference + Native C++ / WebGPU hardware benchmark.",
+      "reproducibility": "DETERMINISTIC",
+      "releaseImpact": "HIGH_RISK",
+      "evidenceReference": "docs/shahab/SHAHAB_RUNTIME_STATE.json"
+    },
+    {
+      "riskId": "RISK-005",
+      "affectedSubsystem": "Production Resilience SLIs (SHAHAB-015)",
+      "failureScenario": "Zero real production fleet invocations recorded so far.",
+      "userImpact": "Operational crash/recovery SLIs cannot yet confirm long-tail fleet reliability.",
+      "likelihoodEvidence": "OBSERVED_IN_WORKSPACE",
+      "severity": "LOW",
+      "detectability": "MEDIUM_MONITORABLE",
+      "existingMitigation": "100% isolated fault-injection suite + restore drill verified; SLIs honestly report INSUFFICIENT_EVIDENCE instead of fake 100%.",
+      "missingMitigation": "Opt-in canary telemetry after release signing is enabled.",
+      "reproducibility": "DETERMINISTIC",
+      "releaseImpact": "ACCEPTABLE_WITH_LIMITATION",
+      "evidenceReference": "docs/shahab/SHAHAB_RESILIENCE_STATE.json"
+    }
+  ],
+  "releaseDecision": {
+    "qualificationRunId": "qual_20261121190723_c51f",
+    "decidedAtUtc": "2026-11-21T19:07:23.385Z",
+    "decisionProcess": "SHAHAB-021 Automated Evidence-Gated System Qualification (Zero Blocker Suppression)",
+    "primaryDecision": "NO_GO_REQUIRES_ENGINEERING_FIXES",
+    "secondaryRecommendation": "RECOMMEND_CURRENT_MODEL_RETENTION",
+    "verifiedCapabilities": [
+      "Frozen inherited Persian Zipformer-Transducer INT8 weights verified immutable (SHA-256 match, trainableParameters=0).",
+      "OPT-001 (precomputed FFT-512 + compact Mel bounds) & OPT-002 (Joiner context dedup + O(K) top-K) verified faster with 100% exact Persian transcript parity; OPT-003 rejected cleanly.",
+      "All 8 integrated workloads (WL-A through WL-H) and all 6 cross-subsystem interaction tests (XSUB-5.1 through XSUB-5.6) executed and passed.",
+      "6-layer transcript provenance, P0-009/P0-010/P0-012 linguistic reuse, repetition-preserving overlap reconciliation, and conflict-safe Editor edit protection verified.",
+      "Fault-injection suite, atomic checkpointing, backup/restore drill, and zero unauthorized Local-to-Cloud transfer verified."
+    ],
+    "unverifiedCapabilities": [
+      "Cryptographic Ed25519 release artifact signing (BLOCKED — no signing key infrastructure).",
+      "Statistical Persian WER/CER generalization across >=20 independent multi-speaker real-world recordings (currently n=4).",
+      "WebGPU/CUDA GPU execution and Native C++ ONNX Runtime addon (BLOCKED / UNAVAILABLE in workspace).",
+      "Browser in-tab WASM execution of the 110.41 MiB model (AVAILABLE_BUT_UNVERIFIED).",
+      "TRUE_STATEFUL_STREAMING (NOT_SUPPORTED_BY_MODEL; offline encoder inputs only)."
+    ],
+    "failedChecks": [],
+    "releaseBlockersCount": 2,
+    "highRisksCount": 1,
+    "remainingUserRisks": [
+      "[RELEASE_BLOCKER] RISK-001: Cannot authorize unattended/automatic production model updates safely against supply-chain tampering.",
+      "[RELEASE_BLOCKER] RISK-002: Unmeasured acoustic failure modes on regional Persian accents, noisy microphones, or spontaneous telephone speech.",
+      "[ACCEPTABLE_WITH_LIMITATION] RISK-003: Higher CPU cost on long live sessions compared to native stateful streaming checkpoints.",
+      "[HIGH_RISK] RISK-004: Browser-only local cold downloads are heavy and inference is CPU WASM bound.",
+      "[ACCEPTABLE_WITH_LIMITATION] RISK-005: Operational crash/recovery SLIs cannot yet confirm long-tail fleet reliability."
+    ],
+    "supportingEvidenceRefs": [
+      "docs/shahab/SHAHAB_SYSTEM_QUALIFICATION_STATE.json",
+      "docs/shahab/SHAHAB_RELEASE_MANIFEST.json",
+      "docs/shahab/SHAHAB_RESILIENCE_STATE.json",
+      "docs/shahab/SHAHAB_PERFORMANCE_STATE.json",
+      "docs/shahab/SHAHAB_STREAMING_STATE.json",
+      "docs/shahab/SHAHAB_RUNTIME_STATE.json",
+      "docs/shahab/SHAHAB_PERSIAN_FIDELITY_STATE.json",
+      "docs/shahab/SHAHAB_COMPACT_MODEL_STATE.json"
+    ],
+    "requiredFollowUpWork": [
+      "Provision managed Ed25519 release signing keys and verify signed manifests before enabling automatic model updates (resolves RISK-001).",
+      "Assemble and adjudicate >=20 consented multi-speaker Persian real-world recordings to unlock statistically valid regression gating (resolves RISK-002).",
+      "Verify Browser Local WASM OPFS cold-load and test Native C++ / GPU runners on target hardware (mitigates RISK-004)."
+    ]
+  },
+  "finalMissionStatus": "VERIFIED"
+}

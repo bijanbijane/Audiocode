@@ -1,0 +1,43 @@
+{
+  "parentModelId": "ramin-mahmoodi/persian-zipformer-asr",
+  "parentRevisionSha": "0408facbcf3f670121def48e0802c395c225d150",
+  "derivedModelId": null,
+  "inheritedFrozenParameters": 11470768,
+  "adaptedInheritedParameters": 0,
+  "newlyIntroducedParameters": 0,
+  "nonTrainableConstantsElements": 53084484,
+  "trainableParametersTotal": 0,
+  "tensorLineageSummary": [
+    {
+      "component": "encoder",
+      "fileName": "encoder.int8.onnx",
+      "sha256": "08735923618e196bd093b369f6843c8a390a6113a391e7b7095115582fd2cd27",
+      "initializerCount": 731,
+      "logicalElements": 11073072,
+      "frozen": true,
+      "modified": false,
+      "transformationMethod": "NONE_INHERITED_FROZEN"
+    },
+    {
+      "component": "decoder",
+      "fileName": "decoder.int8.onnx",
+      "sha256": "9d4ad2da0335d86d8638ff026e6b37247d97df940af6ad40bba671af5fd4aa9d",
+      "initializerCount": 6,
+      "logicalElements": 396672,
+      "frozen": true,
+      "modified": false,
+      "transformationMethod": "NONE_INHERITED_FROZEN"
+    },
+    {
+      "component": "joiner",
+      "fileName": "joiner.int8.onnx",
+      "sha256": "a2a4a30585dc53e46afafd03690181107a610f67ff0e29cab460ec16df5cc00b",
+      "initializerCount": 4,
+      "logicalElements": 1024,
+      "frozen": true,
+      "modified": false,
+      "transformationMethod": "NONE_INHERITED_FROZEN"
+    }
+  ],
+  "ownsIndependentNeuralWeights": false
+}

@@ -1,0 +1,215 @@
+{
+  "schemaVersion": "1.0.0",
+  "updatedAtIso": "2026-11-21T19:06:52.406Z",
+  "mission014Status": "PARTIALLY_VERIFIED",
+  "entryGate013": {
+    "gateState": "PARTIALLY_VERIFIED",
+    "evaluatedAtIso": "2026-11-21T19:06:52.401Z",
+    "releaseCandidateId": "SHAHAB-R2.0.0-RELEASE-CANDIDATE",
+    "checks": [
+      {
+        "checkId": "RELEASE_MANIFEST_PRESENT",
+        "passed": true,
+        "evidencePath": "docs/shahab/SHAHAB_RELEASE_MANIFEST.json",
+        "detail": "Candidate SHAHAB-R2.0.0-RELEASE-CANDIDATE"
+      },
+      {
+        "checkId": "SECURITY_VERIFICATION_PASSED",
+        "passed": true,
+        "evidencePath": "docs/shahab/SHAHAB_SECURITY_VERIFICATION.json",
+        "detail": "All supply-chain & integrity security checks passed."
+      },
+      {
+        "checkId": "INSTALL_AND_SMOKE_INFERENCE_PASSED",
+        "passed": true,
+        "evidencePath": "docs/shahab/SHAHAB_INSTALLATION_TESTS.json",
+        "detail": "Atomic install & post-install Persian smoke inference verified."
+      },
+      {
+        "checkId": "ROLLBACK_VERIFIED",
+        "passed": true,
+        "evidencePath": "docs/shahab/SHAHAB_ROLLBACK_TESTS.json",
+        "detail": "Rollback & post-rollback Persian inference verified."
+      },
+      {
+        "checkId": "RELEASE_CRYPTOGRAPHIC_SIGNING",
+        "passed": false,
+        "evidencePath": "docs/shahab/SHAHAB_RELEASE_MANIFEST.json",
+        "detail": "BLOCKED: No external signing key infrastructure provisioned (SHA-256 integrity verified separately)."
+      }
+    ],
+    "automaticRolloutAllowed": false,
+    "blockers": [
+      "External cryptographic signing infrastructure not provisioned (automatic production rollout disabled)."
+    ]
+  },
+  "activeRuntime": {
+    "engineVersion": "SHAHAB-R2.0.0-RELEASE-CANDIDATE",
+    "neuralCoreIdentity": "INHERITED-PERSIAN-ASR-CORE",
+    "modelRepository": "ramin-mahmoodi/persian-zipformer-asr",
+    "modelRevision": "0408facbcf3f670121def48e0802c395c225d150",
+    "modelArtifactHash": "08735923618e196bd093b369f6843c8a390a6113a391e7b7095115582fd2cd27",
+    "tokenizerHash": "435f9e09a290c764670044e54c2450670fc2eab50176cd912734fa6f92ab166f",
+    "runtimeProvider": "onnxruntime-web@1.31.1 (WASM CPU)",
+    "executionMode": "LOCAL",
+    "lastSuccessfulInitIso": "2026-11-21T19:06:52.406Z",
+    "operationalStatus": "HEALTHY_LOCAL_CPU_RC_SIGNING_BLOCKED"
+  },
+  "metricsSummary": {
+    "sampleCount": 1,
+    "timeRangeStartIso": "2026-11-21T19:06:52.402Z",
+    "timeRangeEndIso": "2026-11-21T19:06:52.402Z",
+    "monitoringActive": true,
+    "modelLoadsSucceeded": 1,
+    "modelLoadsFailed": 0,
+    "inferencesSucceeded": 1,
+    "inferencesFailed": 0,
+    "providerFallbacks": 0,
+    "cacheHits": 1,
+    "cacheMisses": 0,
+    "cacheEvictions": 0,
+    "updatesFailed": 0,
+    "rollbacksCompleted": 1,
+    "rollbacksFailed": 0,
+    "meanRtf": 0.2912,
+    "meanInferenceMs": 3529,
+    "totalAudioDurationSec": 12.12,
+    "lastModelLoadMs": 3321,
+    "peakProcessRssBytes": 1011699712,
+    "gpuUtilizationPct": "NOT_MEASURED",
+    "gpuMemoryBytes": "NOT_MEASURED"
+  },
+  "metricDefinitions": [
+    {
+      "metricName": "RTF",
+      "formula": "measured_inference_wall_time_sec / audio_duration_sec",
+      "unit": "ratio (dimensionless)",
+      "clockSource": "performance.now() high-resolution monotonic clock",
+      "includesModelInit": false,
+      "includesAudioPreprocessing": true,
+      "includesQueueTime": false,
+      "scope": "FULL_RECORDING"
+    },
+    {
+      "metricName": "model_load_time_ms",
+      "formula": "t_sessions_ready - t_load_start",
+      "unit": "milliseconds",
+      "clockSource": "performance.now()",
+      "includesModelInit": true,
+      "includesAudioPreprocessing": false,
+      "includesQueueTime": false,
+      "scope": "PROCESS_SNAPSHOT"
+    },
+    {
+      "metricName": "peak_process_rss_bytes",
+      "formula": "max(process.memoryUsage().rss) across observed inference window",
+      "unit": "bytes",
+      "clockSource": "Node.js process.memoryUsage().rss",
+      "includesModelInit": true,
+      "includesAudioPreprocessing": true,
+      "includesQueueTime": false,
+      "scope": "PROCESS_SNAPSHOT"
+    },
+    {
+      "metricName": "gpu_utilization_pct",
+      "formula": "UNAVAILABLE (0 GPUs detected in container)",
+      "unit": "NOT_MEASURED",
+      "clockSource": "NONE",
+      "includesModelInit": false,
+      "includesAudioPreprocessing": false,
+      "includesQueueTime": false,
+      "scope": "PROCESS_SNAPSHOT"
+    }
+  ],
+  "consent": {
+    "schemaVersion": "1.0.0",
+    "localDiagnosticsEnabled": true,
+    "externalOperationalTelemetryOptIn": false,
+    "externalResearchContributionOptIn": false,
+    "destinationDescription": "LOCAL_ONLY (No external monitoring endpoint configured)",
+    "retentionPolicyDays": 30,
+    "linkableToAccountOrDevice": false,
+    "updatedAtIso": "2026-11-21T19:06:52.401Z",
+    "revocationHistory": []
+  },
+  "feedbackGovernance": {
+    "totalReceived": 0,
+    "consentPending": 0,
+    "consentGranted": 0,
+    "consentDenied": 0,
+    "humanReviewed": 0,
+    "approvedForDataset": 0,
+    "withdrawnOrDeleted": 0,
+    "exposesRawTranscriptOrAudio": false
+  },
+  "updateLifecycle": {
+    "activeReleaseId": "SHAHAB-R1.4.0",
+    "previousVerifiedReleaseId": null,
+    "stagedReleaseId": "SHAHAB-R2.0.0-RELEASE-CANDIDATE",
+    "rollbackAvailable": false,
+    "history": [
+      {
+        "updateId": "upd_1795288012403_72e0",
+        "releaseId": "SHAHAB-R2.0.0-RELEASE-CANDIDATE",
+        "state": "STAGED",
+        "previousActiveReleaseId": "SHAHAB-R1.4.0",
+        "reason": "Update SHAHAB-R2.0.0-RELEASE-CANDIDATE verified, compatibility-checked, and staged without overwriting active release.",
+        "timestampIso": "2026-11-21T19:06:52.403Z"
+      }
+    ],
+    "lastStageProbe": {
+      "state": "STAGED",
+      "activeReleaseUnchanged": true,
+      "reason": "Update SHAHAB-R2.0.0-RELEASE-CANDIDATE verified, compatibility-checked, and staged without overwriting active release."
+    },
+    "automaticProductionRolloutEnabled": false
+  },
+  "regressionReports": [
+    {
+      "comparisonId": "reg_1795288012406",
+      "evaluatedAtIso": "2026-11-21T19:06:52.406Z",
+      "previousRelease": {
+        "releaseId": "SHAHAB-R1.4.0 (Variant A Original)",
+        "modelArtifactHash": "08735923618e196bd093b369f6843c8a390a6113a391e7b7095115582fd2cd27",
+        "datasetId": "shahab-frozen-baseline-fa-v1",
+        "datasetRevision": "1.0.0",
+        "hardwareProfile": "x64/4c/CPU-ONLY",
+        "runtimeVersion": "onnxruntime-web@1.31.1",
+        "sampleCount": 1,
+        "validReferenceCount": 1,
+        "excludedSamplesCount": 0,
+        "trackAWer": 0.384615,
+        "trackACer": 0.2,
+        "meanRtf": 0.2912,
+        "peakRssBytes": 990777344
+      },
+      "candidateRelease": {
+        "releaseId": "SHAHAB-R2.0.0-RELEASE-CANDIDATE (Variant B Cleaned)",
+        "modelArtifactHash": "bf4d351c0cbeedf6bdde11ae359e2e343ab20edd5bfa3ef270bdce9e9f1f833f",
+        "datasetId": "shahab-frozen-baseline-fa-v1",
+        "datasetRevision": "1.0.0",
+        "hardwareProfile": "x64/4c/CPU-ONLY",
+        "runtimeVersion": "onnxruntime-web@1.31.1",
+        "sampleCount": 1,
+        "validReferenceCount": 1,
+        "excludedSamplesCount": 0,
+        "trackAWer": 0.384615,
+        "trackACer": 0.2,
+        "meanRtf": 0.089,
+        "peakRssBytes": 1011699712
+      },
+      "recommendedThresholdsForApproval": {
+        "maxAllowedWerIncreaseAbsolute": 0.01,
+        "maxAllowedRtfIncreaseRatio": 1.15,
+        "minPairedSamplesForClaim": 20,
+        "policyApprovalStatus": "PROPOSED_AWAITING_PRODUCT_OWNER_APPROVAL"
+      },
+      "verdict": "INSUFFICIENT_EVIDENCE",
+      "deltaTrackAWer": 0,
+      "deltaTrackACer": 0,
+      "deltaRtf": -0.2022,
+      "statisticalLimitation": "Sample count (n=1) is below minimum paired sample threshold (20) for statistical significance.",
+      "reason": "Zero observed WER delta on matched samples, but sample count is insufficient for statistical population claims."
+    }
+  ]
+}

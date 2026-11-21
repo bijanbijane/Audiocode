@@ -1,0 +1,23 @@
+{
+  "schemaVersion": "1.0.0",
+  "verifiedAtIso": "2026-11-21T19:06:52.400Z",
+  "allChecksPassed": true,
+  "checks": {
+    "artifactIntegrityVerified": true,
+    "archivePathTraversalBlocked": true,
+    "archiveSymlinkBlocked": true,
+    "archiveScriptPayloadBlocked": true,
+    "unpinnedMainBranchBlocked": true,
+    "nonHttpsDownloadBlocked": true,
+    "runtimeLimitsEnforced": {
+      "maxAudioDurationSec": 3600,
+      "maxAudioBytes": 268435456,
+      "maxConcurrentJobs": 4,
+      "maxBeamPaths": 16,
+      "maxRedecodePasses": 2,
+      "supportedSampleRateMinHz": 8000,
+      "supportedSampleRateMaxHz": 192000
+    },
+    "signingStatus": "BLOCKED"
+  }
+}

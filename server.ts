@@ -1,4 +1,6 @@
 import express from 'express';
+import fs from 'node:fs';
+import crypto from 'node:crypto';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createServer as createViteServer } from 'vite';
@@ -1271,6 +1273,314 @@ async function startServer() {
         },
       });
     }
+  });
+
+  // ── SHAHAB Persistent Observatory & Operations API (SHAHAB-002 .. SHAHAB-021) ──
+  const SHAHAB_DOCS_ROOT = path.resolve(process.cwd(), 'docs', 'shahab');
+  const readShahabJsonSafe = (relativeName: string): unknown => {
+    const resolved = path.resolve(SHAHAB_DOCS_ROOT, relativeName);
+    if (!resolved.startsWith(SHAHAB_DOCS_ROOT + path.sep)) return null;
+    if (!fs.existsSync(resolved)) return null;
+    try {
+      return JSON.parse(fs.readFileSync(resolved, 'utf8'));
+    } catch {
+      return null;
+    }
+  };
+  const readShahabJsonlSafe = (relativeName: string, limit = 120): unknown[] => {
+    const resolved = path.resolve(SHAHAB_DOCS_ROOT, relativeName);
+    if (!resolved.startsWith(SHAHAB_DOCS_ROOT + path.sep)) return [];
+    if (!fs.existsSync(resolved)) return [];
+    try {
+      const lines = fs
+        .readFileSync(resolved, 'utf8')
+        .split('\n')
+        .map((l) => l.trim())
+        .filter(Boolean);
+      return lines.slice(-limit).map((line) => {
+        try {
+          return JSON.parse(line);
+        } catch {
+          return { parseError: true };
+        }
+      });
+    } catch {
+      return [];
+    }
+  };
+  const writeShahabJsonAtomic = (relativeName: string, value: unknown): void => {
+    const resolved = path.resolve(SHAHAB_DOCS_ROOT, relativeName);
+    if (!resolved.startsWith(SHAHAB_DOCS_ROOT + path.sep)) {
+      throw new Error('Path traversal rejected for SHAHAB persistence.');
+    }
+    fs.mkdirSync(path.dirname(resolved), { recursive: true });
+    const tmpPath = `${resolved}.${crypto.randomBytes(4).toString('hex')}.tmp`;
+    fs.writeFileSync(tmpPath, JSON.stringify(value, null, 2), 'utf8');
+    fs.renameSync(tmpPath, resolved);
+  };
+  const appendShahabJsonl = (relativeName: string, entry: Record<string, unknown>): void => {
+    const resolved = path.resolve(SHAHAB_DOCS_ROOT, relativeName);
+    if (!resolved.startsWith(SHAHAB_DOCS_ROOT + path.sep)) {
+      throw new Error('Path traversal rejected for SHAHAB JSONL append.');
+    }
+    fs.mkdirSync(path.dirname(resolved), { recursive: true });
+    fs.appendFileSync(resolved, `${JSON.stringify(entry)}\n`, 'utf8');
+  };
+
+  app.get('/api/shahab/state', (_req, res) => {
+    const implementationState = readShahabJsonSafe('SHAHAB_IMPLEMENTATION_STATE.json');
+    const consentRecords = readShahabJsonSafe('SHAHAB_CONSENT_RECORDS.json');
+    const operationalState = readShahabJsonSafe('SHAHAB_OPERATIONAL_STATE.json');
+    const releaseManifest = readShahabJsonSafe('SHAHAB_RELEASE_MANIFEST.json');
+    const sbom = readShahabJsonSafe('SHAHAB_SBOM.json');
+    const resilienceState = readShahabJsonSafe('SHAHAB_RESILIENCE_STATE.json');
+    const faultInjectionResults = readShahabJsonSafe('SHAHAB_FAULT_INJECTION_RESULTS.json');
+    const restoreReports = readShahabJsonSafe('SHAHAB_RESTORE_VERIFICATION_REPORTS.json');
+    const performanceState = readShahabJsonSafe('SHAHAB_PERFORMANCE_STATE.json');
+    const streamingState = readShahabJsonSafe('SHAHAB_STREAMING_STATE.json');
+    const runtimeState = readShahabJsonSafe('SHAHAB_RUNTIME_STATE.json');
+    const persianFidelityState = readShahabJsonSafe('SHAHAB_PERSIAN_FIDELITY_STATE.json');
+    const compactModelState = readShahabJsonSafe('SHAHAB_COMPACT_MODEL_STATE.json');
+    const systemQualificationState = readShahabJsonSafe('SHAHAB_SYSTEM_QUALIFICATION_STATE.json');
+    const sdkState = readShahabJsonSafe('SHAHAB_SDK_STATE.json');
+    const avapardazIntegrationState = readShahabJsonSafe('SHAHAB_AVAPARDAZ_INTEGRATION_STATE.json');
+    const adobeIntegrationState = readShahabJsonSafe('SHAHAB_ADOBE_INTEGRATION_STATE.json');
+    const evidenceLedger = readShahabJsonlSafe('SHAHAB_EVIDENCE_LEDGER.jsonl', 150);
+    const runtimeEvents = readShahabJsonlSafe('SHAHAB_RUNTIME_EVENTS.jsonl', 150);
+
+    res.json({
+      available: Boolean(implementationState),
+      implementationState,
+      consentRecords,
+      operationalState,
+      releaseManifest,
+      sbom,
+      resilienceState,
+      faultInjectionResults,
+      restoreReports,
+      performanceState,
+      streamingState,
+      runtimeState,
+      persianFidelityState,
+      compactModelState,
+      systemQualificationState,
+      sdkState,
+      avapardazIntegrationState,
+      adobeIntegrationState,
+      evidenceLedger,
+      runtimeEvents,
+    });
+  });
+
+  app.post('/api/shahab/memory', (req, res) => {
+    const body = req.body as Record<string, unknown> | undefined;
+    const rawTerm = typeof body?.term === 'string' ? body.term.trim() : '';
+    const scopeRaw = typeof body?.scope === 'string' ? body.scope : 'PROJECT';
+    const categoryRaw = typeof body?.category === 'string' ? body.category : 'DOMAIN_TERM';
+    const verificationStatusRaw =
+      typeof body?.verificationStatus === 'string' ? body.verificationStatus : 'USER_VERIFIED';
+
+    const allowedScopes = new Set(['SESSION', 'PROJECT', 'WORKSPACE', 'USER']);
+    const allowedCategories = new Set(['PROPER_NOUN', 'TECHNICAL_TERM', 'DOMAIN_TERM', 'BRAND_OR_ACRONYM', 'COLLOQUIAL_FORM']);
+    const allowedStatuses = new Set(['USER_VERIFIED', 'UNVERIFIED_CANDIDATE', 'ADMIN_APPROVED']);
+
+    if (!rawTerm || rawTerm.length > 120) {
+      res.status(400).json({ error: 'INVALID_TERM', message: 'Persian context term must be 1..120 characters.' });
+      return;
+    }
+    if (!allowedScopes.has(scopeRaw) || !allowedCategories.has(categoryRaw) || !allowedStatuses.has(verificationStatusRaw)) {
+      res.status(400).json({ error: 'INVALID_MEMORY_METADATA', message: 'Invalid scope, category, or verificationStatus.' });
+      return;
+    }
+
+    const state = (readShahabJsonSafe('SHAHAB_IMPLEMENTATION_STATE.json') as Record<string, unknown> | null) ?? {};
+    const existingMem = (state.persianContextMemory as Record<string, unknown> | undefined) ?? { entries: [] };
+    const existingEntries = Array.isArray(existingMem.entries) ? [...existingMem.entries] : [];
+
+    const nowUtc = new Date().toISOString();
+    const entry = {
+      entryId: `mem_${crypto.randomBytes(4).toString('hex')}`,
+      term: rawTerm,
+      canonicalSurface: rawTerm.replace(/\u064A/g, '\u06CC').replace(/\u0643/g, '\u06A9'),
+      scope: scopeRaw,
+      category: categoryRaw,
+      verificationStatus: verificationStatusRaw,
+      boostWeight: typeof body?.boostWeight === 'number' && Number.isFinite(body.boostWeight)
+        ? Math.max(0.1, Math.min(2.0, body.boostWeight))
+        : 1.0,
+      createdAtUtc: nowUtc,
+      updatedAtUtc: nowUtc,
+      source: 'SHAHAB_LAB_UI',
+    };
+
+    const nextEntries = [entry, ...existingEntries];
+    const nextState = {
+      ...state,
+      updatedAtUtc: nowUtc,
+      persianContextMemory: {
+        ...existingMem,
+        entries: nextEntries,
+      },
+    };
+    writeShahabJsonAtomic('SHAHAB_IMPLEMENTATION_STATE.json', nextState);
+    appendShahabJsonl('SHAHAB_EVIDENCE_LEDGER.jsonl', {
+      eventId: `evt_${crypto.randomBytes(6).toString('hex')}`,
+      timestampUtc: nowUtc,
+      missionId: 'SHAHAB-008',
+      eventType: 'PERSIAN_CONTEXT_MEMORY_ADDED',
+      evidenceStatus: 'VERIFIED',
+      summary: `Added Persian context memory term (${scopeRaw}/${verificationStatusRaw}).`,
+      details: { entryId: entry.entryId, scope: scopeRaw, category: categoryRaw, verificationStatus: verificationStatusRaw },
+    });
+
+    res.status(201).json({ entry, totalEntries: nextEntries.length });
+  });
+
+  app.delete('/api/shahab/memory/:entryId', (req, res) => {
+    const entryId = String(req.params.entryId || '').trim();
+    if (!/^[a-zA-Z0-9_-]{3,64}$/.test(entryId)) {
+      res.status(400).json({ error: 'INVALID_ENTRY_ID', message: 'Invalid memory entry identifier.' });
+      return;
+    }
+    const state = (readShahabJsonSafe('SHAHAB_IMPLEMENTATION_STATE.json') as Record<string, unknown> | null) ?? {};
+    const existingMem = (state.persianContextMemory as Record<string, unknown> | undefined) ?? { entries: [] };
+    const existingEntries = Array.isArray(existingMem.entries) ? existingMem.entries : [];
+    const filtered = existingEntries.filter(
+      (item: unknown) =>
+        typeof item === 'object' &&
+        item !== null &&
+        (item as Record<string, unknown>).entryId !== entryId &&
+        (item as Record<string, unknown>).id !== entryId,
+    );
+
+    const nowUtc = new Date().toISOString();
+    const nextState = {
+      ...state,
+      updatedAtUtc: nowUtc,
+      persianContextMemory: {
+        ...existingMem,
+        entries: filtered,
+      },
+    };
+    writeShahabJsonAtomic('SHAHAB_IMPLEMENTATION_STATE.json', nextState);
+    appendShahabJsonl('SHAHAB_EVIDENCE_LEDGER.jsonl', {
+      eventId: `evt_${crypto.randomBytes(6).toString('hex')}`,
+      timestampUtc: nowUtc,
+      missionId: 'SHAHAB-008',
+      eventType: 'PERSIAN_CONTEXT_MEMORY_DELETED',
+      evidenceStatus: 'VERIFIED',
+      summary: `Removed Persian context memory entry ${entryId}.`,
+      details: { entryId, remainingCount: filtered.length },
+    });
+
+    res.json({ deleted: existingEntries.length !== filtered.length, remainingCount: filtered.length });
+  });
+
+  app.post('/api/shahab/operations/consent', (req, res) => {
+    const body = req.body as Record<string, unknown> | undefined;
+    const nowUtc = new Date().toISOString();
+    const existingConsent = (readShahabJsonSafe('SHAHAB_CONSENT_RECORDS.json') as Record<string, unknown> | null) ?? {};
+    const current = (existingConsent.currentConsent as Record<string, unknown> | undefined) ?? {
+      localDiagnosticsEnabled: true,
+      externalAnonymizedMetricsOptIn: false,
+      crashDiagnosticsOptIn: false,
+      humanFeedbackResearchOptIn: false,
+      revokedByUser: false,
+    };
+
+    const nextConsent = {
+      localDiagnosticsEnabled:
+        typeof body?.localDiagnosticsEnabled === 'boolean'
+          ? body.localDiagnosticsEnabled
+          : Boolean(current.localDiagnosticsEnabled ?? true),
+      externalAnonymizedMetricsOptIn:
+        typeof body?.externalAnonymizedMetricsOptIn === 'boolean'
+          ? body.externalAnonymizedMetricsOptIn
+          : Boolean(current.externalAnonymizedMetricsOptIn ?? false),
+      crashDiagnosticsOptIn:
+        typeof body?.crashDiagnosticsOptIn === 'boolean'
+          ? body.crashDiagnosticsOptIn
+          : Boolean(current.crashDiagnosticsOptIn ?? false),
+      humanFeedbackResearchOptIn:
+        typeof body?.humanFeedbackResearchOptIn === 'boolean'
+          ? body.humanFeedbackResearchOptIn
+          : Boolean(current.humanFeedbackResearchOptIn ?? false),
+      revokedByUser:
+        typeof body?.revokedByUser === 'boolean'
+          ? body.revokedByUser
+          : false,
+      updatedAtUtc: nowUtc,
+    };
+
+    if (nextConsent.revokedByUser) {
+      nextConsent.externalAnonymizedMetricsOptIn = false;
+      nextConsent.crashDiagnosticsOptIn = false;
+      nextConsent.humanFeedbackResearchOptIn = false;
+    }
+
+    const history = Array.isArray(existingConsent.history) ? [...existingConsent.history] : [];
+    history.push({ ...nextConsent, actor: 'LOCAL_USER_UI' });
+
+    const consentDoc = {
+      schemaVersion: '1.0.0',
+      updatedAtUtc: nowUtc,
+      currentConsent: nextConsent,
+      history: history.slice(-50),
+    };
+    writeShahabJsonAtomic('SHAHAB_CONSENT_RECORDS.json', consentDoc);
+
+    const opState = (readShahabJsonSafe('SHAHAB_OPERATIONAL_STATE.json') as Record<string, unknown> | null);
+    if (opState) {
+      writeShahabJsonAtomic('SHAHAB_OPERATIONAL_STATE.json', {
+        ...opState,
+        updatedAtUtc: nowUtc,
+        privacyConsent: nextConsent,
+      });
+    }
+
+    appendShahabJsonl('SHAHAB_RUNTIME_EVENTS.jsonl', {
+      eventId: `op_${crypto.randomBytes(6).toString('hex')}`,
+      timestampUtc: nowUtc,
+      eventType: nextConsent.revokedByUser ? 'PRIVACY_CONSENT_REVOKED' : 'PRIVACY_CONSENT_UPDATED',
+      severity: 'INFO',
+      fields: {
+        localDiagnosticsEnabled: nextConsent.localDiagnosticsEnabled,
+        externalAnonymizedMetricsOptIn: nextConsent.externalAnonymizedMetricsOptIn,
+        crashDiagnosticsOptIn: nextConsent.crashDiagnosticsOptIn,
+        humanFeedbackResearchOptIn: nextConsent.humanFeedbackResearchOptIn,
+        revokedByUser: nextConsent.revokedByUser,
+      },
+    });
+
+    res.json({ consent: nextConsent, historyCount: consentDoc.history.length });
+  });
+
+  app.post('/api/shahab/operations/diagnostic-export', (_req, res) => {
+    const nowUtc = new Date().toISOString();
+    const opState = (readShahabJsonSafe('SHAHAB_OPERATIONAL_STATE.json') as Record<string, unknown> | null) ?? {};
+    const qualState = (readShahabJsonSafe('SHAHAB_SYSTEM_QUALIFICATION_STATE.json') as Record<string, unknown> | null) ?? {};
+    const runtimeEvents = readShahabJsonlSafe('SHAHAB_RUNTIME_EVENTS.jsonl', 50);
+
+    // Strictly sanitized bundle: zero raw transcripts, zero audio buffers, zero user vocabulary, zero file paths
+    const sanitizedBundle = {
+      exportedAtUtc: nowUtc,
+      sanitizationPolicy: 'ZERO_RAW_TRANSCRIPT_ZERO_AUDIO_ZERO_USER_VOCAB_ZERO_LOCAL_PATHS',
+      privacyConsent: opState.privacyConsent ?? null,
+      releaseDecision: (qualState.releaseDecision as Record<string, unknown> | undefined)?.primaryDecision ?? null,
+      recentSanitizedEventsCount: runtimeEvents.length,
+      recentSanitizedEventTypes: runtimeEvents.map((e) =>
+        typeof e === 'object' && e !== null ? (e as Record<string, unknown>).eventType ?? 'UNKNOWN' : 'UNKNOWN',
+      ),
+    };
+    res.json(sanitizedBundle);
+  });
+
+  app.delete('/api/shahab/operations/local-diagnostics', (_req, res) => {
+    const resolved = path.resolve(SHAHAB_DOCS_ROOT, 'SHAHAB_RUNTIME_EVENTS.jsonl');
+    if (resolved.startsWith(SHAHAB_DOCS_ROOT + path.sep) && fs.existsSync(resolved)) {
+      fs.writeFileSync(resolved, '', 'utf8');
+    }
+    res.json({ cleared: true, clearedAtUtc: new Date().toISOString() });
   });
 
   // Sanitized JSON error handler for malformed JSON bodies and unexpected API errors

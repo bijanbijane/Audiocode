@@ -319,3 +319,8 @@ export async function sha256Blob(
   shouldAbort?.();
   return hasher.digestHex();
 }
+
+export function sha256Bytes(bytes: Uint8Array): string {
+  return new IncrementalSha256().update(bytes).digestHex();
+}
+

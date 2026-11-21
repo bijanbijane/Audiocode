@@ -146,3 +146,6 @@ export class ExecutionPolicyRouter {
     };
   }
 }
+
+export * from '../asr-core/UnifiedLocalAsrRuntime';
+

@@ -1,0 +1,26 @@
+{
+  "schemaVersion": "1.0.0",
+  "executedAtIso": "2026-11-21T19:06:52.400Z",
+  "passed": true,
+  "smokeInferencePassed": true,
+  "installV1": {
+    "activated": true,
+    "activeVersionId": "v1_upstream_original",
+    "previousVersionPreserved": null,
+    "stagingDirUsed": "/app/applet/models/shahab-variants/.install-smoke-store/.staging_v1_upstream_original_1795288003546",
+    "integrityVerified": true,
+    "smokeInferencePassed": true,
+    "smokeTranscript": "شکلات داغ در حد",
+    "error": null
+  },
+  "installV2": {
+    "activated": true,
+    "activeVersionId": "v2_variant_b_cleaned",
+    "previousVersionPreserved": "v1_upstream_original",
+    "stagingDirUsed": "/app/applet/models/shahab-variants/.install-smoke-store/.staging_v2_variant_b_cleaned_1795288006855",
+    "integrityVerified": true,
+    "smokeInferencePassed": true,
+    "smokeTranscript": "شکلات داغ در حد",
+    "error": null
+  }
+}

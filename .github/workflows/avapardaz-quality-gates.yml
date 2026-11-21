@@ -1,0 +1,79 @@
+name: AVAPARDAZ Quality & Release Gates (AVP-P0-005 / AVP-P0-006 / AVP-P0-007)
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  level1-static-and-build:
+    name: Level 1 — Lint, Typecheck & Production Build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install dependencies
+        run: npm ci || npm install
+      - name: Run linter
+        run: npm run lint
+      - name: Build production web bundle
+        run: npm run build
+      - name: Verify self-hosted ORT WASM assets exist
+        run: |
+          test -f public/ort/ort-wasm-simd-threaded.wasm
+          test -f dist/ort/ort-wasm-simd-threaded.wasm
+
+  level2-unit-dsp-linguistic-security-real-ort:
+    name: Level 2–4 — Real ORT Offline, DSP, Workflow, Linguistic, IPC & Security Suites
+    runs-on: ubuntu-latest
+    needs: level1-static-and-build
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install dependencies
+        run: npm ci || npm install
+      - name: Run canonical P0 automated verification suites (30 tests)
+        run: |
+          npx --yes tsx --test \
+            src/lifecycle/ModelProvenanceAndDelivery.test.ts \
+            src/asr-core/RealOnnxAndCrossRuntimeConformance.test.ts \
+            src/workflow/CanonicalProjectWorkflowAndDsp.test.ts \
+            src/asr-core/PersianLinguisticCorrectionAndLexical.test.ts \
+            src/host-bridge/companion/__tests__/CompanionProductionIpcAndCep.test.ts \
+            src/security/ArchitectureAndSecurityGuardrails.test.ts \
+            src/host-bridge/companion/__tests__/LocalCompanionAndSecurity.test.ts \
+            src/studio-workflow/__tests__/StudioWorkflowController.pass4.test.ts
+      - name: Verify no bundled model weights or secrets in web bundle
+        run: |
+          test -z "$(find src public dist -type f \( -name '*.onnx' -o -name '*.bin' -o -name '*.pt' \))"
+
+  level5-cep-packaging-and-audit:
+    name: Level 5 — Audition CEP Packaging & Supply-Chain Audit
+    runs-on: ubuntu-latest
+    needs: level2-unit-dsp-linguistic-security-real-ort
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Verify Adobe Audition CEP manifest & CSP hygiene
+        run: |
+          test -f packages/audition-cep-plugin/CSXS/manifest.xml
+          grep -q "AUDT" packages/audition-cep-plugin/CSXS/manifest.xml
+          grep -q "Content-Security-Policy" packages/audition-cep-plugin/client/index.html
+      - name: Check lockfile / dependency audit availability
+        run: |
+          if [ -f package-lock.json ]; then
+            npm audit --audit-level=high
+          else
+            echo "::warning::package-lock.json absent (bun.lock present) — npm audit BLOCKED until canonical npm lockfile is generated."
+          fi

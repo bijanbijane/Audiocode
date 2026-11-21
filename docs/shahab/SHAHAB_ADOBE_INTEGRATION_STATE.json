@@ -1,0 +1,63 @@
+{
+  "missionId": "SHAHAB-024",
+  "generatedAtUtc": "2026-11-21T19:07:42.715Z",
+  "primaryArchitectureDecision": "COMPANION_APP_APPROVED",
+  "officialCapabilityRegisterCount": 5,
+  "hostVersionMatrix": [
+    {
+      "auditionVersion": "Adobe Audition 25.x (2025/2026)",
+      "os": "Windows 11",
+      "arch": "x86_64",
+      "integrationMechanism": "Companion App + User WAV Export + Markers Tab-Delimited CSV/TXT + SRT + JSON Sidecar",
+      "markerCsvImportSupported": true,
+      "liveHostTestResult": "NOT_TESTED",
+      "sdkCompatibility": "SHAHAB SDK v1.0.0",
+      "adapterVersion": "1.0.0",
+      "notes": "No Windows Adobe Audition installation available in Linux headless workspace."
+    },
+    {
+      "auditionVersion": "Adobe Audition 25.x (2025/2026)",
+      "os": "macOS 14/15",
+      "arch": "arm64 / x86_64",
+      "integrationMechanism": "Companion App + User WAV Export + Markers Tab-Delimited CSV/TXT + SRT + JSON Sidecar",
+      "markerCsvImportSupported": true,
+      "liveHostTestResult": "NOT_TESTED",
+      "sdkCompatibility": "SHAHAB SDK v1.0.0",
+      "adapterVersion": "1.0.0",
+      "notes": "No macOS Adobe Audition installation available in Linux headless workspace."
+    }
+  ],
+  "liveAuditionHostTested": false,
+  "liveHostTestStatus": "NOT_TESTED_NO_AUDITION_INSTALLATION_IN_LINUX_CONTAINER",
+  "adapterVerificationChecks": [
+    {
+      "checkId": "AUD-SDK-OFFSET-01",
+      "area": "SHAHAB-022 SDK Consumption, Source Integrity & Non-Zero Session Offset Mapping",
+      "passed": true,
+      "detail": "intact=true, offsetMapped=85.5s, workflow=RESULT_PACKAGE_READY_AWAITING_USER_IMPORT"
+    },
+    {
+      "checkId": "AUD-INTERCHANGE-01",
+      "area": "Audition Tab-Delimited Markers CSV (UTF-8 BOM), SRT & JSON Sidecar Generation",
+      "passed": true,
+      "detail": "csvHeader=true, offsetInCsv=true, formats=CSV/SRT/JSON"
+    },
+    {
+      "checkId": "AUD-BRIDGE-SEC-01",
+      "area": "Authenticated Local Companion Bridge & Path Confinement",
+      "passed": true,
+      "detail": "unauthBlocked=true, pathEscapeBlocked=true, validAllowed=true"
+    },
+    {
+      "checkId": "AUD-PRIV-REC-01",
+      "area": "Unauthorized Cloud Block & Host-Close Recovery Validation",
+      "passed": true,
+      "detail": "cloudRejected=true, matchingSessionSafe=true, wrongSessionBlocked=true"
+    }
+  ],
+  "finalStatus": "PARTIALLY_VERIFIED",
+  "unresolvedBlockers": [
+    "Live end-to-end import test inside an installed Windows/macOS Adobe Audition 25.x desktop binary is NOT_TESTED in this Linux container.",
+    "Adobe Audition does not expose a public UXP API or native Speech-to-Text transcript object API; user-driven Markers Panel import remains required."
+  ]
+}

@@ -1,0 +1,26 @@
+# SHAHAB Mission Log (SHAHAB-001 .. SHAHAB-021)
+
+- **SHAHAB-001:** VERIFIED — Hardware/runtime discovery (4 CPU cores, 12.00 GiB RAM, 0 GPUs).
+- **SHAHAB-002:** VERIFIED — Persistent `SHAHAB LAB` observatory + `/api/shahab/*` + append-only JSONL ledger.
+- **SHAHAB-003:** VERIFIED — Live metadata-only inspection of all 9 target repositories (zero weight downloads).
+- **SHAHAB-004:** VERIFIED — Selected Persian Zipformer INT8 @ `0408facbcf3f670121def48e0802c395c225d150`; parsed 11,470,768 logical parameters.
+- **SHAHAB-005:** VERIFIED — Real unmocked Persian Zipformer inference on `sample.wav` (cold load 3321 ms).
+- **SHAHAB-006:** VERIFIED — Immutable baseline benchmark `shahab_bench_1795287969425_e345b2` (Track A/B dual-track evaluation).
+- **SHAHAB-007:** VERIFIED — Encoder Output Reuse verified (1 encoder call across 4 decode policies; saved ~749 ms/pass).
+- **SHAHAB-008:** VERIFIED — 4-scope Persian Context Memory, real `tokens.txt` BPE biasing, Greedy bias refusal, and `SHAHABFalseInsertionGuard`.
+- **SHAHAB-009:** VERIFIED — Compression Lab Variants A/B/C/D measured honestly (uncompressed 115.77 MB (110.41 MiB) · 115,768,868 B; gzip 99.24 MB (94.65 MiB) · 99,244,845 B; INT4 blocked in WASM).
+- **SHAHAB-010:** VERIFIED — Unified `SHAHABEngine` (`SHAHAB-R1.4.0`) Local/Cloud parity, privacy gate, chunked streaming, and verified rollback.
+- **SHAHAB-011:** COMPLETED_UNVERIFIED — Field validation infrastructure + pilot run complete; Decision A (`CONTINUE_FROZEN_WEIGHT_RUNTIME`) issued.
+- **SHAHAB-012:** NOT_REQUIRED_BY_EVIDENCE — Honored SHAHAB-011 Decision A; `NO_TRAINING_EXECUTED`; `trainable_parameters = 0`.
+- **SHAHAB-013:** VERIFIED — Branch B release hardening (`SHAHAB-R2.0.0-RELEASE-CANDIDATE`), CycloneDX SBOM, atomic install/rollback verified; cryptographic signing honestly marked BLOCKED.
+- **SHAHAB-014:** PARTIALLY_VERIFIED — Entry gate `PARTIALLY_VERIFIED`; operational observability, local-first privacy, 11-state feedback governance, 14-state update lifecycle, and regression analyzer implemented and tested.
+- **SHAHAB-015:** PARTIALLY_VERIFIED — Entry gate `PARTIALLY_VERIFIED`; 12 containment boundaries, 33 failure codes, 14-state job machine, 11/11 isolated fault-injection scenarios & restore verification passed.
+- **SHAHAB-016:** VERIFIED — Tracks A–F, Amdahl bottleneck forensics, OPT-001/002/003 controlled A/B experiments (warm median RTF=0.079).
+- **SHAHAB-017:** VERIFIED — Honest streaming audit (`TRUE_STATEFUL_STREAMING: NOT_SUPPORTED_BY_MODEL`), `INCREMENTAL_WINDOWED_INFERENCE`, 16-state machine, repetition-preserving overlap reconciliation & editor bridge.
+- **SHAHAB-018:** PARTIALLY_VERIFIED — Target platform registry, coarse privacy-safe capability discovery, deterministic capability negotiation & conformance suite (6/6).
+- **SHAHAB-019:** VERIFIED — 6-layer transcript provenance, P0-009/010/012 reuse, verbatim preservation, 18-category Persian error taxonomy, uncalibrated score guard & 7-level adjudication.
+- **SHAHAB-020:** VERIFIED — Complete package footprint (115.77 MB (110.41 MiB) · 115,768,868 B uncompressed vs 99.24 MB (94.65 MiB) · 99,244,845 B gzip transport), sub-100 MiB uncompressed honesty, and active-model protection.
+- **SHAHAB-021:** VERIFIED — Integrated system qualification across SHAHAB-013..020, Workloads WL-A..WL-H (8/8 passed), Cross-Subsystem XSUB-5.1..5.6, and programmatic Go/No-Go decision (`NO_GO_REQUIRES_ENGINEERING_FIXES`).
+- **SHAHAB-022:** VERIFIED — Stable host-neutral SDK v1.0.0, conformance (7/7), and runnable sample host verified.
+- **SHAHAB-023:** VERIFIED — Avapardaz native integration via SHAHAB-022 SDK, non-destructive source hashing, exact flick/sample timeline mapping, P0-009/010/012 preserved.
+- **SHAHAB-024:** PARTIALLY_VERIFIED — Adobe Audition official research (`COMPANION_APP_APPROVED`), Companion Host Adapter & Markers CSV/SRT/Sidecar verified; live Audition GUI `NOT_TESTED`.

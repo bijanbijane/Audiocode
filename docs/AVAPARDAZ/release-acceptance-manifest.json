@@ -1,0 +1,102 @@
+{
+  "schemaVersion": "1.0.0",
+  "product": "AVAPARDAZ",
+  "generatedAtIso": "2026-11-21T07:40:00.000Z",
+  "missionsCovered": [
+    "AVP-P0-001",
+    "AVP-P0-002",
+    "AVP-P0-003",
+    "AVP-P0-004",
+    "AVP-P0-005",
+    "AVP-P0-006",
+    "AVP-P0-007",
+    "AVP-P0-008",
+    "AVP-P0-009",
+    "AVP-P0-010",
+    "AVP-PERSIAN-ZIPFORMER-ASSET-ACQUISITION-001",
+    "AVP-P0-012"
+  ],
+  "componentVersions": {
+    "webAppVersion": "2.0.0",
+    "companionVersion": "2.0.0",
+    "auditionCepVersion": "1.0.0",
+    "ipcProtocolVersion": "2.0.0",
+    "asrContractVersion": "2.0.0",
+    "modelManifestSchemaVersion": "2.0.0",
+    "projectSchemaVersion": "2.0.0",
+    "persianNormalizationPolicyVersion": "FA-LINGUISTIC-V1.0.0",
+    "persianCorrectionPolicyVersion": "FA-EVIDENCE-CORRECTION-V1.0.0"
+  },
+  "runtimeArchitectureGuarantees": {
+    "browserLocalRuntimeRequiresCompanion": false,
+    "nativeLocalRuntimeRequiresBrowser": false,
+    "cloudAsrFallbackPermitted": false,
+    "zipformerWiredToCtcEngine": false
+  },
+  "verifiedAutomatedTestSuites": {
+    "totalTestsExecuted": 30,
+    "passed": 30,
+    "failed": 0,
+    "suites": [
+      "src/lifecycle/ModelProvenanceAndDelivery.test.ts",
+      "src/asr-core/RealOnnxAndCrossRuntimeConformance.test.ts",
+      "src/workflow/CanonicalProjectWorkflowAndDsp.test.ts",
+      "src/asr-core/PersianLinguisticCorrectionAndLexical.test.ts",
+      "src/host-bridge/companion/__tests__/CompanionProductionIpcAndCep.test.ts",
+      "src/security/ArchitectureAndSecurityGuardrails.test.ts",
+      "src/host-bridge/companion/__tests__/LocalCompanionAndSecurity.test.ts",
+      "src/studio-workflow/__tests__/StudioWorkflowController.pass4.test.ts"
+    ]
+  },
+  "acquiredModelPackages": [
+    {
+      "modelId": "persian-zipformer-transducer",
+      "version": "1.0.0",
+      "architecture": "pruned_transducer_stateless7",
+      "upstreamRepository": "https://huggingface.co/ramin-mahmoodi/persian-zipformer-asr",
+      "upstreamCommit": "0408facbcf3f670121def48e0802c395c225d150",
+      "localDirectory": "models/persian-zipformer-transducer/1.0.0",
+      "licenseDeclaredInUpstreamReadme": "Apache-2.0",
+      "upstreamStandaloneLicenseFilePresent": false,
+      "mandatoryTotalBytes": 115757880,
+      "verifiedByScript": "node scripts/acquire-persian-zipformer.mjs --verify-only",
+      "inferenceReadinessStatus": "ASSETS_ACQUIRED_AND_VERIFIED_ONLY_NOT_WIRED_TO_CTC"
+    }
+  ],
+  "overallVerdict": {
+    "internalEngineeringQualification": "PASS_WITH_EXPLICIT_EXTERNAL_BLOCKERS",
+    "publicCommercialRelease": "BLOCKED"
+  },
+  "explicitBlockers": [
+    {
+      "id": "BLK-001",
+      "category": "MODEL_PUBLISHER_SIGNING",
+      "status": "BLOCKED",
+      "detail": "No detached cryptographic publisher signing private/public keypair (Ed25519/ECDSA) has been provisioned for production model manifests or component updates; SHA-256 checksums verify integrity only."
+    },
+    {
+      "id": "BLK-002",
+      "category": "UPSTREAM_ZIPFORMER_LICENSE_FILE",
+      "status": "BLOCKED",
+      "detail": "Upstream repository ramin-mahmoodi/persian-zipformer-asr commit 0408facbcf3f670121def48e0802c395c225d150 declares Apache-2.0 in README.md YAML frontmatter and License section, but does not include a standalone LICENSE file in its Git tree."
+    },
+    {
+      "id": "BLK-003",
+      "category": "HUMAN_VERIFIED_PERSIAN_AUDIO_CORPUS",
+      "status": "BLOCKED",
+      "detail": "No human-verified multi-domain Persian speech audio benchmark corpus is bundled in the repository for live end-to-end statistical WER/CER qualification beyond synthetic DSP/ORT contract fixtures and prior Phase-02 FLEURS results."
+    },
+    {
+      "id": "BLK-004",
+      "category": "NATIVE_OS_AND_ADOBE_AUDITION_HOST",
+      "status": "BLOCKED",
+      "detail": "Container runs Linux without sherpa-onnx native binary or physical macOS/Windows Adobe Audition 24/25 host GUI; live ExtendScript host smoke tests and signed .zxp/.dmg/.msi packaging require physical target hosts."
+    },
+    {
+      "id": "BLK-005",
+      "category": "DEPENDENCY_LOCKFILE_CVE_SCAN",
+      "status": "BLOCKED",
+      "detail": "Repository uses bun.lock without package-lock.json, preventing npm audit execution until a canonical npm lockfile is generated."
+    }
+  ]
+}

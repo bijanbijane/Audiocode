@@ -33,6 +33,9 @@ export interface StudioAsrInitializePayload {
   readonly executionProviders: readonly ('webgpu' | 'wasm')[];
   readonly chunkedManifest: ChunkedModelManifest;
   readonly decoderChunkedManifest?: ChunkedModelManifest;
+  /** Optional direct model bytes (still strictly SHA-256 verified against expectedSha256Hex) */
+  readonly directEncoderBytes?: Uint8Array;
+  readonly directDecoderBytes?: Uint8Array;
   readonly ctcVocabulary?: readonly string[];
   readonly whisperIdToBpeTokenEntries?: readonly [number, string][];
   readonly whisperSpecialTokens?: WhisperSpecialTokens;
@@ -105,6 +108,27 @@ export class StudioAsrWorkerRuntimeHost {
   public async handleMessage(
     msg: StudioAsrWorkerRequestMessage,
   ): Promise<StudioAsrWorkerResponseMessage> {
+    if (
+      !msg ||
+      typeof msg !== 'object' ||
+      typeof msg.requestId !== 'string' ||
+      msg.requestId.trim().length === 0 ||
+      msg.requestId.length > 128 ||
+      typeof msg.jobId !== 'string' ||
+      msg.jobId.trim().length === 0 ||
+      msg.jobId.length > 128 ||
+      typeof msg.command !== 'string'
+    ) {
+      return {
+        requestId: typeof msg?.requestId === 'string' ? msg.requestId : 'invalid',
+        jobId: typeof msg?.jobId === 'string' ? msg.jobId : 'invalid',
+        ok: false,
+        command: (typeof msg?.command === 'string' ? msg.command : 'DISPOSE') as StudioAsrWorkerCommand,
+        errorCode: 'INVALID_PROCESSING_REQUEST',
+        message: 'Worker message failed strict schema validation (requestId, jobId, command required).',
+      };
+    }
+
     if (this.disposed && msg.command !== 'DISPOSE') {
       return {
         requestId: msg.requestId,
@@ -283,25 +307,38 @@ export class StudioAsrWorkerRuntimeHost {
     const budget = this.options?.budgetManager ?? getSharedMemoryBudgetManager();
 
     try {
-      const encoderBytes = await WebWorkerOrtRuntimeProvider.assembleModelBytesFromOpfsChunks(
-        {
-          ...payload.chunkedManifest,
-          sha256Hex: expectedSha,
-        },
-        this.options?.opfsRootOverride,
-        {
-          memoryBudgetManager: budget,
-          signal: abortCtrl.signal,
-          onReservation: (reservation) => {
-            this.activeReservations.push(reservation);
+      let encoderBytes: Uint8Array;
+      if (payload.directEncoderBytes instanceof Uint8Array && payload.directEncoderBytes.byteLength > 0) {
+        // Strictly SHA-256 verify direct bytes before passing to ONNX Runtime
+        const digestBuf = await crypto.subtle.digest(
+          'SHA-256',
+          payload.directEncoderBytes.buffer.slice(
+            payload.directEncoderBytes.byteOffset,
+            payload.directEncoderBytes.byteOffset + payload.directEncoderBytes.byteLength,
+          ) as ArrayBuffer,
+        );
+        const actualHex = Array.from(new Uint8Array(digestBuf))
+          .map((b) => b.toString(16).padStart(2, '0'))
+          .join('');
+        if (actualHex !== expectedSha) {
+          throw new Error(
+            `MODEL_INTEGRITY_FAILURE: Direct encoder SHA-256 mismatch (expected ${expectedSha}, actual ${actualHex}).`,
+          );
+        }
+        const reservation = budget.reserve({
+          owner: `studio-asr-worker:direct:${payload.modelId}`,
+          category: 'model-runtime',
+          bytes: payload.directEncoderBytes.byteLength,
+          priority: 'protected',
+        });
+        this.activeReservations.push(reservation);
+        encoderBytes = payload.directEncoderBytes;
+      } else {
+        encoderBytes = await WebWorkerOrtRuntimeProvider.assembleModelBytesFromOpfsChunks(
+          {
+            ...payload.chunkedManifest,
+            sha256Hex: expectedSha,
           },
-        },
-      );
-
-      let decoderBytes: Uint8Array | undefined;
-      if (payload.architecture === 'WHISPER_SEQ2SEQ' && payload.decoderChunkedManifest) {
-        decoderBytes = await WebWorkerOrtRuntimeProvider.assembleModelBytesFromOpfsChunks(
-          payload.decoderChunkedManifest,
           this.options?.opfsRootOverride,
           {
             memoryBudgetManager: budget,
@@ -311,6 +348,25 @@ export class StudioAsrWorkerRuntimeHost {
             },
           },
         );
+      }
+
+      let decoderBytes: Uint8Array | undefined;
+      if (payload.architecture === 'WHISPER_SEQ2SEQ' && payload.decoderChunkedManifest) {
+        if (payload.directDecoderBytes instanceof Uint8Array && payload.directDecoderBytes.byteLength > 0) {
+          decoderBytes = payload.directDecoderBytes;
+        } else {
+          decoderBytes = await WebWorkerOrtRuntimeProvider.assembleModelBytesFromOpfsChunks(
+            payload.decoderChunkedManifest,
+            this.options?.opfsRootOverride,
+            {
+              memoryBudgetManager: budget,
+              signal: abortCtrl.signal,
+              onReservation: (reservation) => {
+                this.activeReservations.push(reservation);
+              },
+            },
+          );
+        }
       }
 
       if (abortCtrl.signal.aborted) {
@@ -420,22 +476,22 @@ export class StudioAsrWorkerRuntimeHost {
         message: 'Local ONNX ASR engine is not initialized.',
       };
     }
-    if (!msg.pcm16kBuffer) {
+    if (!msg.pcm16kBuffer || !(msg.pcm16kBuffer instanceof ArrayBuffer) || msg.pcm16kBuffer.byteLength > 32 * 1024 * 1024) {
       return {
         requestId: msg.requestId,
         jobId: msg.jobId,
         ok: false,
         command: 'TRANSCRIBE_WINDOW',
         errorCode: 'INVALID_PROCESSING_REQUEST',
-        message: 'TRANSCRIBE_WINDOW requires pcm16kBuffer.',
+        message: 'TRANSCRIBE_WINDOW requires a valid pcm16kBuffer (<= 32 MiB).',
       };
     }
     const abortCtrl = new AbortController();
     this.activeJobAborts.set(msg.jobId, abortCtrl);
     try {
       const sampleCount =
-        typeof msg.pcm16kLength === 'number' && msg.pcm16kLength >= 0
-          ? Math.min(msg.pcm16kLength, Math.floor(msg.pcm16kBuffer.byteLength / 4))
+        typeof msg.pcm16kLength === 'number' && Number.isFinite(msg.pcm16kLength) && msg.pcm16kLength >= 0
+          ? Math.min(Math.floor(msg.pcm16kLength), Math.floor(msg.pcm16kBuffer.byteLength / 4))
           : Math.floor(msg.pcm16kBuffer.byteLength / 4);
       const pcm = new Float32Array(msg.pcm16kBuffer, 0, sampleCount);
       const words = await this.engine.transcribeWindow(pcm);

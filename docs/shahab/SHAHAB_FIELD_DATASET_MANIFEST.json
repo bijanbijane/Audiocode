@@ -1,0 +1,140 @@
+{
+  "datasetId": "shahab-persian-field-eval-v1",
+  "datasetVersion": "1.0.0",
+  "leakageCheck": {
+    "passed": true,
+    "duplicateAudioHashes": [],
+    "duplicateAcousticFingerprints": [],
+    "crossPartitionSpeakerLeaks": [],
+    "crossPartitionSessionLeaks": [],
+    "notes": [
+      "Total samples registered: 3",
+      "Eligible for ground-truth scoring: 3",
+      "No speaker overlap across DEV/FROZEN_TEST."
+    ]
+  },
+  "categoryCoverage": {
+    "CATEGORY_A_STUDIO_PODCAST": {
+      "sampleCount": 1,
+      "independentRecordingCount": 1,
+      "totalDurationSec": 12.12,
+      "status": "INSUFFICIENT_DATA"
+    },
+    "CATEGORY_B_INTERVIEWS_CONVERSATIONS": {
+      "sampleCount": 0,
+      "independentRecordingCount": 0,
+      "totalDurationSec": 0,
+      "status": "NOT_EVALUATED"
+    },
+    "CATEGORY_C_PROFESSIONAL_EDUCATIONAL": {
+      "sampleCount": 0,
+      "independentRecordingCount": 0,
+      "totalDurationSec": 0,
+      "status": "NOT_EVALUATED"
+    },
+    "CATEGORY_D_MEDIA_VIDEO_EDITING": {
+      "sampleCount": 0,
+      "independentRecordingCount": 0,
+      "totalDurationSec": 0,
+      "status": "NOT_EVALUATED"
+    },
+    "CATEGORY_E_DIFFICULT_ACOUSTICS": {
+      "sampleCount": 2,
+      "independentRecordingCount": 1,
+      "totalDurationSec": 24.24,
+      "status": "INSUFFICIENT_DATA"
+    }
+  },
+  "samples": [
+    {
+      "sampleId": "field_catA_clean_001",
+      "audioSha256": "e4f83ec981187afc2bd5902d604dfa55c3692c4010a5de2232b15427ca697b97",
+      "acousticFingerprint": "fp_clean_193920",
+      "sourceIdentifier": "ramin-mahmoodi/persian-zipformer-asr/sample.wav",
+      "sourceLicenseOrAuthorization": "Apache-2.0 (Public Upstream Demo Sample)",
+      "durationSec": 12.12,
+      "sampleRateHz": 16000,
+      "channelCount": 1,
+      "category": "CATEGORY_A_STUDIO_PODCAST",
+      "recordingConditions": "Clean 16kHz studio Persian speech",
+      "referenceTranscript": "شکلات داغ در حد استانداردهای بلژیکی است آبمیوهها گران قیمت ولی عالی میباشند",
+      "referenceVerificationStatus": "UPSTREAM_DOCUMENTED_DEMO",
+      "speakerGroupId": "spk_upstream_demo_1",
+      "sessionGroupId": "sess_upstream_demo_1",
+      "partition": "FROZEN_TEST",
+      "consent": {
+        "anonymousOperationalTelemetry": true,
+        "audioRetentionForResearch": true,
+        "transcriptRetentionForEvaluation": true,
+        "shareCorrectionsForResearch": false,
+        "consentRecordedAtIso": "2026-11-21T19:06:43.101Z",
+        "retentionPolicyDays": 90,
+        "withdrawn": false,
+        "withdrawnAtIso": null
+      },
+      "annotationVersion": "1.0.0",
+      "isDerivedAcousticConditionVariant": false,
+      "derivedFromSampleId": null
+    },
+    {
+      "sampleId": "field_catE_noisy_002",
+      "audioSha256": "2fcfcdb29751c21d5ccc5003257c00c39a5206dd94cf7909b99d2f5b47c19717",
+      "acousticFingerprint": "fp_noisy_193920",
+      "sourceIdentifier": "Derived broadband noise stress test from sample.wav",
+      "sourceLicenseOrAuthorization": "Apache-2.0 (Derived from sample.wav)",
+      "durationSec": 12.12,
+      "sampleRateHz": 16000,
+      "channelCount": 1,
+      "category": "CATEGORY_E_DIFFICULT_ACOUSTICS",
+      "recordingConditions": "Broadband noise stress",
+      "referenceTranscript": "شکلات داغ در حد استانداردهای بلژیکی است آبمیوهها گران قیمت ولی عالی میباشند",
+      "referenceVerificationStatus": "UPSTREAM_DOCUMENTED_DEMO",
+      "speakerGroupId": "spk_stress_e_noise",
+      "sessionGroupId": "sess_stress_e_noise",
+      "partition": "DEV_DIAGNOSTIC",
+      "consent": {
+        "anonymousOperationalTelemetry": true,
+        "audioRetentionForResearch": true,
+        "transcriptRetentionForEvaluation": true,
+        "shareCorrectionsForResearch": false,
+        "consentRecordedAtIso": "2026-11-21T19:06:43.101Z",
+        "retentionPolicyDays": 90,
+        "withdrawn": false,
+        "withdrawnAtIso": null
+      },
+      "annotationVersion": "1.0.0",
+      "isDerivedAcousticConditionVariant": true,
+      "derivedFromSampleId": "field_catA_clean_001"
+    },
+    {
+      "sampleId": "field_catE_clipped_003",
+      "audioSha256": "c73adf72fb30e6057c23d9d7609d1d651a01a0abde75f1bf0a0b62d840113d7f",
+      "acousticFingerprint": "fp_clipped_193920",
+      "sourceIdentifier": "Derived clipping stress test from sample.wav",
+      "sourceLicenseOrAuthorization": "Apache-2.0 (Derived from sample.wav)",
+      "durationSec": 12.12,
+      "sampleRateHz": 16000,
+      "channelCount": 1,
+      "category": "CATEGORY_E_DIFFICULT_ACOUSTICS",
+      "recordingConditions": "Hard-clipped microphone overload",
+      "referenceTranscript": "شکلات داغ در حد استانداردهای بلژیکی است آبمیوهها گران قیمت ولی عالی میباشند",
+      "referenceVerificationStatus": "UPSTREAM_DOCUMENTED_DEMO",
+      "speakerGroupId": "spk_stress_e_clip",
+      "sessionGroupId": "sess_stress_e_clip",
+      "partition": "DEV_DIAGNOSTIC",
+      "consent": {
+        "anonymousOperationalTelemetry": true,
+        "audioRetentionForResearch": true,
+        "transcriptRetentionForEvaluation": true,
+        "shareCorrectionsForResearch": false,
+        "consentRecordedAtIso": "2026-11-21T19:06:43.101Z",
+        "retentionPolicyDays": 90,
+        "withdrawn": false,
+        "withdrawnAtIso": null
+      },
+      "annotationVersion": "1.0.0",
+      "isDerivedAcousticConditionVariant": true,
+      "derivedFromSampleId": "field_catA_clean_001"
+    }
+  ]
+}

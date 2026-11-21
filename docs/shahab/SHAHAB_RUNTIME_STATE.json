@@ -1,0 +1,179 @@
+{
+  "missionId": "SHAHAB-018",
+  "generatedAtUtc": "2026-11-21T19:07:19.205Z",
+  "targetPlatformRegistry": [
+    {
+      "targetId": "NODE_LOCAL_WASM_CPU",
+      "label": "Node.js Local WASM CPU (onnxruntime-web)",
+      "runtimeLibrary": "onnxruntime-web@1.31.1",
+      "executionProvider": "wasm",
+      "supportState": "VERIFIED_AVAILABLE",
+      "offlineCapable": true,
+      "verifiedInThisWorkspace": true,
+      "blockers": []
+    },
+    {
+      "targetId": "CLOUD_UNIFIED_SERVER",
+      "label": "Avapardaz Unified Cloud Processing Adapter",
+      "runtimeLibrary": "server.ts / UnifiedProcessingOrchestrator",
+      "executionProvider": "cloud_api",
+      "supportState": "VERIFIED_AVAILABLE",
+      "offlineCapable": false,
+      "verifiedInThisWorkspace": true,
+      "blockers": [
+        "Requires explicit user authorization before transferring any audio off-device."
+      ]
+    },
+    {
+      "targetId": "BROWSER_LOCAL_WASM",
+      "label": "Browser In-Tab WASM CPU (OPFS cached)",
+      "runtimeLibrary": "onnxruntime-web@1.31.1",
+      "executionProvider": "wasm",
+      "supportState": "AVAILABLE_BUT_UNVERIFIED",
+      "offlineCapable": true,
+      "verifiedInThisWorkspace": false,
+      "blockers": [
+        "110.41 MiB uncompressed model exceeds comfortable cold browser-tab download without OPFS pre-caching and headless-browser inference verification."
+      ]
+    },
+    {
+      "targetId": "NATIVE_CPP_ONNXRUNTIME",
+      "label": "Native C++ ONNX Runtime / Companion Host",
+      "runtimeLibrary": "onnxruntime-node / sherpa-onnx C++",
+      "executionProvider": "cpu_native",
+      "supportState": "UNAVAILABLE",
+      "offlineCapable": true,
+      "verifiedInThisWorkspace": false,
+      "blockers": [
+        "Native C++ binary addon not installed in container environment."
+      ]
+    },
+    {
+      "targetId": "WEBGPU_OR_CUDA_ACCEL",
+      "label": "GPU Hardware Acceleration (WebGPU / CUDA)",
+      "runtimeLibrary": "WebGPU / CUDA EP",
+      "executionProvider": "webgpu",
+      "supportState": "BLOCKED",
+      "offlineCapable": true,
+      "verifiedInThisWorkspace": false,
+      "blockers": [
+        "No hardware GPU / CUDA driver available in headless container environment."
+      ]
+    }
+  ],
+  "discoveredCapabilities": {
+    "cpuCoreBucket": "3-4",
+    "memoryTierGb": "9-16GB",
+    "wasmAvailable": true,
+    "webGpuAvailable": false,
+    "nativeCppBindingAvailable": false,
+    "cloudEndpointAuthorized": false,
+    "fingerprintCollected": false,
+    "userAgentParsed": false
+  },
+  "modelCompatibilityManifest": {
+    "modelId": "INHERITED-PERSIAN-ASR-CORE",
+    "modelRevision": "0408facbcf3f670121def48e0802c395c225d150",
+    "artifacts": [
+      {
+        "fileName": "encoder.int8.onnx",
+        "opsetVersions": [
+          14
+        ],
+        "inputs": [
+          "x",
+          "x_lens"
+        ],
+        "outputs": [
+          "encoder_out",
+          "encoder_out_lens"
+        ],
+        "operatorCount": 4445,
+        "uniqueOperatorsCount": 33
+      },
+      {
+        "fileName": "decoder.int8.onnx",
+        "opsetVersions": [
+          14
+        ],
+        "inputs": [
+          "y"
+        ],
+        "outputs": [
+          "decoder_out"
+        ],
+        "operatorCount": 14,
+        "uniqueOperatorsCount": 11
+      },
+      {
+        "fileName": "joiner.int8.onnx",
+        "opsetVersions": [
+          14
+        ],
+        "inputs": [
+          "encoder_out",
+          "decoder_out"
+        ],
+        "outputs": [
+          "logit"
+        ],
+        "operatorCount": 8,
+        "uniqueOperatorsCount": 6
+      }
+    ],
+    "requiredProvider": "wasm"
+  },
+  "conformanceSuite": {
+    "totalCases": 6,
+    "passedCases": 6,
+    "results": [
+      {
+        "testId": "CONF-INIT-01",
+        "category": "INIT",
+        "passed": true,
+        "detail": "Initialized 3 ONNX sessions; SHA-256 immutable=true; vocab=1024."
+      },
+      {
+        "testId": "CONF-INPUT-01",
+        "category": "INPUT",
+        "passed": true,
+        "detail": "Empty audio buffer rejected with typed AUDIO_INVALID error."
+      },
+      {
+        "testId": "CONF-OUTPUT-01",
+        "category": "OUTPUT",
+        "passed": true,
+        "detail": "Unified contract returned provider=wasm, segments=1, textLen=67."
+      },
+      {
+        "testId": "CONF-CANCEL-01",
+        "category": "CANCELLATION",
+        "passed": true,
+        "detail": "Pre-aborted AbortSignal rejected cleanly with JOB_CANCELLED."
+      },
+      {
+        "testId": "CONF-NEG-01",
+        "category": "NEGOTIATION",
+        "passed": true,
+        "detail": "UnauthorizedCloud=BLOCKED_CLOUD_AUTHORIZATION_REQUIRED; ModelSub=BLOCKED_MODEL_SUBSTITUTION_FORBIDDEN; WebGpuAuto=SELECTED_LOCAL_WASM (fallbackApplied=true)."
+      },
+      {
+        "testId": "CONF-FAIL-01",
+        "category": "FAILURE",
+        "passed": true,
+        "detail": "Hash-mismatched model blocked with MODEL_INTEGRITY_FAILURE."
+      }
+    ]
+  },
+  "localCloudContractCheck": {
+    "contractVersionMatch": true,
+    "unauthorizedCloudBlocked": true,
+    "provenanceSeparatesProviders": true
+  },
+  "finalStatus": "PARTIALLY_VERIFIED",
+  "blockers": [
+    "WebGPU/CUDA execution providers are BLOCKED (no GPU hardware in environment).",
+    "Native C++ ONNX Runtime addon is UNAVAILABLE in workspace.",
+    "Browser Local WASM remains AVAILABLE_BUT_UNVERIFIED for 110.41 MiB cold tab execution."
+  ]
+}

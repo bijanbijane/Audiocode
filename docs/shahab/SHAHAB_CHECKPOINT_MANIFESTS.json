@@ -1,0 +1,69 @@
+{
+  "schemaVersion": "1.0.0",
+  "updatedAtIso": "2026-11-21T19:06:52.510Z",
+  "manifests": [
+    {
+      "schemaVersion": "1.0.0",
+      "checkpointId": "chk-5a25abb8-ce6",
+      "jobId": "job-08424982-6d4",
+      "stage": "POST_ENCODER_EXECUTION",
+      "createdAtIso": "2026-11-21T19:06:52.419Z",
+      "audioSourceId": "rec-proc-02.wav",
+      "audioContentSha256": "c596e2a11f1ccb2a9981db6220234ec28f5609c6a96bc8976dc1d9b969a74917",
+      "modelId": "INHERITED-PERSIAN-ASR-CORE",
+      "modelArtifactsDigestSha256": "474ce805ed56bfc9e51940e146f97b066e2601528070855cdd8c5eaa85268f63",
+      "tokenizerSha256": "611647fe6021c054a84626b0d7d69ad2def6492c0f3e1bec58ed0137300af1ba",
+      "preprocessingConfigSha256": "d9b05595a96a6720958cfb05a75df9e48dde535fd71d9aeee75cbb7e41848dc1",
+      "runtimeCompatibilityTag": "onnxruntime-web-wasm-cpu",
+      "completedChunkIndices": [
+        0
+      ],
+      "totalChunks": 2,
+      "payloadSha256": "7b6bf3bae569cc9c110463dd93c5df3690b46e33b659baded17f241aec58ab89",
+      "payloadRelativePath": "payloads/chk-5a25abb8-ce6.payload.json",
+      "envelopeSha256": "6db4a8ff2ee1e08e5ada9fa27ef8e709efe3bc644c1dd7d8ee1e522f662cbdb1"
+    },
+    {
+      "schemaVersion": "1.0.0",
+      "checkpointId": "chk-6a757490-4f7",
+      "jobId": "job-corrupt-chk",
+      "stage": "POST_FEATURE_EXTRACTION",
+      "createdAtIso": "2026-11-21T19:06:52.429Z",
+      "audioSourceId": "rec-corrupt.wav",
+      "audioContentSha256": "c596e2a11f1ccb2a9981db6220234ec28f5609c6a96bc8976dc1d9b969a74917",
+      "modelId": "INHERITED-PERSIAN-ASR-CORE",
+      "modelArtifactsDigestSha256": "474ce805ed56bfc9e51940e146f97b066e2601528070855cdd8c5eaa85268f63",
+      "tokenizerSha256": "611647fe6021c054a84626b0d7d69ad2def6492c0f3e1bec58ed0137300af1ba",
+      "preprocessingConfigSha256": "d9b05595a96a6720958cfb05a75df9e48dde535fd71d9aeee75cbb7e41848dc1",
+      "runtimeCompatibilityTag": "onnxruntime-web-wasm-cpu",
+      "completedChunkIndices": [
+        0
+      ],
+      "totalChunks": 2,
+      "payloadSha256": "ff553a5f7d0f81c7dbbf92ac1f8a0d703691916c3256b7fc06fb2ea72f2ee4e8",
+      "payloadRelativePath": "payloads/chk-6a757490-4f7.payload.json",
+      "envelopeSha256": "45c01c0e0183cd97ab64f7e1048ab6265def60be3c4d18df3eb11dd986498a63"
+    },
+    {
+      "schemaVersion": "1.0.0",
+      "checkpointId": "chk-0dbd2466-c20",
+      "jobId": "job-int-checks",
+      "stage": "POST_ENCODER_EXECUTION",
+      "createdAtIso": "2026-11-21T19:06:52.491Z",
+      "audioSourceId": "rec-A.wav",
+      "audioContentSha256": "c596e2a11f1ccb2a9981db6220234ec28f5609c6a96bc8976dc1d9b969a74917",
+      "modelId": "INHERITED-PERSIAN-ASR-CORE",
+      "modelArtifactsDigestSha256": "474ce805ed56bfc9e51940e146f97b066e2601528070855cdd8c5eaa85268f63",
+      "tokenizerSha256": "611647fe6021c054a84626b0d7d69ad2def6492c0f3e1bec58ed0137300af1ba",
+      "preprocessingConfigSha256": "d9b05595a96a6720958cfb05a75df9e48dde535fd71d9aeee75cbb7e41848dc1",
+      "runtimeCompatibilityTag": "onnxruntime-web-wasm-cpu",
+      "completedChunkIndices": [
+        0
+      ],
+      "totalChunks": 2,
+      "payloadSha256": "da007999ea64c7d60f3c6e7626db51e423e07418366e4f814064c7f7bfe1c9c8",
+      "payloadRelativePath": "payloads/chk-0dbd2466-c20.payload.json",
+      "envelopeSha256": "3043f1de2d5d785dcd0e95ad2ba74d373b4da1e51dbcba7aacc0614cd2865999"
+    }
+  ]
+}

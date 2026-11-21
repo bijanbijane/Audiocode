@@ -1,0 +1,129 @@
+{
+  "missionId": "SHAHAB-022",
+  "generatedAtUtc": "2026-11-21T19:07:33.339Z",
+  "entryGateQualificationDecision": "NO_GO_REQUIRES_ENGINEERING_FIXES",
+  "sdkApiVersion": "1.0.0",
+  "resultSchemaVersion": "1.0.0",
+  "eventSchemaVersion": "1.0.0",
+  "engineVersion": "SHAHAB-R2.0.0-RELEASE-CANDIDATE",
+  "modelIdentity": {
+    "modelId": "persian-zipformer-transducer-1.0.0",
+    "neuralCoreIdentity": "INHERITED-PERSIAN-ASR-CORE",
+    "upstreamRepository": "ramin-mahmoodi/persian-zipformer-asr",
+    "modelRevisionSha": "0408facbcf3f670121def48e0802c395c225d150",
+    "licenseSpdx": "Apache-2.0",
+    "trainableParameters": 0,
+    "tokenizerSha256": "435f9e09a290c764670044e54c2450670fc2eab50176cd912734fa6f92ab166f",
+    "artifactHashes": {
+      "encoder.int8.onnx": "08735923618e196bd093b369f6843c8a390a6113a391e7b7095115582fd2cd27",
+      "decoder.int8.onnx": "9d4ad2da0335d86d8638ff026e6b37247d97df940af6ad40bba671af5fd4aa9d",
+      "joiner.int8.onnx": "a2a4a30585dc53e46afafd03690181107a610f67ff0e29cab460ec16df5cc00b",
+      "tokens.txt": "435f9e09a290c764670044e54c2450670fc2eab50176cd912734fa6f92ab166f"
+    },
+    "activeStreamingMode": "INCREMENTAL_WINDOWED_INFERENCE",
+    "trueStatefulStreamingSupported": false,
+    "uncompressedPackageMiB": 110.41,
+    "sub100MiBUncompressedSatisfied": false
+  },
+  "capabilities": {
+    "apiVersion": "1.0.0",
+    "engineVersion": "SHAHAB-R2.0.0-RELEASE-CANDIDATE",
+    "qualificationGateDecision": "NO_GO_REQUIRES_ENGINEERING_FIXES",
+    "operations": {
+      "offlineTranscription": "SUPPORTED_VERIFIED",
+      "trueStatefulStreaming": "UNSUPPORTED",
+      "incrementalWindowedStreaming": "SUPPORTED_VERIFIED",
+      "batchTranscription": "SUPPORTED_VERIFIED",
+      "segmentTiming": "SUPPORTED_VERIFIED",
+      "wordLevelForcedAlignment": "UNSUPPORTED",
+      "speakerDiarization": "UNSUPPORTED",
+      "contextualVocabularyBiasing": "PARTIALLY_SUPPORTED",
+      "cancellation": "SUPPORTED_VERIFIED",
+      "pauseResumeStreaming": "UNSUPPORTED",
+      "localExecution": "SUPPORTED_VERIFIED",
+      "cloudExecution": "REQUIRES_PERMISSION",
+      "automaticSignedModelUpdates": "BLOCKED",
+      "gpuHardwareAcceleration": "BLOCKED"
+    },
+    "activeStreamingMode": "INCREMENTAL_WINDOWED_INFERENCE",
+    "acceptedAudioFormats": [
+      "FLOAT32_PCM",
+      "INT16_PCM",
+      "WAV_BYTES"
+    ],
+    "maxAudioDurationSec": 3600,
+    "maxPayloadBytes": 67108864
+  },
+  "sampleHostRun": {
+    "executed": true,
+    "audioSourceId": "sample_wav_first_6s",
+    "durationSec": 6,
+    "rtf": 0.0755,
+    "eventsObserved": 3,
+    "secondJobCancelledCleanly": true,
+    "transcriptNonEmpty": true,
+    "provenanceRef": "sdk://1.0.0/job/shjob_66b288c85f8b"
+  },
+  "conformanceSuite": {
+    "totalCases": 7,
+    "passedCases": 7,
+    "failedCases": 0,
+    "cases": [
+      {
+        "testId": "SDK-LIFE-01",
+        "category": "ENGINE_LIFECYCLE",
+        "description": "Idempotent initialization & verified immutable model identity",
+        "passed": true,
+        "detail": "model=persian-zipformer-transducer-1.0.0, sha=0408facbcf3f, hashes=4"
+      },
+      {
+        "testId": "SDK-COMPAT-01",
+        "category": "COMPATIBILITY",
+        "description": "Capability negotiation discloses unsupported word timing/stateful streaming & rejects incompatible major version",
+        "passed": true,
+        "detail": "limitations=2, badMajorRejected=true"
+      },
+      {
+        "testId": "SDK-PRIV-01",
+        "category": "PRIVACY_SECURITY",
+        "description": "Unauthorized Cloud transfer & out-of-workspace file paths are strictly rejected",
+        "passed": true,
+        "detail": "cloudBlocked=true, pathEscapeBlocked=true"
+      },
+      {
+        "testId": "SDK-JOB-01",
+        "category": "JOB_LIFECYCLE",
+        "description": "Real Local transcription, idempotency replay/conflict, project isolation, and cancellation semantics",
+        "passed": true,
+        "detail": "textLen=36, replayMatch=true, conflict=true, tenantIsolated=true, cancel=CANCELLATION_COMPLETED"
+      },
+      {
+        "testId": "SDK-STREAM-01",
+        "category": "STREAMING",
+        "description": "Incremental windowed streaming session, chunk acknowledgement, duplicate rejection & finalization",
+        "passed": true,
+        "detail": "mode=INCREMENTAL_WINDOWED_INFERENCE, dupRejected=true, finalState=COMPLETED"
+      },
+      {
+        "testId": "SDK-CONC-01",
+        "category": "CONCURRENCY",
+        "description": "Concurrent multi-project jobs complete with distinct job/project identities",
+        "passed": true,
+        "detail": "jobA=shjob_d074a8ab8771 (proj-A), jobB=shjob_83495185464b (proj-B)"
+      },
+      {
+        "testId": "SDK-LIFE-02",
+        "category": "ENGINE_LIFECYCLE",
+        "description": "Idempotent disposal and strict rejection of calls after disposal",
+        "passed": true,
+        "detail": "postDisposeRejected=true"
+      }
+    ]
+  },
+  "finalStatus": "VERIFIED",
+  "knownLimitations": [
+    "SHAHAB-021 Qualification Decision is NO_GO_REQUIRES_ENGINEERING_FIXES; blocked release capabilities (Ed25519 auto-update signing, WebGPU/CUDA, >20-sample statistical release gate) remain explicitly BLOCKED/UNAVAILABLE.",
+    "TRUE_STATEFUL_STREAMING is NOT_SUPPORTED_BY_MODEL; streaming API uses INCREMENTAL_WINDOWED_INFERENCE.",
+    "Word-level forced alignment and speaker diarization are UNSUPPORTED and never fabricated."
+  ]
+}

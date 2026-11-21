@@ -1,0 +1,34 @@
+{
+  "schemaVersion": "1.0.0",
+  "updatedAtIso": "2026-11-21T19:06:52.510Z",
+  "reports": [
+    {
+      "schemaVersion": "1.0.0",
+      "reportId": "restore-d43f02cc-b",
+      "executedAtIso": "2026-11-21T19:06:52.506Z",
+      "isolatedSandboxDir": "<ISOLATED_OS_TMPDIR_CLEANED>",
+      "backedUpAssetClasses": [
+        "AUTHORIZED_FINAL_TRANSCRIPTS",
+        "PROJECT_METADATA",
+        "MODEL_MANIFESTS",
+        "RUNTIME_CONFIGURATION"
+      ],
+      "excludedLargeModelWeights": true,
+      "externalUploadPerformed": false,
+      "checks": {
+        "readabilityPassed": true,
+        "schemaCompatibilityPassed": true,
+        "contentIntegritySha256Passed": true,
+        "referentialIntegrityPassed": true,
+        "postRestoreUsabilityPassed": true
+      },
+      "verifiedFileCount": 5,
+      "allChecksPassed": true,
+      "notes": [
+        "Executed in isolated temporary sandbox; production files untouched.",
+        "Large ONNX model artifacts intentionally excluded from backup bundle (reacquirable via SHA-256 manifest).",
+        "Verified post-restore protection against partial recovery overwriting an authorized final transcript."
+      ]
+    }
+  ]
+}

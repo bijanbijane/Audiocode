@@ -1,0 +1,100 @@
+{
+  "schemaVersion": "1.0.0",
+  "generatedAtIso": "2026-11-21T19:06:52.399Z",
+  "profiles": [
+    {
+      "profileName": "SHAHAB-STUDIO",
+      "targetPlatform": "NATIVE_CPU_WASM",
+      "modelIdentity": "INHERITED-PERSIAN-ASR-CORE (ramin-mahmoodi/persian-zipformer-asr@0408facb)",
+      "modelDir": "/app/applet/models/persian-zipformer-transducer/1.0.0",
+      "includedFiles": [
+        {
+          "fileName": "encoder.int8.onnx",
+          "bytes": 113609320,
+          "sha256": "08735923618e196bd093b369f6843c8a390a6113a391e7b7095115582fd2cd27"
+        },
+        {
+          "fileName": "decoder.int8.onnx",
+          "bytes": 1736806,
+          "sha256": "9d4ad2da0335d86d8638ff026e6b37247d97df940af6ad40bba671af5fd4aa9d"
+        },
+        {
+          "fileName": "joiner.int8.onnx",
+          "bytes": 398795,
+          "sha256": "a2a4a30585dc53e46afafd03690181107a610f67ff0e29cab460ec16df5cc00b"
+        },
+        {
+          "fileName": "tokens.txt",
+          "bytes": 12959,
+          "sha256": "435f9e09a290c764670044e54c2450670fc2eab50176cd912734fa6f92ab166f"
+        },
+        {
+          "fileName": "LICENSE",
+          "bytes": 9459,
+          "sha256": "2d829fe2bf7fa992816d74f33916ea2936f0f7db747089e4a9fd763ecaeb487f"
+        },
+        {
+          "fileName": "NOTICE",
+          "bytes": 1529,
+          "sha256": "8c53051f5700bad148016170e74ca9b5d8c2ed762db75097baae16a8be0894f0"
+        }
+      ],
+      "uncompressedModelPackageBytes": 115768868,
+      "uncompressedDisplay": "115.77 MB (110.41 MiB) · 115,768,868 B",
+      "gzipTransferArchiveBytes": 99244845,
+      "gzipDisplay": "99.24 MB (94.65 MiB) · 99,244,845 B",
+      "tokenizerAndVocabBytes": 12959,
+      "runtimeDependencyBytes": 109008892,
+      "under100MiBUncompressed": false,
+      "under100MiBGzipTransferOnly": true,
+      "packageManifestSha256": "f6a9986d46dc550aa4019c090f7cfe13625d5bb1e618b2c17c9bbba62b6e5e19"
+    },
+    {
+      "profileName": "SHAHAB-EDGE",
+      "targetPlatform": "NATIVE_CPU_WASM",
+      "modelIdentity": "SHAHAB_RUNTIME_DERIVED_ARTIFACT (lossless metadata-stripped INT8)",
+      "modelDir": "/app/applet/models/shahab-variants/persian-zipformer-int8-cleaned",
+      "includedFiles": [
+        {
+          "fileName": "encoder.int8.onnx",
+          "bytes": 113281298,
+          "sha256": "bf4d351c0cbeedf6bdde11ae359e2e343ab20edd5bfa3ef270bdce9e9f1f833f"
+        },
+        {
+          "fileName": "decoder.int8.onnx",
+          "bytes": 1736381,
+          "sha256": "ba85ae3ec45d91d48b6d28ae03c27eca17b730228897bd1820c53be3666eb830"
+        },
+        {
+          "fileName": "joiner.int8.onnx",
+          "bytes": 398690,
+          "sha256": "1f0d1ade36d917aab81b339c0f76982ae52fa5e41e23c813d530f3ff998ec326"
+        },
+        {
+          "fileName": "tokens.txt",
+          "bytes": 12959,
+          "sha256": "435f9e09a290c764670044e54c2450670fc2eab50176cd912734fa6f92ab166f"
+        },
+        {
+          "fileName": "LICENSE",
+          "bytes": 9459,
+          "sha256": "2d829fe2bf7fa992816d74f33916ea2936f0f7db747089e4a9fd763ecaeb487f"
+        },
+        {
+          "fileName": "NOTICE",
+          "bytes": 1529,
+          "sha256": "8c53051f5700bad148016170e74ca9b5d8c2ed762db75097baae16a8be0894f0"
+        }
+      ],
+      "uncompressedModelPackageBytes": 115440316,
+      "uncompressedDisplay": "115.44 MB (110.09 MiB) · 115,440,316 B",
+      "gzipTransferArchiveBytes": 99214748,
+      "gzipDisplay": "99.21 MB (94.62 MiB) · 99,214,748 B",
+      "tokenizerAndVocabBytes": 12959,
+      "runtimeDependencyBytes": 109008892,
+      "under100MiBUncompressed": false,
+      "under100MiBGzipTransferOnly": true,
+      "packageManifestSha256": "1e92f1d03f91314a287f307e45c56fe8dd2b44873f9d6910fa3a79eeb3e2afeb"
+    }
+  ]
+}

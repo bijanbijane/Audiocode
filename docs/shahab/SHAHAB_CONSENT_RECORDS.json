@@ -1,0 +1,11 @@
+{
+  "schemaVersion": "1.0.0",
+  "localDiagnosticsEnabled": true,
+  "externalOperationalTelemetryOptIn": false,
+  "externalResearchContributionOptIn": false,
+  "destinationDescription": "LOCAL_ONLY (No external monitoring endpoint configured)",
+  "retentionPolicyDays": 30,
+  "linkableToAccountOrDevice": false,
+  "updatedAtIso": "2026-11-21T19:06:52.401Z",
+  "revocationHistory": []
+}

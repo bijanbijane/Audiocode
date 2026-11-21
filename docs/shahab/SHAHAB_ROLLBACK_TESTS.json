@@ -1,0 +1,20 @@
+{
+  "schemaVersion": "1.0.0",
+  "executedAtIso": "2026-11-21T19:06:52.400Z",
+  "passed": true,
+  "postRollbackInferencePassed": true,
+  "installerRollback": {
+    "rolledBack": true,
+    "activeVersionId": "v1_upstream_original",
+    "postRollbackSmokeTranscript": "شکلات داغ در حد",
+    "error": null
+  },
+  "engineRollback": {
+    "rolledBackTo": "ORIGINAL_INT8",
+    "modelRevision": "0408facbcf3f670121def48e0802c395c225d150",
+    "artifactHash": "08735923618e196bd093b369f6843c8a390a6113a391e7b7095115582fd2cd27",
+    "vocabularyPreservedCount": 4,
+    "ledgerEntriesPreserved": 5,
+    "postRollbackRawTranscript": "شکلات داغ در حد ساندارهای بلژیکی از آبی گران قیمت ولی آنین باشند"
+  }
+}

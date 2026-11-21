@@ -1,0 +1,55 @@
+{
+  "generatedAtIso": "2026-11-21T19:06:52.408Z",
+  "status": "NOT_EXECUTED_BY_DESIGN",
+  "note": "Comparator models (Taraneh-WLarge, Taraneh-Q1.7B, Taraneh-Q0.6B) were inspected metadata-only in SHAHAB-003; no unselected multi-GB weights were downloaded.",
+  "inspectedComparators": [
+    {
+      "repoId": "k2-fsa/sherpa-onnx",
+      "pinnedRevisionSha": "8a667ab114e8a007f671678ddb031729dd81dce4",
+      "licenseSpdx": "Apache-2.0",
+      "licenseStatus": "PERMISSIVE_CLEAR"
+    },
+    {
+      "repoId": "k2-fsa/icefall",
+      "pinnedRevisionSha": "ed16de9534d79252cac51f1729fdcee5699e9758",
+      "licenseSpdx": "Apache-2.0",
+      "licenseStatus": "PERMISSIVE_CLEAR"
+    },
+    {
+      "repoId": "areffarhadi/persian-asr",
+      "pinnedRevisionSha": "08c2f83c5ae84075342f8e6f5e9be4150322b677",
+      "licenseSpdx": null,
+      "licenseStatus": "MISSING_OR_AMBIGUOUS"
+    },
+    {
+      "repoId": "QwenLM/Qwen3-ASR",
+      "pinnedRevisionSha": "7c6daf77a2421100f5fb066495372c00129d39ff",
+      "licenseSpdx": "Apache-2.0",
+      "licenseStatus": "PERMISSIVE_CLEAR"
+    },
+    {
+      "repoId": "areffarhadi/Taraneh-Q0.6B",
+      "pinnedRevisionSha": "14939bc2e1f392aeca7b8f0d22218809b12882af",
+      "licenseSpdx": "Apache-2.0",
+      "licenseStatus": "PERMISSIVE_NO_STANDALONE_FILE"
+    },
+    {
+      "repoId": "areffarhadi/Taraneh-Q1.7B",
+      "pinnedRevisionSha": "faa6a524003687a80e16fd4312a26819391405aa",
+      "licenseSpdx": "Apache-2.0",
+      "licenseStatus": "PERMISSIVE_NO_STANDALONE_FILE"
+    },
+    {
+      "repoId": "areffarhadi/Taraneh-WLarge",
+      "pinnedRevisionSha": "876da71621f711fbd41e63310c166614caef0b31",
+      "licenseSpdx": "MIT",
+      "licenseStatus": "PERMISSIVE_NO_STANDALONE_FILE"
+    },
+    {
+      "repoId": "mehdi-hf/nemotron-asr-streaming-farsi",
+      "pinnedRevisionSha": "b70aff58c22da79ba7139ff13af7ba58a15cbeb9",
+      "licenseSpdx": "other",
+      "licenseStatus": "LEGAL_GATE_REQUIRED"
+    }
+  ]
+}

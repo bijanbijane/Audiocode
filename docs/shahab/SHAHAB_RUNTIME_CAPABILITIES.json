@@ -1,0 +1,118 @@
+{
+  "schemaVersion": "1.0.0",
+  "generatedAtIso": "2026-11-21T19:06:52.398Z",
+  "adapters": [
+    {
+      "adapterId": "shahab-local-execution-adapter",
+      "adapterClass": "LOCAL_NATIVE",
+      "verificationStatus": "VERIFIED",
+      "supportedModelVariants": [
+        "ORIGINAL_INT8",
+        "LOSSLESS_CLEANED_INT8"
+      ],
+      "supportedDecodePolicies": [
+        "SPEED",
+        "BALANCED",
+        "PRECISION",
+        "VOCABULARY",
+        "VERBATIM"
+      ],
+      "supportedTensorPrecisions": [
+        "INT8_DYNAMIC_QUANTIZED_ONNX",
+        "FLOAT32_ACTIVATIONS"
+      ],
+      "executionProvider": "onnxruntime-web@1.31.1 (WASM CPU, Node v22)",
+      "streamingCapability": {
+        "nativeStreamingGraph": false,
+        "chunkedOverlapStreaming": true,
+        "notes": "Offline stateless7 ONNX graph has no cached_key/cached_conv inputs; supports chunked overlap streaming."
+      },
+      "timingCapability": {
+        "segmentTimestamps": true,
+        "wordTimestamps": false,
+        "notes": "Segment boundaries measured from PCM window; forced word-level timestamps not invented."
+      },
+      "maxPracticalAudioDurationSec": 3600,
+      "availableMemoryBudgetBytes": 536870912,
+      "unsupportedOperations": [
+        "CUDA_GPU_EXECUTION (no GPU in container)",
+        "INT4_MATMULNBITS (not supported in onnxruntime-web WASM)",
+        "NATIVE_RECURRENT_STREAMING_CACHE (offline encoder graph)",
+        "SPEAKER_DIARIZATION (single-stream ASR core)",
+        "WORD_LEVEL_FORCED_ALIGNMENT (no verified aligner bundled)"
+      ]
+    },
+    {
+      "adapterId": "shahab-browser-wasm-adapter",
+      "adapterClass": "BROWSER_WASM",
+      "verificationStatus": "NOT_VERIFIED",
+      "supportedModelVariants": [
+        "ORIGINAL_INT8",
+        "LOSSLESS_CLEANED_INT8"
+      ],
+      "supportedDecodePolicies": [
+        "SPEED",
+        "BALANCED",
+        "PRECISION",
+        "VOCABULARY",
+        "VERBATIM"
+      ],
+      "supportedTensorPrecisions": [
+        "INT8_DYNAMIC_QUANTIZED_ONNX"
+      ],
+      "executionProvider": "onnxruntime-web (Browser WASM SIMD; WebGPU NOT verified)",
+      "streamingCapability": {
+        "nativeStreamingGraph": false,
+        "chunkedOverlapStreaming": true,
+        "notes": "Browser WASM requires ~116 MB artifact cache in OPFS; WebGPU unsupported/unverified in current container."
+      },
+      "timingCapability": {
+        "segmentTimestamps": true,
+        "wordTimestamps": false,
+        "notes": "Segment timestamps only."
+      },
+      "maxPracticalAudioDurationSec": 600,
+      "availableMemoryBudgetBytes": 402653184,
+      "unsupportedOperations": [
+        "BROWSER_WEBGPU (unverified — no GPU in environment)",
+        "NODE_FS_MODEL_LOADING (requires OPFS / HTTP chunk fetch in browser)"
+      ]
+    },
+    {
+      "adapterId": "shahab-cloud-authorized-adapter",
+      "adapterClass": "CLOUD_AUTHORIZED",
+      "verificationStatus": "VERIFIED",
+      "supportedModelVariants": [
+        "ORIGINAL_INT8",
+        "LOSSLESS_CLEANED_INT8"
+      ],
+      "supportedDecodePolicies": [
+        "SPEED",
+        "BALANCED",
+        "PRECISION",
+        "VOCABULARY",
+        "VERBATIM"
+      ],
+      "supportedTensorPrecisions": [
+        "INT8_DYNAMIC_QUANTIZED_ONNX"
+      ],
+      "executionProvider": "Authorized Cloud Container Worker (onnxruntime-web WASM CPU, zero-retention)",
+      "streamingCapability": {
+        "nativeStreamingGraph": false,
+        "chunkedOverlapStreaming": true,
+        "notes": "Identical logical contract as Local; requires explicit user cloud authorization."
+      },
+      "timingCapability": {
+        "segmentTimestamps": true,
+        "wordTimestamps": false,
+        "notes": "Segment timestamps only."
+      },
+      "maxPracticalAudioDurationSec": 3600,
+      "availableMemoryBudgetBytes": 536870912,
+      "unsupportedOperations": [
+        "IMPLICIT_LOCAL_FALLBACK_UPLOAD (permanently forbidden)",
+        "UNAUTHORIZED_AUDIO_RETENTION (permanently forbidden)"
+      ]
+    }
+  ]
+}

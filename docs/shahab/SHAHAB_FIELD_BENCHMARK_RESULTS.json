@@ -1,0 +1,329 @@
+{
+  "validationRelease": "SHAHAB-R1.5.0-VALIDATION",
+  "benchmarkExecutionId": "shahab_bench_1795287969425_e345b2",
+  "sampleSufficiencyNote": "Pilot descriptive evaluation ONLY (1 independent recording + 2 derived acoustic stress variants). Not statistically representative of population WER.",
+  "evaluations": [
+    {
+      "sampleId": "field_catA_clean_001",
+      "category": "CATEGORY_A_STUDIO_PODCAST",
+      "durationSec": 12.12,
+      "referenceText": "شکلات داغ در حد استانداردهای بلژیکی است آبمیوهها گران قیمت ولی عالی میباشند",
+      "rawHypothesis": "شکلات داغ در حد ساندارهای بلژیکی از آبیگاه گران قیمت ولی آنین باشند",
+      "normalizedHypothesis": "شکلات داغ در حد ساندارهای بلژیکی از آبیگاه گران قیمت ولی آنین باشند",
+      "dualTrack": {
+        "trackAVerbatim": {
+          "wer": 0.384615,
+          "cer": 0.2,
+          "substitutions": 5,
+          "deletions": 0,
+          "insertions": 0,
+          "refWords": 13,
+          "sentenceError": true,
+          "wordOps": [
+            {
+              "op": "MATCH",
+              "refToken": "شکلات",
+              "hypToken": "شکلات"
+            },
+            {
+              "op": "MATCH",
+              "refToken": "داغ",
+              "hypToken": "داغ"
+            },
+            {
+              "op": "MATCH",
+              "refToken": "در",
+              "hypToken": "در"
+            },
+            {
+              "op": "MATCH",
+              "refToken": "حد",
+              "hypToken": "حد"
+            },
+            {
+              "op": "SUB",
+              "refToken": "استانداردهای",
+              "hypToken": "ساندارهای"
+            },
+            {
+              "op": "MATCH",
+              "refToken": "بلژیکی",
+              "hypToken": "بلژیکی"
+            },
+            {
+              "op": "SUB",
+              "refToken": "است",
+              "hypToken": "از"
+            },
+            {
+              "op": "SUB",
+              "refToken": "آبمیوهها",
+              "hypToken": "آبیگاه"
+            },
+            {
+              "op": "MATCH",
+              "refToken": "گران",
+              "hypToken": "گران"
+            },
+            {
+              "op": "MATCH",
+              "refToken": "قیمت",
+              "hypToken": "قیمت"
+            },
+            {
+              "op": "MATCH",
+              "refToken": "ولی",
+              "hypToken": "ولی"
+            },
+            {
+              "op": "SUB",
+              "refToken": "عالی",
+              "hypToken": "آنین"
+            },
+            {
+              "op": "SUB",
+              "refToken": "میباشند",
+              "hypToken": "باشند"
+            }
+          ]
+        },
+        "trackBNormalized": {
+          "policyVersion": "SHAHAB-FA-NORM-EVAL-V1.0",
+          "wer": 0.384615,
+          "cer": 0.222222,
+          "substitutions": 5,
+          "deletions": 0,
+          "insertions": 0,
+          "refWords": 13,
+          "sentenceError": true,
+          "normalizedReference": "شکلات داغ در حد استانداردهای بلژیکی است آبمیوهها گران قیمت ولی عالی میباشند",
+          "normalizedHypothesis": "شکلات داغ در حد ساندارهای بلژیکی از آبیگاه گران قیمت ولی آنین باشند"
+        },
+        "properNounErrorRate": null,
+        "numericAccuracy": null,
+        "repetitionPreserved": null
+      },
+      "policyName": "BALANCED",
+      "rtf": 0.1083,
+      "latencyMs": 1313
+    },
+    {
+      "sampleId": "field_catE_noisy_002",
+      "category": "CATEGORY_E_DIFFICULT_ACOUSTICS",
+      "durationSec": 12.12,
+      "referenceText": "شکلات داغ در حد استانداردهای بلژیکی است آبمیوهها گران قیمت ولی عالی میباشند",
+      "rawHypothesis": "شکلات گاو در حد ساندارهای بلژیکی از نگاه مس ول قانونی باشند",
+      "normalizedHypothesis": "شکلات گاو در حد ساندارهای بلژیکی از نگاه مس ول قانونی باشند",
+      "dualTrack": {
+        "trackAVerbatim": {
+          "wer": 0.692308,
+          "cer": 0.373333,
+          "substitutions": 8,
+          "deletions": 1,
+          "insertions": 0,
+          "refWords": 13,
+          "sentenceError": true,
+          "wordOps": [
+            {
+              "op": "MATCH",
+              "refToken": "شکلات",
+              "hypToken": "شکلات"
+            },
+            {
+              "op": "SUB",
+              "refToken": "داغ",
+              "hypToken": "گاو"
+            },
+            {
+              "op": "MATCH",
+              "refToken": "در",
+              "hypToken": "در"
+            },
+            {
+              "op": "MATCH",
+              "refToken": "حد",
+              "hypToken": "حد"
+            },
+            {
+              "op": "SUB",
+              "refToken": "استانداردهای",
+              "hypToken": "ساندارهای"
+            },
+            {
+              "op": "MATCH",
+              "refToken": "بلژیکی",
+              "hypToken": "بلژیکی"
+            },
+            {
+              "op": "DEL",
+              "refToken": "است",
+              "hypToken": null
+            },
+            {
+              "op": "SUB",
+              "refToken": "آبمیوهها",
+              "hypToken": "از"
+            },
+            {
+              "op": "SUB",
+              "refToken": "گران",
+              "hypToken": "نگاه"
+            },
+            {
+              "op": "SUB",
+              "refToken": "قیمت",
+              "hypToken": "مس"
+            },
+            {
+              "op": "SUB",
+              "refToken": "ولی",
+              "hypToken": "ول"
+            },
+            {
+              "op": "SUB",
+              "refToken": "عالی",
+              "hypToken": "قانونی"
+            },
+            {
+              "op": "SUB",
+              "refToken": "میباشند",
+              "hypToken": "باشند"
+            }
+          ]
+        },
+        "trackBNormalized": {
+          "policyVersion": "SHAHAB-FA-NORM-EVAL-V1.0",
+          "wer": 0.692308,
+          "cer": 0.396825,
+          "substitutions": 8,
+          "deletions": 1,
+          "insertions": 0,
+          "refWords": 13,
+          "sentenceError": true,
+          "normalizedReference": "شکلات داغ در حد استانداردهای بلژیکی است آبمیوهها گران قیمت ولی عالی میباشند",
+          "normalizedHypothesis": "شکلات گاو در حد ساندارهای بلژیکی از نگاه مس ول قانونی باشند"
+        },
+        "properNounErrorRate": null,
+        "numericAccuracy": null,
+        "repetitionPreserved": null
+      },
+      "policyName": "BALANCED",
+      "rtf": 0.0876,
+      "latencyMs": 1062
+    },
+    {
+      "sampleId": "field_catE_clipped_003",
+      "category": "CATEGORY_E_DIFFICULT_ACOUSTICS",
+      "durationSec": 12.12,
+      "referenceText": "شکلات داغ در حد استانداردهای بلژیکی است آبمیوهها گران قیمت ولی عالی میباشند",
+      "rawHypothesis": "شکلات و باغ در حد ساندارهای بلژیکی از آب نگاه گران قیمت ولی آنین باشند",
+      "normalizedHypothesis": "شکلات و باغ در حد ساندارهای بلژیکی از آب نگاه گران قیمت ولی آنین باشند",
+      "dualTrack": {
+        "trackAVerbatim": {
+          "wer": 0.615385,
+          "cer": 0.253333,
+          "substitutions": 6,
+          "deletions": 0,
+          "insertions": 2,
+          "refWords": 13,
+          "sentenceError": true,
+          "wordOps": [
+            {
+              "op": "MATCH",
+              "refToken": "شکلات",
+              "hypToken": "شکلات"
+            },
+            {
+              "op": "INS",
+              "refToken": null,
+              "hypToken": "و"
+            },
+            {
+              "op": "SUB",
+              "refToken": "داغ",
+              "hypToken": "باغ"
+            },
+            {
+              "op": "MATCH",
+              "refToken": "در",
+              "hypToken": "در"
+            },
+            {
+              "op": "MATCH",
+              "refToken": "حد",
+              "hypToken": "حد"
+            },
+            {
+              "op": "SUB",
+              "refToken": "استانداردهای",
+              "hypToken": "ساندارهای"
+            },
+            {
+              "op": "MATCH",
+              "refToken": "بلژیکی",
+              "hypToken": "بلژیکی"
+            },
+            {
+              "op": "INS",
+              "refToken": null,
+              "hypToken": "از"
+            },
+            {
+              "op": "SUB",
+              "refToken": "است",
+              "hypToken": "آب"
+            },
+            {
+              "op": "SUB",
+              "refToken": "آبمیوهها",
+              "hypToken": "نگاه"
+            },
+            {
+              "op": "MATCH",
+              "refToken": "گران",
+              "hypToken": "گران"
+            },
+            {
+              "op": "MATCH",
+              "refToken": "قیمت",
+              "hypToken": "قیمت"
+            },
+            {
+              "op": "MATCH",
+              "refToken": "ولی",
+              "hypToken": "ولی"
+            },
+            {
+              "op": "SUB",
+              "refToken": "عالی",
+              "hypToken": "آنین"
+            },
+            {
+              "op": "SUB",
+              "refToken": "میباشند",
+              "hypToken": "باشند"
+            }
+          ]
+        },
+        "trackBNormalized": {
+          "policyVersion": "SHAHAB-FA-NORM-EVAL-V1.0",
+          "wer": 0.615385,
+          "cer": 0.269841,
+          "substitutions": 6,
+          "deletions": 0,
+          "insertions": 2,
+          "refWords": 13,
+          "sentenceError": true,
+          "normalizedReference": "شکلات داغ در حد استانداردهای بلژیکی است آبمیوهها گران قیمت ولی عالی میباشند",
+          "normalizedHypothesis": "شکلات و باغ در حد ساندارهای بلژیکی از آب نگاه گران قیمت ولی آنین باشند"
+        },
+        "properNounErrorRate": null,
+        "numericAccuracy": null,
+        "repetitionPreserved": null
+      },
+      "policyName": "BALANCED",
+      "rtf": 0.0785,
+      "latencyMs": 952
+    }
+  ]
+}
