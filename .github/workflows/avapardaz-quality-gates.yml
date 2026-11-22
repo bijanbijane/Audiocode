@@ -28,6 +28,7 @@ jobs:
           bun run tsx --test \
             src/ai-engine/asr/SileroVadOnnxRunner.test.ts \
             src/ai-engine/asr/SpeakerEmbeddingOnnxRunner.test.ts \
+            src/ai-engine/asr/WespeakerKaldiFbank80.test.ts \
             src/ai-engine/MultiSpeakerDiarizationAndCrosstalkEngine.test.ts
       - name: Build production web bundle
         if: always()
@@ -59,6 +60,10 @@ jobs:
         run: node scripts/download-persian-zipformer-assets.mjs
       - name: Download and verify pinned Silero VAD v5 asset
         run: node scripts/download-persian-zipformer-assets.mjs models/silero-vad/1.0.0/manifest.json
+      - name: Download and verify pinned WeSpeaker ECAPA ONNX asset
+        run: node scripts/download-persian-zipformer-assets.mjs models/speaker-embedding/1.0.0/manifest.json
+      - name: Run real WeSpeaker ECAPA ONNX/WASM CPU inference
+        run: npx --yes tsx --test src/ai-engine/asr/SpeakerEmbeddingOnnxRunner.real-model.test.ts
       - name: Run real Silero VAD v5 ONNX/WASM CPU inference
         run: npx --yes tsx --test src/ai-engine/asr/SileroVadOnnxRunner.real-model.test.ts
       - name: Run real SHAHAB Zipformer ONNX inference and parity suite
