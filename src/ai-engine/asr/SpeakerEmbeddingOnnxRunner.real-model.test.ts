@@ -107,7 +107,7 @@ test(
         sampleDurationSec: Number(durationSec.toFixed(3)),
         inputWindowSec: 1.5,
         hopDurationSec: 0.75,
-        inputFramesPerWindow: 148,
+        inputFramesPerWindow: 150,
         embeddingCount: embeddings.length,
         embeddingDimensions: vector.length,
         inferenceElapsedMs: Number(elapsedMs.toFixed(2)),
