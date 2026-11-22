@@ -158,11 +158,10 @@ export class MultiSpeakerDiarizationAndCrosstalkEngine {
     similarityThreshold = 0.72,
   ): SpeakerTimelineSegment[] {
     if (frames.length === 0) return [];
-    if (
-      !Number.isFinite(similarityThreshold) ||
-      similarityThreshold < -1 ||
-      similarityThreshold > 1
-    ) {
+    // Preserve the engine's fail-safe behavior for corrupted non-finite input:
+    // use the conservative default. Finite but out-of-domain configuration is a caller error.
+    const safeThreshold = Number.isFinite(similarityThreshold) ? similarityThreshold : 0.72;
+    if (safeThreshold < -1 || safeThreshold > 1) {
       throw new RangeError('DIARIZATION_SIMILARITY_THRESHOLD_MUST_BE_BETWEEN_MINUS_ONE_AND_ONE');
     }
 
@@ -227,7 +226,7 @@ export class MultiSpeakerDiarizationAndCrosstalkEngine {
         }
       }
 
-      if (bestSim >= similarityThreshold && bestCentroidIdx !== -1) {
+      if (bestSim >= safeThreshold && bestCentroidIdx !== -1) {
         bestSpeakerId = centroids[bestCentroidIdx].speakerId;
         const centroid = centroids[bestCentroidIdx];
         for (let d = 0; d < centroid.vector.length; d++) {
