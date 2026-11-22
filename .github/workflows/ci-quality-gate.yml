@@ -36,8 +36,8 @@ jobs:
       - name: Verify Zero Circular TypeScript Dependencies
         run: npx madge --circular --extensions ts,tsx src/ packages/
 
-      - name: Generate CycloneDX NPM SBOM
-        run: npx @cyclonedx/cyclonedx-npm --output-file sbom-npm.cdx.json
+      - name: Generate CycloneDX SBOM from Bun lockfile
+        run: bunx --bun @cdxgen/cdxgen -t bun -o sbom-bun.cdx.json .
 
       - name: Verify TypeScript Compilation (Lint Gate)
         run: npm run lint
