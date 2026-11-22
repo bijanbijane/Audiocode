@@ -70,3 +70,45 @@ test('Embedding clustering separates speakers, emits UNKNOWN_SPEAKER, and suppor
   assert.equal(corrected[1].speakerId, 'SPEAKER_2');
   assert.equal(corrected[1].manuallyVerifiedByUser, true);
 });
+
+
+test('Speaker assignment rejects invalid or dimension-mismatched embeddings instead of comparing partial vectors', () => {
+  const segments = MultiSpeakerDiarizationAndCrosstalkEngine.assignSpeakersFromEmbeddings('track-guard', [
+    {
+      range: { start: 0, end: 100 },
+      embeddingVector: new Float32Array([1, 0]),
+      vadProbability: 0.95,
+    },
+    {
+      range: { start: 300, end: 400 },
+      embeddingVector: new Float32Array([1, 0, 0]),
+      vadProbability: 0.95,
+    },
+    {
+      range: { start: 600, end: 700 },
+      embeddingVector: new Float32Array([0, 0]),
+      vadProbability: 0.95,
+    },
+    {
+      range: { start: 900, end: 1000 },
+      embeddingVector: new Float32Array([Number.NaN, 1]),
+      vadProbability: 0.95,
+    },
+  ]);
+
+  assert.equal(segments.length, 4);
+  assert.equal(segments[0].speakerId, 'SPEAKER_1');
+  assert.deepEqual(
+    segments.slice(1).map((segment) => segment.classification),
+    ['UNKNOWN_SPEAKER', 'UNKNOWN_SPEAKER', 'UNKNOWN_SPEAKER'],
+  );
+  assert.throws(
+    () =>
+      MultiSpeakerDiarizationAndCrosstalkEngine.assignSpeakersFromEmbeddings(
+        'track-guard',
+        [],
+        1.1,
+      ),
+    /DIARIZATION_SIMILARITY_THRESHOLD_MUST_BE_BETWEEN_MINUS_ONE_AND_ONE/,
+  );
+});
