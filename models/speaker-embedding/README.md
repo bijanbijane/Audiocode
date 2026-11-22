@@ -46,7 +46,7 @@ The implementation must not substitute the existing Whisper-style Log-Mel fronte
 
 - The 24,861,931-byte model was downloaded from the pinned immutable revision and its byte length and SHA-256 were verified.
 - The updated official-style WeSpeaker subsegment path used 1.5-second windows, 0.75-second hop, fixed 150-frame / 80-bin FBANK tensors, and produced two finite L2-normalized 192-dimensional embeddings from the pinned 12.12-second Persian WAV.
-- WeSpeaker embedding smoke: 339.95 ms; per-file RTF 0.1511.
+- WeSpeaker embedding smoke: 339.95 ms for 2.25 seconds of VAD speech coverage (two 1.5-second windows with 0.75-second hop); speech-window RTF 0.1511. The 12.12-second file-level RTF is reported separately for the integrated pipeline.
 - The integrated local service loaded both real Silero VAD and real WeSpeaker ONNX models, ran VAD followed by speaker embedding and anonymous clustering, and completed with 4 output speaker clusters, 4 output segments, and 0.0 seconds left unassigned. Whole-service elapsed time: 825.04 ms; RTF 0.0681.
 - The separate real Silero smoke detected 2 speech segments (5.816 seconds total) in 448.08 ms; RTF 0.0370.
 - The same product workflow also passed SHAHAB real Zipformer inference/parity (14/14), canonical P0 tests (30/30), model/secret bundle exclusion, product build/lint and CEP packaging checks.
