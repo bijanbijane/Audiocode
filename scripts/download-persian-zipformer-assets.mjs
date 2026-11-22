@@ -12,9 +12,9 @@ import { Transform, Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import path from 'node:path';
 
-const packageRelativePath = 'models/persian-zipformer-transducer/1.0.0';
-const packageDirectory = path.resolve(process.cwd(), packageRelativePath);
-const manifestPath = path.join(packageDirectory, 'manifest.json');
+const defaultManifestPath = 'models/persian-zipformer-transducer/1.0.0/manifest.json';
+const manifestPath = path.resolve(process.cwd(), process.argv[2] ?? defaultManifestPath);
+const packageDirectory = path.dirname(manifestPath);
 
 async function exists(filePath) {
   try {
@@ -138,7 +138,8 @@ async function main() {
   }
 
   // Required non-hashed legal/attribution files must still be present.
-  for (const requiredName of ['LICENSE', 'NOTICE']) {
+  const requiredAttributionFiles = manifest.requiredAttributionFiles ?? ['LICENSE', 'NOTICE'];
+  for (const requiredName of requiredAttributionFiles) {
     if (!(await exists(path.join(packageDirectory, requiredName)))) {
       throw new Error(`Required model attribution file is missing: ${requiredName}`);
     }
