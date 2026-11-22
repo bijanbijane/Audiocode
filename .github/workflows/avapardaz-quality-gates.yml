@@ -65,6 +65,8 @@ jobs:
         run: node scripts/download-persian-zipformer-assets.mjs models/speaker-embedding/1.0.0/manifest.json
       - name: Run real WeSpeaker ECAPA ONNX/WASM CPU inference
         run: npx --yes tsx --test src/ai-engine/asr/SpeakerEmbeddingOnnxRunner.real-model.test.ts
+      - name: Run integrated local Silero VAD + WeSpeaker diarization smoke
+        run: npx --yes tsx --test src/ai-engine/asr/LocalWeSpeakerDiarizationService.real-model.test.ts
       - name: Run real Silero VAD v5 ONNX/WASM CPU inference
         run: npx --yes tsx --test src/ai-engine/asr/SileroVadOnnxRunner.real-model.test.ts
       - name: Run real SHAHAB Zipformer ONNX inference and parity suite
