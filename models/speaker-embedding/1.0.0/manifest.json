@@ -48,6 +48,18 @@
   "requiredAttributionFiles": [
     "NOTICE"
   ],
-  "evaluationStatus": "RUNTIME_SMOKE_PENDING",
-  "qualityStatus": "NOT_EVALUATED_ON_PERSIAN_MULTI_SPEAKER_CORPUS"
+  "evaluationStatus": "RUNTIME_SMOKE_PASSED_SINGLE_SAMPLE",
+  "qualityStatus": "NOT_EVALUATED_ON_PERSIAN_MULTI_SPEAKER_CORPUS",
+  "runtimeEvidence": {
+    "workflowRunId": 45072803347,
+    "commitSha": "3b90311f9265c5fdb9bd1081032065120edec498",
+    "executionProvider": "wasm-cpu",
+    "sampleDurationSec": 12.12,
+    "inputWindowSec": 2.02,
+    "inputFrames": 200,
+    "embeddingDimensions": 192,
+    "inferenceElapsedMs": 276.58,
+    "realTimeFactor": 0.1369,
+    "verifiedAtUtc": "2026-11-22T21:34:59Z"
+  }
 }
