@@ -56,10 +56,10 @@ test(
   const modelBytes = fs.readFileSync(MODEL_PATH);
   const sampleBytes = fs.readFileSync(SAMPLE_WAV_PATH);
   const { pcm16k, durationSec } = decodeWavToMono16k(sampleBytes);
-  const requiredSamples = Math.ceil(2.02 * 16000);
+  const requiredSamples = Math.ceil(2.25 * 16000);
   assert.ok(
     pcm16k.length >= requiredSamples,
-    'real speaker smoke sample must contain at least 2.02 seconds for a 200-frame FBANK window',
+    'real speaker smoke sample must contain at least 2.25 seconds for two 1.5-second windows with 0.75-second hop',
   );
 
   const provider = createRealWasmOrtProvider();
@@ -85,12 +85,12 @@ test(
           peakSpeechProb: 0.95,
         },
       ],
-      2.02,
-      2.02,
+      1.5,
+      0.75,
     );
     const elapsedMs = performance.now() - startedAt;
 
-    assert.equal(embeddings.length, 1);
+    assert.equal(embeddings.length, 2);
     const vector = embeddings[0].embeddingVector;
     assert.equal(vector.length, 192);
     let normSq = 0;
@@ -105,10 +105,13 @@ test(
         test: 'wespeaker-ecapa-real-onnx',
         modelBytes: modelBytes.byteLength,
         sampleDurationSec: Number(durationSec.toFixed(3)),
-        inputFrames: 200,
+        inputWindowSec: 1.5,
+        hopDurationSec: 0.75,
+        inputFramesPerWindow: 148,
+        embeddingCount: embeddings.length,
         embeddingDimensions: vector.length,
         inferenceElapsedMs: Number(elapsedMs.toFixed(2)),
-        rtf: Number((elapsedMs / 2020).toFixed(4)),
+        rtf: Number((elapsedMs / 2250).toFixed(4)),
         executionProvider: 'wasm-cpu',
       }),
     );
