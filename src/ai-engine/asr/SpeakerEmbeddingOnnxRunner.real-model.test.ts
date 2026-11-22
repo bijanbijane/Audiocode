@@ -46,16 +46,13 @@ function createRealWasmOrtProvider(): OrtRuntimeProvider {
   };
 }
 
-test('WeSpeaker ECAPA-TDNN512-LM: real ONNX/WASM CPU inference returns a finite 192-D embedding', async () => {
-  assert.ok(
-    fs.existsSync(MODEL_PATH),
-    'pinned WeSpeaker ECAPA ONNX asset must be provisioned and SHA-256 verified before the test',
-  );
-  assert.ok(
-    fs.existsSync(SAMPLE_WAV_PATH),
-    'pinned Persian WAV sample must be provisioned before the test',
-  );
+const modelAndSampleAvailable =
+  fs.existsSync(MODEL_PATH) && fs.existsSync(SAMPLE_WAV_PATH);
 
+test(
+  'WeSpeaker ECAPA-TDNN512-LM: real ONNX/WASM CPU inference returns a finite 192-D embedding',
+  { skip: modelAndSampleAvailable ? false : 'Pinned WeSpeaker model and Persian sample are provisioned only in the product model-smoke workflow' },
+  async () => {
   const modelBytes = fs.readFileSync(MODEL_PATH);
   const sampleBytes = fs.readFileSync(SAMPLE_WAV_PATH);
   const { pcm16k, durationSec } = decodeWavToMono16k(sampleBytes);
@@ -118,4 +115,5 @@ test('WeSpeaker ECAPA-TDNN512-LM: real ONNX/WASM CPU inference returns a finite 
   } finally {
     await runner.unloadModel();
   }
-});
+  },
+);
