@@ -29,6 +29,7 @@ jobs:
             src/ai-engine/asr/SileroVadOnnxRunner.test.ts \
             src/ai-engine/asr/SpeakerEmbeddingOnnxRunner.test.ts \
             src/ai-engine/asr/WespeakerKaldiFbank80.test.ts \
+            src/ai-engine/asr/LocalWeSpeakerDiarizationService.test.ts \
             src/ai-engine/MultiSpeakerDiarizationAndCrosstalkEngine.test.ts
       - name: Build production web bundle
         if: always()
