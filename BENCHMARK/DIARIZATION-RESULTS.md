@@ -14,7 +14,7 @@ GitHub Actions product workflow [45074800631](https://github.com/bijanbijane/Aud
 - Model input: 80-bin Kaldi-FBANK, fixed 150-frame windows, 1.5-second window / 0.75-second hop
 - Output: two finite, L2-normalized 192-dimensional embeddings from the pinned 12.12-second Persian WAV
 - Embedding inference time: 339.95 ms
-- Embedding smoke RTF: 0.1511 (measured against the 12.12-second source file)
+- Embedding smoke RTF: 0.1511, measured against the 2.25 seconds of VAD speech coverage represented by the two overlapping windows. The separate 12.12-second file-level RTF is 0.0681 for the full VAD→WeSpeaker service.
 
 The same workflow ran the actual local service with **both** Silero VAD and WeSpeaker ONNX models:
 - Source duration: 12.12 seconds
