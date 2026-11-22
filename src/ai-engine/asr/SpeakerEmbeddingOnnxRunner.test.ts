@@ -221,10 +221,10 @@ describe('Section 113: SpeakerEmbeddingOnnxRunner & Hierarchical AHC Clustering'
             const features = feeds.feats.data as Float32Array;
             for (let mel = 0; mel < 80; mel++) {
               let mean = 0;
-              for (let frame = 0; frame < 98; frame++) {
+              for (let frame = 0; frame < 150; frame++) {
                 mean += features[frame * 80 + mel];
               }
-              assert.ok(Math.abs(mean / 98) < 1e-4);
+              assert.ok(Math.abs(mean / 150) < 1e-4);
             }
             return {
               embs: {
