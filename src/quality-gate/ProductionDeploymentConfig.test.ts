@@ -84,7 +84,7 @@ test('Section 32: CI Quality Gate workflow audits Rust licenses, circular deps, 
   assert.match(workflow, /EmbarkStudios\/cargo-deny-action@v2/);
   assert.match(workflow, /manifest-path:\s*wasm-audio-core\/Cargo\.toml/);
   assert.match(workflow, /madge\s+--circular\s+--extensions\s+ts,tsx\s+src\/\s+packages\//);
-  assert.match(workflow, /@cyclonedx\/cyclonedx-npm\s+--output-file\s+sbom-npm\.cdx\.json/);
+  assert.match(workflow, /bunx\s+--bun\s+@cdxgen\/cdxgen\s+-t\s+bun\s+-o\s+sbom-bun\.cdx\.json/);
   assert.match(workflow, /npm\s+run\s+lint/);
   assert.match(workflow, /tsx\s+--test/);
   assert.match(workflow, /npm\s+run\s+build/);
