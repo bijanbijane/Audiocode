@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import * as ort from 'onnxruntime-web';
-import {
+import type {
   OrtRuntimeProvider,
   OrtSessionLike,
   OrtTensorLike,
@@ -28,9 +28,9 @@ function createRealWasmOrtProvider(): OrtRuntimeProvider {
       return new ort.Tensor(type, data, [...dims]) as unknown as OrtTensorLike;
     },
     async createSession(modelBytesOrPath, executionProviders) {
-      const providers = executionProviders.includes('wasm') ? ['wasm'] : ['wasm'];
+      void executionProviders;
       return (await ort.InferenceSession.create(modelBytesOrPath, {
-        executionProviders: providers,
+        executionProviders: ['wasm'],
         graphOptimizationLevel: 'all',
       })) as unknown as OrtSessionLike;
     },
