@@ -531,14 +531,11 @@ export class ShahabSdkEngine {
     const audit = auditZipformerStreamingCapability(path.join(this.modelDir, 'encoder.int8.onnx'));
     this.streamingMode = audit.selectedStreamingMode;
 
+    // Keep the adapter's pinned release hashes as the trust anchor.
+    // Passing hashes computed from these same files would make a modified model
+    // self-authorizing and defeat the adapter's immutable-weight verification.
     const adapter = new SHAHABFrozenModelAdapter({
       modelDir: this.modelDir,
-      expectedHashes: {
-        encoder: hashes['encoder.int8.onnx'],
-        decoder: hashes['decoder.int8.onnx'],
-        joiner: hashes['joiner.int8.onnx'],
-        tokens: hashes['tokens.txt'],
-      },
     });
     await adapter.initializeRuntime();
     this.adapter = adapter;
