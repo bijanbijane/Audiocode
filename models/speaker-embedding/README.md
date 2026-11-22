@@ -42,22 +42,22 @@ The implementation must not substitute the existing Whisper-style Log-Mel fronte
 
 ## Verification status
 
-**Real model runtime smoke passed** on the GitHub Actions Linux runner using ONNX Runtime Web/WASM CPU:
-- The exact 24,861,931-byte asset was downloaded from the pinned revision and SHA-256 verified.
-- A 2.02-second window (200 FBANK frames) from the pinned Persian WAV produced a finite, L2-normalized 192-dimensional embedding.
-- Inference: 276.58 ms; RTF 0.1369.
-- Workflow run: [45072803347](https://github.com/bijanbijane/Audiocode/actions/runs/45072803347), commit `3b90311f9265c5fdb9bd1081032065120edec498`.
+**Full model and local-service smoke passed** in GitHub Actions on Linux using ONNX Runtime Web/WASM CPU, workflow [45074800631](https://github.com/bijanbijane/Audiocode/actions/runs/45074800631), commit `ef2a27fd047a225e0d9ae2d2e3c3e40d17e8f513`.
 
-This verifies model loading and one real inference path. It does **not** verify embedding quality or speaker separation accuracy. The frontend has dedicated unit/contract tests, but an independent numerical parity comparison against the upstream Torchaudio/Kaldi implementation remains open.
+- The 24,861,931-byte model was downloaded from the pinned immutable revision and its byte length and SHA-256 were verified.
+- The updated official-style WeSpeaker subsegment path used 1.5-second windows, 0.75-second hop, fixed 150-frame / 80-bin FBANK tensors, and produced two finite L2-normalized 192-dimensional embeddings from the pinned 12.12-second Persian WAV.
+- WeSpeaker embedding smoke: 339.95 ms; per-file RTF 0.1511.
+- The integrated local service loaded both real Silero VAD and real WeSpeaker ONNX models, ran VAD followed by speaker embedding and anonymous clustering, and completed with 4 output speaker clusters, 4 output segments, and 0.0 seconds left unassigned. Whole-service elapsed time: 825.04 ms; RTF 0.0681.
+- The separate real Silero smoke detected 2 speech segments (5.816 seconds total) in 448.08 ms; RTF 0.0370.
+- The same product workflow also passed SHAHAB real Zipformer inference/parity (14/14), canonical P0 tests (30/30), model/secret bundle exclusion, product build/lint and CEP packaging checks.
 
-The pinned asset now has a reproducible CI acquisition manifest and a real ONNX Runtime Web/WASM CPU smoke test. This smoke verifies that the graph can produce a finite, normalized 192-dimensional vector from the test WAV. It does **not** establish Persian speaker diarization accuracy.
+The reported four speaker clusters are only the raw output count for one sample. There is no human-annotated speaker reference for that sample, so this result does **not** mean four speakers were correctly identified. A smoke test verifies model loading and that the integrated path produces structurally valid output; it does **not** verify speaker separation quality, DER, JER, false merges, false splits or Persian generalization.
 
-The model remains an evaluation candidate, not production-approved, until all of these gates pass:
+The custom frontend now follows the upstream subsegment framing and per-window CMN behavior. Independent numerical parity against the official Torchaudio/Kaldi implementation remains open. The model remains an evaluation candidate, not production-approved, until all of these gates pass:
 
-1. Real ONNX/WASM inference and asset-integrity checks.
-2. Frontend numerical parity against the official Kaldi/Torchaudio reference implementation.
-3. Licensed, independently annotated Persian multi-speaker evaluation with DER, JER, false merges/splits, short turns and overlap analysis.
-4. Memory and real-time factor qualification on the target Mac M2 with 8 GB RAM.
-5. End-to-end validation in the Adobe Audition plugin and the product's local/offline pipeline.
+1. Frontend numerical parity against the official Kaldi/Torchaudio reference implementation.
+2. Licensed, independently annotated Persian multi-speaker evaluation with DER, JER, false merges/splits, short turns and overlap analysis.
+3. Memory and real-time factor qualification on the target Mac M2 with 8 GB RAM.
+4. End-to-end validation in the Adobe Audition host and the product's actual application/model lifecycle.
 
-The source model was trained on VoxCeleb2; results on that dataset do not imply equal performance on Persian speech or the AvaPardaz recording conditions.
+The source model was trained on VoxCeleb2; results on that dataset do not imply equal performance on Persian speech or AvaPardaz recording conditions.
