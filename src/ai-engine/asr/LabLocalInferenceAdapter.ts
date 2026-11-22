@@ -20,7 +20,7 @@ import type {
   AsrInferenceWordPrediction,
   AsrProviderAdapter,
   VerifiedModelIdentity,
-} from './AsrExperimentationLabCore';
+} from './AsrExperimentationLabContracts';
 
 const SHA256_HEX_RE = /^[a-f0-9]{64}$/i;
 
