@@ -208,4 +208,63 @@ describe('Section 113: SpeakerEmbeddingOnnxRunner & Hierarchical AHC Clustering'
     );
   });
 
+
+  it('uses the dedicated Kaldi FBANK frontend for WeSpeaker feature-input models', async () => {
+    const mockOrt: OrtRuntimeProvider = {
+      createTensor(type, data, dims) {
+        return { type, data, dims };
+      },
+      async createSession() {
+        return {
+          async run(feeds) {
+            assert.deepEqual(feeds.feats.dims, [1, 98, 80]);
+            const features = feeds.feats.data as Float32Array;
+            for (let mel = 0; mel < 80; mel++) {
+              let mean = 0;
+              for (let frame = 0; frame < 98; frame++) {
+                mean += features[frame * 80 + mel];
+              }
+              assert.ok(Math.abs(mean / 98) < 1e-4);
+            }
+            return {
+              embs: {
+                type: 'float32',
+                data: new Float32Array([3, 4]),
+                dims: [1, 2],
+              },
+            };
+          },
+        };
+      },
+    };
+
+    const runner = new SpeakerEmbeddingOnnxRunner(
+      mockOrt,
+      'feats',
+      'B_T_M',
+      'KALDI_FBANK',
+      'lens',
+      'embs',
+    );
+    await runner.loadModel(new Uint8Array([1, 2, 3]), ['wasm']);
+
+    const pcm = new Float32Array(16000);
+    for (let i = 0; i < pcm.length; i++) {
+      pcm[i] = 0.2 * Math.sin((2 * Math.PI * 180 * i) / 16000);
+    }
+    const extracted = await runner.extractEmbeddingsForVadSegments(pcm, [
+      {
+        startSample16k: 0,
+        endSample16k: pcm.length,
+        range: { start: 0, end: TimeMath.secondsToFlicks(1) },
+        peakSpeechProb: 0.9,
+      },
+    ]);
+    await runner.unloadModel();
+
+    assert.equal(extracted.length, 1);
+    assert.ok(Math.abs(extracted[0].embeddingVector[0] - 0.6) < 1e-4);
+    assert.ok(Math.abs(extracted[0].embeddingVector[1] - 0.8) < 1e-4);
+  });
+
 });
