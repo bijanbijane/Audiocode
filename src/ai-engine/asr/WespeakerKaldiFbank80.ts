@@ -149,7 +149,7 @@ export class WespeakerKaldiFbank80 {
       let frameMean = 0;
       for (let i = 0; i < FRAME_LENGTH; i++) {
         const sample = pcm16kMono[frameStart + i];
-        frameMean += Number.isFinite(sample) ? sample : 0;
+        frameMean += Number.isFinite(sample) ? sample * 32768 : 0;
       }
       frameMean /= FRAME_LENGTH;
 
@@ -158,7 +158,7 @@ export class WespeakerKaldiFbank80 {
       let previous = 0;
       for (let i = 0; i < FRAME_LENGTH; i++) {
         const raw = pcm16kMono[frameStart + i];
-        const centered = (Number.isFinite(raw) ? raw : 0) - frameMean;
+        const centered = (Number.isFinite(raw) ? raw * 32768 : 0) - frameMean;
         const emphasized =
           i === 0 ? centered * (1.0 - PREEMPHASIS) : centered - PREEMPHASIS * previous;
         previous = centered;
