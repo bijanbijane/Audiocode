@@ -73,4 +73,62 @@ describe('Section 105: SileroVadOnnxRunner (Silero v5 ONNX + LSTM State Carryove
     assert.equal(batches[0].offsetMappings.length, 2);
     assert.ok(batches[0].concatenated16kPcm.length < pcm.length);
   });
+
+  it('does not split speech when weak frames remain above the end threshold', async () => {
+    const frameProbabilities = [
+      ...Array(10).fill(0.92),
+      0.04,
+      0.04,
+      0.4,
+      0.04,
+      0.04,
+      0.04,
+      0.92,
+      0.92,
+      0.92,
+      0.92,
+    ];
+    let frameIndex = 0;
+
+    const mockOrtProvider: OrtRuntimeProvider = {
+      createTensor(type, data, dims) {
+        return { type, data, dims };
+      },
+      async createSession() {
+        return {
+          async run() {
+            const prob = frameProbabilities[frameIndex++] ?? 0.92;
+            return {
+              output: {
+                type: 'float32',
+                data: new Float32Array([prob]),
+                dims: [1, 1],
+              },
+              stateN: {
+                type: 'float32',
+                data: new Float32Array(2 * 1 * 128),
+                dims: [2, 1, 128],
+              },
+            };
+          },
+        };
+      },
+    };
+
+    const pcm = new Float32Array(frameProbabilities.length * 512);
+    const vad = new SileroVadOnnxRunner(mockOrtProvider);
+    await vad.loadModel(new Uint8Array([0, 1, 2]));
+
+    const segments = await vad.detectSpeechSegments(pcm, {
+      minSilenceMs: 120,
+      speechPadMs: 0,
+    });
+    await vad.unloadModel();
+
+    assert.equal(frameIndex, frameProbabilities.length);
+    assert.equal(segments.length, 1);
+    assert.equal(segments[0].startSample16k, 0);
+    assert.equal(segments[0].endSample16k, pcm.length);
+  });
+
 });
