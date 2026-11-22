@@ -21,10 +21,12 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: npm
 
-      - name: Install Dependencies Reproducibly
-        run: npm ci --no-audit --no-fund
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Install Dependencies from Frozen Bun Lockfile
+        run: bun install --frozen-lockfile
 
       - name: Audit Rust Licenses & Supply Chain (cargo-deny)
         uses: EmbarkStudios/cargo-deny-action@v2
