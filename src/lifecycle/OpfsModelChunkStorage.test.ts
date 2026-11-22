@@ -94,10 +94,8 @@ class VirtualOpfsFs {
         return {
           size: snapshot.byteLength,
           async arrayBuffer() {
-            return snapshot.buffer.slice(
-              snapshot.byteOffset,
-              snapshot.byteOffset + snapshot.byteLength,
-            );
+            const copy = snapshot.slice();
+            return copy.buffer;
           },
           async text() {
             return new TextDecoder().decode(snapshot);
@@ -164,7 +162,7 @@ describe('AVP-008: OpfsModelChunkStorage durable repository', () => {
     await storage1.writeTemporaryChunk(storageDir, 4, chunk1);
 
     // Before promote/pointer write, active pointer must still be null
-    assert.equal(await storage1.readActivePointer(), null);
+    assert.equal(await storage1.readActiveRegistryPointer(), null);
 
     const manifest: StoredModelArtifactManifest = {
       schemaVersion: 1,
@@ -173,35 +171,39 @@ describe('AVP-008: OpfsModelChunkStorage durable repository', () => {
       generationId: 'gen1',
       storageDirectory: storageDir,
       architecture: 'FASTCONFORMER_CTC',
-      supportedRuntime: 'onnxruntime-web/wasm',
-      supportedExecutionProviders: ['wasm'],
-      license: 'Apache-2.0',
-      sourceOrigin: 'local-file',
-      compatibilityMinAppVersion: '1.0.0',
+      storageBackend: 'OPFS',
       fileName: 'avapardaz-fa.onnx',
       totalBytes: fullBytes.byteLength,
-      sha256Hex: fullHash,
       chunkSizeBytes: 4,
-      installedAtIso: '2026-11-20T00:00:00.000Z',
-      verifiedAtIso: '2026-11-20T00:00:00.000Z',
+      chunkCount: 2,
+      sha256Hex: fullHash,
+      committedAtMs: 1_795_046_400_000,
       chunks: [
-        { index: 0, fileName: 'chunk_0000.bin', byteLength: 4, sha256Hex: sha256Bytes(chunk0) },
-        { index: 1, fileName: 'chunk_0001.bin', byteLength: 3, sha256Hex: sha256Bytes(chunk1) },
+        { index: 0, byteLength: 4, sha256Hex: sha256Bytes(chunk0) },
+        { index: 1, byteLength: 3, sha256Hex: sha256Bytes(chunk1) },
       ],
     };
 
-    await storage1.promoteTemporaryArtifact(storageDir, manifest);
+    await storage1.promoteTemporaryArtifact(storageDir, storageDir, manifest);
     const pointer: PersistedModelRegistryPointer = {
       schemaVersion: 1,
       modelId: 'avapardaz-fa',
       version: '1.0.0',
       generationId: 'gen1',
       storageDirectory: storageDir,
-      sha256Hex: fullHash,
-      totalBytes: fullBytes.byteLength,
-      updatedAtIso: '2026-11-20T00:00:00.000Z',
+      architecture: 'FASTCONFORMER_CTC',
+      supportedRuntime: 'onnxruntime-web/wasm',
+      supportedExecutionProviders: ['wasm'],
+      fileName: 'avapardaz-fa.onnx',
+      fileSizeBytes: fullBytes.byteLength,
+      verifiedSha256Hex: fullHash,
+      license: 'Apache-2.0',
+      sourceOrigin: 'local-file',
+      compatibilityMinAppVersion: '1.0.0',
+      installedAtMs: 1_795_046_400_000,
+      committedAtMs: 1_795_046_400_000,
     };
-    await storage1.writeActivePointer(pointer);
+    await storage1.writeActiveRegistryPointer(pointer);
 
     // Simulate complete browser reload with a fresh OpfsModelChunkStorage instance
     const storage2 = new OpfsModelChunkStorage({
@@ -209,15 +211,17 @@ describe('AVP-008: OpfsModelChunkStorage durable repository', () => {
     });
     await storage2.initialize();
 
-    const restoredPtr = await storage2.readActivePointer();
+    const restoredPtr = await storage2.readActiveRegistryPointer();
     assert.deepEqual(restoredPtr, pointer);
 
-    const restoredManifest = await storage2.readInstalledManifest(storageDir);
+    const restoredManifest = await storage2.getInstalledManifest(storageDir);
     assert.equal(restoredManifest?.sha256Hex, fullHash);
     assert.equal(restoredManifest?.chunks.length, 2);
 
     const r0 = await storage2.readInstalledChunk(storageDir, 0);
     const r1 = await storage2.readInstalledChunk(storageDir, 1);
+    assert.ok(r0);
+    assert.ok(r1);
     assert.deepEqual(Array.from(r0), [1, 2, 3, 4]);
     assert.deepEqual(Array.from(r1), [5, 6, 7]);
   });
@@ -237,7 +241,7 @@ describe('AVP-008: OpfsModelChunkStorage durable repository', () => {
           chunkSizeBytes: 8,
         }),
       (err: unknown) =>
-        err instanceof ModelRepositoryError && err.code === 'INVALID_MODEL_PATH_SEGMENT',
+        err instanceof ModelRepositoryError && err.code === 'MODEL_PATH_INVALID',
     );
 
     await storage.beginTemporaryArtifact({
