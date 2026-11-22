@@ -19,8 +19,10 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - name: Install dependencies
-        run: npm ci || npm install
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+      - name: Install dependencies from frozen bun.lock
+        run: bun install --frozen-lockfile
       - name: Run linter
         run: npm run lint
       - name: Build production web bundle
@@ -39,8 +41,10 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - name: Install dependencies
-        run: npm ci || npm install
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+      - name: Install dependencies from frozen bun.lock
+        run: bun install --frozen-lockfile
       - name: Run canonical P0 automated verification suites (30 tests)
         run: |
           npx --yes tsx --test \
@@ -75,5 +79,5 @@ jobs:
           if [ -f package-lock.json ]; then
             npm audit --audit-level=high
           else
-            echo "::warning::package-lock.json absent (bun.lock present) — npm audit BLOCKED until canonical npm lockfile is generated."
+            echo "::warning::Repository uses bun.lock; npm audit cannot audit this lockfile. Add a Bun-lockfile-compatible advisory scan before release."
           fi
