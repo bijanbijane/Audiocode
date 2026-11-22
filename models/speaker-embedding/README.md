@@ -1,35 +1,47 @@
 # Speaker embedding model assets
 
-This directory intentionally contains no model weights yet. Do not mark speaker diarization as model-verified until a pinned asset has passed the acquisition, runtime and evaluation gates below.
+Speaker diarization uses a separately versioned ONNX embedding model. The binary is intentionally excluded from Git; CI downloads the pinned file and verifies exact byte count and SHA-256 before inference.
 
-## Candidate under review (not adopted)
+## Current evaluation candidate: WeSpeaker ECAPA-TDNN512-LM
 
-Candidate: [kenrunio/transcriber-speaker-onnx](https://huggingface.co/kenrunio/transcriber-speaker-onnx)
+- Upstream: [Wespeaker/wespeaker-ecapa-tdnn512-LM](https://huggingface.co/Wespeaker/wespeaker-ecapa-tdnn512-LM)
+- Immutable source revision: `a2f3dcb1c8702caccc7a55ceb57f5e8d1842112b`
+- Asset: `voxceleb_ECAPA512_LM.onnx`
+- Size: 24,861,931 bytes
+- SHA-256: `d71b85d9b48058ef68004f04f1b78acebefb9dfcf542e19b976a12a5ad1f10b0`
+- Declared upstream license: CC-BY-4.0; see [NOTICE](./NOTICE)
+- Embedding dimension: 192
+- Training domain stated by the model card: VoxCeleb2 Dev (English celebrity interview recordings)
 
-Its model card describes an Apache-2.0 ONNX export of SpeechBrain ECAPA-TDNN with the 80-band feature frontend and normalization included in the graph. The documented inputs are:
-- `wav`: float32, shape `[batch, samples]`, 16 kHz mono PCM
-- `lens`: float32, shape `[batch]`, fraction of each row containing real audio
-- `emb`: float32, shape `[batch, 1, 192]`
+The upstream ONNX graph contract is `feats: float32 [1,T,80]` to `embs: float32 [1,192]`. It is a **feature-input model**, not a waveform-input model.
 
-The model card states that the weights come from SpeechBrain's `spkrec-ecapa-voxceleb`, trained on VoxCeleb 1 and 2, and reports ONNX/PyTorch embedding parity. These are upstream claims, not AvaPardaz validation results.
+## Required frontend contract
 
-**Adoption is blocked** until an immutable repository revision, exact byte size, SHA-256, license/attribution files and file provenance are verified. The default `main` branch is not an acceptable production pin. The candidate must also pass a Persian multi-speaker evaluation; model-export parity alone does not establish diarization accuracy on Persian audio.
+The dedicated `WespeakerKaldiFbank80` implementation is intentionally separate from SHAHAB's Whisper/Conformer Log-Mel frontend.
 
-## Runtime contract
+- Input audio: mono Float32 PCM normalized to approximately [-1,1], 16 kHz
+- Scale: multiply waveform by 2^15 before Kaldi FBANK computation
+- Window: Hamming, 25 ms (400 samples)
+- Frame shift: 10 ms (160 samples), snip edges enabled
+- FFT: 512 points
+- Features: 80 triangular Mel bins, power spectrum, log filterbank
+- Dither: 0 at inference, matching WeSpeaker's `Speaker.compute_features()` default
+- Normalization: subtract utterance mean independently per Mel bin
+- Tensor layout: `[1,T,80]`
+- Embedding postprocessing: L2 normalization by AvaPardaz runner
 
-`SpeakerEmbeddingOnnxRunner` supports:
-- `LOG_MEL_FEATURES`: the existing generic Log-Mel/CMVN frontend. This is not asserted to reproduce SpeechBrain Fbank.
-- `WAVEFORM`: pass raw 16 kHz mono PCM and a length tensor directly to a graph that embeds its own feature frontend. Tensor names are configurable.
+The implementation must not substitute the existing Whisper-style Log-Mel frontend or the waveform-native SpeechBrain contract. See the [official WeSpeaker inference implementation](https://github.com/wenet-e2e/wespeaker/blob/master/wespeaker/cli/speaker.py), the [ONNX exporter](https://github.com/wenet-e2e/wespeaker/blob/master/wespeaker/bin/export_onnx.py), and its [VoxCeleb recipe](https://github.com/wenet-e2e/wespeaker/blob/master/examples/voxceleb/v2/conf/ecapa_tdnn_lm.yaml).
 
-No candidate asset is automatically downloaded or loaded by the application.
+## Verification status
 
-## Required gates before adoption
+The pinned asset now has a reproducible CI acquisition manifest and a real ONNX Runtime Web/WASM CPU smoke test. This smoke verifies that the graph can produce a finite, normalized 192-dimensional vector from the test WAV. It does **not** establish Persian speaker diarization accuracy.
 
-1. Pin an immutable upstream commit and declare exact path, byte size, SHA-256, license and required attribution files in a manifest.
-2. Download at CI/runtime setup from the pinned revision; verify all bytes and hashes before ONNX session creation.
-3. Inspect and assert the exact ONNX input/output tensor names, types and shapes.
-4. Run actual ONNX Runtime WASM/CPU inference on a licensed Persian multi-speaker sample with at least two known speakers. Keep mock tests separate from this smoke test.
-5. Evaluate same-speaker and different-speaker embedding distributions, diarization error rate (DER), Jaccard error rate (JER), false merges/splits, short-turn behavior and overlap handling against human-annotated reference audio.
-6. Measure memory and real-time factor on the target Mac M2/8 GB device; test coexistence with Adobe Audition.
+The model remains an evaluation candidate, not production-approved, until all of these gates pass:
 
-Until these gates pass, the diarization engine remains **implemented / tested at contract level, not model-verified**.
+1. Real ONNX/WASM inference and asset-integrity checks.
+2. Frontend numerical parity against the official Kaldi/Torchaudio reference implementation.
+3. Licensed, independently annotated Persian multi-speaker evaluation with DER, JER, false merges/splits, short turns and overlap analysis.
+4. Memory and real-time factor qualification on the target Mac M2 with 8 GB RAM.
+5. End-to-end validation in the Adobe Audition plugin and the product's local/offline pipeline.
+
+The source model was trained on VoxCeleb2; results on that dataset do not imply equal performance on Persian speech or the AvaPardaz recording conditions.
