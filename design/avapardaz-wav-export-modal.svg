@@ -1,1 +1,150 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="1080" viewBox="0 0 1440 1080"><defs><linearGradient id="bg" x2="1" y2="1"><stop stop-color="#0B1220"/><stop offset="1" stop-color="#111B2B"/></linearGradient><linearGradient id="panel" x2="0" y2="1"><stop stop-color="#172131"/><stop offset="1" stop-color="#111925"/></linearGradient><linearGradient id="amber" x2="1" y2="1"><stop stop-color="#FBBF24"/><stop offset="1" stop-color="#F59E0B"/></linearGradient><style>text{font-family:Vazirmatn,Vazir,IRANSansX,Tahoma,Arial,sans-serif}.fa{direction:rtl;unicode-bidi:plaintext;text-anchor:end}.en{font-family:monospace}.primary{fill:#F3F6FC}.muted{fill:#9AA9BF}.line{stroke:#2A374A;stroke-width:1}.field{fill:#0D1521;stroke:#35445A;stroke-width:1.2}</style></defs><rect width="1440" height="1080" fill="url(#bg)"/><rect width="1440" height="1080" fill="#050A12" opacity=".35"/><rect x="300" y="92" width="840" height="896" rx="20" fill="url(#panel)" stroke="#2B394D"/><rect x="301" y="93" width="838" height="114" rx="19" fill="#182436"/><path d="M301 207H1139" class="line"/><text x="1096" y="135" class="fa primary" font-size="23" font-weight="700">رندر غیرمخرب و خروجی استاندارد</text><text x="1096" y="166" class="fa muted" font-size="14">فقط پیشنهادهای تأییدشده در EDL اعمال می‌شوند؛ فایل صوتی اصلی دست‌نخورده می‌ماند.</text><text x="1096" y="188" class="fa muted en" font-size="11">MISSION 06 · RENDER &amp; EXPORT</text><rect x="330" y="132" width="36" height="36" rx="10" fill="#202D40"/><path d="M341 143l14 14m0-14l-14 14" stroke="#9AA9BF" stroke-width="1.7"/><text x="1090" y="250" class="fa" fill="#DCE5F2" font-size="18">تنظیمات خروجی</text><text x="1090" y="272" class="fa muted" font-size="13">قالب فایل و نرخ نمونه‌برداری را انتخاب کنید.</text><text x="1090" y="311" class="fa" fill="#CBD5E1" font-size="15">قالب خروجی صوتی</text><rect x="738" y="325" width="352" height="58" rx="10" class="field"/><text x="1067" y="360" class="fa primary en" font-size="15">WAV PCM 16-bit</text><text x="1067" y="377" class="fa muted" font-size="10">STANDARD · انتخاب پیش‌فرض</text><text x="700" y="311" class="fa" fill="#CBD5E1" font-size="15">نرخ نمونه‌برداری</text><rect x="350" y="325" width="350" height="58" rx="10" class="field"/><text x="677" y="360" class="fa primary en" font-size="15">48,000 Hz</text><text x="677" y="377" class="fa muted" font-size="10">PROJECT SAMPLE RATE</text><text x="1090" y="416" class="fa muted" font-size="13">قالب‌های قابل انتخاب</text><g class="en" font-size="11" text-anchor="middle"><rect x="350" y="428" width="174" height="30" rx="7" fill="#26364B" stroke="#F59E0B"/><text x="437" y="448" fill="#FCD34D">PCM 16-bit</text><rect x="534" y="428" width="174" height="30" rx="7" fill="#131E2D" stroke="#34445A"/><text x="621" y="448" fill="#AAB8CA">PCM 24-bit</text><rect x="718" y="428" width="174" height="30" rx="7" fill="#131E2D" stroke="#34445A"/><text x="805" y="448" fill="#AAB8CA">FLOAT 32-bit</text><rect x="902" y="428" width="188" height="30" rx="7" fill="#131E2D" stroke="#34445A"/><text x="996" y="448" fill="#AAB8CA">RF64 · LONG FORM</text></g><rect x="350" y="486" width="740" height="250" rx="13" fill="#0D1623" stroke="#2C3B50"/><text x="1062" y="524" class="fa primary" font-size="16">وضعیت چرخه رندر</text><rect x="366" y="502" width="96" height="28" rx="7" fill="#27364A"/><text x="414" y="521" text-anchor="middle" class="en" font-size="11" fill="#D2DCEB">IDLE</text><text x="1062" y="556" class="fa muted" font-size="14">در انتظار شروع رندر غیرمخرب</text><text x="378" y="556" class="en" font-size="15" fill="#DCE5F2">0%</text><rect x="378" y="571" width="684" height="8" rx="4" fill="#202C3D"/><g><rect x="366" y="603" width="216" height="104" rx="10" fill="#131F2E" stroke="#2A394D"/><text x="524" y="635" class="fa primary" font-size="13">۱. تکمیل رندر</text><text x="565" y="663" class="fa muted" font-size="12">ساخت فایل از روی EDL تأییدشده</text><text x="524" y="686" class="fa muted en" font-size="10">RENDER COMPLETED</text><rect x="594" y="603" width="216" height="104" rx="10" fill="#131F2E" stroke="#2A394D"/><text x="752" y="635" class="fa primary" font-size="13">۲. اعتبارسنجی فایل</text><text x="752" y="663" class="fa muted" font-size="12">بررسی مستقل ساختار و خروجی</text><text x="752" y="686" class="fa muted en" font-size="10">OUTPUT VALIDATION</text><rect x="822" y="603" width="252" height="104" rx="10" fill="#131F2E" stroke="#2A394D"/><text x="1016" y="635" class="fa primary" font-size="13">۳. ذخیره و دانلود</text><text x="1016" y="663" class="fa muted" font-size="12">ذخیره محلی فایل تأییدشده</text><text x="1016" y="686" class="fa muted en" font-size="10">FILE DOWNLOAD</text></g><rect x="350" y="766" width="232" height="52" rx="10" fill="url(#amber)"/><text x="560" y="798" class="fa" fill="#111827" font-size="15" font-weight="800">شروع رندر غیرمخرب</text><rect x="594" y="766" width="198" height="52" rx="10" fill="#182538" stroke="#394B63"/><text x="773" y="798" class="fa" fill="#9EADC1" font-size="14">ادامه از Checkpoint</text><rect x="804" y="766" width="286" height="52" rx="10" fill="#17352F" stroke="#2B6655"/><text x="1072" y="798" class="fa" fill="#82A99C" font-size="14">دانلود فایل صوتی تأییدشده</text><text x="1072" y="838" class="fa muted" font-size="11">پس از تکمیل و اعتبارسنجی رندر فعال می‌شود.</text><path d="M350 862H1090" class="line"/><text x="1090" y="896" class="fa" fill="#DCE5F2" font-size="16">خروجی‌های متنی و مستند</text><text x="1090" y="919" class="fa muted" font-size="12">متن پیاده‌سازی، زیرنویس و تصمیم‌های تدوین</text><g font-size="13" font-weight="600" text-anchor="middle"><rect x="350" y="934" width="104" height="38" rx="8" fill="#172436" stroke="#35465D"/><text x="402" y="958" fill="#D8E2F0">TXT</text><rect x="464" y="934" width="104" height="38" rx="8" fill="#172436" stroke="#35465D"/><text x="516" y="958" fill="#D8E2F0">SRT</text><rect x="578" y="934" width="190" height="38" rx="8" fill="#172436" stroke="#35465D"/><text x="673" y="958" fill="#D8E2F0">Transcript JSON</text><rect x="778" y="934" width="154" height="38" rx="8" fill="#172436" stroke="#35465D"/><text x="855" y="958" fill="#D8E2F0">EDL JSON</text></g><text x="1090" y="982" class="fa muted" font-size="10">خروجی EDL در صورت وجود نسخه معتبر پروژه در دسترس است.</text></svg>
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="1080" viewBox="0 0 1440 1080">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0B1220"/>
+      <stop offset="1" stop-color="#111B2B"/>
+    </linearGradient>
+    <linearGradient id="panel" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#172131"/>
+      <stop offset="1" stop-color="#111925"/>
+    </linearGradient>
+    <linearGradient id="amber" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#FBBF24"/>
+      <stop offset="1" stop-color="#F59E0B"/>
+    </linearGradient>
+    <filter id="shadow" x="-30%" y="-30%" width="160%" height="170%">
+      <feGaussianBlur in="SourceAlpha" stdDeviation="22"/>
+      <feOffset dy="16"/>
+      <feComponentTransfer><feFuncA type="linear" slope="0.42"/></feComponentTransfer>
+      <feMerge><feMergeNode/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <style>
+      text { font-family: 'Vazirmatn','Vazir','IRANSansX','Noto Sans Arabic','Noto Naskh Arabic',Tahoma,Arial,sans-serif; }
+      .fa { direction: rtl; unicode-bidi: plaintext; text-anchor: start; }
+      .fa.en { direction: ltr; unicode-bidi: normal; text-anchor: end; }
+      .en { font-family: 'JetBrains Mono',ui-monospace,monospace; }
+      .primary { fill:#F3F6FC; }
+      .muted { fill:#9AA9BF; }
+      .subtle { fill:#74839A; }
+      .line { stroke:#2A374A; stroke-width:1; }
+      .small { font-size:14px; }
+      .tiny { font-size:12px; }
+      .label { font-size:16px; font-weight:600; fill:#DCE5F2; }
+      .field { fill:#0D1521; stroke:#35445A; stroke-width:1.2; }
+    </style>
+  </defs>
+
+  <!-- Backdrop -->
+  <rect width="1440" height="1080" fill="url(#bg)"/>
+  <circle cx="160" cy="160" r="250" fill="#1E3A5F" opacity="0.12"/>
+  <circle cx="1270" cy="920" r="320" fill="#D97706" opacity="0.055"/>
+  <rect width="1440" height="1080" fill="#050A12" opacity="0.35"/>
+
+  <!-- Modal frame -->
+  <g filter="url(#shadow)">
+    <rect x="300" y="92" width="840" height="896" rx="20" fill="url(#panel)" stroke="#2B394D" stroke-width="1.4"/>
+  </g>
+
+  <!-- Header -->
+  <rect x="301" y="93" width="838" height="114" rx="19" fill="#182436"/>
+  <path d="M301 207H1139" class="line"/>
+  <text x="1096" y="135" text-anchor="end" class="fa primary" font-size="23" font-weight="700">رندر غیرمخرب و خروجی استاندارد</text>
+  <text x="1096" y="166" text-anchor="end" class="fa muted" font-size="14">فقط پیشنهادهای تأییدشده در EDL اعمال می‌شوند؛ فایل صوتی اصلی دست‌نخورده می‌ماند.</text>
+  <text x="1096" y="188" text-anchor="end" class="fa subtle en" font-size="11" letter-spacing="1.1">MISSION 06  ·  RENDER &amp; EXPORT</text>
+  <rect x="330" y="132" width="36" height="36" rx="10" fill="#202D40"/>
+  <path d="M341 143l14 14m0-14l-14 14" stroke="#9AA9BF" stroke-width="1.7" stroke-linecap="round"/>
+
+  <!-- Format controls -->
+  <text x="1090" y="250" text-anchor="end" class="fa label">تنظیمات خروجی</text>
+  <text x="1090" y="272" text-anchor="end" class="fa muted tiny">قالب فایل و نرخ نمونه‌برداری را انتخاب کنید.</text>
+
+  <text x="1090" y="311" text-anchor="end" class="fa small" fill="#CBD5E1" font-weight="600">قالب خروجی صوتی</text>
+  <rect x="738" y="325" width="352" height="58" rx="10" class="field"/>
+  <text x="1067" y="360" text-anchor="end" class="fa primary en" font-size="15" font-weight="600">WAV PCM 16-bit</text>
+  <text x="1067" y="377" text-anchor="end" class="fa subtle" font-size="10">STANDARD · انتخاب پیش‌فرض</text>
+  <path d="M758 349l7 7 7-7" stroke="#8FA0B7" stroke-width="1.7" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+
+  <text x="700" y="311" text-anchor="end" class="fa small" fill="#CBD5E1" font-weight="600">نرخ نمونه‌برداری</text>
+  <rect x="350" y="325" width="350" height="58" rx="10" class="field"/>
+  <text x="677" y="360" text-anchor="end" class="fa primary en" font-size="15" font-weight="600">48,000 Hz</text>
+  <text x="677" y="377" text-anchor="end" class="fa subtle" font-size="10">PROJECT SAMPLE RATE</text>
+  <path d="M370 349l7 7 7-7" stroke="#8FA0B7" stroke-width="1.7" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+
+  <!-- Available presets -->
+  <text x="1090" y="416" text-anchor="end" class="fa muted tiny">قالب‌های قابل انتخاب</text>
+  <g class="en" font-size="11" text-anchor="middle">
+    <rect x="350" y="428" width="174" height="30" rx="7" fill="#26364B" stroke="#F59E0B" stroke-width="1"/>
+    <text x="437" y="448" fill="#FCD34D">PCM 16-bit</text>
+    <rect x="534" y="428" width="174" height="30" rx="7" fill="#131E2D" stroke="#34445A"/>
+    <text x="621" y="448" fill="#AAB8CA">PCM 24-bit</text>
+    <rect x="718" y="428" width="174" height="30" rx="7" fill="#131E2D" stroke="#34445A"/>
+    <text x="805" y="448" fill="#AAB8CA">FLOAT 32-bit</text>
+    <rect x="902" y="428" width="188" height="30" rx="7" fill="#131E2D" stroke="#34445A"/>
+    <text x="996" y="448" fill="#AAB8CA">RF64 · LONG FORM</text>
+  </g>
+
+  <!-- Lifecycle panel -->
+  <rect x="350" y="486" width="740" height="250" rx="13" fill="#0D1623" stroke="#2C3B50" stroke-width="1.2"/>
+  <text x="1062" y="524" text-anchor="end" class="fa primary" font-size="16" font-weight="700">وضعیت چرخه رندر</text>
+  <rect x="366" y="502" width="96" height="28" rx="7" fill="#27364A"/>
+  <text x="414" y="521" text-anchor="middle" class="en" font-size="11" fill="#D2DCEB">IDLE</text>
+  <text x="1062" y="556" text-anchor="end" class="fa muted small">در انتظار شروع رندر غیرمخرب</text>
+  <text x="378" y="556" text-anchor="start" class="en" font-size="15" fill="#DCE5F2" font-weight="600">0%</text>
+  <rect x="378" y="571" width="684" height="8" rx="4" fill="#202C3D"/>
+  <rect x="378" y="571" width="0" height="8" rx="4" fill="url(#amber)"/>
+
+  <!-- Three verification stages -->
+  <g>
+    <rect x="366" y="603" width="216" height="104" rx="10" fill="#131F2E" stroke="#2A394D"/>
+    <circle cx="544" cy="630" r="13" fill="#26364A"/>
+    <path d="M538 630h12m-6-6v12" stroke="#A8B7CA" stroke-width="1.5" stroke-linecap="round"/>
+    <text x="524" y="635" text-anchor="end" class="fa primary" font-size="13" font-weight="600">۱. تکمیل رندر</text>
+    <text x="565" y="663" text-anchor="end" class="fa muted tiny">ساخت فایل از روی EDL تأییدشده</text>
+    <text x="524" y="686" text-anchor="end" class="fa subtle en" font-size="10">RENDER COMPLETED</text>
+
+    <rect x="594" y="603" width="216" height="104" rx="10" fill="#131F2E" stroke="#2A394D"/>
+    <circle cx="772" cy="630" r="13" fill="#26364A"/>
+    <path d="M766 630l4 4 8-9" stroke="#A8B7CA" stroke-width="1.6" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+    <text x="752" y="635" text-anchor="end" class="fa primary" font-size="13" font-weight="600">۲. اعتبارسنجی فایل</text>
+    <text x="752" y="663" text-anchor="end" class="fa muted tiny">بررسی مستقل ساختار و خروجی</text>
+    <text x="752" y="686" text-anchor="end" class="fa subtle en" font-size="10">OUTPUT VALIDATION</text>
+
+    <rect x="822" y="603" width="252" height="104" rx="10" fill="#131F2E" stroke="#2A394D"/>
+    <circle cx="1036" cy="630" r="13" fill="#26364A"/>
+    <path d="M1036 622v10m-4-4l4 4 4-4" stroke="#A8B7CA" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+    <text x="1016" y="635" text-anchor="end" class="fa primary" font-size="13" font-weight="600">۳. ذخیره و دانلود</text>
+    <text x="1016" y="663" text-anchor="end" class="fa muted tiny">ذخیره محلی فایل تأییدشده</text>
+    <text x="1016" y="686" text-anchor="end" class="fa subtle en" font-size="10">FILE DOWNLOAD</text>
+  </g>
+
+  <!-- Primary actions -->
+  <rect x="350" y="766" width="232" height="52" rx="10" fill="url(#amber)"/>
+  <path d="M375 783l14 9-14 9z" fill="#111827"/>
+  <text x="560" y="798" text-anchor="end" fill="#111827" font-size="15" font-weight="800">شروع رندر غیرمخرب</text>
+
+  <rect x="594" y="766" width="198" height="52" rx="10" fill="#182538" stroke="#394B63"/>
+  <path d="M620 782v20m-5-5l5 5 5-5" stroke="#AAB8CA" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+  <text x="773" y="798" text-anchor="end" fill="#9EADC1" font-size="14" font-weight="600">ادامه از Checkpoint</text>
+
+  <rect x="804" y="766" width="286" height="52" rx="10" fill="#17352F" stroke="#2B6655" opacity="0.62"/>
+  <path d="M830 782v19m-6-6l6 6 6-6" stroke="#82A99C" stroke-width="1.7" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+  <text x="1072" y="798" text-anchor="end" fill="#82A99C" font-size="14" font-weight="700">دانلود فایل صوتی تأییدشده</text>
+  <text x="1072" y="838" text-anchor="end" fill="#73839A" font-size="11">پس از تکمیل و اعتبارسنجی رندر فعال می‌شود.</text>
+
+  <!-- Secondary exports -->
+  <path d="M350 862H1090" class="line"/>
+  <text x="1090" y="896" text-anchor="end" class="fa label">خروجی‌های متنی و مستند</text>
+  <text x="1090" y="919" text-anchor="end" class="fa muted tiny">متن پیاده‌سازی، زیرنویس و تصمیم‌های تدوین</text>
+
+  <g font-size="13" font-weight="600" text-anchor="middle">
+    <rect x="350" y="934" width="104" height="38" rx="8" fill="#172436" stroke="#35465D"/>
+    <text x="402" y="958" fill="#D8E2F0">TXT</text>
+    <rect x="464" y="934" width="104" height="38" rx="8" fill="#172436" stroke="#35465D"/>
+    <text x="516" y="958" fill="#D8E2F0">SRT</text>
+    <rect x="578" y="934" width="190" height="38" rx="8" fill="#172436" stroke="#35465D"/>
+    <text x="673" y="958" fill="#D8E2F0">Transcript JSON</text>
+    <rect x="778" y="934" width="154" height="38" rx="8" fill="#172436" stroke="#35465D"/>
+    <text x="855" y="958" fill="#D8E2F0">EDL JSON</text>
+  </g>
+  <text x="1090" y="982" text-anchor="end" class="fa subtle" font-size="10">خروجی EDL در صورت وجود نسخهٔ معتبر پروژه در دسترس است.</text>
+</svg>
