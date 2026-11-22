@@ -75,22 +75,22 @@ test('Embedding clustering separates speakers, emits UNKNOWN_SPEAKER, and suppor
 test('Speaker assignment rejects invalid or dimension-mismatched embeddings instead of comparing partial vectors', () => {
   const segments = MultiSpeakerDiarizationAndCrosstalkEngine.assignSpeakersFromEmbeddings('track-guard', [
     {
-      range: { start: 0, end: 100 },
+      range: { start: 0, end: TimeMath.secondsToFlicks(0.1) },
       embeddingVector: new Float32Array([1, 0]),
       vadProbability: 0.95,
     },
     {
-      range: { start: 300, end: 400 },
+      range: { start: TimeMath.secondsToFlicks(1), end: TimeMath.secondsToFlicks(1.1) },
       embeddingVector: new Float32Array([1, 0, 0]),
       vadProbability: 0.95,
     },
     {
-      range: { start: 600, end: 700 },
+      range: { start: TimeMath.secondsToFlicks(2), end: TimeMath.secondsToFlicks(2.1) },
       embeddingVector: new Float32Array([0, 0]),
       vadProbability: 0.95,
     },
     {
-      range: { start: 900, end: 1000 },
+      range: { start: TimeMath.secondsToFlicks(3), end: TimeMath.secondsToFlicks(3.1) },
       embeddingVector: new Float32Array([Number.NaN, 1]),
       vadProbability: 0.95,
     },
