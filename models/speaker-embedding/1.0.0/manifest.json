@@ -1,0 +1,53 @@
+{
+  "modelId": "wespeaker-ecapa-tdnn512-lm",
+  "version": "1.0.0",
+  "architecture": "ECAPA_TDNN_GLOB_C512_ASTP",
+  "license": "CC-BY-4.0",
+  "sampleRateHz": 16000,
+  "embeddingDimension": 192,
+  "inputContract": {
+    "tensorName": "feats",
+    "dtype": "float32",
+    "shape": [
+      "batch",
+      "frames",
+      80
+    ],
+    "frontend": "kaldi-fbank",
+    "frameLengthMs": 25,
+    "frameShiftMs": 10,
+    "window": "hamming",
+    "melBins": 80,
+    "dither": 0,
+    "useEnergy": false,
+    "snipEdges": true,
+    "waveformScale": 32768,
+    "cmn": "per-utterance-per-bin"
+  },
+  "outputContract": {
+    "tensorName": "embs",
+    "dtype": "float32",
+    "shape": [
+      "batch",
+      192
+    ],
+    "postprocess": "L2 normalization by AvaPardaz runner"
+  },
+  "upstream": {
+    "repository": "https://huggingface.co/Wespeaker/wespeaker-ecapa-tdnn512-LM",
+    "commitSha": "a2f3dcb1c8702caccc7a55ceb57f5e8d1842112b",
+    "modelCard": "https://huggingface.co/Wespeaker/wespeaker-ecapa-tdnn512-LM"
+  },
+  "files": [
+    {
+      "path": "voxceleb_ECAPA512_LM.onnx",
+      "sizeBytes": 24861931,
+      "sha256": "d71b85d9b48058ef68004f04f1b78acebefb9dfcf542e19b976a12a5ad1f10b0"
+    }
+  ],
+  "requiredAttributionFiles": [
+    "NOTICE"
+  ],
+  "evaluationStatus": "RUNTIME_SMOKE_PENDING",
+  "qualityStatus": "NOT_EVALUATED_ON_PERSIAN_MULTI_SPEAKER_CORPUS"
+}
