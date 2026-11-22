@@ -10,7 +10,11 @@ Original editable SVG source for the Persian RTL render/export modal.
 
 ## Figma import status
 
-The SVG is committed here and can be imported into a Figma Design file. The connected Figma account currently reports a Starter plan with a View seat. That access level does not permit this session to write/import into the existing Figma canvas, so the Figma import remains pending. No claim is made that the SVG has been placed in Figma.
+The original SVG is committed to GitHub and its content hash has been verified. A Figma Starter Draft has also been created as the target:
+
+[Open AvaPardaz — WAV Export Modal in Figma](https://www.figma.com/design/VBRAGgIuuFvEFGgTJ2qKCF)
+
+The SVG has **not** yet been placed in that Draft. The automated import is currently blocked by the Starter MCP tool-call limit and a DNS/network failure while posting the SVG upload. See [FIGMA-IMPORT-RECOVERY.md](./FIGMA-IMPORT-RECOVERY.md) for the exact evidence, file key, and supported next steps.
 
 ## Preview
 
