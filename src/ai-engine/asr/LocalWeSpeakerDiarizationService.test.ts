@@ -4,7 +4,6 @@ import { sha256Bytes } from '../../utils/StreamingSha256';
 import { LocalWeSpeakerDiarizationService } from './LocalWeSpeakerDiarizationService';
 import type {
   OrtRuntimeProvider,
-  OrtTensorLike,
 } from './UnifiedOnnxPersianAsrEngine';
 
 function createMockProvider(options: { failSpeakerLoad?: boolean } = {}) {
