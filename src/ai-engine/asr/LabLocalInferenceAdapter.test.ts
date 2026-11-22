@@ -43,9 +43,12 @@ async function createInstalledManager(modelId = 'avapardaz-fa-conformer', versio
       expectedByteLength: bytes.byteLength,
       expectedSha256Hex: sha,
     },
-    stream: (async function* () {
-      yield bytes;
-    })(),
+    stream: {
+      supportsRangeResume: false,
+      async fetchRange(startByte: number, endByteExclusive: number) {
+        return bytes.slice(startByte, endByteExclusive);
+      },
+    },
     license: 'Apache-2.0',
     sourceOrigin: 'local-file',
   });
@@ -91,12 +94,14 @@ describe('AVP-009: LabLocalInferenceAdapter readiness gates, chunked inference &
     const audio = makeSpeechAudio(2);
 
     // 1. Uninstalled model -> MODEL_NOT_INSTALLED
-    const emptyMgr = new LocalModelLifecycleManager(new InMemoryModelChunkStorage(), '1.0.0');
+    const emptyMgr = new LocalModelLifecycleManager(new InMemoryModelChunkStorage());
     await emptyMgr.initialize();
     const adapter1 = new LabLocalInferenceAdapter({ modelManager: emptyMgr });
     const res1 = await adapter1.transcribe({
       audio,
       config: { expectedLanguage: 'fa', mode: 'batch', keyterms: [] },
+      signal: new AbortController().signal,
+      experimentId: 'contract-alignment-test',
     });
     assert.equal(res1.status, 'MODEL_NOT_INSTALLED');
     assert.equal(res1.hypothesisProvenance, 'NONE');
@@ -109,6 +114,8 @@ describe('AVP-009: LabLocalInferenceAdapter readiness gates, chunked inference &
     const res2 = await adapter2.transcribe({
       audio,
       config: { expectedLanguage: 'fa', mode: 'batch', keyterms: [] },
+      signal: new AbortController().signal,
+      experimentId: 'contract-alignment-test',
     });
     assert.equal(res2.status, 'MODEL_NOT_READY');
 
@@ -132,6 +139,8 @@ describe('AVP-009: LabLocalInferenceAdapter readiness gates, chunked inference &
     const res3 = await adapter3.transcribe({
       audio,
       config: { expectedLanguage: 'fa', mode: 'batch', keyterms: [] },
+      signal: new AbortController().signal,
+      experimentId: 'contract-alignment-test',
     });
     assert.equal(res3.status, 'MODEL_NOT_READY');
 
@@ -155,6 +164,8 @@ describe('AVP-009: LabLocalInferenceAdapter readiness gates, chunked inference &
     const res4 = await adapter4.transcribe({
       audio,
       config: { expectedLanguage: 'fa', mode: 'batch', keyterms: [] },
+      signal: new AbortController().signal,
+      experimentId: 'contract-alignment-test',
     });
     assert.equal(res4.status, 'MODEL_NOT_READY');
 
@@ -177,6 +188,8 @@ describe('AVP-009: LabLocalInferenceAdapter readiness gates, chunked inference &
     const res5 = await adapter5.transcribe({
       audio,
       config: { expectedLanguage: 'fa', mode: 'batch', keyterms: [] },
+      signal: new AbortController().signal,
+      experimentId: 'contract-alignment-test',
     });
     assert.equal(res5.status, 'MODEL_NOT_READY');
 
@@ -200,6 +213,8 @@ describe('AVP-009: LabLocalInferenceAdapter readiness gates, chunked inference &
     const res6 = await adapter6.transcribe({
       audio,
       config: { expectedLanguage: 'fa', mode: 'batch', keyterms: [] },
+      signal: new AbortController().signal,
+      experimentId: 'contract-alignment-test',
     });
     assert.equal(res6.status, 'WORKER_OFFLINE');
   });
@@ -243,6 +258,8 @@ describe('AVP-009: LabLocalInferenceAdapter readiness gates, chunked inference &
     const out = await adapter.transcribe({
       audio: audio30s,
       config: { expectedLanguage: 'fa-en-mixed', mode: 'batch', keyterms: [] },
+      signal: new AbortController().signal,
+      experimentId: 'contract-alignment-test',
     });
 
     assert.equal(out.status, 'SUCCESS');
@@ -270,6 +287,8 @@ describe('AVP-009: LabLocalInferenceAdapter readiness gates, chunked inference &
     const placeholderOut = await placeholderAdapter.transcribe({
       audio: makeSpeechAudio(2),
       config: { expectedLanguage: 'fa', mode: 'batch', keyterms: [] },
+      signal: new AbortController().signal,
+      experimentId: 'contract-alignment-test',
     });
     assert.equal(placeholderOut.status, 'EMPTY_RESPONSE');
     assert.equal(placeholderOut.hypothesisProvenance, 'NONE');
@@ -307,6 +326,8 @@ describe('AVP-009: LabLocalInferenceAdapter readiness gates, chunked inference &
     const out = await adapter.transcribe({
       audio: makeSpeechAudio(2),
       config: { expectedLanguage: 'fa', mode: 'batch', keyterms: [] },
+      signal: new AbortController().signal,
+      experimentId: 'contract-alignment-test',
       signal: ac.signal,
     });
 
