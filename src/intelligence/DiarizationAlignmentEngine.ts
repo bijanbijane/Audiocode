@@ -165,12 +165,12 @@ export function runModularDiarizationCapability(params: {
       prevEnd = Math.max(prevEnd, safeEnd);
     });
   } else if (Number.isFinite(params.durationSec) && params.durationSec > 0) {
-    // Unassigned acoustic fallback when neither multi-track PCM nor segment hints exist
+    // Duration alone contains no evidence for the number or identity of speakers.
     segments.push({
       segmentId: 'dseg_1',
       startSec: 0,
       endSec: Number(params.durationSec.toFixed(3)),
-      speakerId: 'speaker_1',
+      speakerId: 'UNKNOWN_SPEAKER',
       confidence: null,
       overlap: false,
       competingSpeakerIds: [],
@@ -250,7 +250,7 @@ export async function runWeSpeakerDiarizationCapability(params: {
 
   const segments: DiarizationSegment[] = assigned.map((segment, index) => {
     const rawSpeakerId = String(segment.speakerId);
-    const match = /^SPEAKER_(\\d+)$/i.exec(rawSpeakerId);
+    const match = /^SPEAKER_(\d+)$/i.exec(rawSpeakerId);
     const speakerId = match
       ? `speaker_${match[1]}`
       : 'UNKNOWN_SPEAKER';
