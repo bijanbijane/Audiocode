@@ -27,7 +27,8 @@ jobs:
         run: |
           bun run tsx --test \
             src/ai-engine/asr/SileroVadOnnxRunner.test.ts \
-            src/ai-engine/asr/SpeakerEmbeddingOnnxRunner.test.ts
+            src/ai-engine/asr/SpeakerEmbeddingOnnxRunner.test.ts \
+            src/ai-engine/MultiSpeakerDiarizationAndCrosstalkEngine.test.ts
       - name: Build production web bundle
         if: always()
         run: npm run build
