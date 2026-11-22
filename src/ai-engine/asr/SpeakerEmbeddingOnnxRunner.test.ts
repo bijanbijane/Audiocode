@@ -104,4 +104,57 @@ describe('Section 113: SpeakerEmbeddingOnnxRunner & Hierarchical AHC Clustering'
       ['SPEAKER_1', 'SPEAKER_2', 'SPEAKER_1', 'SPEAKER_2'],
     );
   });
+
+  it('supports waveform-native ONNX speaker models with explicit waveform and length tensors', async () => {
+    const mockOrt: OrtRuntimeProvider = {
+      createTensor(type, data, dims) {
+        return { type, data, dims };
+      },
+      async createSession() {
+        return {
+          async run(feeds) {
+            assert.deepEqual(feeds.wav.dims, [1, 8000]);
+            assert.deepEqual(feeds.lens.dims, [1]);
+            assert.equal((feeds.lens.data as Float32Array)[0], 1);
+            return {
+              emb: {
+                type: 'float32',
+                data: new Float32Array([3, 4]),
+                dims: [1, 1, 2],
+              },
+            };
+          },
+        };
+      },
+    };
+
+    const runner = new SpeakerEmbeddingOnnxRunner(
+      mockOrt,
+      'wav',
+      'B_T_M',
+      'WAVEFORM',
+      'lens',
+      'emb',
+    );
+    await runner.loadModel(new Uint8Array([1, 2, 3]), ['wasm']);
+
+    const pcm = new Float32Array(8000);
+    for (let i = 0; i < pcm.length; i++) {
+      pcm[i] = 0.2 * Math.sin((2 * Math.PI * 180 * i) / 16000);
+    }
+    const extracted = await runner.extractEmbeddingsForVadSegments(pcm, [
+      {
+        startSample16k: 0,
+        endSample16k: pcm.length,
+        range: { start: 0, end: TimeMath.secondsToFlicks(0.5) },
+        peakSpeechProb: 0.9,
+      },
+    ]);
+    await runner.unloadModel();
+
+    assert.equal(extracted.length, 1);
+    assert.ok(Math.abs(extracted[0].embeddingVector[0] - 0.6) < 1e-4);
+    assert.ok(Math.abs(extracted[0].embeddingVector[1] - 0.8) < 1e-4);
+  });
+
 });
