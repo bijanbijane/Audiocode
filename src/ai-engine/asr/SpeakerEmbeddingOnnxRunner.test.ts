@@ -157,4 +157,55 @@ describe('Section 113: SpeakerEmbeddingOnnxRunner & Hierarchical AHC Clustering'
     assert.ok(Math.abs(extracted[0].embeddingVector[1] - 0.8) < 1e-4);
   });
 
+
+  it('validates embedding dimensions, norms and clustering parameters before AHC', () => {
+    const validFrame = {
+      range: { start: 0, end: TimeMath.secondsToFlicks(1) },
+      embeddingVector: new Float32Array([1, 0]),
+      vadProbability: 0.9,
+    };
+
+    assert.throws(
+      () =>
+        SpeakerEmbeddingOnnxRunner.clusterEmbeddingsHierarchicalAhc('track-ahc', [
+          validFrame,
+          {
+            ...validFrame,
+            range: {
+              start: TimeMath.secondsToFlicks(2),
+              end: TimeMath.secondsToFlicks(3),
+            },
+            embeddingVector: new Float32Array([1, 0, 0]),
+          },
+        ]),
+      /SPEAKER_AHC_EMBEDDING_DIMENSION_MISMATCH/,
+    );
+    assert.throws(
+      () =>
+        SpeakerEmbeddingOnnxRunner.clusterEmbeddingsHierarchicalAhc('track-ahc', [
+          { ...validFrame, embeddingVector: new Float32Array([0, 0]) },
+        ]),
+      /SPEAKER_AHC_EMBEDDING_ZERO_OR_INVALID_NORM/,
+    );
+    assert.throws(
+      () =>
+        SpeakerEmbeddingOnnxRunner.clusterEmbeddingsHierarchicalAhc(
+          'track-ahc',
+          [validFrame],
+          1.1,
+        ),
+      /SPEAKER_AHC_COSINE_THRESHOLD_MUST_BE_BETWEEN_MINUS_ONE_AND_ONE/,
+    );
+    assert.throws(
+      () =>
+        SpeakerEmbeddingOnnxRunner.clusterEmbeddingsHierarchicalAhc(
+          'track-ahc',
+          [validFrame],
+          0.68,
+          0,
+        ),
+      /SPEAKER_AHC_MAX_SPEAKERS_MUST_BE_A_POSITIVE_INTEGER/,
+    );
+  });
+
 });
