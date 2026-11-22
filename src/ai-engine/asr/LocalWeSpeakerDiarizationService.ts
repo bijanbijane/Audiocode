@@ -2,7 +2,6 @@ import type { DiarizationResultPayload } from '../../intelligence/SpeechIntellig
 import { runWeSpeakerDiarizationCapability } from '../../intelligence/DiarizationAlignmentEngine';
 import { sha256Bytes } from '../../utils/StreamingSha256';
 import { SileroVadOnnxRunner } from './SileroVadOnnxRunner';
-import type { VadSpeechSegment } from './SileroVadOnnxRunner';
 import { SpeakerEmbeddingOnnxRunner } from './SpeakerEmbeddingOnnxRunner';
 import type { OrtRuntimeProvider } from './UnifiedOnnxPersianAsrEngine';
 
@@ -50,7 +49,7 @@ export class LocalWeSpeakerDiarizationService {
 
   constructor(
     ortProvider: OrtRuntimeProvider,
-    private readonly executionProviders: ('webgpu' | 'wasm' | 'cuda' | 'cpu')[] = ['wasm'],
+    private readonly executionProviders: ('wasm' | 'cpu')[] = ['wasm'],
     private readonly options: LocalWeSpeakerDiarizationOptions = {},
   ) {
     this.vadRunner = new SileroVadOnnxRunner(ortProvider);
