@@ -52,11 +52,42 @@ export class SpeakerEmbeddingOnnxRunner {
     hopDurationSec: number = 0.75,
   ): Promise<FrameSpeakerEmbedding[]> {
     if (!this.session) throw new Error('SPEAKER_EMBEDDING_SESSION_NOT_LOADED');
+    if (!(pcm16kMono instanceof Float32Array)) {
+      throw new TypeError('SPEAKER_EMBEDDING_AUDIO_MUST_BE_FLOAT32ARRAY');
+    }
+    if (!Array.isArray(vadSegments)) {
+      throw new TypeError('SPEAKER_EMBEDDING_VAD_SEGMENTS_MUST_BE_ARRAY');
+    }
+    if (!Number.isFinite(windowDurationSec) || windowDurationSec <= 0) {
+      throw new RangeError('SPEAKER_EMBEDDING_WINDOW_DURATION_MUST_BE_POSITIVE');
+    }
+    if (
+      !Number.isFinite(hopDurationSec) ||
+      hopDurationSec <= 0 ||
+      hopDurationSec > windowDurationSec
+    ) {
+      throw new RangeError('SPEAKER_EMBEDDING_HOP_MUST_BE_POSITIVE_AND_NOT_EXCEED_WINDOW');
+    }
 
     const sr = 16000;
     const winSamples = Math.floor(sr * windowDurationSec);
     const hopSamples = Math.floor(sr * hopDurationSec);
     const minSubWinSamples = Math.floor(sr * 0.4); // Minimum 400ms audio for valid speaker embedding
+    if (winSamples < 1 || hopSamples < 1) {
+      throw new RangeError('SPEAKER_EMBEDDING_WINDOW_AND_HOP_MUST_BE_AT_LEAST_ONE_SAMPLE');
+    }
+
+    for (const segment of vadSegments) {
+      if (
+        !Number.isSafeInteger(segment.startSample16k) ||
+        !Number.isSafeInteger(segment.endSample16k) ||
+        segment.startSample16k < 0 ||
+        segment.endSample16k <= segment.startSample16k ||
+        segment.endSample16k > pcm16kMono.length
+      ) {
+        throw new RangeError('SPEAKER_EMBEDDING_VAD_SEGMENT_OUT_OF_AUDIO_BOUNDS');
+      }
+    }
 
     const embeddings: FrameSpeakerEmbedding[] = [];
 
@@ -145,9 +176,12 @@ export class SpeakerEmbeddingOnnxRunner {
 
     const inputTensor = this.ortProvider.createTensor('float32', tensorData, dims);
     const outputs = await this.session.run({ [this.inputTensorName]: inputTensor });
-    const rawVec = new Float32Array(Object.values(outputs)[0].data as Float32Array);
+    const output = Object.values(outputs)[0];
+    if (!output || !(output.data instanceof Float32Array) || output.data.length === 0) {
+      throw new Error('SPEAKER_EMBEDDING_MODEL_RETURNED_EMPTY_OR_NON_FLOAT_OUTPUT');
+    }
 
-    return this.l2Normalize(rawVec);
+    return this.l2Normalize(new Float32Array(output.data));
   }
 
   /**
@@ -242,9 +276,22 @@ export class SpeakerEmbeddingOnnxRunner {
   }
 
   private l2Normalize(vec: Float32Array): Float32Array {
+    if (vec.length === 0) {
+      throw new Error('SPEAKER_EMBEDDING_VECTOR_EMPTY');
+    }
+
     let sumSq = 0;
-    for (let i = 0; i < vec.length; i++) sumSq += vec[i] * vec[i];
-    const invNorm = 1.0 / (Math.sqrt(sumSq) + 1e-12);
+    for (let i = 0; i < vec.length; i++) {
+      if (!Number.isFinite(vec[i])) {
+        throw new Error('SPEAKER_EMBEDDING_VECTOR_CONTAINS_NON_FINITE_VALUE');
+      }
+      sumSq += vec[i] * vec[i];
+    }
+    if (!Number.isFinite(sumSq) || sumSq <= 1e-12) {
+      throw new Error('SPEAKER_EMBEDDING_VECTOR_HAS_ZERO_OR_INVALID_NORM');
+    }
+
+    const invNorm = 1.0 / Math.sqrt(sumSq);
     const out = new Float32Array(vec.length);
     for (let i = 0; i < vec.length; i++) out[i] = vec[i] * invNorm;
     return out;
