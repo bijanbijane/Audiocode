@@ -106,7 +106,13 @@ test('Speaker assignment rejects invalid or dimension-mismatched embeddings inst
     () =>
       MultiSpeakerDiarizationAndCrosstalkEngine.assignSpeakersFromEmbeddings(
         'track-guard',
-        [],
+        [
+          {
+            range: { start: 0, end: 100 },
+            embeddingVector: new Float32Array([1, 0]),
+            vadProbability: 0.95,
+          },
+        ],
         1.1,
       ),
     /DIARIZATION_SIMILARITY_THRESHOLD_MUST_BE_BETWEEN_MINUS_ONE_AND_ONE/,
