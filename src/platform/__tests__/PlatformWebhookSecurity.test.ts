@@ -39,10 +39,10 @@ describe('AVP-011 PlatformWebhookSecurity SSRF & Destination Validation', () => 
       '::ffff:10.0.0.5',
     ];
     for (const ip of forbidden) {
-      expect(isDisallowedIpAddress(ip), `Expected ${ip} to be disallowed`).toBe(true);
+      expect(isPrivateOrNonPublicIp(ip), `Expected ${ip} to be disallowed`).toBe(true);
     }
-    expect(isDisallowedIpAddress('93.184.216.34')).toBe(false);
-    expect(isDisallowedIpAddress('2606:2800:220:1:248:1893:25c8:1946')).toBe(false);
+    expect(isPrivateOrNonPublicIp('93.184.216.34')).toBe(false);
+    expect(isPrivateOrNonPublicIp('2606:2800:220:1:248:1893:25c8:1946')).toBe(false);
   });
 
   it('rejects non-HTTPS, embedded credentials, localhost, private IPs, and .local domains in production', async () => {
