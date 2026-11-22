@@ -26,17 +26,18 @@ import {
 } from './storageBroker';
 import { WorkerPersistenceBackend } from './workerStorageCore';
 import { flicksToSeconds, secondsToFlicks } from './timebase';
-import { LoadedStudioProject } from './audioFixtures';
+import type {
+  LoadedStudioProject,
+  ProjectRuntimeResourceLease,
+} from './StudioProjectContracts';
+export type { ProjectRuntimeResourceLease } from './StudioProjectContracts';
 import { HASH_CHUNK_BYTES, sha256Blob } from '../utils/StreamingSha256';
 
 /**
  * Idempotent runtime-only resource ownership handle transferred to a successfully constructed
  * LoadedStudioProject. Must never be serialized into persistent project documents or manifests.
  */
-export interface ProjectRuntimeResourceLease {
-  readonly disposed: boolean;
-  dispose(): void;
-}
+
 
 export function createProjectRuntimeResourceLease(
   memoryBudgetManager: MemoryBudgetManager,
