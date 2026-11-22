@@ -1,4 +1,13 @@
 import { SampleRate } from '../contracts/timebase.contract';
+import type {
+  RenderArtifactReadStreamOptions,
+  StreamingByteSink,
+} from './RenderOutputArtifactContracts';
+export type {
+  RenderArtifactReadStreamOptions,
+  RenderArtifactReader,
+  StreamingByteSink,
+} from './RenderOutputArtifactContracts';
 import {
   getSharedMemoryBudgetManager,
   MemoryBudgetManager,
@@ -17,26 +26,13 @@ import {
 
 export const DEFAULT_MAX_ARTIFACT_READ_BYTES = 1024 * 1024; // 1 MiB
 
-export interface RenderArtifactReadStreamOptions {
-  readonly start?: number;
-  readonly end?: number;
-  readonly chunkSizeBytes?: number;
-}
+
 
 /**
  * Bounded, range-addressable reader contract for committed render outputs.
  * Prevents unbounded full-file allocations during validation and export streaming.
  */
-export interface RenderArtifactReader {
-  readonly sizeBytes: number;
 
-  readRange(
-    offset: number,
-    length: number,
-  ): Promise<Uint8Array>;
-
-  openReadStream(options?: RenderArtifactReadStreamOptions): ReadableStream<Uint8Array>;
-}
 
 export function validateArtifactRangeRead(
   sizeBytes: number,
@@ -109,24 +105,7 @@ export function validateArtifactStreamOptions(
  * OPFS / FileSystemWritableFileStream, temp disk storage, or a bounded chunked buffer
  * without ever building a giant single contiguous output array in JS memory.
  */
-export interface StreamingByteSink {
-  readonly persistedExternally: boolean;
-  writeAt(offset: number, bytes: Uint8Array): Promise<void> | void;
-  append(bytes: Uint8Array): Promise<void> | void;
-  finalizeTempToCommitted(): Promise<void> | void;
-  abortAndCleanup(): Promise<void> | void;
-  getTotalBytesWritten(): number;
-  readRange(offset: number, length: number): Promise<Uint8Array>;
-  openReadStream(options?: RenderArtifactReadStreamOptions): ReadableStream<Uint8Array>;
-  /** Optional zero-concatenation Blob creation from committed backing storage */
-  createBlob?(contentType: string): Promise<Blob>;
-  /**
-   * Optional idempotent disposal for committed sinks.
-   * In-memory sinks release retained chunks and memory reservations;
-   * externally persisted sinks close transient handles without deleting committed user files.
-   */
-  disposeCommitted?(): Promise<void> | void;
-}
+
 
 export class ExportWriteFailureError extends Error {
   public readonly code: 'WRITE_IO_FAILURE' | 'OUTPUT_QUOTA_EXCEEDED';
