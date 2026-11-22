@@ -37,19 +37,21 @@ export interface StreamingByteSink {
   disposeCommitted?(): Promise<void> | void;
 }
 
+export type RenderArtifactLifecycleState =
+  | 'WRITING'
+  | 'FINALIZED'
+  | 'VALIDATING'
+  | 'VALIDATED_READY'
+  | 'ACTIVE_IN_WORKFLOW'
+  | 'DISPOSED';
+
 export interface RenderOutputArtifact extends RenderArtifactReader {
   readonly artifactId: string;
   readonly sizeBytes: number;
   readonly contentType: 'audio/wav';
   readonly persistedExternally: boolean;
   readonly disposed: boolean;
-  readonly lifecycleState:
-    | 'WRITING'
-    | 'FINALIZED'
-    | 'VALIDATING'
-    | 'VALIDATED_READY'
-    | 'ACTIVE_IN_WORKFLOW'
-    | 'DISPOSED';
+  readonly lifecycleState: RenderArtifactLifecycleState;
   createBlob(): Promise<Blob>;
   dispose(): Promise<void>;
 }
