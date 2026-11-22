@@ -48,18 +48,30 @@
   "requiredAttributionFiles": [
     "NOTICE"
   ],
-  "evaluationStatus": "RUNTIME_SMOKE_PASSED_SINGLE_SAMPLE",
+  "evaluationStatus": "REAL_ONNX_AND_INTEGRATED_LOCAL_SERVICE_SMOKE_PASSED_SINGLE_SAMPLE",
   "qualityStatus": "NOT_EVALUATED_ON_PERSIAN_MULTI_SPEAKER_CORPUS",
   "runtimeEvidence": {
-    "workflowRunId": 45072803347,
-    "commitSha": "3b90311f9265c5fdb9bd1081032065120edec498",
+    "workflowRunId": 45074800631,
+    "commitSha": "ef2a27fd047a225e0d9ae2d2e3c3e40d17e8f513",
     "executionProvider": "wasm-cpu",
     "sampleDurationSec": 12.12,
-    "inputWindowSec": 2.02,
-    "inputFrames": 200,
+    "windowDurationSec": 1.5,
+    "hopDurationSec": 0.75,
+    "inputFramesPerWindow": 150,
+    "embeddingCount": 2,
     "embeddingDimensions": 192,
-    "inferenceElapsedMs": 276.58,
-    "realTimeFactor": 0.1369,
-    "verifiedAtUtc": "2026-11-22T21:34:59Z"
+    "inferenceElapsedMs": 339.95,
+    "inferenceRealTimeFactor": 0.1511,
+    "integratedService": {
+      "realSileroVad": true,
+      "realWeSpeakerEcapa": true,
+      "assignedAnonymousClusterCount": 4,
+      "outputSegmentCount": 4,
+      "unassignedDurationSec": 0,
+      "totalElapsedMs": 825.04,
+      "realTimeFactor": 0.0681
+    },
+    "verifiedAtUtc": "2026-11-22T21:56:27Z",
+    "caveat": "Single unannotated sample. Cluster count is not speaker-count accuracy; DER/JER and Persian multi-speaker quality have not been measured."
   }
 }
