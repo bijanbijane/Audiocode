@@ -7,8 +7,7 @@
  */
 import { createHash } from 'node:crypto';
 import { createReadStream, createWriteStream } from 'node:fs';
-import { access, mkdir, rm, rename, stat, readFile } from 'node:fs/promises';
-import { once } from 'node:events';
+import { access, mkdir, rm, rename, readFile } from 'node:fs/promises';
 import { Transform, Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import path from 'node:path';
