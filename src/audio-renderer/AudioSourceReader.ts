@@ -279,6 +279,7 @@ export class AudioSourceReader {
           createdAt: Date.now(),
           priority: 'optional',
           protectedUserData: false,
+          releasable: false,
         },
       };
     }
@@ -319,6 +320,7 @@ export class AudioSourceReader {
           createdAt: Date.now(),
           priority: 'optional',
           protectedUserData: false,
+          releasable: false,
         },
       };
     }
