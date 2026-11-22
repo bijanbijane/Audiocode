@@ -51,6 +51,8 @@ jobs:
         uses: oven-sh/setup-bun@v2
       - name: Install dependencies from frozen bun.lock
         run: bun install --frozen-lockfile
+      - name: Download and verify pinned Persian Zipformer assets
+        run: node scripts/download-persian-zipformer-assets.mjs
       - name: Run canonical P0 automated verification suites (30 tests)
         run: |
           npx --yes tsx --test \
