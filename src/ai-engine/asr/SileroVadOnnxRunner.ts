@@ -83,10 +83,11 @@ export class SileroVadOnnxRunner {
     const frameWithContext = new Float32Array(
       SileroVadOnnxRunner.CONTEXT_SAMPLES + SileroVadOnnxRunner.WINDOW_SAMPLES,
     );
+    // Silero VAD ONNX declares sr as a scalar int64 tensor (rank 0), not [1].
     const srTensor = this.ortProvider.createTensor(
       'int64',
       BigInt64Array.from([BigInt(SileroVadOnnxRunner.SAMPLE_RATE)]),
-      [1],
+      [],
     );
 
     const frameProbs: { startSample: number; prob: number }[] = [];
