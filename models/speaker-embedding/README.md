@@ -34,6 +34,14 @@ The implementation must not substitute the existing Whisper-style Log-Mel fronte
 
 ## Verification status
 
+**Real model runtime smoke passed** on the GitHub Actions Linux runner using ONNX Runtime Web/WASM CPU:
+- The exact 24,861,931-byte asset was downloaded from the pinned revision and SHA-256 verified.
+- A 2.02-second window (200 FBANK frames) from the pinned Persian WAV produced a finite, L2-normalized 192-dimensional embedding.
+- Inference: 276.58 ms; RTF 0.1369.
+- Workflow run: [45072803347](https://github.com/bijanbijane/Audiocode/actions/runs/45072803347), commit `3b90311f9265c5fdb9bd1081032065120edec498`.
+
+This verifies model loading and one real inference path. It does **not** verify embedding quality or speaker separation accuracy. The frontend has dedicated unit/contract tests, but an independent numerical parity comparison against the upstream Torchaudio/Kaldi implementation remains open.
+
 The pinned asset now has a reproducible CI acquisition manifest and a real ONNX Runtime Web/WASM CPU smoke test. This smoke verifies that the graph can produce a finite, normalized 192-dimensional vector from the test WAV. It does **not** establish Persian speaker diarization accuracy.
 
 The model remains an evaluation candidate, not production-approved, until all of these gates pass:
