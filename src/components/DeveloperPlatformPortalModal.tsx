@@ -135,7 +135,7 @@ export const DeveloperPlatformPortalModal: React.FC<DeveloperPlatformPortalModal
   const [webhookSigningSecretOnce, setWebhookSigningSecretOnce] = useState<string | null>(null);
   const [copiedKey, setCopiedKey] = useState(false);
 
-  // Interactive API Playground state (binary audio upload only — zero audio_duration_ms / raw_text_hint)
+  // Interactive API Playground state (binary audio upload only; metadata is derived server-side)
   const [playgroundModel, setPlaygroundModel] = useState('asr-fa-en-v1');
   const [playgroundIdempKey, setPlaygroundIdempKey] = useState(() => `idemp-${Date.now()}`);
   const [estimateDurationSec, setEstimateDurationSec] = useState(12);
