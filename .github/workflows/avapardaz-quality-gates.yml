@@ -23,14 +23,19 @@ jobs:
         uses: oven-sh/setup-bun@v2
       - name: Install dependencies from frozen bun.lock
         run: bun install --frozen-lockfile
-      - name: Run linter
-        run: npm run lint
+      - name: Run focused VAD regression suite
+        run: bun run tsx --test src/ai-engine/asr/SileroVadOnnxRunner.test.ts
       - name: Build production web bundle
+        if: always()
         run: npm run build
       - name: Verify self-hosted ORT WASM assets exist
+        if: always()
         run: |
           test -f public/ort/ort-wasm-simd-threaded.wasm
           test -f dist/ort/ort-wasm-simd-threaded.wasm
+      - name: Run linter
+        if: always()
+        run: npm run lint
 
   level2-unit-dsp-linguistic-security-real-ort:
     name: Level 2–4 — Real ORT Offline, DSP, Workflow, Linguistic, IPC & Security Suites
