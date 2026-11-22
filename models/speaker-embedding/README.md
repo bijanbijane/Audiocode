@@ -15,6 +15,14 @@ Speaker diarization uses a separately versioned ONNX embedding model. The binary
 
 The upstream ONNX graph contract is `feats: float32 [1,T,80]` to `embs: float32 [1,192]`. It is a **feature-input model**, not a waveform-input model.
 
+## Official WeSpeaker diarization subsegment contract
+
+The official diarization recipe does not simply crop a 1.5-second waveform and use the naturally resulting 148 FBANK frames. It computes FBANK for each VAD region first, derives subsegment length/shift in 10 ms frames (150/75 by default), resizes each selected feature matrix to a fixed 150-frame window using the same repeat-to-fill behavior as WeSpeaker's `np.resize`, and applies CMN per subsegment before ONNX inference.
+
+`SpeakerEmbeddingOnnxRunner` now follows this sequence in `KALDI_FBANK` mode. The regression suite asserts the fixed `[1,150,80]` tensor shape and checks per-bin CMN over all 150 frames. The actual ONNX smoke uses two overlapping 1.5-second windows at a 0.75-second hop.
+
+This follows the upstream diarization framing more closely than the earlier raw waveform-window path. Independent numerical parity against the upstream Torchaudio/Kaldi implementation remains an explicit pending gate.
+
 ## Required frontend contract
 
 The dedicated `WespeakerKaldiFbank80` implementation is intentionally separate from SHAHAB's Whisper/Conformer Log-Mel frontend.
