@@ -40,14 +40,30 @@ describe('Section 113: SpeakerEmbeddingOnnxRunner & Hierarchical AHC Clustering'
     const pcm = new Float32Array(16000);
     for (let i = 0; i < pcm.length; i++) pcm[i] = 0.2 * Math.sin((2 * Math.PI * 180 * i) / 16000);
 
-    const extracted = await runner.extractEmbeddingsForVadSegments(pcm, [
-      {
-        startSample16k: 0,
-        endSample16k: 16000,
-        range: { start: 0, end: TimeMath.secondsToFlicks(1.0) },
-        peakSpeechProb: 0.95,
-      },
-    ]);
+    const vadSegment = {
+      startSample16k: 0,
+      endSample16k: 16000,
+      range: { start: 0, end: TimeMath.secondsToFlicks(1.0) },
+      peakSpeechProb: 0.95,
+    };
+
+    await assert.rejects(
+      runner.extractEmbeddingsForVadSegments(pcm, [vadSegment], 1.5, 0),
+      /SPEAKER_EMBEDDING_HOP_MUST_BE_POSITIVE_AND_NOT_EXCEED_WINDOW/,
+    );
+    await assert.rejects(
+      runner.extractEmbeddingsForVadSegments(pcm, [vadSegment], 0.5, 1),
+      /SPEAKER_EMBEDDING_HOP_MUST_BE_POSITIVE_AND_NOT_EXCEED_WINDOW/,
+    );
+    await assert.rejects(
+      runner.extractEmbeddingsForVadSegments(
+        pcm,
+        [{ ...vadSegment, endSample16k: pcm.length + 1 }],
+      ),
+      /SPEAKER_EMBEDDING_VAD_SEGMENT_OUT_OF_AUDIO_BOUNDS/,
+    );
+
+    const extracted = await runner.extractEmbeddingsForVadSegments(pcm, [vadSegment]);
     await runner.unloadModel();
 
     assert.equal(extracted.length, 1);
