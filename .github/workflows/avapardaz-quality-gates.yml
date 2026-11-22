@@ -31,7 +31,8 @@ jobs:
       - name: Verify self-hosted ORT WASM assets exist
         if: always()
         run: |
-          test -f public/ort/ort-wasm-simd-threaded.wasm
+          # Vite serves development assets directly from node_modules and copies
+          # the packaged runtime into dist/ort during production builds.
           test -f dist/ort/ort-wasm-simd-threaded.wasm
       - name: Run linter
         if: always()
