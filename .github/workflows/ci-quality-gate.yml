@@ -2,7 +2,7 @@ name: Architecture Governance, Reliability & Release Quality Gate
 
 on:
   push:
-    branches: [main, release/*]
+    branches: [main, release/*, codex/avapardaz-audio-engines]
   pull_request:
     branches: [main]
 
