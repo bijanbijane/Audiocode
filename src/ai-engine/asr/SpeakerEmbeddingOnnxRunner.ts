@@ -8,11 +8,16 @@ import {
 import { TimeMath } from '../../contracts/timebase.contract';
 import { TrackId } from '../../contracts/project-schema.contract';
 
-export type EmbeddingMelLayout = 'B_T_M' | 'B_M_T'; // SpeechBrain/Wespeaker=[1,T,80] | NeMo TitaNet=[1,80,T]
+export type EmbeddingMelLayout = 'B_T_M' | 'B_M_T'; // Feature-model layouts: [1,T,80] or [1,80,T]
+export type SpeakerEmbeddingInputMode = 'LOG_MEL_FEATURES' | 'WAVEFORM';
 
 /**
- * Section 113: Speaker Embedding ONNX Runner (ECAPA-TDNN / TitaNet) with Per-Bin CMVN, L2 Normalization,
- * and Agglomerative Hierarchical Clustering (AHC) for drift-free long-form diarization.
+ * Section 113: Speaker Embedding ONNX Runner (ECAPA-TDNN / TitaNet) with explicit
+ * feature-input or waveform-native contracts, L2 normalization, and AHC clustering.
+ *
+ * IMPORTANT: LOG_MEL_FEATURES is a generic frontend contract, not a claim of parity
+ * with SpeechBrain Fbank. Use WAVEFORM only when the selected ONNX graph embeds
+ * its own feature frontend and declares compatible input/output names.
  */
 export class SpeakerEmbeddingOnnxRunner {
   private session: OrtSessionLike | null = null;
@@ -25,6 +30,9 @@ export class SpeakerEmbeddingOnnxRunner {
     private readonly ortProvider: OrtRuntimeProvider,
     private readonly inputTensorName: string = 'feats',
     private readonly layout: EmbeddingMelLayout = 'B_T_M',
+    private readonly inputMode: SpeakerEmbeddingInputMode = 'LOG_MEL_FEATURES',
+    private readonly lengthTensorName: string = 'lens',
+    private readonly outputTensorName?: string,
   ) {}
 
   public async loadModel(
@@ -137,46 +145,68 @@ export class SpeakerEmbeddingOnnxRunner {
   ): Promise<Float32Array> {
     if (!this.session) throw new Error('SPEAKER_EMBEDDING_SESSION_NOT_LOADED');
 
-    const { melTensor, numFrames, nMels } =
-      this.featureExtractor.computeLogMelSpectrogram(pcm16kSlice);
-    if (numFrames === 0) return new Float32Array(192);
+    let feeds: Record<string, ReturnType<OrtRuntimeProvider['createTensor']>>;
 
-    // Compute and subtract temporal mean per Mel bin (Mean CMVN) to remove static microphone coloration
-    const binMeans = new Float32Array(nMels);
-    for (let t = 0; t < numFrames; t++) {
-      const rowOff = t * nMels;
-      for (let m = 0; m < nMels; m++) {
-        binMeans[m] += melTensor[rowOff + m];
-      }
-    }
-    for (let m = 0; m < nMels; m++) binMeans[m] /= numFrames;
-
-    let tensorData: Float32Array;
-    let dims: readonly number[];
-
-    if (this.layout === 'B_T_M') {
-      tensorData = new Float32Array(numFrames * nMels);
-      for (let t = 0; t < numFrames; t++) {
-        const rowOff = t * nMels;
-        for (let m = 0; m < nMels; m++) {
-          tensorData[rowOff + m] = melTensor[rowOff + m] - binMeans[m];
-        }
-      }
-      dims = [1, numFrames, nMels];
+    if (this.inputMode === 'WAVEFORM') {
+      const waveform = new Float32Array(pcm16kSlice);
+      const lengths = this.ortProvider.createTensor(
+        'float32',
+        new Float32Array([1.0]),
+        [1],
+      );
+      feeds = {
+        [this.inputTensorName]: this.ortProvider.createTensor(
+          'float32',
+          waveform,
+          [1, waveform.length],
+        ),
+        [this.lengthTensorName]: lengths,
+      };
     } else {
-      tensorData = new Float32Array(nMels * numFrames);
+      const { melTensor, numFrames, nMels } =
+        this.featureExtractor.computeLogMelSpectrogram(pcm16kSlice);
+      if (numFrames === 0) {
+        throw new Error('SPEAKER_EMBEDDING_AUDIO_TOO_SHORT_FOR_FEATURE_FRONTEND');
+      }
+
+      // Subtract temporal mean per Mel bin. This is not a replacement for a model-specific Fbank frontend.
+      const binMeans = new Float32Array(nMels);
       for (let t = 0; t < numFrames; t++) {
         const rowOff = t * nMels;
-        for (let m = 0; m < nMels; m++) {
-          tensorData[m * numFrames + t] = melTensor[rowOff + m] - binMeans[m];
-        }
+        for (let m = 0; m < nMels; m++) binMeans[m] += melTensor[rowOff + m];
       }
-      dims = [1, nMels, numFrames];
+      for (let m = 0; m < nMels; m++) binMeans[m] /= numFrames;
+
+      let tensorData: Float32Array;
+      let dims: readonly number[];
+      if (this.layout === 'B_T_M') {
+        tensorData = new Float32Array(numFrames * nMels);
+        for (let t = 0; t < numFrames; t++) {
+          const rowOff = t * nMels;
+          for (let m = 0; m < nMels; m++) {
+            tensorData[rowOff + m] = melTensor[rowOff + m] - binMeans[m];
+          }
+        }
+        dims = [1, numFrames, nMels];
+      } else {
+        tensorData = new Float32Array(nMels * numFrames);
+        for (let t = 0; t < numFrames; t++) {
+          const rowOff = t * nMels;
+          for (let m = 0; m < nMels; m++) {
+            tensorData[m * numFrames + t] = melTensor[rowOff + m] - binMeans[m];
+          }
+        }
+        dims = [1, nMels, numFrames];
+      }
+      feeds = {
+        [this.inputTensorName]: this.ortProvider.createTensor('float32', tensorData, dims),
+      };
     }
 
-    const inputTensor = this.ortProvider.createTensor('float32', tensorData, dims);
-    const outputs = await this.session.run({ [this.inputTensorName]: inputTensor });
-    const output = Object.values(outputs)[0];
+    const outputs = await this.session.run(feeds);
+    const output = this.outputTensorName
+      ? outputs[this.outputTensorName]
+      : Object.values(outputs)[0];
     if (!output || !(output.data instanceof Float32Array) || output.data.length === 0) {
       throw new Error('SPEAKER_EMBEDDING_MODEL_RETURNED_EMPTY_OR_NON_FLOAT_OUTPUT');
     }
