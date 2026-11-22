@@ -226,6 +226,8 @@ export async function runWeSpeakerDiarizationCapability(params: {
   runner: SpeakerEmbeddingOnnxRunner;
   similarityThreshold?: number;
   modelVersion?: string;
+  windowDurationSec?: number;
+  hopDurationSec?: number;
 }): Promise<DiarizationResultPayload> {
   if (!params.recordingId.trim()) {
     throw new TypeError('DIARIZATION_RECORDING_ID_REQUIRED');
@@ -241,6 +243,8 @@ export async function runWeSpeakerDiarizationCapability(params: {
   const embeddings = await params.runner.extractEmbeddingsForVadSegments(
     params.pcm16kMono,
     params.vadSpeechSegments,
+    params.windowDurationSec ?? 1.5,
+    params.hopDurationSec ?? 0.75,
   );
   const assigned = MultiSpeakerDiarizationAndCrosstalkEngine.assignSpeakersFromEmbeddings(
     params.recordingId,
