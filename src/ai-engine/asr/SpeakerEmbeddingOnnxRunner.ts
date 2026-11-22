@@ -1,5 +1,6 @@
 import { OrtRuntimeProvider, OrtSessionLike } from './UnifiedOnnxPersianAsrEngine';
 import { OnnxPersianAsrAndVadAdapter } from '../OnnxPersianAsrAndVadAdapter';
+import { WespeakerKaldiFbank80 } from './WespeakerKaldiFbank80';
 import { VadSpeechSegment } from './SileroVadOnnxRunner';
 import {
   FrameSpeakerEmbedding,
@@ -9,7 +10,7 @@ import { TimeMath } from '../../contracts/timebase.contract';
 import { TrackId } from '../../contracts/project-schema.contract';
 
 export type EmbeddingMelLayout = 'B_T_M' | 'B_M_T'; // Feature-model layouts: [1,T,80] or [1,80,T]
-export type SpeakerEmbeddingInputMode = 'LOG_MEL_FEATURES' | 'WAVEFORM';
+export type SpeakerEmbeddingInputMode = 'LOG_MEL_FEATURES' | 'KALDI_FBANK' | 'WAVEFORM';
 
 /**
  * Section 113: Speaker Embedding ONNX Runner (ECAPA-TDNN / TitaNet) with explicit
@@ -25,6 +26,7 @@ export class SpeakerEmbeddingOnnxRunner {
     'speaker-ecapa-tdnn',
     '1.0.0',
   );
+  private readonly wespeakerFbank = new WespeakerKaldiFbank80();
 
   constructor(
     private readonly ortProvider: OrtRuntimeProvider,
@@ -162,6 +164,32 @@ export class SpeakerEmbeddingOnnxRunner {
         ),
         [this.lengthTensorName]: lengths,
       };
+    } else if (this.inputMode === 'KALDI_FBANK') {
+      const { features, numFrames, numMelBins } = this.wespeakerFbank.compute(
+        pcm16kSlice,
+        { applyCepstralMeanNormalization: true },
+      );
+      if (numFrames === 0) {
+        throw new Error('WESPEAKER_FBANK_AUDIO_TOO_SHORT_FOR_FEATURE_FRONTEND');
+      }
+
+      let tensorData: Float32Array;
+      let dims: readonly number[];
+      if (this.layout === 'B_T_M') {
+        tensorData = features;
+        dims = [1, numFrames, numMelBins];
+      } else {
+        tensorData = new Float32Array(numMelBins * numFrames);
+        for (let t = 0; t < numFrames; t++) {
+          for (let m = 0; m < numMelBins; m++) {
+            tensorData[m * numFrames + t] = features[t * numMelBins + m];
+          }
+        }
+        dims = [1, numMelBins, numFrames];
+      }
+      feeds = {
+        [this.inputTensorName]: this.ortProvider.createTensor('float32', tensorData, dims),
+      };
     } else {
       const { melTensor, numFrames, nMels } =
         this.featureExtractor.computeLogMelSpectrogram(pcm16kSlice);
@@ -169,7 +197,7 @@ export class SpeakerEmbeddingOnnxRunner {
         throw new Error('SPEAKER_EMBEDDING_AUDIO_TOO_SHORT_FOR_FEATURE_FRONTEND');
       }
 
-      // Subtract temporal mean per Mel bin. This is not a replacement for a model-specific Fbank frontend.
+      // This generic frontend is retained for compatible feature graphs only.
       const binMeans = new Float32Array(nMels);
       for (let t = 0; t < numFrames; t++) {
         const rowOff = t * nMels;
