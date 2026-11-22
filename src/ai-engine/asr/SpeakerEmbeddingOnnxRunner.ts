@@ -225,19 +225,61 @@ export class SpeakerEmbeddingOnnxRunner {
     maxSpeakers: number = 8,
   ): SpeakerTimelineSegment[] {
     if (frames.length === 0) return [];
+    if (
+      !Number.isFinite(cosineStopThreshold) ||
+      cosineStopThreshold < -1 ||
+      cosineStopThreshold > 1
+    ) {
+      throw new RangeError('SPEAKER_AHC_COSINE_THRESHOLD_MUST_BE_BETWEEN_MINUS_ONE_AND_ONE');
+    }
+    if (!Number.isSafeInteger(maxSpeakers) || maxSpeakers < 1) {
+      throw new RangeError('SPEAKER_AHC_MAX_SPEAKERS_MUST_BE_A_POSITIVE_INTEGER');
+    }
+
+    const embeddingDimension = frames[0].embeddingVector?.length ?? 0;
+    if (embeddingDimension < 1) {
+      throw new Error('SPEAKER_AHC_EMBEDDING_VECTOR_EMPTY');
+    }
+
+    const normalizedVectors = frames.map((frame, frameIndex) => {
+      const vector = frame.embeddingVector;
+      if (!(vector instanceof Float32Array) || vector.length === 0) {
+        throw new Error(`SPEAKER_AHC_EMBEDDING_VECTOR_EMPTY_AT_FRAME_${frameIndex}`);
+      }
+      if (vector.length !== embeddingDimension) {
+        throw new RangeError(`SPEAKER_AHC_EMBEDDING_DIMENSION_MISMATCH_AT_FRAME_${frameIndex}`);
+      }
+
+      let normSq = 0;
+      for (let d = 0; d < vector.length; d++) {
+        if (!Number.isFinite(vector[d])) {
+          throw new Error(`SPEAKER_AHC_EMBEDDING_NON_FINITE_VALUE_AT_FRAME_${frameIndex}`);
+        }
+        normSq += vector[d] * vector[d];
+      }
+      if (!Number.isFinite(normSq) || normSq <= 1e-12) {
+        throw new Error(`SPEAKER_AHC_EMBEDDING_ZERO_OR_INVALID_NORM_AT_FRAME_${frameIndex}`);
+      }
+
+      const inverseNorm = 1 / Math.sqrt(normSq);
+      const normalized = new Float32Array(vector.length);
+      for (let d = 0; d < vector.length; d++) {
+        normalized[d] = vector[d] * inverseNorm;
+      }
+      return normalized;
+    });
 
     interface Cluster {
       memberIndices: number[];
       centroid: Float32Array;
     }
 
-    // Initialize: each frame is an independent singleton cluster
-    const clusters: Cluster[] = frames.map((f, idx) => ({
+    // Normalize upfront so the dot product below is a true cosine similarity.
+    const clusters: Cluster[] = normalizedVectors.map((vector, idx) => ({
       memberIndices: [idx],
-      centroid: new Float32Array(f.embeddingVector),
+      centroid: new Float32Array(vector),
     }));
 
-    // Iteratively merge the pair of clusters with highest cosine similarity until threshold
     while (clusters.length > 1) {
       let bestI = -1;
       let bestJ = -1;
@@ -261,46 +303,54 @@ export class SpeakerEmbeddingOnnxRunner {
         break;
       }
 
-      const cA = clusters[bestI];
-      const cB = clusters[bestJ];
-      const mergedIndices = [...cA.memberIndices, ...cB.memberIndices];
-      const dim = cA.centroid.length;
-      const newCentroid = new Float32Array(dim);
+      const clusterA = clusters[bestI];
+      const clusterB = clusters[bestJ];
+      const mergedIndices = [...clusterA.memberIndices, ...clusterB.memberIndices];
+      const newCentroid = new Float32Array(embeddingDimension);
 
-      for (const idx of mergedIndices) {
-        const v = frames[idx].embeddingVector;
-        for (let d = 0; d < dim; d++) newCentroid[d] += v[d];
+      for (const index of mergedIndices) {
+        const vector = normalizedVectors[index];
+        for (let d = 0; d < embeddingDimension; d++) {
+          newCentroid[d] += vector[d];
+        }
       }
 
-      let norm = 0;
-      for (let d = 0; d < dim; d++) norm += newCentroid[d] * newCentroid[d];
-      norm = Math.sqrt(norm) + 1e-12;
-      for (let d = 0; d < dim; d++) newCentroid[d] /= norm;
+      let normSq = 0;
+      for (let d = 0; d < embeddingDimension; d++) {
+        normSq += newCentroid[d] * newCentroid[d];
+      }
+      if (!Number.isFinite(normSq) || normSq <= 1e-12) {
+        throw new Error('SPEAKER_AHC_MERGED_CENTROID_HAS_ZERO_OR_INVALID_NORM');
+      }
+      const inverseNorm = 1 / Math.sqrt(normSq);
+      for (let d = 0; d < embeddingDimension; d++) {
+        newCentroid[d] *= inverseNorm;
+      }
 
       clusters[bestI] = { memberIndices: mergedIndices, centroid: newCentroid };
       clusters.splice(bestJ, 1);
     }
 
-    // Order speaker IDs by earliest appearance on the timeline (SPEAKER_1, SPEAKER_2, ...)
+    // Order speaker IDs by earliest appearance on the timeline (SPEAKER_1, SPEAKER_2, ...).
     clusters.sort(
       (a, b) => Math.min(...a.memberIndices) - Math.min(...b.memberIndices),
     );
 
     const frameToSpeakerId = new Array<string>(frames.length);
-    clusters.forEach((cl, spkIdx) => {
-      const label = `SPEAKER_${spkIdx + 1}`;
-      for (const mIdx of cl.memberIndices) {
-        frameToSpeakerId[mIdx] = label;
+    clusters.forEach((cluster, speakerIndex) => {
+      const label = `SPEAKER_${speakerIndex + 1}`;
+      for (const memberIndex of cluster.memberIndices) {
+        frameToSpeakerId[memberIndex] = label;
       }
     });
 
-    return frames.map((f, idx) => ({
-      segmentId: `ahc_${trackId}_${idx}`,
+    return frames.map((frame, index) => ({
+      segmentId: `ahc_${trackId}_${index}`,
       trackId,
-      speakerId: frameToSpeakerId[idx],
+      speakerId: frameToSpeakerId[index],
       classification: 'PRIMARY_SPEECH',
-      range: f.range,
-      confidence: Number(f.vadProbability.toFixed(2)),
+      range: frame.range,
+      confidence: Number(frame.vadProbability.toFixed(2)),
       manuallyVerifiedByUser: false,
     }));
   }
