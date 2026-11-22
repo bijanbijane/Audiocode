@@ -1,4 +1,15 @@
 import {
+  getSharedMemoryBudgetManager,
+  MemoryBudgetManager,
+  MemoryReservation,
+} from '../runtime/memory/MemoryBudgetManager';
+import {
+  BoundedChunkedByteSink,
+  DEFAULT_MAX_ARTIFACT_READ_BYTES,
+  ExportWriteFailureError,
+  validateArtifactRangeRead,
+  validateArtifactStreamOptions,
+} from './AudioExportWriter';
 import type {
   CreateCommittedRenderArtifactParams,
   RenderArtifactLifecycleState,
@@ -11,18 +22,6 @@ export type {
   RenderArtifactLifecycleState,
   RenderOutputArtifact,
 } from './RenderOutputArtifactContracts';
-
-  getSharedMemoryBudgetManager,
-  MemoryBudgetManager,
-  MemoryReservation,
-} from '../runtime/memory/MemoryBudgetManager';
-import {
-  BoundedChunkedByteSink,
-  DEFAULT_MAX_ARTIFACT_READ_BYTES,
-  ExportWriteFailureError,
-  validateArtifactRangeRead,
-  validateArtifactStreamOptions,
-} from './AudioExportWriter';
 
 /** Maximum output size eligible for populating the deprecated outputBytes compatibility field (8 MiB) */
 export const COMPATIBILITY_OUTPUT_BYTES_MAX_SIZE = 8 * 1024 * 1024;
