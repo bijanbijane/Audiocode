@@ -23,8 +23,11 @@ jobs:
         uses: oven-sh/setup-bun@v2
       - name: Install dependencies from frozen bun.lock
         run: bun install --frozen-lockfile
-      - name: Run focused VAD regression suite
-        run: bun run tsx --test src/ai-engine/asr/SileroVadOnnxRunner.test.ts
+      - name: Run focused VAD & speaker embedding regression suites
+        run: |
+          bun run tsx --test \
+            src/ai-engine/asr/SileroVadOnnxRunner.test.ts \
+            src/ai-engine/asr/SpeakerEmbeddingOnnxRunner.test.ts
       - name: Build production web bundle
         if: always()
         run: npm run build
