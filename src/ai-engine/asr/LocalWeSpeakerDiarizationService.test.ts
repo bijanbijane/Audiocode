@@ -4,6 +4,8 @@ import { sha256Bytes } from '../../utils/StreamingSha256';
 import { LocalWeSpeakerDiarizationService } from './LocalWeSpeakerDiarizationService';
 import type {
   OrtRuntimeProvider,
+  OrtSessionLike,
+  OrtTensorLike,
 } from './UnifiedOnnxPersianAsrEngine';
 
 function createMockProvider(options: { failSpeakerLoad?: boolean } = {}) {
@@ -13,13 +15,13 @@ function createMockProvider(options: { failSpeakerLoad?: boolean } = {}) {
     createTensor(type, data, dims) {
       return { type, data, dims };
     },
-    async createSession() {
+    async createSession(): Promise<OrtSessionLike> {
       const current = sessionIndex++;
       if (current === 1 && options.failSpeakerLoad) {
         throw new Error('MOCK_SPEAKER_MODEL_LOAD_FAILED');
       }
       return {
-        async run() {
+        async run(): Promise<Record<string, OrtTensorLike>> {
           if (current === 0) {
             return {
               output: {
