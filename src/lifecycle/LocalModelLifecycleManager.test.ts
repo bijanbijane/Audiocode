@@ -67,6 +67,7 @@ class BoundedRamStreamingStorageSpy implements StreamingModelChunkStorage {
   public previousPointer: PersistedModelRegistryPointer | null = null;
   public manifests = new Map<string, StoredModelArtifactManifest>();
   private stagingChunkBytes = new Map<string, number>();
+  private stagingExpectedByteLength = new Map<string, number>();
 
   public isStorageAvailable(): boolean {
     return true;
@@ -84,6 +85,7 @@ class BoundedRamStreamingStorageSpy implements StreamingModelChunkStorage {
     chunkSizeBytes: number;
   }): Promise<void> {
     this.stagingChunkBytes.set(params.key, 0);
+    this.stagingExpectedByteLength.set(params.key, params.expectedByteLength);
   }
   public async writeTemporaryChunk(key: string, _offset: number, chunk: Uint8Array): Promise<void> {
     if (chunk.byteLength > this.maxObservedChunkBytes) {
@@ -97,12 +99,15 @@ class BoundedRamStreamingStorageSpy implements StreamingModelChunkStorage {
   }
   public async deleteTemporaryArtifact(key: string): Promise<void> {
     this.stagingChunkBytes.delete(key);
+    this.stagingExpectedByteLength.delete(key);
   }
   public async readTemporaryChunk(key: string, index: number): Promise<Uint8Array | null> {
-    const bytes = this.stagingChunkBytes.get(key) ?? 0;
+    const expected = this.stagingExpectedByteLength.get(key) ?? 0;
     const start = index * MAX_MODEL_CHUNK_BYTES;
-    if (start >= bytes) return null;
-    return new Uint8Array(Math.min(MAX_MODEL_CHUNK_BYTES, bytes - start));
+    if (start >= expected) return null;
+    const chunk = new Uint8Array(Math.min(MAX_MODEL_CHUNK_BYTES, expected - start));
+    chunk.fill((index * 17 + 5) & 0xff);
+    return chunk;
   }
   public async getTemporaryArtifactSize(key: string): Promise<number> {
     return this.stagingChunkBytes.get(key) ?? 0;
@@ -114,6 +119,7 @@ class BoundedRamStreamingStorageSpy implements StreamingModelChunkStorage {
   ): Promise<void> {
     this.manifests.set(installedKey, manifest);
     this.stagingChunkBytes.delete(temporaryKey);
+    this.stagingExpectedByteLength.delete(temporaryKey);
   }
   public async getInstalledManifest(
     storageDirectory: string,
@@ -211,13 +217,7 @@ describe('AVP-008: LocalModelLifecycleManager durability, bounded streaming, rol
       }
       const expectedSha = preHasher.digestHex();
 
-      async function* virtualStream(): AsyncIterable<Uint8Array> {
-        for (let i = 0; i < chunkCount; i++) {
-          const buf = new Uint8Array(chunkBytes);
-          buf.fill((i * 17 + 5) & 0xff);
-          yield buf;
-        }
-      }
+
 
       const snap = await mgr.installOrUpdateFromStream({
         manifest: createManifest({
@@ -325,11 +325,7 @@ describe('AVP-008: LocalModelLifecycleManager durability, bounded streaming, rol
     // Abort mid-stream
     storage.simulatedAvailableQuotaBytes = 1024 * 1024 * 1024;
     const ac = new AbortController();
-    async function* abortingStream(): AsyncIterable<Uint8Array> {
-      yield payload.subarray(0, 8192);
-      ac.abort();
-      yield payload.subarray(8192);
-    }
+
     const abortedSnap = await mgr.installOrUpdateFromStream({
       manifest: createManifest({ byteLength: payload.byteLength, sha256Hex: sha }),
       stream: makeRangeStream(payload),
