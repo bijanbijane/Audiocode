@@ -141,6 +141,76 @@ test('Phase 11B: single-channel diarization without speaker evidence never fabri
   assert.equal(durationOnly.unassignedDurationSec, 4);
 });
 
+
+test('Phase 11B: model-backed diarization preserves VAD speech outside embedding windows as unknown', async () => {
+  const pcm = new Float32Array(2 * 16000);
+  const vadSegment = {
+    startSample16k: 0,
+    endSample16k: pcm.length,
+    range: {
+      start: TimeMath.secondsToFlicks(0),
+      end: TimeMath.secondsToFlicks(2),
+    },
+    peakSpeechProb: 0.95,
+  };
+  const runnerStub = {
+    async extractEmbeddingsForVadSegments() {
+      return [
+        {
+          range: {
+            start: TimeMath.secondsToFlicks(0),
+            end: TimeMath.secondsToFlicks(1.5),
+          },
+          embeddingVector: new Float32Array([1, 0]),
+          vadProbability: 0.95,
+        },
+      ];
+    },
+  };
+
+  const partial = await runWeSpeakerDiarizationCapability({
+    recordingId: 'rec_partial_coverage',
+    pcm16kMono: pcm,
+    vadSpeechSegments: [vadSegment],
+    runner: runnerStub as never,
+  });
+  assert.equal(partial.segments[0].speakerId, 'speaker_1');
+  assert.ok(
+    partial.segments.some(
+      (segment) =>
+        segment.speakerId === 'UNKNOWN_SPEAKER' &&
+        segment.startSec >= 1.49 &&
+        segment.endSec <= 2.001,
+    ),
+    'speech after the last complete embedding window must remain unassigned, not disappear',
+  );
+
+  const shortRunner = {
+    async extractEmbeddingsForVadSegments() {
+      return [];
+    },
+  };
+  const shortOnly = await runWeSpeakerDiarizationCapability({
+    recordingId: 'rec_short_only',
+    pcm16kMono: new Float32Array(8000),
+    vadSpeechSegments: [
+      {
+        startSample16k: 0,
+        endSample16k: 8000,
+        range: {
+          start: TimeMath.secondsToFlicks(0),
+          end: TimeMath.secondsToFlicks(0.5),
+        },
+        peakSpeechProb: 0.9,
+      },
+    ],
+    runner: shortRunner as never,
+  });
+  assert.equal(shortOnly.segments.length, 1);
+  assert.equal(shortOnly.segments[0].speakerId, 'UNKNOWN_SPEAKER');
+  assert.equal(shortOnly.unassignedDurationSec, 0.5);
+});
+
 test('Phase 11B: model-backed WeSpeaker capability creates anonymous local clusters from real embeddings', async () => {
   const runnerStub = {
     async extractEmbeddingsForVadSegments() {
