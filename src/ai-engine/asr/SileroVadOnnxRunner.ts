@@ -162,6 +162,9 @@ export class SileroVadOnnxRunner {
           if (fp.prob > peakProb) peakProb = fp.prob;
           tempSilenceStart = -1; // Speech resumed before hangover expired
         }
+      } else if (isTriggered && fp.prob >= endThresh) {
+        if (fp.prob > peakProb) peakProb = fp.prob;
+        tempSilenceStart = -1; // Hysteresis: weak speech above end threshold cancels pending silence
       } else if (isTriggered && fp.prob < endThresh) {
         if (tempSilenceStart === -1) {
           tempSilenceStart = fp.startSample;
