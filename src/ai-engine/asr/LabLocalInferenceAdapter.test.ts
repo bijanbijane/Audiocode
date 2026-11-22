@@ -29,7 +29,7 @@ function makeSpeechAudio(durationSec: number) {
 
 async function createInstalledManager(modelId = 'avapardaz-fa-conformer', version = '1.0.0') {
   const storage = new InMemoryModelChunkStorage();
-  const mgr = new LocalModelLifecycleManager(storage, '1.0.0');
+  const mgr = new LocalModelLifecycleManager(storage);
   await mgr.initialize();
   const bytes = new Uint8Array(8192);
   bytes.fill(7);
@@ -37,20 +37,17 @@ async function createInstalledManager(modelId = 'avapardaz-fa-conformer', versio
   await mgr.installOrUpdateFromStream({
     manifest: {
       modelId,
-      version,
+      modelVersion: version,
       architecture: 'FASTCONFORMER_CTC',
-      supportedRuntime: 'onnxruntime-web/wasm',
-      supportedExecutionProviders: ['wasm'],
       fileName: `${modelId}.onnx`,
-      fileSizeBytes: bytes.byteLength,
+      expectedByteLength: bytes.byteLength,
       expectedSha256Hex: sha,
-      license: 'Apache-2.0',
-      sourceOrigin: 'local-file',
-      compatibilityMinAppVersion: '1.0.0',
     },
-    chunks: (async function* () {
+    stream: (async function* () {
       yield bytes;
     })(),
+    license: 'Apache-2.0',
+    sourceOrigin: 'local-file',
   });
   return { mgr, sha };
 }
@@ -62,20 +59,29 @@ function makeFakeModelRunner(params: {
   ready?: boolean;
   hasDecoder?: boolean;
 }): AsrModelRunnerAdapter {
+  let windowIndex = 0;
   return {
+    modelId: 'avapardaz-fa-conformer',
+    modelVersion: '1.0.0',
     architecture: 'FASTCONFORMER_CTC',
     modelSha256: params.sha,
     isReady: () => params.ready ?? true,
     hasDecoderConfiguration: () => params.hasDecoder ?? true,
-    async detectSpeechRegions(pcm16k) {
-      return [{ startSample: 0, endSample: pcm16k.length }];
+    async detectVoiceActivity(pcm16kMono) {
+      return { hasSpeech: pcm16kMono.length > 0, speechRatio: pcm16kMono.length > 0 ? 1 : 0 };
     },
-    async inferWindow(pcm16k, windowStartSec) {
+    async transcribeWindow(pcm16kMono) {
       if (params.delayMs) {
         await new Promise((r) => setTimeout(r, params.delayMs));
       }
-      assert.ok(pcm16k.length > 0);
-      return params.wordsPerWindow(windowStartSec);
+      assert.ok(pcm16kMono.length > 0);
+      const windowStartSec = windowIndex++ * 25;
+      return params.wordsPerWindow(windowStartSec).map((word) => ({
+        word: word.text,
+        relativeStartSec: Math.max(0, word.startSec - windowStartSec),
+        relativeEndSec: Math.max(0, word.endSec - windowStartSec),
+        probability: word.confidence,
+      }));
     },
   };
 }
@@ -90,7 +96,7 @@ describe('AVP-009: LabLocalInferenceAdapter readiness gates, chunked inference &
     const adapter1 = new LabLocalInferenceAdapter({ modelManager: emptyMgr });
     const res1 = await adapter1.transcribe({
       audio,
-      config: { expectedLanguage: 'fa', mode: 'batch' },
+      config: { expectedLanguage: 'fa', mode: 'batch', keyterms: [] },
     });
     assert.equal(res1.status, 'MODEL_NOT_INSTALLED');
     assert.equal(res1.hypothesisProvenance, 'NONE');
@@ -102,7 +108,7 @@ describe('AVP-009: LabLocalInferenceAdapter readiness gates, chunked inference &
     const adapter2 = new LabLocalInferenceAdapter({ modelManager: mgr });
     const res2 = await adapter2.transcribe({
       audio,
-      config: { expectedLanguage: 'fa', mode: 'batch' },
+      config: { expectedLanguage: 'fa', mode: 'batch', keyterms: [] },
     });
     assert.equal(res2.status, 'MODEL_NOT_READY');
 
@@ -125,7 +131,7 @@ describe('AVP-009: LabLocalInferenceAdapter readiness gates, chunked inference &
     });
     const res3 = await adapter3.transcribe({
       audio,
-      config: { expectedLanguage: 'fa', mode: 'batch' },
+      config: { expectedLanguage: 'fa', mode: 'batch', keyterms: [] },
     });
     assert.equal(res3.status, 'MODEL_NOT_READY');
 
@@ -148,7 +154,7 @@ describe('AVP-009: LabLocalInferenceAdapter readiness gates, chunked inference &
     });
     const res4 = await adapter4.transcribe({
       audio,
-      config: { expectedLanguage: 'fa', mode: 'batch' },
+      config: { expectedLanguage: 'fa', mode: 'batch', keyterms: [] },
     });
     assert.equal(res4.status, 'MODEL_NOT_READY');
 
@@ -170,7 +176,7 @@ describe('AVP-009: LabLocalInferenceAdapter readiness gates, chunked inference &
     });
     const res5 = await adapter5.transcribe({
       audio,
-      config: { expectedLanguage: 'fa', mode: 'batch' },
+      config: { expectedLanguage: 'fa', mode: 'batch', keyterms: [] },
     });
     assert.equal(res5.status, 'MODEL_NOT_READY');
 
@@ -193,7 +199,7 @@ describe('AVP-009: LabLocalInferenceAdapter readiness gates, chunked inference &
     });
     const res6 = await adapter6.transcribe({
       audio,
-      config: { expectedLanguage: 'fa', mode: 'batch' },
+      config: { expectedLanguage: 'fa', mode: 'batch', keyterms: [] },
     });
     assert.equal(res6.status, 'WORKER_OFFLINE');
   });
@@ -201,7 +207,7 @@ describe('AVP-009: LabLocalInferenceAdapter readiness gates, chunked inference &
   it('executes chunked multi-window inference, reconciles timestamps/confidences, and rejects synthetic placeholders', async () => {
     const { mgr, sha } = await createInstalledManager();
     const audio30s = makeSpeechAudio(30);
-    const budget = new MemoryBudgetManager({ totalSoftLimitBytes: 64 * 1024 * 1024 });
+    const budget = new MemoryBudgetManager();
 
     let windowsSeen = 0;
     const binding: LocalModelRuntimeBinding = {
@@ -236,18 +242,19 @@ describe('AVP-009: LabLocalInferenceAdapter readiness gates, chunked inference &
 
     const out = await adapter.transcribe({
       audio: audio30s,
-      config: { expectedLanguage: 'fa-en-mixed', mode: 'batch' },
+      config: { expectedLanguage: 'fa-en-mixed', mode: 'batch', keyterms: [] },
     });
 
     assert.equal(out.status, 'SUCCESS');
     assert.equal(out.hypothesisProvenance, 'MODEL_INFERENCE');
     assert.ok(windowsSeen >= 2, `Expected >=2 windows for 30s audio, saw ${windowsSeen}`);
     assert.equal(out.rawTranscript, 'سلام دنیا آواپرداز');
+    assert.ok(out.modelIdentity);
     assert.equal(out.modelIdentity.modelId, 'avapardaz-fa-conformer');
     assert.equal(out.modelIdentity.modelSha256, sha);
     assert.ok((out.words?.length ?? 0) === 3);
     assert.ok(typeof out.meanConfidence === 'number' && out.meanConfidence > 0.85);
-    assert.equal(budget.getSnapshot().usedBytes, 0, 'All PCM window reservations must be released');
+    assert.equal(budget.getSnapshot().accountedBytes, 0, 'All PCM window reservations must be released');
 
     // Synthetic placeholder rejection
     const placeholderAdapter = new LabLocalInferenceAdapter({
@@ -262,7 +269,7 @@ describe('AVP-009: LabLocalInferenceAdapter readiness gates, chunked inference &
     });
     const placeholderOut = await placeholderAdapter.transcribe({
       audio: makeSpeechAudio(2),
-      config: { expectedLanguage: 'fa', mode: 'batch' },
+      config: { expectedLanguage: 'fa', mode: 'batch', keyterms: [] },
     });
     assert.equal(placeholderOut.status, 'EMPTY_RESPONSE');
     assert.equal(placeholderOut.hypothesisProvenance, 'NONE');
@@ -270,7 +277,7 @@ describe('AVP-009: LabLocalInferenceAdapter readiness gates, chunked inference &
 
   it('cancels cleanly via AbortSignal and releases MemoryBudgetManager reservations', async () => {
     const { mgr, sha } = await createInstalledManager();
-    const budget = new MemoryBudgetManager({ totalSoftLimitBytes: 64 * 1024 * 1024 });
+    const budget = new MemoryBudgetManager();
     let cancelHookCalled = false;
 
     const adapter = new LabLocalInferenceAdapter({
@@ -299,13 +306,13 @@ describe('AVP-009: LabLocalInferenceAdapter readiness gates, chunked inference &
 
     const out = await adapter.transcribe({
       audio: makeSpeechAudio(2),
-      config: { expectedLanguage: 'fa', mode: 'batch' },
+      config: { expectedLanguage: 'fa', mode: 'batch', keyterms: [] },
       signal: ac.signal,
     });
 
     assert.equal(out.status, 'TIMEOUT');
     assert.equal(out.rawTranscript, '');
     assert.equal(cancelHookCalled, true);
-    assert.equal(budget.getSnapshot().usedBytes, 0);
+    assert.equal(budget.getSnapshot().accountedBytes, 0);
   });
 });
