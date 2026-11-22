@@ -29,7 +29,11 @@ function createRealWasmOrtProvider(): OrtRuntimeProvider {
     },
     async createSession(modelBytesOrPath, executionProviders) {
       void executionProviders;
-      return (await ort.InferenceSession.create(modelBytesOrPath, {
+      const modelBytes =
+        typeof modelBytesOrPath === 'string'
+          ? new Uint8Array(fs.readFileSync(modelBytesOrPath))
+          : modelBytesOrPath;
+      return (await ort.InferenceSession.create(modelBytes, {
         executionProviders: ['wasm'],
         graphOptimizationLevel: 'all',
       })) as unknown as OrtSessionLike;
