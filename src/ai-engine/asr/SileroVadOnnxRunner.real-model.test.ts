@@ -47,9 +47,9 @@ test('Silero VAD v5: real ONNX/WASM CPU inference detects speech on the pinned P
   assert.ok(pcm16k.length >= 16000, 'sample must contain at least one second of audio');
 
   const runner = new SileroVadOnnxRunner(createRealWasmOrtProvider());
-  const startedAt = performance.now();
   try {
     await runner.loadModel(new Uint8Array(modelBytes), ['wasm']);
+    const startedAt = performance.now();
     const segments = await runner.detectSpeechSegments(pcm16k, {
       startThreshold: 0.5,
       endThreshold: 0.35,
