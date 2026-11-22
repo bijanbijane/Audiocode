@@ -85,6 +85,54 @@ import {
 } from './src/processing-engine/index.ts';
 import { LocalCompanionService } from './src/host-bridge/companion/LocalCompanionService.ts';
 
+interface SandboxStudioScope {
+  readonly tenantId: string;
+  readonly operatorId: string;
+}
+
+function getSandboxStudioScope(res: express.Response): SandboxStudioScope {
+  const scope = res.locals.sandboxStudioScope as SandboxStudioScope | undefined;
+  if (!scope) {
+    throw new Error('SANDBOX_STUDIO_SCOPE_UNAVAILABLE');
+  }
+  return scope;
+}
+
+/**
+ * Sandbox-only routes are disabled unless explicitly provisioned with a tenant,
+ * operator, and high-entropy bearer token. No demo tenant identity is hardcoded
+ * into the HTTP server, and production callers cannot reach these routes by
+ * relying on implicit sample credentials.
+ */
+const requireSandboxStudioAccess: express.RequestHandler = (req, res, next) => {
+  const enabled = process.env.ENABLE_SANDBOX_STUDIO_ROUTES === 'true';
+  const tenantId = process.env.AVAPARDAZ_SANDBOX_TENANT_ID?.trim();
+  const operatorId = process.env.AVAPARDAZ_SANDBOX_OPERATOR_ID?.trim();
+  const expectedToken = process.env.AVAPARDAZ_SANDBOX_STUDIO_TOKEN ?? '';
+
+  if (!enabled || !tenantId || !operatorId || expectedToken.length < 32) {
+    res.status(404).json({ error: 'SANDBOX_STUDIO_DISABLED' });
+    return;
+  }
+
+  const authorization = req.headers.authorization ?? '';
+  const suppliedToken = authorization.startsWith('Bearer ')
+    ? authorization.slice('Bearer '.length)
+    : '';
+  const suppliedBytes = Buffer.from(suppliedToken);
+  const expectedBytes = Buffer.from(expectedToken);
+  if (
+    suppliedBytes.byteLength !== expectedBytes.byteLength ||
+    !crypto.timingSafeEqual(suppliedBytes, expectedBytes)
+  ) {
+    res.status(401).json({ error: 'SANDBOX_STUDIO_UNAUTHORIZED' });
+    return;
+  }
+
+  res.locals.sandboxStudioScope = { tenantId, operatorId } satisfies SandboxStudioScope;
+  next();
+};
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const IS_PROD = process.env.NODE_ENV === 'production';
 const RAW_PORT = process.env.PORT;
@@ -949,11 +997,16 @@ async function startServer() {
     res.status(out.status).json(out.body);
   });
 
+  // Sandbox studio APIs require explicit environment provisioning and a bearer token.
+  app.use('/api/v1/data-factory/sandbox', requireSandboxStudioAccess);
+  app.use('/api/v1/model-factory/sandbox', requireSandboxStudioAccess);
+  app.use('/api/v1/security/sandbox', requireSandboxStudioAccess);
+
   // ── Phase 12 Sandbox UI Routes (`/api/v1/data-factory/sandbox/*`) ───────────
   app.get('/api/v1/data-factory/sandbox/dashboard', async (_req, res, next) => {
     try {
-      await dataFactoryGateway.service.ensureSandboxDemoSeeded('org_avapardaz_sandbox');
-      const tenantId = 'org_avapardaz_sandbox';
+      await dataFactoryGateway.service.ensureSandboxDemoSeeded(getSandboxStudioScope(res).tenantId);
+      const tenantId = getSandboxStudioScope(res).tenantId;
       const recs = dataFactoryGateway.service.listRecordings(tenantId);
       const datasets = dataFactoryGateway.service.listDatasets(tenantId);
       const releases = datasets.flatMap((d) => dataFactoryGateway.service.listDatasetReleases(tenantId, d.datasetId));
@@ -981,9 +1034,9 @@ async function startServer() {
 
   app.post('/api/v1/data-factory/sandbox/rights/:recordingId/revoke', async (req, res, next) => {
     try {
-      await dataFactoryGateway.service.ensureSandboxDemoSeeded('org_avapardaz_sandbox');
+      await dataFactoryGateway.service.ensureSandboxDemoSeeded(getSandboxStudioScope(res).tenantId);
       try {
-        const report = dataFactoryGateway.service.revokeRecordingRights('org_avapardaz_sandbox', req.params.recordingId);
+        const report = dataFactoryGateway.service.revokeRecordingRights(getSandboxStudioScope(res).tenantId, req.params.recordingId);
         res.json(report);
       } catch (err) {
         res.status(400).json({ error: 'REVOKE_FAILED', message: sanitizePublicErrorOutput(String(err)) });
@@ -995,16 +1048,16 @@ async function startServer() {
 
   app.post('/api/v1/data-factory/sandbox/datasets/:datasetId/build', async (req, res, next) => {
     try {
-      await dataFactoryGateway.service.ensureSandboxDemoSeeded('org_avapardaz_sandbox');
+      await dataFactoryGateway.service.ensureSandboxDemoSeeded(getSandboxStudioScope(res).tenantId);
       try {
         const body = (req.body ?? {}) as { version?: string; releaseType?: DatasetReleaseType };
         const version = body.version?.trim() || `v1.0.${Date.now() % 10000}`;
         const built = dataFactoryGateway.service.buildDatasetRelease({
-          tenantId: 'org_avapardaz_sandbox',
+          tenantId: getSandboxStudioScope(res).tenantId,
           datasetId: req.params.datasetId,
           version,
           releaseType: body.releaseType ?? 'TRAIN',
-          releaseAuthor: 'studio_sandbox_operator',
+          releaseAuthor: getSandboxStudioScope(res).operatorId,
         });
         res.status(201).json(built);
       } catch (err) {
@@ -1022,8 +1075,8 @@ async function startServer() {
   // ── Phase 13 Sandbox Studio Routes (`/api/v1/model-factory/sandbox/*`) ─────
   app.get('/api/v1/model-factory/sandbox/overview', async (_req, res, next) => {
     try {
-      await modelFactoryGateway.service.ensureSandboxDemoSeeded('org_avapardaz_sandbox');
-      res.json(modelFactoryGateway.service.getSandboxLifecycleSummary('org_avapardaz_sandbox'));
+      await modelFactoryGateway.service.ensureSandboxDemoSeeded(getSandboxStudioScope(res).tenantId);
+      res.json(modelFactoryGateway.service.getSandboxLifecycleSummary(getSandboxStudioScope(res).tenantId));
     } catch (err) {
       next(err);
     }
@@ -1031,12 +1084,12 @@ async function startServer() {
 
   app.post('/api/v1/model-factory/sandbox/deployments/:deploymentId/rollback', async (req, res, next) => {
     try {
-      await modelFactoryGateway.service.ensureSandboxDemoSeeded('org_avapardaz_sandbox');
+      await modelFactoryGateway.service.ensureSandboxDemoSeeded(getSandboxStudioScope(res).tenantId);
       try {
         const result = modelFactoryGateway.service.rollbackDeployment({
-          tenantId: 'org_avapardaz_sandbox',
+          tenantId: getSandboxStudioScope(res).tenantId,
           deploymentId: req.params.deploymentId,
-          actorId: 'studio_sandbox_operator',
+          actorId: getSandboxStudioScope(res).operatorId,
           reason: 'Sandbox emergency rollback verification drill',
         });
         res.json(result);
@@ -1050,10 +1103,10 @@ async function startServer() {
 
   app.post('/api/v1/model-factory/sandbox/models/:modelVersionId/optimize', async (req, res, next) => {
     try {
-      await modelFactoryGateway.service.ensureSandboxDemoSeeded('org_avapardaz_sandbox');
+      await modelFactoryGateway.service.ensureSandboxDemoSeeded(getSandboxStudioScope(res).tenantId);
       try {
         const result = modelFactoryGateway.service.optimizeAndRegisterDerivedVersion({
-          tenantId: 'org_avapardaz_sandbox',
+          tenantId: getSandboxStudioScope(res).tenantId,
           parentModelVersionId: req.params.modelVersionId,
           newVersion: `1.0.0-int8-${Date.now() % 1000}`,
           technique: 'DYNAMIC_INT8_QUANTIZATION',
@@ -1074,8 +1127,8 @@ async function startServer() {
   // ── Phase 14 Sandbox UI Routes (`/api/v1/security/sandbox/*`) ────────────────
   app.get('/api/v1/security/sandbox/overview', async (_req, res, next) => {
     try {
-      await modelFactoryGateway.service.ensureSandboxDemoSeeded('org_avapardaz_sandbox');
-      res.json(speechSecurityService.getSandboxSecurityOverview('org_avapardaz_sandbox'));
+      await modelFactoryGateway.service.ensureSandboxDemoSeeded(getSandboxStudioScope(res).tenantId);
+      res.json(speechSecurityService.getSandboxSecurityOverview(getSandboxStudioScope(res).tenantId));
     } catch (err) {
       next(err);
     }
@@ -1083,8 +1136,8 @@ async function startServer() {
 
   app.post('/api/v1/security/sandbox/red-team/run', async (_req, res, next) => {
     try {
-      await modelFactoryGateway.service.ensureSandboxDemoSeeded('org_avapardaz_sandbox');
-      res.json({ groups: speechSecurityService.runFullRedTeamVerificationSuite('org_avapardaz_sandbox') });
+      await modelFactoryGateway.service.ensureSandboxDemoSeeded(getSandboxStudioScope(res).tenantId);
+      res.json({ groups: speechSecurityService.runFullRedTeamVerificationSuite(getSandboxStudioScope(res).tenantId) });
     } catch (err) {
       next(err);
     }
@@ -1093,10 +1146,10 @@ async function startServer() {
   app.post('/api/v1/security/sandbox/pii-redact', (req, res) => {
     const body = (req.body ?? {}) as { recordingId?: string; originalTranscript?: string };
     const derivative = speechSecurityService.createPiiDerivative({
-      tenantId: 'org_avapardaz_sandbox',
+      tenantId: getSandboxStudioScope(res).tenantId,
       recordingId: body.recordingId ?? 'rec_sandbox_pii',
       originalTranscript: body.originalTranscript ?? '',
-      actorId: 'studio_sandbox_operator',
+      actorId: getSandboxStudioScope(res).operatorId,
     });
     res.status(201).json(derivative);
   });
@@ -1104,16 +1157,16 @@ async function startServer() {
   app.post('/api/v1/security/sandbox/prompt-boundary-test', (req, res) => {
     const body = (req.body ?? {}) as { transcriptText?: string };
     const env = speechSecurityService.protectTranscriptAndCheckTool({
-      tenantId: 'org_avapardaz_sandbox',
+      tenantId: getSandboxStudioScope(res).tenantId,
       recordingId: 'rec_sandbox_prompt_probe',
       rawTranscriptText: body.transcriptText ?? '',
-      actorId: 'studio_sandbox_operator',
+      actorId: getSandboxStudioScope(res).operatorId,
     });
     const toolDecision = speechSecurityService.authorizeIntelligenceToolCall({
       triggerOrigin: 'TRANSCRIPT_TEXT_EXTRACTION',
-      actorPrincipalId: 'studio_sandbox_operator',
-      actorTenantId: 'org_avapardaz_sandbox',
-      targetTenantId: 'org_avapardaz_sandbox',
+      actorPrincipalId: getSandboxStudioScope(res).operatorId,
+      actorTenantId: getSandboxStudioScope(res).tenantId,
+      targetTenantId: getSandboxStudioScope(res).tenantId,
       actorRole: 'OWNER',
       toolName: 'deleteRecording',
       allowedRoles: ['OWNER', 'ADMIN'],
@@ -1126,9 +1179,9 @@ async function startServer() {
   app.post('/api/v1/security/sandbox/deletion-cascade', (req, res) => {
     const body = (req.body ?? {}) as { recordingId?: string };
     const report = speechSecurityService.deleteRecordingWithCascade({
-      tenantId: 'org_avapardaz_sandbox',
+      tenantId: getSandboxStudioScope(res).tenantId,
       recordingId: body.recordingId ?? 'rec_sandbox_pii',
-      actorId: 'studio_sandbox_operator',
+      actorId: getSandboxStudioScope(res).operatorId,
     });
     res.json(report);
   });
@@ -1176,7 +1229,7 @@ async function startServer() {
     }
   });
 
-  app.post('/api/v1/asr-core/stream-sim', (req, res) => {
+  app.post('/api/v1/asr-core/stream-sim', requireSandboxStudioAccess, (req, res) => {
     const body = (req.body ?? {}) as {
       chunkDurationMs?: number;
       textProbe?: string;
@@ -1189,7 +1242,7 @@ async function startServer() {
     full.set(speech, 0);
 
     const created = coreAsrRouter.streamingManager.createSession({
-      tenantId: 'org_avapardaz_sandbox',
+      tenantId: getSandboxStudioScope(res).tenantId,
       languageHint: body.languageHint ?? 'auto',
       streamingCategory: 'STATEFUL_CHUNKED_STREAMING',
       silenceEndpointMs: 320,
