@@ -73,7 +73,8 @@ async function downloadAndVerify(entry, repository, revision) {
   }
 
   const encodedPath = entry.path.split('/').map(encodeURIComponent).join('/');
-  const url = `${repository.replace(/\\/$/, '')}/resolve/${revision}/${encodedPath}?download=true`;
+  const baseRepository = repository.endsWith('/') ? repository.slice(0, -1) : repository;
+  const url = `${baseRepository}/resolve/${revision}/${encodedPath}?download=true`;
   const response = await fetch(url, { signal: AbortSignal.timeout(30 * 60 * 1000) });
   if (!response.ok || !response.body) {
     throw new Error(`Model download failed for ${entry.path}: HTTP ${response.status}`);
