@@ -326,9 +326,8 @@ describe('AVP-009: LabLocalInferenceAdapter readiness gates, chunked inference &
     const out = await adapter.transcribe({
       audio: makeSpeechAudio(2),
       config: { expectedLanguage: 'fa', mode: 'batch', keyterms: [] },
-      signal: new AbortController().signal,
-      experimentId: 'contract-alignment-test',
       signal: ac.signal,
+      experimentId: 'contract-alignment-test',
     });
 
     assert.equal(out.status, 'TIMEOUT');
