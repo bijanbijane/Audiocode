@@ -278,18 +278,50 @@ export async function runWeSpeakerDiarizationCapability(params: {
     };
   }).filter((segment) => segment.endSec > segment.startSec);
 
-  // The embedding runner intentionally skips sub-400ms speech. Preserve those
-  // intervals as unassigned instead of silently dropping them or guessing IDs.
+  segments.sort((a, b) => a.startSec - b.startSec || a.endSec - b.endSec);
+
+  // The embedding runner only emits complete windows. Preserve every portion
+  // of each VAD speech interval that those windows do not cover as UNKNOWN.
+  // This includes short turns, sub-window tails and gaps between windows.
   for (const vadSegment of params.vadSpeechSegments) {
-    const length = vadSegment.endSample16k - vadSegment.startSample16k;
-    if (length >= 6400) continue;
-    const startSec = Math.max(0, vadSegment.startSample16k / 16000);
-    const endSec = Math.min(durationSec, vadSegment.endSample16k / 16000);
-    if (endSec > startSec) {
+    const vadStart = Math.max(0, vadSegment.startSample16k / 16000);
+    const vadEnd = Math.min(durationSec, vadSegment.endSample16k / 16000);
+    if (vadEnd <= vadStart) continue;
+
+    const covered = segments
+      .filter(
+        (segment) =>
+          segment.speakerId !== 'UNKNOWN_SPEAKER' &&
+          segment.endSec > vadStart &&
+          segment.startSec < vadEnd,
+      )
+      .map((segment) => ({
+        start: Math.max(vadStart, segment.startSec),
+        end: Math.min(vadEnd, segment.endSec),
+      }))
+      .sort((a, b) => a.start - b.start);
+
+    let cursor = vadStart;
+    for (const interval of covered) {
+      if (interval.start - cursor >= 0.02) {
+        segments.push({
+          segmentId: `dseg_uncovered_${segments.length + 1}`,
+          startSec: Number(cursor.toFixed(3)),
+          endSec: Number(interval.start.toFixed(3)),
+          speakerId: 'UNKNOWN_SPEAKER',
+          confidence: null,
+          overlap: false,
+          competingSpeakerIds: [],
+          uncertain: true,
+        });
+      }
+      cursor = Math.max(cursor, interval.end);
+    }
+    if (vadEnd - cursor >= 0.02) {
       segments.push({
-        segmentId: `dseg_short_${segments.length + 1}`,
-        startSec: Number(startSec.toFixed(3)),
-        endSec: Number(endSec.toFixed(3)),
+        segmentId: `dseg_uncovered_${segments.length + 1}`,
+        startSec: Number(cursor.toFixed(3)),
+        endSec: Number(vadEnd.toFixed(3)),
         speakerId: 'UNKNOWN_SPEAKER',
         confidence: null,
         overlap: false,
