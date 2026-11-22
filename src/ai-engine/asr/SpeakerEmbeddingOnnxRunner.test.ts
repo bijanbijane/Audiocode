@@ -217,7 +217,7 @@ describe('Section 113: SpeakerEmbeddingOnnxRunner & Hierarchical AHC Clustering'
       async createSession() {
         return {
           async run(feeds) {
-            assert.deepEqual(feeds.feats.dims, [1, 98, 80]);
+            assert.deepEqual(feeds.feats.dims, [1, 150, 80]);
             const features = feeds.feats.data as Float32Array;
             for (let mel = 0; mel < 80; mel++) {
               let mean = 0;
