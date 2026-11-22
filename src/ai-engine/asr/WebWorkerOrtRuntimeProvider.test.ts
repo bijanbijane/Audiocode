@@ -31,10 +31,9 @@ function buildMockOpfsRoot(filesByDir: Record<string, Record<string, Uint8Array>
                   return {
                     size: data.byteLength,
                     async arrayBuffer() {
-                      return data.buffer.slice(
-                        data.byteOffset,
-                        data.byteOffset + data.byteLength,
-                      );
+                      const copy = new Uint8Array(data.byteLength);
+                      copy.set(data);
+                      return copy.buffer;
                     },
                   };
                 },
@@ -119,7 +118,7 @@ describe('Section 114 & AVP-008: WebWorkerOrtRuntimeProvider & Hardened OPFS Mod
       },
     });
 
-    const budget = new MemoryBudgetManager({ totalSoftLimitBytes: 1024 * 1024 });
+    const budget = new MemoryBudgetManager();
     let capturedReservationId: string | null = null;
     const assembled = await WebWorkerOrtRuntimeProvider.assembleModelBytesFromOpfsChunks(
       {
@@ -144,9 +143,9 @@ describe('Section 114 & AVP-008: WebWorkerOrtRuntimeProvider & Hardened OPFS Mod
 
     assert.deepEqual(Array.from(assembled), [10, 20, 30, 40, 50]);
     assert.ok(capturedReservationId !== null);
-    assert.equal(budget.getSnapshot().usedBytes, 5);
+    assert.equal(budget.getSnapshot().accountedBytes, 5);
     budget.release(capturedReservationId!);
-    assert.equal(budget.getSnapshot().usedBytes, 0);
+    assert.equal(budget.getSnapshot().accountedBytes, 0);
   });
 
   it('rejects corrupted chunks, mismatched manifest identity, wrong full-artifact hash, and MemoryBudgetManager denial', async () => {
@@ -163,7 +162,7 @@ describe('Section 114 & AVP-008: WebWorkerOrtRuntimeProvider & Hardened OPFS Mod
       },
     });
 
-    const budget = new MemoryBudgetManager({ totalSoftLimitBytes: 1024 * 1024 });
+    const budget = new MemoryBudgetManager();
     await assert.rejects(
       () =>
         WebWorkerOrtRuntimeProvider.assembleModelBytesFromOpfsChunks(
@@ -182,7 +181,7 @@ describe('Section 114 & AVP-008: WebWorkerOrtRuntimeProvider & Hardened OPFS Mod
         ),
       /CHUNK_SHA256_MISMATCH|INTEGRITY/,
     );
-    assert.equal(budget.getSnapshot().usedBytes, 0, 'Reservation must be released on failure');
+    assert.equal(budget.getSnapshot().accountedBytes, 0, 'Reservation must be released on failure');
 
     // Path traversal rejection
     await assert.rejects(
@@ -206,15 +205,11 @@ describe('Section 114 & AVP-008: WebWorkerOrtRuntimeProvider & Hardened OPFS Mod
 
     // Budget denial before allocating
     const tinyBudget = new MemoryBudgetManager({
-      totalSoftLimitBytes: 4,
-      categoryLimits: {
-        AUDIO_PCM: 4,
-        AI_MODEL: 4,
-        WAVEFORM: 4,
-        RENDER_BUFFER: 4,
-        CACHE: 4,
-        OTHER: 4,
-      },
+      hardLimitBytes: 4,
+      targetBytes: 1,
+      throttleBytes: 2,
+      emergencyBytes: 3,
+      audioCacheBytes: 1,
     });
     const validOpfs = buildMockOpfsRoot({
       'model-a_1.0.0': {
