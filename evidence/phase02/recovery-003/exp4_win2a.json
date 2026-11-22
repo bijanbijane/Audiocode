@@ -1,0 +1,407 @@
+{
+  "window_key": "2a",
+  "global_offset_sec": 1200,
+  "duration_sec": 300.0,
+  "num_threads": 3,
+  "wav_sha256": "6069717cefca89f7489c595de58757e395701a0f66b5f16e6a4ab76702f10edd",
+  "rc": 0,
+  "preprocess_sec": 0.157,
+  "wall_sec": 240.139,
+  "decode_sec": 231.553,
+  "rtf": 0.7718,
+  "peak_rss_mib": 1976.43,
+  "post_warmup_rss_min_mib": 1528.01,
+  "post_warmup_rss_max_mib": 1976.43,
+  "post_warmup_rss_growth_mib": 448.42,
+  "steady_state_second_half_rss_drift_mib": 40.0,
+  "segments_count": 44,
+  "words_count": 605,
+  "alignment_probe": {
+    "segments_tested": 3,
+    "all_rc_zero": true,
+    "align_rtf": 0.01415,
+    "samples": [
+      {
+        "segment_index": 0,
+        "seg_dur_sec": 1.838,
+        "rc": 0,
+        "align_decode_sec": 0.035,
+        "align_rtf": 0.01904
+      },
+      {
+        "segment_index": 1,
+        "seg_dur_sec": 2.03,
+        "rc": 0,
+        "align_decode_sec": 0.027,
+        "align_rtf": 0.0133
+      },
+      {
+        "segment_index": 2,
+        "seg_dur_sec": 5.038,
+        "rc": 0,
+        "align_decode_sec": 0.064,
+        "align_rtf": 0.0127
+      }
+    ]
+  },
+  "segments": [
+    {
+      "local_start_sec": 1.054,
+      "local_end_sec": 2.892,
+      "global_start_sec": 1201.054,
+      "global_end_sec": 1202.892,
+      "text": "I hope so, I am sure."
+    },
+    {
+      "local_start_sec": 3.358,
+      "local_end_sec": 5.388,
+      "global_start_sec": 1203.358,
+      "global_end_sec": 1205.388,
+      "text": "said Mr. Kenji politely."
+    },
+    {
+      "local_start_sec": 6.238,
+      "local_end_sec": 11.276,
+      "global_start_sec": 1206.238,
+      "global_end_sec": 1211.276,
+      "text": "wished esther only to know what would be serviceable to her"
+    },
+    {
+      "local_start_sec": 11.934,
+      "local_end_sec": 17.516,
+      "global_start_sec": 1211.934,
+      "global_end_sec": 1217.516,
+      "text": "and she knows from any teaching she has had here nothing more."
+    },
+    {
+      "local_start_sec": 18.91,
+      "local_end_sec": 25.74,
+      "global_start_sec": 1218.91,
+      "global_end_sec": 1225.74,
+      "text": "Well, said Mr. Kenji, upon the whole very proper, now to the point addressing me."
+    },
+    {
+      "local_start_sec": 26.27,
+      "local_end_sec": 28.908,
+      "global_start_sec": 1226.27,
+      "global_end_sec": 1228.908,
+      "text": "Miss Barbary, your sole relation."
+    },
+    {
+      "local_start_sec": 30.078,
+      "local_end_sec": 34.444,
+      "global_start_sec": 1230.078,
+      "global_end_sec": 1234.444,
+      "text": "In fact, that is, for I am bound to observe that in law you had none."
+    },
+    {
+      "local_start_sec": 34.974,
+      "local_end_sec": 36.204,
+      "global_start_sec": 1234.974,
+      "global_end_sec": 1236.204,
+      "text": "being deceased"
+    },
+    {
+      "local_start_sec": 36.702,
+      "local_end_sec": 41.196,
+      "global_start_sec": 1236.702,
+      "global_end_sec": 1241.196,
+      "text": "and it is naturally not being to be expected that mrs rachel"
+    },
+    {
+      "local_start_sec": 41.822,
+      "local_end_sec": 44.492,
+      "global_start_sec": 1241.822,
+      "global_end_sec": 1244.492,
+      "text": "Oh, dear, no, said Mrs. Rachel quickly."
+    },
+    {
+      "local_start_sec": 45.438,
+      "local_end_sec": 47.916,
+      "global_start_sec": 1245.438,
+      "global_end_sec": 1247.916,
+      "text": "Quite so, assented Mr. Kenji."
+    },
+    {
+      "local_start_sec": 48.638,
+      "local_end_sec": 55.276,
+      "global_start_sec": 1248.638,
+      "global_end_sec": 1255.276,
+      "text": "that mrs rachel should charge herself with your maintenance and support i beg you won't distress yourself"
+    },
+    {
+      "local_start_sec": 56.062,
+      "local_end_sec": 74.22,
+      "global_start_sec": 1256.062,
+      "global_end_sec": 1274.22,
+      "text": "you are in a position to receive the renewal of an offer which i was instructed to make to miss barbary some two years ago and which though rejected then was understood to be renewable under the lamentable circumstances that have since occurred"
+    },
+    {
+      "local_start_sec": 74.942,
+      "local_end_sec": 86.412,
+      "global_start_sec": 1274.942,
+      "global_end_sec": 1286.412,
+      "text": "now if i avow that i represent in jaundice and jaundice and otherwise a highly humane but at the same time singular man"
+    },
+    {
+      "local_start_sec": 86.942,
+      "local_end_sec": 92.94,
+      "global_start_sec": 1286.942,
+      "global_end_sec": 1292.94,
+      "text": "Shall I compromise myself by any stretch of my professional caution?"
+    },
+    {
+      "local_start_sec": 93.726,
+      "local_end_sec": 100.076,
+      "global_start_sec": 1293.726,
+      "global_end_sec": 1300.076,
+      "text": "said mr kenji leaning back in his chair again and looking calmly at us both"
+    },
+    {
+      "local_start_sec": 100.862,
+      "local_end_sec": 105.676,
+      "global_start_sec": 1300.862,
+      "global_end_sec": 1305.676,
+      "text": "He appeared to enjoy beyond everything the sound of his own voice."
+    },
+    {
+      "local_start_sec": 106.366,
+      "local_end_sec": 114.284,
+      "global_start_sec": 1306.366,
+      "global_end_sec": 1314.284,
+      "text": "i couldn't wonder at that for it was mellow and full and gave great importance to every word he uttered"
+    },
+    {
+      "local_start_sec": 115.038,
+      "local_end_sec": 128.108,
+      "global_start_sec": 1315.038,
+      "global_end_sec": 1328.108,
+      "text": "he listened to himself with obvious satisfaction and sometimes gently beat time to his own music with his head or rounded a sentence with his hand"
+    },
+    {
+      "local_start_sec": 128.67,
+      "local_end_sec": 130.988,
+      "global_start_sec": 1328.67,
+      "global_end_sec": 1330.988,
+      "text": "i was very much impressed by him"
+    },
+    {
+      "local_start_sec": 131.582,
+      "local_end_sec": 140.876,
+      "global_start_sec": 1331.582,
+      "global_end_sec": 1340.876,
+      "text": "even then before i knew that he formed himself on the model of a great lord who was his client"
+    },
+    {
+      "local_start_sec": 141.47,
+      "local_end_sec": 146.956,
+      "global_start_sec": 1341.47,
+      "global_end_sec": 1346.956,
+      "text": "and that he was generally called Conversation Kenji."
+    },
+    {
+      "local_start_sec": 147.998,
+      "local_end_sec": 156.844,
+      "global_start_sec": 1347.998,
+      "global_end_sec": 1356.844,
+      "text": "mr jaundice he pursued being aware of the i would say desolate position of our young friend"
+    },
+    {
+      "local_start_sec": 157.438,
+      "local_end_sec": 164.044,
+      "global_start_sec": 1357.438,
+      "global_end_sec": 1364.044,
+      "text": "offers to place her at a first-rate establishment where her education shall be completed"
+    },
+    {
+      "local_start_sec": 164.638,
+      "local_end_sec": 170.892,
+      "global_start_sec": 1364.638,
+      "global_end_sec": 1370.892,
+      "text": "where her comfort shall be secured and where her reasonable wants shall be anticipated"
+    },
+    {
+      "local_start_sec": 171.422,
+      "local_end_sec": 183.852,
+      "global_start_sec": 1371.422,
+      "global_end_sec": 1383.852,
+      "text": "where she shall be eminently qualified to discharge her duty in that station of life unto which it has pleased shall i say providence to call her"
+    },
+    {
+      "local_start_sec": 184.606,
+      "local_end_sec": 187.5,
+      "global_start_sec": 1384.606,
+      "global_end_sec": 1387.5,
+      "text": "My heart was filled so full."
+    },
+    {
+      "local_start_sec": 188.286,
+      "local_end_sec": 193.132,
+      "global_start_sec": 1388.286,
+      "global_end_sec": 1393.132,
+      "text": "both by what he said and by his affecting manner of saying it."
+    },
+    {
+      "local_start_sec": 193.694,
+      "local_end_sec": 197.068,
+      "global_start_sec": 1393.694,
+      "global_end_sec": 1397.068,
+      "text": "that I was not able to speak, though I tried."
+    },
+    {
+      "local_start_sec": 198.078,
+      "local_end_sec": 219.1,
+      "global_start_sec": 1398.078,
+      "global_end_sec": 1419.1,
+      "text": "mr jaundice he went on makes no condition beyond expressing his expectation that our young friend will not at any time remove herself from the establishment in question without his knowledge and concurrence that she will faithfully apply herself to the acquisition of those accomplishments"
+    },
+    {
+      "local_start_sec": 219.294,
+      "local_end_sec": 223.308,
+      "global_start_sec": 1419.294,
+      "global_end_sec": 1423.308,
+      "text": "upon the exercise of which she will be ultimately dependent"
+    },
+    {
+      "local_start_sec": 223.774,
+      "local_end_sec": 226.988,
+      "global_start_sec": 1423.774,
+      "global_end_sec": 1426.988,
+      "text": "that she will tread in the paths of virtue and honor."
+    },
+    {
+      "local_start_sec": 227.454,
+      "local_end_sec": 229.452,
+      "global_start_sec": 1427.454,
+      "global_end_sec": 1429.452,
+      "text": "and so forth."
+    },
+    {
+      "local_start_sec": 230.462,
+      "local_end_sec": 234.348,
+      "global_start_sec": 1430.462,
+      "global_end_sec": 1434.348,
+      "text": "i was still less able to speak than before"
+    },
+    {
+      "local_start_sec": 235.294,
+      "local_end_sec": 239.596,
+      "global_start_sec": 1435.294,
+      "global_end_sec": 1439.596,
+      "text": "now what does our young friend say proceeded mr kenji"
+    },
+    {
+      "local_start_sec": 240.222,
+      "local_end_sec": 244.748,
+      "global_start_sec": 1440.222,
+      "global_end_sec": 1444.748,
+      "text": "Take time, take time. I pause for her reply, but take time."
+    },
+    {
+      "local_start_sec": 246.014,
+      "local_end_sec": 251.98,
+      "global_start_sec": 1446.014,
+      "global_end_sec": 1451.98,
+      "text": "What the destitute subject of such an offer tried to say, I need not repeat."
+    },
+    {
+      "local_start_sec": 252.67,
+      "local_end_sec": 264.812,
+      "global_start_sec": 1452.67,
+      "global_end_sec": 1464.812,
+      "text": "what she did say i could more easily tell if it were worth the telling what she felt and will feel to her dying hour i could never relate"
+    },
+    {
+      "local_start_sec": 265.534,
+      "local_end_sec": 268.46,
+      "global_start_sec": 1465.534,
+      "global_end_sec": 1468.46,
+      "text": "This interview took place at Windsor."
+    },
+    {
+      "local_start_sec": 269.086,
+      "local_end_sec": 270.54,
+      "global_start_sec": 1469.086,
+      "global_end_sec": 1470.54,
+      "text": "where I had passed."
+    },
+    {
+      "local_start_sec": 271.134,
+      "local_end_sec": 273.516,
+      "global_start_sec": 1471.134,
+      "global_end_sec": 1473.516,
+      "text": "as far as I knew, my whole life."
+    },
+    {
+      "local_start_sec": 274.27,
+      "local_end_sec": 283.852,
+      "global_start_sec": 1474.27,
+      "global_end_sec": 1483.852,
+      "text": "On that day, week, amply provided with all necessaries, I left it inside the stagecoach for Redding."
+    },
+    {
+      "local_start_sec": 284.894,
+      "local_end_sec": 292.268,
+      "global_start_sec": 1484.894,
+      "global_end_sec": 1492.268,
+      "text": "Mrs. Rachel was too good to feel any emotion at parting, but I was not so good, and wept bitterly."
+    },
+    {
+      "local_start_sec": 293.342,
+      "local_end_sec": 296.044,
+      "global_start_sec": 1493.342,
+      "global_end_sec": 1496.044,
+      "text": "I thought that I ought to have known."
+    }
+  ],
+  "rss_timeline_sampled": [
+    {
+      "elapsed_sec": 0.0,
+      "rss_mib": 6.38
+    },
+    {
+      "elapsed_sec": 20.0,
+      "rss_mib": 1538.01
+    },
+    {
+      "elapsed_sec": 40.0,
+      "rss_mib": 1556.01
+    },
+    {
+      "elapsed_sec": 60.0,
+      "rss_mib": 1866.79
+    },
+    {
+      "elapsed_sec": 80.0,
+      "rss_mib": 1918.29
+    },
+    {
+      "elapsed_sec": 100.0,
+      "rss_mib": 1936.43
+    },
+    {
+      "elapsed_sec": 120.1,
+      "rss_mib": 1936.43
+    },
+    {
+      "elapsed_sec": 140.1,
+      "rss_mib": 1936.43
+    },
+    {
+      "elapsed_sec": 160.1,
+      "rss_mib": 1936.43
+    },
+    {
+      "elapsed_sec": 180.1,
+      "rss_mib": 1976.43
+    },
+    {
+      "elapsed_sec": 200.1,
+      "rss_mib": 1976.43
+    },
+    {
+      "elapsed_sec": 220.1,
+      "rss_mib": 1976.43
+    }
+  ]
+}

@@ -1,0 +1,41 @@
+{
+  "generated_utc": "2026-11-22T20:22:49.956075+00:00",
+  "artifacts": {
+    "/root/.avapardaz/models/shenava-rizzeh/model.int8.onnx": {
+      "size_bytes": 38183269,
+      "sha256": "6bdd4ab80626ddfe0b19338a5c96fcc4f2021ad78899cece20a805a48dc5250d"
+    },
+    "/root/.avapardaz/models/shenava-rizzeh/tokens.txt": {
+      "size_bytes": 12236,
+      "sha256": "8e192963f6e666dfa5721e5cbd4710bc1ef592460a45f08cefc94b2db16a6954"
+    },
+    "/root/.avapardaz/models/whisper-turbo/turbo-encoder.int8.onnx": {
+      "size_bytes": 674716297,
+      "sha256": "b02dcdf54f348741e93fe732b67d933c8dcb6735655f710640143081db38878b"
+    },
+    "/root/.avapardaz/models/whisper-turbo/turbo-decoder.int8.onnx": {
+      "size_bytes": 361080764,
+      "sha256": "20accd02388482eb3a46bd615631adfdc85e1eb2c7db9ea3f02a40ffe6b81547"
+    },
+    "/root/.avapardaz/models/whisper-turbo/turbo-tokens.txt": {
+      "size_bytes": 816730,
+      "sha256": "b34b360dbb493e781e479794586d661700670d65564001f23024971d1f2fa126"
+    },
+    "/root/.avapardaz/models/taraneh/Taraneh-WBase/model.safetensors": {
+      "size_bytes": 290403936,
+      "sha256": "fd823b15a47d6b84d7f7d7c22c7fb4c14281b1d0cf51b72b7c45b0e4b536ab6b"
+    },
+    "/root/.avapardaz/models/taraneh/Taraneh-WMedium/model.safetensors": {
+      "size_bytes": 3055544304,
+      "sha256": "a2344effe6b1b228f9052158965c3b4048ae176afbb485a09d0179d75adb9835"
+    },
+    "/root/.avapardaz/models/taraneh-ct2-int8/Taraneh-WBase/model.bin": {
+      "size_bytes": 74199173,
+      "sha256": "ce3a3c7a3303f7f7d97863d6d16ee67712c076f46af12b483bf4bea2b6a1f49e"
+    },
+    "/root/.avapardaz/models/taraneh-ct2-int8/Taraneh-WMedium/model.bin": {
+      "size_bytes": 769156493,
+      "sha256": "82eb8e1d04907bb75888b17b955e77366d5fd30fb7495af0889eec548ca87277"
+    }
+  }
+}

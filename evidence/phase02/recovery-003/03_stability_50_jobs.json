@@ -1,0 +1,537 @@
+{
+  "timestamp_utc": "2026-11-22T17:51:43.605474+00:00",
+  "execution_id": "AVP-P02-RECOVERY-005",
+  "experiment": "exp3_stability_50_real_jobs",
+  "checkpoint_state": "COMPLETED",
+  "config_hash": "ecf53910ff26689b8865923f15afbc5ce010b88fedd73c235454ca346162c736",
+  "os_level_offline": "unshare -r -n",
+  "note_on_process_isolation": "Each job executed in a fresh netns-isolated CLI process (service-lifecycle isolation); sustained single-process RSS stability is measured separately in EXP4 (10-min continuous windows).",
+  "TOTAL_VALIDATED_JOBS": 50,
+  "TOTAL_SUBMITTED_JOBS": 50,
+  "PROCESS_CRASHES": 0,
+  "UNHANDLED_EXCEPTIONS": 0,
+  "CORRUPTED_RESULTS": 0,
+  "STATUS": "PASS",
+  "rss_summary_by_provider_mib": {
+    "shenava_fa": {
+      "count": 25,
+      "min": 149.2,
+      "max": 203.83,
+      "drift": 54.63
+    },
+    "whisper_turbo_en": {
+      "count": 10,
+      "min": 1834.21,
+      "max": 2078.48,
+      "drift": 244.27
+    },
+    "mfa_align_en": {
+      "count": 15,
+      "min": 167.15,
+      "max": 169.29,
+      "drift": 2.14
+    }
+  },
+  "jobs": [
+    {
+      "job_index": 1,
+      "job_type": "shenava_fa",
+      "audio_sample_id": "fleurs-fa-dev-0101",
+      "rc": 0,
+      "wall_sec": 2.424,
+      "decode_sec": 0.44,
+      "peak_rss_mib": 196.89,
+      "text_chars": 137
+    },
+    {
+      "job_index": 2,
+      "job_type": "shenava_fa",
+      "audio_sample_id": "fleurs-fa-dev-0102",
+      "rc": 0,
+      "wall_sec": 2.302,
+      "decode_sec": 0.401,
+      "peak_rss_mib": 197.32,
+      "text_chars": 137
+    },
+    {
+      "job_index": 3,
+      "job_type": "mfa_align_en",
+      "audio_sample_id": "fleurs-en-dev-0101",
+      "rc": 0,
+      "wall_sec": 1.826,
+      "decode_sec": 0.087,
+      "peak_rss_mib": 168.36,
+      "textgrid_valid": true
+    },
+    {
+      "job_index": 4,
+      "job_type": "whisper_turbo_en",
+      "audio_sample_id": "fleurs-en-dev-0101",
+      "rc": 0,
+      "wall_sec": 14.71,
+      "decode_sec": 5.851,
+      "peak_rss_mib": 1931.64,
+      "text_chars": 118
+    },
+    {
+      "job_index": 5,
+      "job_type": "shenava_fa",
+      "audio_sample_id": "fleurs-fa-dev-0104",
+      "rc": 0,
+      "wall_sec": 2.254,
+      "decode_sec": 0.408,
+      "peak_rss_mib": 190.86,
+      "text_chars": 105
+    },
+    {
+      "job_index": 6,
+      "job_type": "mfa_align_en",
+      "audio_sample_id": "fleurs-en-dev-0102",
+      "rc": 0,
+      "wall_sec": 1.711,
+      "decode_sec": 0.082,
+      "peak_rss_mib": 168.82,
+      "textgrid_valid": true
+    },
+    {
+      "job_index": 7,
+      "job_type": "shenava_fa",
+      "audio_sample_id": "fleurs-fa-dev-0105",
+      "rc": 0,
+      "wall_sec": 2.135,
+      "decode_sec": 0.44,
+      "peak_rss_mib": 198.04,
+      "text_chars": 104
+    },
+    {
+      "job_index": 8,
+      "job_type": "shenava_fa",
+      "audio_sample_id": "fleurs-fa-dev-0106",
+      "rc": 0,
+      "wall_sec": 2.128,
+      "decode_sec": 0.37,
+      "peak_rss_mib": 186.29,
+      "text_chars": 106
+    },
+    {
+      "job_index": 9,
+      "job_type": "mfa_align_en",
+      "audio_sample_id": "fleurs-en-dev-0103",
+      "rc": 0,
+      "wall_sec": 1.707,
+      "decode_sec": 0.099,
+      "peak_rss_mib": 167.42,
+      "textgrid_valid": true
+    },
+    {
+      "job_index": 10,
+      "job_type": "whisper_turbo_en",
+      "audio_sample_id": "fleurs-en-dev-0102",
+      "rc": 0,
+      "wall_sec": 14.182,
+      "decode_sec": 5.858,
+      "peak_rss_mib": 1934.29,
+      "text_chars": 126
+    },
+    {
+      "job_index": 11,
+      "job_type": "shenava_fa",
+      "audio_sample_id": "fleurs-fa-dev-0107",
+      "rc": 0,
+      "wall_sec": 2.143,
+      "decode_sec": 0.305,
+      "peak_rss_mib": 179.93,
+      "text_chars": 90
+    },
+    {
+      "job_index": 12,
+      "job_type": "mfa_align_en",
+      "audio_sample_id": "fleurs-en-dev-0104",
+      "rc": 0,
+      "wall_sec": 1.743,
+      "decode_sec": 0.113,
+      "peak_rss_mib": 167.91,
+      "textgrid_valid": true
+    },
+    {
+      "job_index": 13,
+      "job_type": "shenava_fa",
+      "audio_sample_id": "fleurs-fa-dev-0108",
+      "rc": 0,
+      "wall_sec": 2.081,
+      "decode_sec": 0.292,
+      "peak_rss_mib": 170.81,
+      "text_chars": 86
+    },
+    {
+      "job_index": 14,
+      "job_type": "shenava_fa",
+      "audio_sample_id": "fleurs-fa-dev-0109",
+      "rc": 0,
+      "wall_sec": 2.078,
+      "decode_sec": 0.332,
+      "peak_rss_mib": 183.88,
+      "text_chars": 87
+    },
+    {
+      "job_index": 15,
+      "job_type": "mfa_align_en",
+      "audio_sample_id": "fleurs-en-dev-0105",
+      "rc": 0,
+      "wall_sec": 1.714,
+      "decode_sec": 0.105,
+      "peak_rss_mib": 168.66,
+      "textgrid_valid": true
+    },
+    {
+      "job_index": 16,
+      "job_type": "whisper_turbo_en",
+      "audio_sample_id": "fleurs-en-dev-0103",
+      "rc": 0,
+      "wall_sec": 13.434,
+      "decode_sec": 5.545,
+      "peak_rss_mib": 1934.39,
+      "text_chars": 110
+    },
+    {
+      "job_index": 17,
+      "job_type": "shenava_fa",
+      "audio_sample_id": "fleurs-fa-dev-0110",
+      "rc": 0,
+      "wall_sec": 2.314,
+      "decode_sec": 0.348,
+      "peak_rss_mib": 194.42,
+      "text_chars": 63
+    },
+    {
+      "job_index": 18,
+      "job_type": "mfa_align_en",
+      "audio_sample_id": "fleurs-en-dev-0106",
+      "rc": 0,
+      "wall_sec": 1.648,
+      "decode_sec": 0.044,
+      "peak_rss_mib": 167.15,
+      "textgrid_valid": true
+    },
+    {
+      "job_index": 19,
+      "job_type": "shenava_fa",
+      "audio_sample_id": "fleurs-fa-dev-0111",
+      "rc": 0,
+      "wall_sec": 2.119,
+      "decode_sec": 0.242,
+      "peak_rss_mib": 162.81,
+      "text_chars": 62
+    },
+    {
+      "job_index": 20,
+      "job_type": "shenava_fa",
+      "audio_sample_id": "fleurs-fa-dev-0112",
+      "rc": 0,
+      "wall_sec": 1.98,
+      "decode_sec": 0.214,
+      "peak_rss_mib": 153.02,
+      "text_chars": 60
+    },
+    {
+      "job_index": 21,
+      "job_type": "mfa_align_en",
+      "audio_sample_id": "fleurs-en-dev-0107",
+      "rc": 0,
+      "wall_sec": 1.69,
+      "decode_sec": 0.051,
+      "peak_rss_mib": 168.11,
+      "textgrid_valid": true
+    },
+    {
+      "job_index": 22,
+      "job_type": "whisper_turbo_en",
+      "audio_sample_id": "fleurs-en-dev-0104",
+      "rc": 0,
+      "wall_sec": 14.972,
+      "decode_sec": 6.872,
+      "peak_rss_mib": 1989.89,
+      "text_chars": 110
+    },
+    {
+      "job_index": 23,
+      "job_type": "shenava_fa",
+      "audio_sample_id": "fleurs-fa-dev-0113",
+      "rc": 0,
+      "wall_sec": 2.282,
+      "decode_sec": 0.367,
+      "peak_rss_mib": 188.14,
+      "text_chars": 99
+    },
+    {
+      "job_index": 24,
+      "job_type": "mfa_align_en",
+      "audio_sample_id": "fleurs-en-dev-0108",
+      "rc": 0,
+      "wall_sec": 1.715,
+      "decode_sec": 0.063,
+      "peak_rss_mib": 167.19,
+      "textgrid_valid": true
+    },
+    {
+      "job_index": 25,
+      "job_type": "shenava_fa",
+      "audio_sample_id": "fleurs-fa-dev-0114",
+      "rc": 0,
+      "wall_sec": 2.068,
+      "decode_sec": 0.327,
+      "peak_rss_mib": 192.7,
+      "text_chars": 106
+    },
+    {
+      "job_index": 26,
+      "job_type": "shenava_fa",
+      "audio_sample_id": "fleurs-fa-dev-0115",
+      "rc": 0,
+      "wall_sec": 2.157,
+      "decode_sec": 0.376,
+      "peak_rss_mib": 189.56,
+      "text_chars": 103
+    },
+    {
+      "job_index": 27,
+      "job_type": "mfa_align_en",
+      "audio_sample_id": "fleurs-en-dev-0110",
+      "rc": 0,
+      "wall_sec": 1.921,
+      "decode_sec": 0.142,
+      "peak_rss_mib": 168.28,
+      "textgrid_valid": true
+    },
+    {
+      "job_index": 28,
+      "job_type": "whisper_turbo_en",
+      "audio_sample_id": "fleurs-en-dev-0105",
+      "rc": 0,
+      "wall_sec": 14.573,
+      "decode_sec": 6.441,
+      "peak_rss_mib": 1948.86,
+      "text_chars": 110
+    },
+    {
+      "job_index": 29,
+      "job_type": "shenava_fa",
+      "audio_sample_id": "fleurs-fa-dev-0116",
+      "rc": 0,
+      "wall_sec": 2.303,
+      "decode_sec": 0.411,
+      "peak_rss_mib": 203.83,
+      "text_chars": 113
+    },
+    {
+      "job_index": 30,
+      "job_type": "mfa_align_en",
+      "audio_sample_id": "fleurs-en-dev-0111",
+      "rc": 0,
+      "wall_sec": 1.726,
+      "decode_sec": 0.126,
+      "peak_rss_mib": 168.35,
+      "textgrid_valid": true
+    },
+    {
+      "job_index": 31,
+      "job_type": "shenava_fa",
+      "audio_sample_id": "fleurs-fa-dev-0117",
+      "rc": 0,
+      "wall_sec": 2.046,
+      "decode_sec": 0.401,
+      "peak_rss_mib": 193.24,
+      "text_chars": 110
+    },
+    {
+      "job_index": 32,
+      "job_type": "shenava_fa",
+      "audio_sample_id": "fleurs-fa-dev-0118",
+      "rc": 0,
+      "wall_sec": 1.958,
+      "decode_sec": 0.211,
+      "peak_rss_mib": 163.86,
+      "text_chars": 60
+    },
+    {
+      "job_index": 33,
+      "job_type": "mfa_align_en",
+      "audio_sample_id": "fleurs-en-dev-0112",
+      "rc": 0,
+      "wall_sec": 1.904,
+      "decode_sec": 0.112,
+      "peak_rss_mib": 169.29,
+      "textgrid_valid": true
+    },
+    {
+      "job_index": 34,
+      "job_type": "whisper_turbo_en",
+      "audio_sample_id": "fleurs-en-dev-0106",
+      "rc": 0,
+      "wall_sec": 11.833,
+      "decode_sec": 3.682,
+      "peak_rss_mib": 1834.21,
+      "text_chars": 56
+    },
+    {
+      "job_index": 35,
+      "job_type": "shenava_fa",
+      "audio_sample_id": "fleurs-fa-dev-0119",
+      "rc": 0,
+      "wall_sec": 2.024,
+      "decode_sec": 0.243,
+      "peak_rss_mib": 166.03,
+      "text_chars": 62
+    },
+    {
+      "job_index": 36,
+      "job_type": "mfa_align_en",
+      "audio_sample_id": "fleurs-en-dev-0113",
+      "rc": 0,
+      "wall_sec": 1.748,
+      "decode_sec": 0.129,
+      "peak_rss_mib": 169.25,
+      "textgrid_valid": true
+    },
+    {
+      "job_index": 37,
+      "job_type": "shenava_fa",
+      "audio_sample_id": "fleurs-fa-dev-0120",
+      "rc": 0,
+      "wall_sec": 2.038,
+      "decode_sec": 0.201,
+      "peak_rss_mib": 149.2,
+      "text_chars": 61
+    },
+    {
+      "job_index": 38,
+      "job_type": "shenava_fa",
+      "audio_sample_id": "fleurs-fa-dev-0121",
+      "rc": 0,
+      "wall_sec": 2.088,
+      "decode_sec": 0.319,
+      "peak_rss_mib": 178.39,
+      "text_chars": 87
+    },
+    {
+      "job_index": 39,
+      "job_type": "mfa_align_en",
+      "audio_sample_id": "fleurs-en-dev-0114",
+      "rc": 0,
+      "wall_sec": 1.679,
+      "decode_sec": 0.112,
+      "peak_rss_mib": 167.58,
+      "textgrid_valid": true
+    },
+    {
+      "job_index": 40,
+      "job_type": "whisper_turbo_en",
+      "audio_sample_id": "fleurs-en-dev-0107",
+      "rc": 0,
+      "wall_sec": 12.145,
+      "decode_sec": 3.92,
+      "peak_rss_mib": 1845.76,
+      "text_chars": 56
+    },
+    {
+      "job_index": 41,
+      "job_type": "shenava_fa",
+      "audio_sample_id": "fleurs-fa-dev-0122",
+      "rc": 0,
+      "wall_sec": 2.219,
+      "decode_sec": 0.298,
+      "peak_rss_mib": 166.31,
+      "text_chars": 83
+    },
+    {
+      "job_index": 42,
+      "job_type": "mfa_align_en",
+      "audio_sample_id": "fleurs-en-dev-0115",
+      "rc": 0,
+      "wall_sec": 1.72,
+      "decode_sec": 0.081,
+      "peak_rss_mib": 169.23,
+      "textgrid_valid": true
+    },
+    {
+      "job_index": 43,
+      "job_type": "shenava_fa",
+      "audio_sample_id": "fleurs-fa-dev-0123",
+      "rc": 0,
+      "wall_sec": 2.111,
+      "decode_sec": 0.293,
+      "peak_rss_mib": 176.03,
+      "text_chars": 106
+    },
+    {
+      "job_index": 44,
+      "job_type": "shenava_fa",
+      "audio_sample_id": "fleurs-fa-dev-0124",
+      "rc": 0,
+      "wall_sec": 2.198,
+      "decode_sec": 0.39,
+      "peak_rss_mib": 192.65,
+      "text_chars": 107
+    },
+    {
+      "job_index": 45,
+      "job_type": "mfa_align_en",
+      "audio_sample_id": "fleurs-en-dev-0116",
+      "rc": 0,
+      "wall_sec": 1.826,
+      "decode_sec": 0.105,
+      "peak_rss_mib": 168.64,
+      "textgrid_valid": true
+    },
+    {
+      "job_index": 46,
+      "job_type": "whisper_turbo_en",
+      "audio_sample_id": "fleurs-en-dev-0108",
+      "rc": 0,
+      "wall_sec": 12.219,
+      "decode_sec": 4.199,
+      "peak_rss_mib": 1842.34,
+      "text_chars": 56
+    },
+    {
+      "job_index": 47,
+      "job_type": "shenava_fa",
+      "audio_sample_id": "fleurs-fa-dev-0129",
+      "rc": 0,
+      "wall_sec": 2.119,
+      "decode_sec": 0.34,
+      "peak_rss_mib": 178.7,
+      "text_chars": 67
+    },
+    {
+      "job_index": 48,
+      "job_type": "shenava_fa",
+      "audio_sample_id": "fleurs-fa-dev-0130",
+      "rc": 0,
+      "wall_sec": 2.027,
+      "decode_sec": 0.226,
+      "peak_rss_mib": 164.47,
+      "text_chars": 67
+    },
+    {
+      "job_index": 49,
+      "job_type": "whisper_turbo_en",
+      "audio_sample_id": "fleurs-en-dev-0110",
+      "rc": 0,
+      "wall_sec": 17.968,
+      "decode_sec": 9.807,
+      "peak_rss_mib": 2078.48,
+      "text_chars": 252
+    },
+    {
+      "job_index": 50,
+      "job_type": "whisper_turbo_en",
+      "audio_sample_id": "fleurs-en-dev-0111",
+      "rc": 0,
+      "wall_sec": 16.693,
+      "decode_sec": 8.353,
+      "peak_rss_mib": 2022.39,
+      "text_chars": 248
+    }
+  ]
+}

@@ -21,6 +21,7 @@ import {
 } from 'lucide-react';
 import { StudioWorkflowState, WorkflowLocale } from '../workflow/StudioWorkflowController';
 import { UserFacingFailureModel } from '../reliability';
+import type { CompanionHealthResponse } from '../host-bridge/companion/CompanionWebClient';
 
 export interface AdvancedLabActions {
   readonly onOpenAsrLab: () => void;
@@ -36,6 +37,7 @@ interface WorkflowStageBarProps {
   executionMode: 'LOCAL' | 'CLOUD';
   cloudProviderStatusLabel: string;
   cloudAsrConfigured?: boolean;
+  companionHealth?: CompanionHealthResponse | null;
   onRunCloudGeminiAsr?: () => void;
   onChangeExecutionMode: (nextMode: 'LOCAL' | 'CLOUD') => void;
   activeFailure: UserFacingFailureModel | null;
@@ -57,7 +59,11 @@ function formatMb(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-function asrLabel(state: StudioWorkflowState['asrState'], locale: WorkflowLocale): string {
+function asrLabel(
+  state: StudioWorkflowState['asrState'],
+  locale: WorkflowLocale,
+  companionHealth?: CompanionHealthResponse | null,
+): string {
   const isFa = locale === 'fa';
   switch (state) {
     case 'MODEL_NOT_INSTALLED':
@@ -71,6 +77,11 @@ function asrLabel(state: StudioWorkflowState['asrState'], locale: WorkflowLocale
     case 'MODEL_LOADING':
       return isFa ? 'بارگذاری مدل محلی...' : 'Loading Local Model...';
     case 'MODEL_READY':
+      if (companionHealth?.runtime?.available) {
+        return isFa
+          ? 'موتور بومی شهاب/شناوا آماده'
+          : 'Native Engine Ready (Shenava-Rizeh)';
+      }
       return isFa ? 'مدل محلی آماده' : 'Local Model Ready';
     case 'INFERENCE_RUNNING':
       return isFa ? 'در حال رونویسی محلی...' : 'Running Local ASR...';
@@ -90,6 +101,7 @@ export const WorkflowStageBar: React.FC<WorkflowStageBarProps> = ({
   executionMode,
   cloudProviderStatusLabel,
   cloudAsrConfigured = false,
+  companionHealth = null,
   onRunCloudGeminiAsr,
   onChangeExecutionMode,
   activeFailure,
@@ -182,7 +194,7 @@ export const WorkflowStageBar: React.FC<WorkflowStageBarProps> = ({
             <Cpu className="w-3.5 h-3.5 text-sky-500 dark:text-sky-400" aria-hidden="true" />
             <span>
               {executionMode === 'LOCAL'
-                ? asrLabel(workflowState.asrState, workflowState.locale)
+                ? asrLabel(workflowState.asrState, workflowState.locale, companionHealth)
                 : cloudProviderStatusLabel}
             </span>
           </button>

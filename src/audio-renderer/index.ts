@@ -9,3 +9,4 @@ export * from './RenderOutputArtifact';
 export * from './AudioRenderValidator';
 export * from './AudioRenderRecovery';
 export * from './AudioRenderEngine';
+export * from './SmartEditPreviewRenderer';

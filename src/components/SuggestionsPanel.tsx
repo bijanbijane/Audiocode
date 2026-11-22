@@ -10,13 +10,24 @@ import {
   Sparkles,
   RefreshCw,
 } from 'lucide-react';
-import { SmartRecommendation } from '../contracts/v1_2';
+import {
+  AudioAsset,
+  PersianWordToken,
+  SmartRecommendation,
+  Track,
+} from '../contracts/v1_2';
 import { flicksToSeconds } from '../engine/timebase';
+import { SuggestionWaveformMiniCard } from './SuggestionWaveformMiniCard';
 
 interface SuggestionsPanelProps {
   recommendations: SmartRecommendation[];
   selectedRecId: string | null;
   previewingId: string | null;
+  tracks?: Track[];
+  assets?: Record<string, AudioAsset>;
+  pcmSources?: Record<string, Float32Array>;
+  tokens?: PersianWordToken[];
+  sampleRate?: number;
   onSelect: (id: string) => void;
   onPreview: (rec: SmartRecommendation, mode: 'before' | 'after') => void;
   onAccept: (rec: SmartRecommendation) => void;
@@ -40,6 +51,11 @@ export const SuggestionsPanel: React.FC<SuggestionsPanelProps> = ({
   recommendations,
   selectedRecId,
   previewingId,
+  tracks,
+  assets,
+  pcmSources,
+  tokens,
+  sampleRate,
   onSelect,
   onPreview,
   onAccept,
@@ -58,6 +74,19 @@ export const SuggestionsPanel: React.FC<SuggestionsPanelProps> = ({
       !r.relatedText.startsWith('بررسی کسره اضافه') &&
       !(r.boundary.trailingEzafeRisk && r.kind === 'repetition'),
   ).length;
+  const activePreviewRec =
+    recommendations.find((r) => r.id === selectedRecId) ??
+    recommendations.find((r) => r.status === 'Pending') ??
+    recommendations[0] ??
+    null;
+  const canRenderMiniCard = Boolean(
+    activePreviewRec &&
+      tracks &&
+      tracks.length > 0 &&
+      assets &&
+      sampleRate &&
+      sampleRate > 0,
+  );
 
   return (
     <section
@@ -134,6 +163,17 @@ export const SuggestionsPanel: React.FC<SuggestionsPanelProps> = ({
             )}
           </div>
         </div>
+      )}
+
+      {canRenderMiniCard && activePreviewRec && tracks && assets && sampleRate && (
+        <SuggestionWaveformMiniCard
+          recommendation={activePreviewRec}
+          tracks={tracks}
+          assets={assets}
+          pcmSources={pcmSources}
+          tokens={tokens ?? []}
+          sampleRate={sampleRate}
+        />
       )}
 
       <div className="divide-y divide-[#252F42] max-h-[460px] overflow-y-auto">

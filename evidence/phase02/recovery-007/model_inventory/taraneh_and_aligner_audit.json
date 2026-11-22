@@ -1,0 +1,143 @@
+{
+  "generated_utc": "2026-11-22T20:17:00+00:00",
+  "execution_id": "AVP-P02-RECOVERY-007",
+  "taraneh_repository": {
+    "github_url": "https://github.com/areffarhadi/persian-asr",
+    "paper": "Aref Farhadipour, Taraneh-ASR: Scaling Persian Speech Recognition and Forced Alignment Across Singing and Conversational Domains (University of Zurich)",
+    "repo_root_license_file_present": false,
+    "repo_readme_license_statement": "MIT for Taraneh-WBase/WMedium/WLarge; Apache-2.0 for Taraneh-Q0.6B/Q1.7B",
+    "training_mixture_table1_observed_from_pdf": {
+      "total_hours": "~1,560 hours (718,627 utterances)",
+      "components": [
+        {"corpus": "Common Voice 20 (fa)", "hours": 369.3, "utterances": 329019, "labels": "Native", "domain": "Read speech"},
+        {"corpus": "Persian Media Speech", "hours": 617.0, "utterances": 170000, "labels": "Pseudo-labeled", "domain": "Telegram news + Instagram/TikTok clips"},
+        {"corpus": "Farsi YouTube", "hours": 306.9, "utterances": 127308, "labels": "Native", "domain": "Spontaneous / narrated YouTube"},
+        {"corpus": "Persian Music", "hours": 204.0, "utterances": 69962, "labels": "Native", "domain": "Singing (mix + dry stem)"},
+        {"corpus": "VoxLingua107 (fa)", "hours": 51.5, "utterances": 19344, "labels": "Pseudo-labeled", "domain": "In-the-wild YouTube"},
+        {"corpus": "FLEURS (fa)", "hours": 11.5, "utterances": 2994, "labels": "Native", "domain": "Read speech"}
+      ],
+      "contamination_findings": {
+        "fleurs_fa_in_training_mix": true,
+        "common_voice_fa_in_training_mix": true,
+        "neyshekar_v6_in_training_mix": false,
+        "psrb_unseen": true,
+        "visualears_unseen": true,
+        "commercial_data_provenance_flag": "Weights are MIT/Apache-2.0, but 975.4h of training audio originated from Telegram/Instagram/TikTok/YouTube web scraping — requires standard commercial legal counsel awareness alongside base Whisper pretraining."
+      }
+    }
+  },
+  "taraneh_checkpoints_audited": [
+    {
+      "name": "Taraneh-WBase",
+      "hf_repo": "areffarhadi/Taraneh-WBase",
+      "hf_commit_sha": "8fdba9ee5b7cd82537f7c86dc86cdf3cdfaaeef2",
+      "base_model": "openai/whisper-base",
+      "hf_card_license": "mit",
+      "hf_total_mb_fp32": 292.3,
+      "supports_asr_fa": false,
+      "shortlist_decision": "SELECTED_FOR_CPU_BENCHMARK_CT2_INT8",
+      "rationale": "Lightweight 72.6M Whisper-Base candidate (74.2 MB CT2 INT8) directly comparable in footprint to Shenava-Rizeh v1.0 INT8 (32M, 38.2 MB ONNX INT8)."
+    },
+    {
+      "name": "Taraneh-WMedium",
+      "hf_repo": "areffarhadi/Taraneh-WMedium",
+      "hf_commit_sha": "09b6de55ecb64bb450360dbd30a7d3d88d08165b",
+      "base_model": "openai/whisper-medium",
+      "hf_card_license": "mit",
+      "hf_total_mb_fp32": 3057.5,
+      "supports_asr_fa": true,
+      "fa_mechanism": "PyTorch WhisperForConditionalGeneration decoder cross-attention heads L19/H8 + L16/H12 + medfilt(3) + colnorm_rownorm + DTW + -35dB energy trim (20ms Whisper frame stride)",
+      "author_reported_farsdat_mae_ms": 37.8,
+      "shortlist_decision": "SELECTED_FOR_CPU_BENCHMARK_CT2_INT8_AND_PYTORCH_ASR_FA",
+      "rationale": "Primary Taraneh candidate supporting both high-accuracy Persian ASR and cross-attention DTW forced alignment; CT2 INT8 (~764 MB) tests CPU ASR viability while PyTorch CPU tests real asr+fa latency & RAM."
+    },
+    {
+      "name": "Taraneh-WLarge",
+      "hf_repo": "areffarhadi/Taraneh-WLarge",
+      "hf_commit_sha": "876da71621f711fbd41e63310c166614caef0b31",
+      "base_model": "openai/whisper-large-v3",
+      "hf_card_license": "mit",
+      "hf_total_mb_fp32": 6176.1,
+      "supports_asr_fa": true,
+      "author_reported_farsdat_mae_ms": 38.1,
+      "shortlist_decision": "DEPRIORITIZED_FOR_8GB_M2_CPU",
+      "rationale": "6.18 GB FP32 (32 decoder layers vs 4 in Turbo); exceeds 8 GB unified memory budget in PyTorch asr+fa mode and already underperforms WMedium slightly on author-reported Media WER (16.06% vs 14.97%) and FarsDat MAE (38.1ms vs 37.8ms)."
+    },
+    {
+      "name": "Taraneh-Q0.6B",
+      "hf_repo": "areffarhadi/Taraneh-Q0.6B",
+      "hf_commit_sha": "14939bc2e1f392aeca7b8f0d22218809b12882af",
+      "base_model": "Qwen/Qwen3-ASR-0.6B",
+      "hf_card_license": "apache-2.0",
+      "hf_total_mb_fp32": 1581.0,
+      "supports_asr_fa": true,
+      "author_reported_farsdat_mae_ms": 47.2,
+      "shortlist_decision": "DEPRIORITIZED_NO_LIGHTWEIGHT_CPU_INT8_RUNTIME",
+      "rationale": "Requires external `qwen_asr` / vLLM runtime (GPU-oriented) or FP32 PyTorch CPU (~2.4+ GB RAM), with worse author-reported Persian WER across every benchmark than Taraneh-WMedium (e.g., PSRB 24.61% vs 19.14%, FarsDat MAE 47.2ms vs 37.8ms)."
+    },
+    {
+      "name": "Taraneh-Q1.7B",
+      "hf_repo": "areffarhadi/Taraneh-Q1.7B",
+      "hf_commit_sha": "faa6a524003687a80e16fd4312a26819391405aa",
+      "base_model": "Qwen/Qwen3-ASR-1.7B",
+      "hf_card_license": "apache-2.0",
+      "hf_total_mb_fp32": 4092.3,
+      "supports_asr_fa": true,
+      "author_reported_farsdat_mae_ms": 48.5,
+      "shortlist_decision": "DEPRIORITIZED_EXCEEDS_8GB_CPU_BUDGET",
+      "rationale": "4.09 GB checkpoint requiring vLLM/PyTorch FP32 on CPU; worse author-reported Persian WER and alignment MAE than Taraneh-WMedium."
+    }
+  ],
+  "persian_alignment_solution_space_audited": [
+    {
+      "approach": "CTC Viterbi Forced Alignment on Reza2kn/Shenava-Rizeh v1.0 INT8",
+      "category": "CTC-based alignment (zero extra model weights)",
+      "license": "Apache-2.0",
+      "commercial_usable": true,
+      "cpu_compatible": true,
+      "frame_stride_ms": 80.0,
+      "status": "IMPLEMENTED_AND_BENCHMARKED_IN_RECOVERY_007"
+    },
+    {
+      "approach": "Taraneh-WMedium Cross-Attention (L19/H8, L16/H12) + DTW + -35dB Trim",
+      "category": "Transformer attention-derived alignment",
+      "license": "MIT",
+      "commercial_usable": true,
+      "cpu_compatible": "YES_BUT_REQUIRES_PYTORCH_FP32_3GB_WEIGHTS",
+      "frame_stride_ms": 20.0,
+      "status": "BENCHMARKED_IN_RECOVERY_007"
+    },
+    {
+      "approach": "Montreal Forced Aligner (MontrealCorpusTools/mfa-models)",
+      "category": "Acoustic forced alignment (GMM-HMM)",
+      "license": "CC-BY-4.0 (where models exist)",
+      "commercial_usable": "N/A_NO_PRETRAINED_PERSIAN_MODEL",
+      "cpu_compatible": true,
+      "status": "VERIFIED_UNAVAILABLE (0 Persian/Farsi models in MontrealCorpusTools/mfa-models main tree; Taraneh paper had to train MFA 3.4 in-domain on FarsDat gold phonemic pronunciations)"
+    },
+    {
+      "approach": "mms-300m-1130-forced-aligner (Meta MMS-300M CTC)",
+      "category": "CTC-based alignment (multilingual)",
+      "license": "CC-BY-NC-4.0 (NON-COMMERCIAL)",
+      "commercial_usable": false,
+      "cpu_compatible": true,
+      "status": "REJECTED_ON_COMMERCIAL_LICENSE_RESTRICTION"
+    },
+    {
+      "approach": "sherpa-onnx-fa (k2-fsa/sherpa-onnx fa-models)",
+      "category": "Acoustic forced alignment (ONNX)",
+      "license": "CC-BY-4.0 (english-mfa-v3.1.0 only)",
+      "commercial_usable": true,
+      "cpu_compatible": true,
+      "status": "VERIFIED_FOR_ENGLISH_ONLY_NO_PERSIAN_MODEL_RELEASED"
+    },
+    {
+      "approach": "Qwen3-ForcedAligner-0.6B",
+      "category": "Slot-filling neural aligner",
+      "license": "Apache-2.0",
+      "commercial_usable": true,
+      "cpu_compatible": "HEAVY_LLM_PYTORCH_CPU",
+      "status": "DEPRIORITIZED (Taraneh Table 3 reports 90.2 ms FarsDat MAE, 2.4x worse than Taraneh-WMedium 37.8 ms, with heavy LLM CPU footprint)"
+    }
+  ]
+}

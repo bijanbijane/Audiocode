@@ -17,10 +17,14 @@
 
 import crypto from 'node:crypto';
 import fs from 'node:fs';
+import https from 'node:https';
 import os from 'node:os';
 import path from 'node:path';
-import { spawn } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
+import { promisify } from 'node:util';
 import { ingestAudioBufferToCanonical16kMono, float32ToPcm16Buffer } from './CoreAudioIngestion';
+
+const execFileAsync = promisify(execFile);
 import { buildAllNormalizationProfiles, detectTextLanguageTag } from './CoreNormalizationAndLanguage';
 import {
   findBestBoundaryValleySample,
@@ -132,17 +136,72 @@ interface SherpaJsonOutput {
 
 const DEFAULT_MODEL_SEARCH_DIRS = [
   process.env.AVAPARDAZ_MODELS_DIR,
-  path.resolve(process.cwd(), 'models'),
   path.join(os.homedir(), '.avapardaz', 'models'),
+  path.resolve(process.cwd(), 'models'),
   '/tmp/avp-p02-bench/models/extracted',
 ].filter((d): d is string => Boolean(d && d.trim().length > 0));
 
 const DEFAULT_BINARY_CANDIDATES = [
   process.env.AVAPARDAZ_SHERPA_BIN,
-  '/tmp/avp-p02-bench/runtime/sherpa-onnx-v2.0.2-linux-x64-shared-no-tts/bin/sherpa-onnx-offline',
   path.join(os.homedir(), '.avapardaz', 'runtime', 'bin', 'sherpa-onnx-offline'),
+  '/tmp/avp-p02-bench/runtime/sherpa-onnx-v2.0.2-linux-x64-shared-no-tts/bin/sherpa-onnx-offline',
   '/usr/local/bin/sherpa-onnx-offline',
 ].filter((p): p is string => Boolean(p && p.trim().length > 0));
+
+export const SHENAVA_RIZEH_RUNTIME_RELEASE = {
+  runtimeVersion: 'v2.0.2',
+  runtimeArchiveName: 'sherpa-onnx-v2.0.2-linux-x64-shared-no-tts.tar.bz2',
+  runtimeUrl:
+    'https://github.com/k2-fsa/sherpa-onnx/releases/download/v2.0.2/sherpa-onnx-v2.0.2-linux-x64-shared-no-tts.tar.bz2',
+  modelDirName: 'sherpa-onnx-nemo-ctc-fa-shenava-rizeh-v1.0-non-streaming-int8-2026-06-26',
+  modelArchiveName:
+    'sherpa-onnx-nemo-ctc-fa-shenava-rizeh-v1.0-non-streaming-int8-2026-06-26.tar.bz2',
+  modelUrl:
+    'https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-nemo-ctc-fa-shenava-rizeh-v1.0-non-streaming-int8-2026-06-26.tar.bz2',
+} as const;
+
+export const KNOWN_MODEL_ARTIFACT_PROVENANCE: Readonly<
+  Record<string, { readonly expectedBytes: number; readonly sha256Hex: string }>
+> = {
+  'model.int8.onnx': {
+    expectedBytes: 38_183_269,
+    sha256Hex: '6bdd4ab80626ddfe0b19338a5c96fcc4f2021ad78899cece20a805a48dc5250d',
+  },
+  'tokens.txt': {
+    expectedBytes: 12_236,
+    sha256Hex: '8e192963f6e666dfa5721e5cbd4710bc1ef592460a45f08cefc94b2db16a6954',
+  },
+  'turbo-encoder.int8.onnx': {
+    expectedBytes: 674_716_297,
+    sha256Hex: 'b02dcdf54f348741e93fe732b67d933c8dcb6735655f710640143081db38878b',
+  },
+  'turbo-decoder.int8.onnx': {
+    expectedBytes: 361_080_764,
+    sha256Hex: '20accd02388482eb3a46bd615631adfdc85e1eb2c7db9ea3f02a40ffe6b81547',
+  },
+  'turbo-tokens.txt': {
+    expectedBytes: 816_730,
+    sha256Hex: 'b34b360dbb493e781e479794586d661700670d65564001f23024971d1f2fa126',
+  },
+  'base-encoder.onnx': {
+    expectedBytes: 95_087_154,
+    sha256Hex: '5a6b87cb313993f6c9fefec9e7027556f6cb30becddf49655bee36c50ecc12d7',
+  },
+  'base-decoder.onnx': {
+    expectedBytes: 196_548_998,
+    sha256Hex: '8a12c3f6ad65bb5b86d7e6eccc302378f20f9fb2df6cb10747c62895da7ac194',
+  },
+  'base-encoder.int8.onnx': {
+    expectedBytes: 29_120_534,
+    sha256Hex: '0b8fb1304b6109976038efff5ace81720e00386f3ff6b54ee8c75291ca0a1e11',
+  },
+  'base-decoder.int8.onnx': {
+    expectedBytes: 130_672_026,
+    sha256Hex: '9759d217388a01b3a4c7c15533201067b48ae819c4daafc8624e64b9409dc02d',
+  },
+};
+
+const artifactIntegrityCache = new Map<string, boolean>();
 
 function encodeFloat32ToWav16kMono(samples: Float32Array, sampleRate = 16_000): Buffer {
   const pcmBuf = float32ToPcm16Buffer(samples);
@@ -173,6 +232,54 @@ function fileSizeSafe(filePath: string): number {
 
 function allFilesExistNonEmpty(files: readonly string[]): boolean {
   return files.length > 0 && files.every((f) => fileSizeSafe(f) > 0);
+}
+
+export function verifyModelFilesIntegrity(files: readonly string[]): boolean {
+  if (files.length === 0) return false;
+  for (const filePath of files) {
+    let stat: fs.Stats;
+    try {
+      stat = fs.statSync(filePath);
+    } catch {
+      return false;
+    }
+    if (!stat.isFile() || stat.size <= 0) return false;
+
+    const baseName = path.basename(filePath);
+    const known = KNOWN_MODEL_ARTIFACT_PROVENANCE[baseName];
+    if (!known) {
+      continue;
+    }
+    if (stat.size !== known.expectedBytes) {
+      return false;
+    }
+
+    const cacheKey = `${filePath}:${stat.size}:${Math.trunc(stat.mtimeMs)}`;
+    const cached = artifactIntegrityCache.get(cacheKey);
+    if (cached !== undefined) {
+      if (!cached) return false;
+      continue;
+    }
+
+    const hash = crypto.createHash('sha256');
+    const fd = fs.openSync(filePath, 'r');
+    try {
+      const chunk = Buffer.allocUnsafe(1024 * 1024);
+      let bytesRead = 0;
+      while ((bytesRead = fs.readSync(fd, chunk, 0, chunk.length, null)) > 0) {
+        hash.update(chunk.subarray(0, bytesRead));
+      }
+    } finally {
+      fs.closeSync(fd);
+    }
+    const digest = hash.digest('hex');
+    const verified = digest === known.sha256Hex;
+    artifactIntegrityCache.set(cacheKey, verified);
+    if (!verified) {
+      return false;
+    }
+  }
+  return true;
 }
 
 function detectSherpaBinary(): { binaryPath: string | null; libDir: string | null } {
@@ -210,10 +317,11 @@ function discoverModelsInRoot(rootDir: string): InstalledLocalNeuralModel[] {
     const nemoModel = path.join(dir, 'model.int8.onnx');
     const nemoTokens = path.join(dir, 'tokens.txt');
     if (allFilesExistNonEmpty([nemoModel, nemoTokens]) && path.basename(dir).includes('shenava')) {
+      const files = [nemoModel, nemoTokens];
       discovered.push({
         modelId: 'Reza2kn/Shenava-Rizeh',
         profileId: 'AVP_MODEL_LITE',
-        displayName: 'شناوا ریزه (FastConformer فارسی سبک INT8)',
+        displayName: 'موتور بومی شهاب / شناوا ریزه (FastConformer فارسی INT8)',
         architecture: 'nemo-ctc',
         quantization: 'INT8',
         licenseSpdx: 'Apache-2.0',
@@ -221,8 +329,8 @@ function discoverModelsInRoot(rootDir: string): InstalledLocalNeuralModel[] {
         supportsNativeWordTimestamps: true,
         rootDir: dir,
         diskSizeBytes: fileSizeSafe(nemoModel) + fileSizeSafe(nemoTokens),
-        requiredFiles: [nemoModel, nemoTokens],
-        integrityVerified: true,
+        requiredFiles: files,
+        integrityVerified: verifyModelFilesIntegrity(files),
         extraCliArgs: [`--nemo-ctc-model=${nemoModel}`, `--tokens=${nemoTokens}`],
       });
     }
@@ -232,6 +340,7 @@ function discoverModelsInRoot(rootDir: string): InstalledLocalNeuralModel[] {
     const turboDec = path.join(dir, 'turbo-decoder.int8.onnx');
     const turboTok = path.join(dir, 'turbo-tokens.txt');
     if (allFilesExistNonEmpty([turboEnc, turboDec, turboTok])) {
+      const files = [turboEnc, turboDec, turboTok];
       discovered.push({
         modelId: 'openai/whisper-large-v3-turbo-int8',
         profileId: 'AVP_MODEL_QUALITY',
@@ -243,8 +352,8 @@ function discoverModelsInRoot(rootDir: string): InstalledLocalNeuralModel[] {
         supportsNativeWordTimestamps: false,
         rootDir: dir,
         diskSizeBytes: fileSizeSafe(turboEnc) + fileSizeSafe(turboDec) + fileSizeSafe(turboTok),
-        requiredFiles: [turboEnc, turboDec, turboTok],
-        integrityVerified: true,
+        requiredFiles: files,
+        integrityVerified: verifyModelFilesIntegrity(files),
         extraCliArgs: [
           `--whisper-encoder=${turboEnc}`,
           `--whisper-decoder=${turboDec}`,
@@ -260,6 +369,7 @@ function discoverModelsInRoot(rootDir: string): InstalledLocalNeuralModel[] {
     const baseDecInt8 = path.join(dir, 'base-decoder.int8.onnx');
     const baseTok = path.join(dir, 'base-tokens.txt');
     if (allFilesExistNonEmpty([baseEncInt8, baseDecInt8, baseTok])) {
+      const files = [baseEncInt8, baseDecInt8, baseTok];
       discovered.push({
         modelId: 'openai/whisper-base-int8',
         profileId: 'AVP_MODEL_BALANCED',
@@ -271,8 +381,8 @@ function discoverModelsInRoot(rootDir: string): InstalledLocalNeuralModel[] {
         supportsNativeWordTimestamps: false,
         rootDir: dir,
         diskSizeBytes: fileSizeSafe(baseEncInt8) + fileSizeSafe(baseDecInt8) + fileSizeSafe(baseTok),
-        requiredFiles: [baseEncInt8, baseDecInt8, baseTok],
-        integrityVerified: true,
+        requiredFiles: files,
+        integrityVerified: verifyModelFilesIntegrity(files),
         extraCliArgs: [
           `--whisper-encoder=${baseEncInt8}`,
           `--whisper-decoder=${baseDecInt8}`,
@@ -286,6 +396,7 @@ function discoverModelsInRoot(rootDir: string): InstalledLocalNeuralModel[] {
     const baseEncFp32 = path.join(dir, 'base-encoder.onnx');
     const baseDecFp32 = path.join(dir, 'base-decoder.onnx');
     if (allFilesExistNonEmpty([baseEncFp32, baseDecFp32, baseTok])) {
+      const files = [baseEncFp32, baseDecFp32, baseTok];
       discovered.push({
         modelId: 'openai/whisper-base-fp32',
         profileId: 'AVP_MODEL_BALANCED',
@@ -297,8 +408,8 @@ function discoverModelsInRoot(rootDir: string): InstalledLocalNeuralModel[] {
         supportsNativeWordTimestamps: false,
         rootDir: dir,
         diskSizeBytes: fileSizeSafe(baseEncFp32) + fileSizeSafe(baseDecFp32) + fileSizeSafe(baseTok),
-        requiredFiles: [baseEncFp32, baseDecFp32, baseTok],
-        integrityVerified: true,
+        requiredFiles: files,
+        integrityVerified: verifyModelFilesIntegrity(files),
         extraCliArgs: [
           `--whisper-encoder=${baseEncFp32}`,
           `--whisper-decoder=${baseDecFp32}`,
@@ -311,6 +422,58 @@ function discoverModelsInRoot(rootDir: string): InstalledLocalNeuralModel[] {
   }
 
   return discovered;
+}
+
+async function downloadFileWithRedirects(
+  url: string,
+  destPath: string,
+  redirectDepth = 0,
+): Promise<void> {
+  if (redirectDepth > 6) {
+    throw new Error(`TOO_MANY_REDIRECTS downloading ${url}`);
+  }
+  await new Promise<void>((resolve, reject) => {
+    const req = https.get(
+      url,
+      { headers: { 'User-Agent': 'avapardaz-native-asr-installer/1.0' } },
+      (res) => {
+        const status = res.statusCode ?? 0;
+        if (status >= 300 && status < 400 && res.headers.location) {
+          res.resume();
+          const nextUrl = new URL(res.headers.location, url).toString();
+          void downloadFileWithRedirects(nextUrl, destPath, redirectDepth + 1)
+            .then(resolve)
+            .catch(reject);
+          return;
+        }
+        if (status !== 200) {
+          res.resume();
+          reject(new Error(`DOWNLOAD_HTTP_${status} for ${url}`));
+          return;
+        }
+        const out = fs.createWriteStream(destPath);
+        res.pipe(out);
+        out.on('finish', () => out.close(() => resolve()));
+        out.on('error', reject);
+        res.on('error', reject);
+      },
+    );
+    req.on('error', reject);
+  });
+}
+
+async function extractTarBz2Safe(archivePath: string, destDir: string): Promise<void> {
+  fs.mkdirSync(destDir, { recursive: true });
+  try {
+    await execFileAsync('python3', [
+      '-c',
+      'import sys, tarfile; tf = tarfile.open(sys.argv[1], "r:bz2"); tf.extractall(sys.argv[2])',
+      archivePath,
+      destDir,
+    ]);
+  } catch {
+    await execFileAsync('tar', ['-xjf', archivePath, '-C', destDir]);
+  }
 }
 
 /**
@@ -397,17 +560,110 @@ export class LocalSherpaNeuralEngine {
   public getStatus(): LocalNeuralRuntimeStatus {
     const { binaryPath, libDir } = detectSherpaBinary();
     this.refreshInstalledModels();
+    const verifiedModels = this.cachedModels.filter((m) => m.integrityVerified);
     return {
       runtimeName: 'sherpa-onnx-cpu',
       binaryPath,
       libDir,
-      available: Boolean(binaryPath && this.cachedModels.length > 0),
+      available: Boolean(binaryPath && verifiedModels.length > 0),
       offlineOnlyEnforced: true,
       cpuThreads: this.defaultCpuThreads,
       activeModelId: this.activeModelId,
       installedModels: this.cachedModels,
       processRssMb: Number((process.memoryUsage().rss / (1024 * 1024)).toFixed(2)),
     };
+  }
+
+  public getBundledSampleAudioPath(): {
+    readonly filePath: string;
+    readonly filename: string;
+    readonly modelId: string;
+  } | null {
+    this.refreshInstalledModels();
+    const verified = this.cachedModels.filter((m) => m.integrityVerified);
+    const ordered = [
+      ...verified.filter((m) => m.modelId === 'Reza2kn/Shenava-Rizeh'),
+      ...verified.filter((m) => m.modelId !== 'Reza2kn/Shenava-Rizeh'),
+    ];
+    for (const model of ordered) {
+      for (const relName of ['0.wav', '1.wav']) {
+        const candidate = path.join(model.rootDir, 'test_wavs', relName);
+        if (fileSizeSafe(candidate) > 44) {
+          return {
+            filePath: candidate,
+            filename: `shenava-sample-${relName}`,
+            modelId: model.modelId,
+          };
+        }
+      }
+    }
+    return null;
+  }
+
+  public async installShenavaRizehRuntime(): Promise<LocalNeuralRuntimeStatus> {
+    if (process.platform !== 'linux' || process.arch !== 'x64') {
+      throw new Error(
+        `NATIVE_INSTALLER_UNSUPPORTED_PLATFORM: Automatic server-side installer targets linux-x64 (current: ${process.platform}-${process.arch}).`,
+      );
+    }
+
+    const baseDir = path.join(os.homedir(), '.avapardaz');
+    const downloadsDir = path.join(baseDir, 'downloads');
+    const runtimeDir = path.join(baseDir, 'runtime');
+    const modelsDir = path.join(baseDir, 'models');
+    fs.mkdirSync(downloadsDir, { recursive: true });
+    fs.mkdirSync(runtimeDir, { recursive: true });
+    fs.mkdirSync(modelsDir, { recursive: true });
+
+    const { binaryPath } = detectSherpaBinary();
+    if (!binaryPath) {
+      const rtArchive = path.join(downloadsDir, SHENAVA_RIZEH_RUNTIME_RELEASE.runtimeArchiveName);
+      const rtTempExtract = fs.mkdtempSync(path.join(os.tmpdir(), 'avp-rt-'));
+      try {
+        await downloadFileWithRedirects(SHENAVA_RIZEH_RUNTIME_RELEASE.runtimeUrl, rtArchive);
+        await extractTarBz2Safe(rtArchive, rtTempExtract);
+        const extractedRoot = fs
+          .readdirSync(rtTempExtract, { withFileTypes: true })
+          .find((d) => d.isDirectory())?.name;
+        const srcRoot = extractedRoot ? path.join(rtTempExtract, extractedRoot) : rtTempExtract;
+        fs.cpSync(srcRoot, runtimeDir, { recursive: true, force: true });
+        const installedBin = path.join(runtimeDir, 'bin', 'sherpa-onnx-offline');
+        if (fs.existsSync(installedBin)) {
+          fs.chmodSync(installedBin, 0o755);
+        }
+      } finally {
+        fs.rmSync(rtTempExtract, { recursive: true, force: true });
+        fs.rmSync(rtArchive, { force: true });
+      }
+    }
+
+    this.refreshInstalledModels();
+    const hasVerifiedShenava = this.cachedModels.some(
+      (m) => m.modelId === 'Reza2kn/Shenava-Rizeh' && m.integrityVerified,
+    );
+    if (!hasVerifiedShenava) {
+      const mdlArchive = path.join(downloadsDir, SHENAVA_RIZEH_RUNTIME_RELEASE.modelArchiveName);
+      try {
+        await downloadFileWithRedirects(SHENAVA_RIZEH_RUNTIME_RELEASE.modelUrl, mdlArchive);
+        await extractTarBz2Safe(mdlArchive, modelsDir);
+      } finally {
+        fs.rmSync(mdlArchive, { force: true });
+      }
+
+      const targetModelDir = path.join(modelsDir, SHENAVA_RIZEH_RUNTIME_RELEASE.modelDirName);
+      const required = [
+        path.join(targetModelDir, 'model.int8.onnx'),
+        path.join(targetModelDir, 'tokens.txt'),
+      ];
+      if (!verifyModelFilesIntegrity(required)) {
+        fs.rmSync(targetModelDir, { recursive: true, force: true });
+        throw new Error(
+          'SHENAVA_INTEGRITY_VERIFICATION_FAILED: Extracted model failed SHA-256 provenance verification.',
+        );
+      }
+    }
+
+    return this.getStatus();
   }
 
   public unloadActiveModel(): { readonly unloadedModelId: string | null; readonly rssMb: number } {
@@ -421,10 +677,11 @@ export class LocalSherpaNeuralEngine {
 
   public selectModel(requestedModelId?: string, languageHint: 'fa' | 'en' | 'fa-en' | 'auto' = 'auto'): InstalledLocalNeuralModel | null {
     this.refreshInstalledModels();
-    if (this.cachedModels.length === 0) return null;
+    const verifiedModels = this.cachedModels.filter((m) => m.integrityVerified);
+    if (verifiedModels.length === 0) return null;
 
     if (requestedModelId) {
-      const exact = this.cachedModels.find((m) => m.modelId === requestedModelId);
+      const exact = verifiedModels.find((m) => m.modelId === requestedModelId);
       if (exact) return exact;
     }
 
@@ -433,18 +690,18 @@ export class LocalSherpaNeuralEngine {
     // - English / Bilingual / Auto: NEVER pick Persian-only Shenava Rizeh; pick Whisper large-v3-turbo INT8 -> Whisper Base INT8
     if (languageHint === 'fa') {
       return (
-        this.cachedModels.find((m) => m.modelId === 'Reza2kn/Shenava-Rizeh') ??
-        this.cachedModels.find((m) => m.modelId === 'openai/whisper-large-v3-turbo-int8') ??
-        this.cachedModels.find((m) => m.modelId === 'openai/whisper-base-fp32') ??
-        this.cachedModels[0]
+        verifiedModels.find((m) => m.modelId === 'Reza2kn/Shenava-Rizeh') ??
+        verifiedModels.find((m) => m.modelId === 'openai/whisper-large-v3-turbo-int8') ??
+        verifiedModels.find((m) => m.modelId === 'openai/whisper-base-fp32') ??
+        verifiedModels[0]
       );
     }
 
     return (
-      this.cachedModels.find((m) => m.modelId === 'openai/whisper-large-v3-turbo-int8') ??
-      this.cachedModels.find((m) => m.modelId === 'openai/whisper-base-fp32') ??
-      this.cachedModels.find((m) => m.modelId === 'Reza2kn/Shenava-Rizeh') ??
-      this.cachedModels[0]
+      verifiedModels.find((m) => m.modelId === 'openai/whisper-large-v3-turbo-int8') ??
+      verifiedModels.find((m) => m.modelId === 'openai/whisper-base-fp32') ??
+      verifiedModels.find((m) => m.modelId === 'Reza2kn/Shenava-Rizeh') ??
+      verifiedModels[0]
     );
   }
 

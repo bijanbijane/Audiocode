@@ -1,0 +1,358 @@
+{
+  "timestamp_utc": "2026-11-22T18:24:27.002162+00:00",
+  "execution_id": "AVP-P02-RECOVERY-006",
+  "experiment": "exp4_genuine_continuous_30min_audio",
+  "source_metadata": {
+    "source_file_path": "/root/.avapardaz/datasets/librivox/bleak_house_03_16k.wav",
+    "source_duration_sec": 3563.337,
+    "source_sha256": "1d3e0bfc16aff05e0241fa1f7ae77592132d6a12a4c032c320a66d7b50cdef01",
+    "source_file_size_bytes": 114026934,
+    "sample_rate_hz": 16000,
+    "channels": 1,
+    "provenance": "LibriVox Bleak House Section 3 (Charles Dickens) — unbroken single human recording, NOT concatenated short clips",
+    "license": "CC0-1.0 (Public Domain)",
+    "reference_transcript_available": false
+  },
+  "timeline_completeness": {
+    "expected_source_range_sec": [
+      0.0,
+      1800.0
+    ],
+    "covered_intervals": [
+      {
+        "window": "0",
+        "start_sec": 0.0,
+        "end_sec": 600.0,
+        "expected_start_sec": 0,
+        "expected_end_sec": 600
+      },
+      {
+        "window": "1a",
+        "start_sec": 600.0,
+        "end_sec": 900.0,
+        "expected_start_sec": 600,
+        "expected_end_sec": 900
+      },
+      {
+        "window": "1b",
+        "start_sec": 900.0,
+        "end_sec": 1200.0,
+        "expected_start_sec": 900,
+        "expected_end_sec": 1200
+      },
+      {
+        "window": "2a",
+        "start_sec": 1200.0,
+        "end_sec": 1500.0,
+        "expected_start_sec": 1200,
+        "expected_end_sec": 1500
+      },
+      {
+        "window": "2b",
+        "start_sec": 1500.0,
+        "end_sec": 1800.0,
+        "expected_start_sec": 1500,
+        "expected_end_sec": 1800
+      }
+    ],
+    "missing_intervals": [],
+    "duplicate_intervals": [],
+    "coverage_verified_complete": true
+  },
+  "source_recording": "LibriVox Bleak House Section 3 (CC0-1.0 Public Domain, unbroken single human recording — NOT concatenated short clips)",
+  "master_recording_duration_sec": 3563.337,
+  "master_recording_sha256": "1d3e0bfc16aff05e0241fa1f7ae77592132d6a12a4c032c320a66d7b50cdef01",
+  "processed_continuous_sec": 1800.0,
+  "processed_continuous_min": 30.0,
+  "streaming_windows": "5 contiguous checkpointed windows (0..600s [4T], 600..900s, 900..1200s, 1200..1500s, 1500..1800s [3T])",
+  "pipeline": "FFmpeg 16kHz -> Silero VAD v5 + openai/whisper-large-v3-turbo-int8 + sherpa-onnx-fa english-mfa-v3.1.0",
+  "os_level_offline": "unshare -r -n (zero external interfaces)",
+  "reference_transcript_available": false,
+  "epistemic_note": "Execution, RTF, memory growth, and timeline continuity are verified; transcription WER and word-boundary error are NOT claimed because no aligned gold transcript or manual Praat TextGrid exists for this LibriVox chapter.",
+  "required_measurements": {
+    "SOURCE_DURATION_SECONDS": 3563.337,
+    "PROCESSED_DURATION_SECONDS": 1800.0,
+    "WINDOW_COMPLETION_COUNT": 5,
+    "CHUNK_COMPLETION_COUNT": 249,
+    "FAILED_WINDOW_COUNT": 0,
+    "INFERENCE_SECONDS": 1226.16,
+    "ALIGNMENT_SECONDS": 1.016,
+    "ALIGNMENT_SAMPLE_SCOPE": "15 sampled VAD segments (estimated full 30m alignment at RTF 0.01206: 21.71s)",
+    "TOTAL_PROCESSING_SECONDS": 1272.632,
+    "RTF": 0.6812,
+    "PEAK_RSS_BYTES": 2401081754,
+    "MEMORY_GROWTH_BYTES": 41943040,
+    "POST_WARMUP_ARENA_RAMP_BYTES": 696736809,
+    "MISSING_WORD_COUNT": "NOT_AVAILABLE (no aligned reference transcript)",
+    "DUPLICATE_WORD_COUNT": 0,
+    "TIMESTAMP_DISCONTINUITY_COUNT": 0
+  },
+  "all_windows_rc_zero": true,
+  "total_preprocess_sec": 0.931,
+  "total_decode_sec": 1226.16,
+  "total_wall_sec": 1270.685,
+  "overall_asr_rtf": 0.6812,
+  "sampled_alignment_rtf": 0.01206,
+  "estimated_30m_alignment_sec": 21.71,
+  "peak_process_rss_mib": 2289.85,
+  "max_single_window_post_warmup_rss_growth_mib": 664.46,
+  "max_steady_state_second_half_rss_drift_mib": 40.0,
+  "total_segments_emitted": 249,
+  "total_words_emitted": 3923,
+  "timeline_start_sec": 0.062,
+  "timeline_end_sec": 1792.012,
+  "first_segment_sample": {
+    "local_start_sec": 0.062,
+    "local_end_sec": 11.596,
+    "global_start_sec": 0.062,
+    "global_end_sec": 11.596,
+    "text": "This is a LibriVox recording. All LibriVox recordings are in the public domain. For more information or to volunteer, please visit LibriVox.org."
+  },
+  "last_segment_sample": {
+    "local_start_sec": 282.174,
+    "local_end_sec": 292.012,
+    "global_start_sec": 1782.174,
+    "global_end_sec": 1792.012,
+    "text": "but i thought that he had pleasant eyes although he kept on muttering to himself in an angry manner and calling mrs rachel names"
+  },
+  "timestamp_discontinuities_gt_1s": 0,
+  "segment_overlaps": 0,
+  "adjacent_boundary_same_word_count": 0,
+  "STATUS": "PASS",
+  "window_summaries": [
+    {
+      "window_index": 0,
+      "global_offset_sec": 0,
+      "duration_sec": 600.0,
+      "wav_sha256": "a031766eec7afced054019675bebacd403c40790f76e37a93b12c7f971f148a6",
+      "rc": 0,
+      "preprocess_sec": 0.211,
+      "wall_sec": 380.214,
+      "decode_sec": 370.017,
+      "rtf": 0.6167,
+      "peak_rss_mib": 2289.85,
+      "post_warmup_rss_min_mib": 1625.39,
+      "post_warmup_rss_max_mib": 2289.85,
+      "post_warmup_rss_growth_mib": 664.46,
+      "segments_count": 86,
+      "words_count": 1321,
+      "alignment_probe": {
+        "segments_tested": 3,
+        "all_rc_zero": true,
+        "align_rtf": 0.01069,
+        "samples": [
+          {
+            "segment_index": 0,
+            "seg_dur_sec": 11.534,
+            "rc": 0,
+            "align_decode_sec": 0.111,
+            "align_rtf": 0.00962
+          },
+          {
+            "segment_index": 1,
+            "seg_dur_sec": 2.478,
+            "rc": 0,
+            "align_decode_sec": 0.031,
+            "align_rtf": 0.01251
+          },
+          {
+            "segment_index": 2,
+            "seg_dur_sec": 1.518,
+            "rc": 0,
+            "align_decode_sec": 0.024,
+            "align_rtf": 0.01581
+          }
+        ]
+      },
+      "steady_state_second_half_rss_drift_mib": 0.0
+    },
+    {
+      "window_key": "1a",
+      "global_offset_sec": 600,
+      "duration_sec": 300.0,
+      "num_threads": 3,
+      "wav_sha256": "d30c0b6bf1b97d490e7a39ea595b3af9930f8f1d1f1d4d46550095145af8d39c",
+      "rc": 0,
+      "preprocess_sec": 0.16,
+      "wall_sec": 215.109,
+      "decode_sec": 207.563,
+      "rtf": 0.6919,
+      "peak_rss_mib": 1978.86,
+      "post_warmup_rss_min_mib": 1526.78,
+      "post_warmup_rss_max_mib": 1978.86,
+      "post_warmup_rss_growth_mib": 452.08,
+      "steady_state_second_half_rss_drift_mib": 14.0,
+      "segments_count": 37,
+      "words_count": 676,
+      "alignment_probe": {
+        "segments_tested": 3,
+        "all_rc_zero": true,
+        "align_rtf": 0.01159,
+        "samples": [
+          {
+            "segment_index": 0,
+            "seg_dur_sec": 7.692,
+            "rc": 0,
+            "align_decode_sec": 0.081,
+            "align_rtf": 0.01053
+          },
+          {
+            "segment_index": 1,
+            "seg_dur_sec": 4.494,
+            "rc": 0,
+            "align_decode_sec": 0.054,
+            "align_rtf": 0.01202
+          },
+          {
+            "segment_index": 2,
+            "seg_dur_sec": 3.694,
+            "rc": 0,
+            "align_decode_sec": 0.049,
+            "align_rtf": 0.01326
+          }
+        ]
+      }
+    },
+    {
+      "window_key": "1b",
+      "global_offset_sec": 900,
+      "duration_sec": 300.0,
+      "num_threads": 3,
+      "wav_sha256": "b7fda2883d22368fb291c83b558cdeec174962ac5c467df6ff63bee87eeb161e",
+      "rc": 0,
+      "preprocess_sec": 0.226,
+      "wall_sec": 220.115,
+      "decode_sec": 211.607,
+      "rtf": 0.7054,
+      "peak_rss_mib": 2000.32,
+      "post_warmup_rss_min_mib": 1631.02,
+      "post_warmup_rss_max_mib": 2000.32,
+      "post_warmup_rss_growth_mib": 369.3,
+      "steady_state_second_half_rss_drift_mib": 0.0,
+      "segments_count": 46,
+      "words_count": 587,
+      "alignment_probe": {
+        "segments_tested": 3,
+        "all_rc_zero": true,
+        "align_rtf": 0.0133,
+        "samples": [
+          {
+            "segment_index": 0,
+            "seg_dur_sec": 4.014,
+            "rc": 0,
+            "align_decode_sec": 0.049,
+            "align_rtf": 0.01221
+          },
+          {
+            "segment_index": 1,
+            "seg_dur_sec": 10.734,
+            "rc": 0,
+            "align_decode_sec": 0.158,
+            "align_rtf": 0.01472
+          },
+          {
+            "segment_index": 2,
+            "seg_dur_sec": 5.326,
+            "rc": 0,
+            "align_decode_sec": 0.06,
+            "align_rtf": 0.01127
+          }
+        ]
+      }
+    },
+    {
+      "window_key": "2a",
+      "global_offset_sec": 1200,
+      "duration_sec": 300.0,
+      "num_threads": 3,
+      "wav_sha256": "6069717cefca89f7489c595de58757e395701a0f66b5f16e6a4ab76702f10edd",
+      "rc": 0,
+      "preprocess_sec": 0.157,
+      "wall_sec": 240.139,
+      "decode_sec": 231.553,
+      "rtf": 0.7718,
+      "peak_rss_mib": 1976.43,
+      "post_warmup_rss_min_mib": 1528.01,
+      "post_warmup_rss_max_mib": 1976.43,
+      "post_warmup_rss_growth_mib": 448.42,
+      "steady_state_second_half_rss_drift_mib": 40.0,
+      "segments_count": 44,
+      "words_count": 605,
+      "alignment_probe": {
+        "segments_tested": 3,
+        "all_rc_zero": true,
+        "align_rtf": 0.01415,
+        "samples": [
+          {
+            "segment_index": 0,
+            "seg_dur_sec": 1.838,
+            "rc": 0,
+            "align_decode_sec": 0.035,
+            "align_rtf": 0.01904
+          },
+          {
+            "segment_index": 1,
+            "seg_dur_sec": 2.03,
+            "rc": 0,
+            "align_decode_sec": 0.027,
+            "align_rtf": 0.0133
+          },
+          {
+            "segment_index": 2,
+            "seg_dur_sec": 5.038,
+            "rc": 0,
+            "align_decode_sec": 0.064,
+            "align_rtf": 0.0127
+          }
+        ]
+      }
+    },
+    {
+      "window_key": "2b",
+      "global_offset_sec": 1500,
+      "duration_sec": 300.0,
+      "num_threads": 3,
+      "wav_sha256": "2a8e8bb9672106dfb9774b8a4c70597251a7f1153584b141ada1f1e5a31d92d6",
+      "rc": 0,
+      "preprocess_sec": 0.177,
+      "wall_sec": 215.108,
+      "decode_sec": 205.42,
+      "rtf": 0.6847,
+      "peak_rss_mib": 2017.49,
+      "post_warmup_rss_min_mib": 1628.14,
+      "post_warmup_rss_max_mib": 2017.49,
+      "post_warmup_rss_growth_mib": 389.35,
+      "steady_state_second_half_rss_drift_mib": 12.0,
+      "segments_count": 36,
+      "words_count": 734,
+      "alignment_probe": {
+        "segments_tested": 3,
+        "all_rc_zero": true,
+        "align_rtf": 0.01058,
+        "samples": [
+          {
+            "segment_index": 0,
+            "seg_dur_sec": 5.294,
+            "rc": 0,
+            "align_decode_sec": 0.06,
+            "align_rtf": 0.01133
+          },
+          {
+            "segment_index": 1,
+            "seg_dur_sec": 9.838,
+            "rc": 0,
+            "align_decode_sec": 0.095,
+            "align_rtf": 0.00966
+          },
+          {
+            "segment_index": 2,
+            "seg_dur_sec": 10.67,
+            "rc": 0,
+            "align_decode_sec": 0.118,
+            "align_rtf": 0.01106
+          }
+        ]
+      }
+    }
+  ]
+}

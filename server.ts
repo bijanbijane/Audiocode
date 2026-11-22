@@ -84,6 +84,7 @@ import {
   type UnifiedProcessingRequest,
 } from './src/processing-engine/index.ts';
 import { LocalCompanionService } from './src/host-bridge/companion/LocalCompanionService.ts';
+import { createSmartAudioEditHttpRouter } from './src/workflow/SmartAudioEditHttpRouter.ts';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const IS_PROD = process.env.NODE_ENV === 'production';
@@ -130,10 +131,22 @@ async function startServer() {
   const speechSecurityGateway = new SpeechSecurityGateway(speechSecurityService);
   const coreAsrRouter = new CoreModelRouter();
   coreAsrRouter.warmup();
-  const unifiedProcessingOrchestrator = new UnifiedProcessingOrchestrator({
-    localAdapter: new LocalExecutionAdapter({ coreRouter: coreAsrRouter }),
-  });
   const localCompanionService = new LocalCompanionService();
+  const unifiedProcessingOrchestrator = new UnifiedProcessingOrchestrator({
+    localAdapter: new LocalExecutionAdapter({
+      coreRouter: coreAsrRouter,
+      checkNeuralWeightsAvailable: () => {
+        const status = localCompanionService.neuralEngine.getStatus();
+        const primary =
+          status.installedModels.find((m) => m.integrityVerified) ?? status.installedModels[0];
+        return {
+          available: status.available,
+          modelId: primary?.modelId ?? null,
+          modelVersion: primary?.quantization ?? null,
+        };
+      },
+    }),
+  });
 
   // Preserve Cross-Origin Isolation so SharedArrayBuffer & OPFS SyncAccessHandle remain active
   app.use((_req, res, next) => {
@@ -250,6 +263,12 @@ async function startServer() {
   // AVP-P08/P09/P10: Shared Local Companion Service (Loopback-only, HMAC IPC v1.0.0)
   // Mounted BEFORE global express.json() so it enforces its own Host/Origin/Loopback security guards.
   app.use('/api/v2/companion', localCompanionService.createExpressRouter({ allowSameOriginProxyHost: true }));
+
+  // AVP-EXECUTION-001: Unified 3-Engine Smart Audio Edit Vertical Slice (/api/v2/smart-edit/*)
+  const { router: smartEditRouter } = createSmartAudioEditHttpRouter({
+    neuralEngine: localCompanionService.neuralEngine,
+  });
+  app.use('/api/v2/smart-edit', smartEditRouter);
 
   app.use(express.json({ limit: '16mb' }));
 

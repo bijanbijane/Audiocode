@@ -1,0 +1,41 @@
+{
+  "generated_utc": "2026-11-22T16:54:49.026524+00:00",
+  "dataset_version": "avp-p02-v1",
+  "archive_root": "/root/.avapardaz/datasets/avp-p02-v1",
+  "manifest_path": "datasets/phase02/manifest_v1.jsonl",
+  "manifest_sha256": "681ddb093c79fd6c1ef33929c739a52b9f41889a81a3654f1d5d98588931b7bd",
+  "counts": {
+    "total_clips": 764,
+    "fa_fleurs_dev_clips": 369,
+    "en_fleurs_dev_clips": 394,
+    "continuous_long_audio_clips": 1,
+    "dev_split_clips": 200,
+    "heldout_split_clips": 563,
+    "exact_duplicates_skipped": 0,
+    "acoustic_near_duplicates_flagged": 0
+  },
+  "durations_hours": {
+    "fa_read_hours": 1.5278,
+    "en_read_hours": 1.0459,
+    "en_continuous_long_hours": 0.9898,
+    "total_verified_hours": 3.5635,
+    "dev_split_hours": 0.6839,
+    "heldout_split_hours": 1.8899,
+    "natural_persian_conversational_hours": 0.0,
+    "natural_disfluency_hours": 0.0,
+    "natural_code_switching_hours": 0.0,
+    "manual_word_timestamp_hours": 0.0
+  },
+  "target_shortfalls": {
+    "total_6h_target_met": false,
+    "dev_2h_target_met": false,
+    "heldout_4h_target_met": false,
+    "heldout_200_clips_met": true,
+    "dev_100_clips_met": true,
+    "distinct_heldout_speakers_note": "FLEURS dev metadata provides recording IDs and gender, not verified speaker IDs; speaker count cannot be overstated as 20+ verified distinct speakers without diarization/metadata.",
+    "missing_natural_conversational_fa": "BLOCKER: Legally cleared conversational Persian podcasts/interviews not available via automated open-license download (YouTube-scraped HF datasets rejected due to unclear commercial audio rights).",
+    "missing_natural_disfluencies": "BLOCKER: 0.0h verified natural Persian disfluencies (target >= 0.5h).",
+    "missing_natural_code_switching": "BLOCKER: 0.0h verified natural intra-sentence FA-EN code-switching (target >= 0.5h).",
+    "missing_manual_word_timestamps": "BLOCKER: 0.0h human-verified Praat TextGrid annotations (target >= 1.0h)."
+  }
+}

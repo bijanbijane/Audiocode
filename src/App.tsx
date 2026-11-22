@@ -3703,6 +3703,11 @@ export default function App() {
                       recommendations={recommendations}
                       selectedRecId={selectedRecId}
                       previewingId={previewingId}
+                      tracks={tracks}
+                      assets={project.assets}
+                      pcmSources={project.pcmSources}
+                      tokens={tokens}
+                      sampleRate={project.sampleRate}
                       onSelect={(id) => setSelectedRecId(id)}
                       onPreview={handlePreviewRecommendation}
                       onAccept={handleAcceptRecommendation}

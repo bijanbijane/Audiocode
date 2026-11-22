@@ -1,0 +1,417 @@
+{
+  "window_key": "1b",
+  "global_offset_sec": 900,
+  "duration_sec": 300.0,
+  "num_threads": 3,
+  "wav_sha256": "b7fda2883d22368fb291c83b558cdeec174962ac5c467df6ff63bee87eeb161e",
+  "rc": 0,
+  "preprocess_sec": 0.226,
+  "wall_sec": 220.115,
+  "decode_sec": 211.607,
+  "rtf": 0.7054,
+  "peak_rss_mib": 2000.32,
+  "post_warmup_rss_min_mib": 1631.02,
+  "post_warmup_rss_max_mib": 2000.32,
+  "post_warmup_rss_growth_mib": 369.3,
+  "steady_state_second_half_rss_drift_mib": 0.0,
+  "segments_count": 46,
+  "words_count": 587,
+  "alignment_probe": {
+    "segments_tested": 3,
+    "all_rc_zero": true,
+    "align_rtf": 0.0133,
+    "samples": [
+      {
+        "segment_index": 0,
+        "seg_dur_sec": 4.014,
+        "rc": 0,
+        "align_decode_sec": 0.049,
+        "align_rtf": 0.01221
+      },
+      {
+        "segment_index": 1,
+        "seg_dur_sec": 10.734,
+        "rc": 0,
+        "align_decode_sec": 0.158,
+        "align_rtf": 0.01472
+      },
+      {
+        "segment_index": 2,
+        "seg_dur_sec": 5.326,
+        "rc": 0,
+        "align_decode_sec": 0.06,
+        "align_rtf": 0.01127
+      }
+    ]
+  },
+  "segments": [
+    {
+      "local_start_sec": 0.158,
+      "local_end_sec": 4.172,
+      "global_start_sec": 900.158,
+      "global_end_sec": 904.172,
+      "text": "you let him first cast a stone at her"
+    },
+    {
+      "local_start_sec": 5.118,
+      "local_end_sec": 15.852,
+      "global_start_sec": 905.118,
+      "global_end_sec": 915.852,
+      "text": "i was stopped by my godmother's rising putting her hand to her head and crying out in an awful voice from quite another part of the book"
+    },
+    {
+      "local_start_sec": 17.086,
+      "local_end_sec": 22.412,
+      "global_start_sec": 917.086,
+      "global_end_sec": 922.412,
+      "text": "watch ye therefore lest coming suddenly he find you sleeping"
+    },
+    {
+      "local_start_sec": 22.974,
+      "local_end_sec": 28.204,
+      "global_start_sec": 922.974,
+      "global_end_sec": 928.204,
+      "text": "And what I say unto you, I say unto all. Watch. Watch. Watch. Watch. Watch. Watch. Watch. Watch. Watch. Watch"
+    },
+    {
+      "local_start_sec": 29.342,
+      "local_end_sec": 35.82,
+      "global_start_sec": 929.342,
+      "global_end_sec": 935.82,
+      "text": "In an instant, while she stood before me repeating these words, she fell down on the floor."
+    },
+    {
+      "local_start_sec": 36.67,
+      "local_end_sec": 38.508,
+      "global_start_sec": 936.67,
+      "global_end_sec": 938.508,
+      "text": "I had no need to cry out."
+    },
+    {
+      "local_start_sec": 38.974,
+      "local_end_sec": 41.452,
+      "global_start_sec": 938.974,
+      "global_end_sec": 941.452,
+      "text": "Her voice had sounded through the house."
+    },
+    {
+      "local_start_sec": 42.302,
+      "local_end_sec": 44.332,
+      "global_start_sec": 942.302,
+      "global_end_sec": 944.332,
+      "text": "and been heard in the street"
+    },
+    {
+      "local_start_sec": 45.342,
+      "local_end_sec": 47.18,
+      "global_start_sec": 945.342,
+      "global_end_sec": 947.18,
+      "text": "She was laid upon her bed."
+    },
+    {
+      "local_start_sec": 48.03,
+      "local_end_sec": 52.652,
+      "global_start_sec": 948.03,
+      "global_end_sec": 952.652,
+      "text": "For more than a week she lay there, little altered outwardly."
+    },
+    {
+      "local_start_sec": 53.31,
+      "local_end_sec": 59.788,
+      "global_start_sec": 953.31,
+      "global_end_sec": 959.788,
+      "text": "with her old handsome resolute frown that i knew so well carved upon her face"
+    },
+    {
+      "local_start_sec": 60.67,
+      "local_end_sec": 80.924,
+      "global_start_sec": 960.67,
+      "global_end_sec": 980.924,
+      "text": "many and many a time in the day and in the night with my head upon the pillow by her that my whispers might be plainer to her i kissed her thanked her prayed for her asked her for her blessing and forgiveness entreated her to give me the least sign"
+    },
+    {
+      "local_start_sec": 81.118,
+      "local_end_sec": 82.892,
+      "global_start_sec": 981.118,
+      "global_end_sec": 982.892,
+      "text": "that she knew or heard me."
+    },
+    {
+      "local_start_sec": 83.71,
+      "local_end_sec": 93.612,
+      "global_start_sec": 983.71,
+      "global_end_sec": 993.612,
+      "text": "no no her face was immovable to the very last and even afterwards her frown remained unsoftened"
+    },
+    {
+      "local_start_sec": 94.846,
+      "local_end_sec": 103.916,
+      "global_start_sec": 994.846,
+      "global_end_sec": 1003.916,
+      "text": "On the day after my poor good godmother was buried, the gentleman in black with the white neckcloth reappeared."
+    },
+    {
+      "local_start_sec": 104.51,
+      "local_end_sec": 107.052,
+      "global_start_sec": 1004.51,
+      "global_end_sec": 1007.052,
+      "text": "i was sent for by mrs rachel"
+    },
+    {
+      "local_start_sec": 107.518,
+      "local_end_sec": 112.012,
+      "global_start_sec": 1007.518,
+      "global_end_sec": 1012.012,
+      "text": "and found him in the same place as if he had never gone away"
+    },
+    {
+      "local_start_sec": 113.374,
+      "local_end_sec": 115.948,
+      "global_start_sec": 1013.374,
+      "global_end_sec": 1015.948,
+      "text": "My name is Kenji."
+    },
+    {
+      "local_start_sec": 116.542,
+      "local_end_sec": 123.372,
+      "global_start_sec": 1016.542,
+      "global_end_sec": 1023.372,
+      "text": "he said. You may remember it, my child. Kenji and Cowboy, Lincoln's Inn."
+    },
+    {
+      "local_start_sec": 124.67,
+      "local_end_sec": 128.972,
+      "global_start_sec": 1024.67,
+      "global_end_sec": 1028.972,
+      "text": "I replied that I remember to have seen him once before."
+    },
+    {
+      "local_start_sec": 130.494,
+      "local_end_sec": 133.26,
+      "global_start_sec": 1030.494,
+      "global_end_sec": 1033.26,
+      "text": "Pray be seated here near me."
+    },
+    {
+      "local_start_sec": 133.726,
+      "local_end_sec": 139.916,
+      "global_start_sec": 1033.726,
+      "global_end_sec": 1039.916,
+      "text": "don't distress yourself it's of no use mrs rachel i needn't inform you"
+    },
+    {
+      "local_start_sec": 140.542,
+      "local_end_sec": 145.004,
+      "global_start_sec": 1040.542,
+      "global_end_sec": 1045.004,
+      "text": "who were acquainted with the late miss barbary's affairs"
+    },
+    {
+      "local_start_sec": 145.566,
+      "local_end_sec": 150.284,
+      "global_start_sec": 1045.566,
+      "global_end_sec": 1050.284,
+      "text": "that her means die with her and that this young lady"
+    },
+    {
+      "local_start_sec": 150.846,
+      "local_end_sec": 152.812,
+      "global_start_sec": 1050.846,
+      "global_end_sec": 1052.812,
+      "text": "Now her aunt is dead."
+    },
+    {
+      "local_start_sec": 153.758,
+      "local_end_sec": 155.02,
+      "global_start_sec": 1053.758,
+      "global_end_sec": 1055.02,
+      "text": "My answer?"
+    },
+    {
+      "local_start_sec": 156.19,
+      "local_end_sec": 165.356,
+      "global_start_sec": 1056.19,
+      "global_end_sec": 1065.356,
+      "text": "it is really of no use carrying on a deception when no object is to be gained by it said mr kenji smoothly"
+    },
+    {
+      "local_start_sec": 166.046,
+      "local_end_sec": 168.396,
+      "global_start_sec": 1066.046,
+      "global_end_sec": 1068.396,
+      "text": "Aren't in fact, though not in law."
+    },
+    {
+      "local_start_sec": 168.926,
+      "local_end_sec": 180.748,
+      "global_start_sec": 1068.926,
+      "global_end_sec": 1080.748,
+      "text": "don't distress yourself don't weep don't tremble mrs rachel our young friend has no doubt heard of the ah jaundice and jaundice"
+    },
+    {
+      "local_start_sec": 181.694,
+      "local_end_sec": 183.692,
+      "global_start_sec": 1081.694,
+      "global_end_sec": 1083.692,
+      "text": "Never, said Mrs. Rachel."
+    },
+    {
+      "local_start_sec": 185.118,
+      "local_end_sec": 186.572,
+      "global_start_sec": 1085.118,
+      "global_end_sec": 1086.572,
+      "text": "Is it possible?"
+    },
+    {
+      "local_start_sec": 187.326,
+      "local_end_sec": 195.756,
+      "global_start_sec": 1087.326,
+      "global_end_sec": 1095.756,
+      "text": "pursued Mr. Kenji, putting up his eyeglasses, that our young friend, I beg you won't distress yourself."
+    },
+    {
+      "local_start_sec": 196.222,
+      "local_end_sec": 199.532,
+      "global_start_sec": 1096.222,
+      "global_end_sec": 1099.532,
+      "text": "Never heard of jaundice and jaundice?"
+    },
+    {
+      "local_start_sec": 200.414,
+      "local_end_sec": 204.364,
+      "global_start_sec": 1100.414,
+      "global_end_sec": 1104.364,
+      "text": "I shook my head, wondering even what it was."
+    },
+    {
+      "local_start_sec": 205.566,
+      "local_end_sec": 218.86,
+      "global_start_sec": 1105.566,
+      "global_end_sec": 1118.86,
+      "text": "not of jarndice and jarndice said mr kenji looking over his glasses at me and softly turning the case about and about as if he were petting something"
+    },
+    {
+      "local_start_sec": 219.646,
+      "local_end_sec": 223.052,
+      "global_start_sec": 1119.646,
+      "global_end_sec": 1123.052,
+      "text": "not of one of the greatest chancery suits known"
+    },
+    {
+      "local_start_sec": 223.614,
+      "local_end_sec": 243.516,
+      "global_start_sec": 1123.614,
+      "global_end_sec": 1143.516,
+      "text": "not of jaundice and jaundice the in itself a monument of chancery practice in which i would say every difficulty every contingency every masterly fiction every form of procedure known in that court is represented over and over again"
+    },
+    {
+      "local_start_sec": 244.67,
+      "local_end_sec": 247.308,
+      "global_start_sec": 1144.67,
+      "global_end_sec": 1147.308,
+      "text": "It is a cause that could not exist."
+    },
+    {
+      "local_start_sec": 247.838,
+      "local_end_sec": 249.964,
+      "global_start_sec": 1147.838,
+      "global_end_sec": 1149.964,
+      "text": "out of this free and great country."
+    },
+    {
+      "local_start_sec": 250.59,
+      "local_end_sec": 261.9,
+      "global_start_sec": 1150.59,
+      "global_end_sec": 1161.9,
+      "text": "i should say that the aggregate of costs in jaundice and jaundice mrs rachel i was afraid he addressed himself to her because i appeared inattentive"
+    },
+    {
+      "local_start_sec": 262.398,
+      "local_end_sec": 264.908,
+      "global_start_sec": 1162.398,
+      "global_end_sec": 1164.908,
+      "text": "amounts at the present hour."
+    },
+    {
+      "local_start_sec": 265.438,
+      "local_end_sec": 272.204,
+      "global_start_sec": 1165.438,
+      "global_end_sec": 1172.204,
+      "text": "from sixty to seventy thousand pounds said mr kenji"
+    },
+    {
+      "local_start_sec": 272.67,
+      "local_end_sec": 274.316,
+      "global_start_sec": 1172.67,
+      "global_end_sec": 1174.316,
+      "text": "leaning back in his chair."
+    },
+    {
+      "local_start_sec": 275.838,
+      "local_end_sec": 284.716,
+      "global_start_sec": 1175.838,
+      "global_end_sec": 1184.716,
+      "text": "i felt very ignorant but what could i do i was so entirely unacquainted with the subject that i understood nothing about it even then"
+    },
+    {
+      "local_start_sec": 285.918,
+      "local_end_sec": 290.7,
+      "global_start_sec": 1185.918,
+      "global_end_sec": 1190.7,
+      "text": "and she really never heard of the cause said mr kenji"
+    },
+    {
+      "local_start_sec": 291.166,
+      "local_end_sec": 292.268,
+      "global_start_sec": 1191.166,
+      "global_end_sec": 1192.268,
+      "text": "Surprising"
+    }
+  ],
+  "rss_timeline_sampled": [
+    {
+      "elapsed_sec": 0.0,
+      "rss_mib": 6.72
+    },
+    {
+      "elapsed_sec": 20.0,
+      "rss_mib": 1658.52
+    },
+    {
+      "elapsed_sec": 40.0,
+      "rss_mib": 1683.26
+    },
+    {
+      "elapsed_sec": 60.0,
+      "rss_mib": 1982.32
+    },
+    {
+      "elapsed_sec": 80.0,
+      "rss_mib": 1998.32
+    },
+    {
+      "elapsed_sec": 100.1,
+      "rss_mib": 2000.32
+    },
+    {
+      "elapsed_sec": 120.1,
+      "rss_mib": 2000.32
+    },
+    {
+      "elapsed_sec": 140.1,
+      "rss_mib": 2000.32
+    },
+    {
+      "elapsed_sec": 160.1,
+      "rss_mib": 2000.32
+    },
+    {
+      "elapsed_sec": 180.1,
+      "rss_mib": 2000.32
+    },
+    {
+      "elapsed_sec": 200.1,
+      "rss_mib": 2000.32
+    }
+  ]
+}

@@ -1,0 +1,33 @@
+{
+  "execution_id": "AVP-P02-RECOVERY-006",
+  "mechanism": "unshare -r -n -> Python verifies netns & raw TCP Errno 101 -> os.execv() replaces same PID/netns with sherpa-onnx-offline; parent independently inspects /proc/<pid>/ns/net",
+  "host_netns": "net:[2]",
+  "proxy_env_stripped": true,
+  "english_whisper_turbo_proof": {
+    "label": "whisper_large_v3_turbo_int8_en",
+    "rc": 0,
+    "wall_sec": 12.08,
+    "host_netns": "net:[2]",
+    "observed_sherpa_pid": 10872,
+    "observed_sherpa_proc_netns": "net:[276]",
+    "exec_same_pid_netns_proof_line": [
+      "NETNS_PROOF_IN_EXEC=net:[276] EGRESS=OSError: [Errno 101] Network is unreachable PID=10872"
+    ],
+    "distinct_netns_verified": true,
+    "inference_output_excerpt": []
+  },
+  "persian_shenava_proof": {
+    "label": "shenava_rizeh_v1_int8_fa",
+    "rc": 0,
+    "wall_sec": 2.256,
+    "host_netns": "net:[2]",
+    "observed_sherpa_pid": 10879,
+    "observed_sherpa_proc_netns": "net:[278]",
+    "exec_same_pid_netns_proof_line": [
+      "NETNS_PROOF_IN_EXEC=net:[278] EGRESS=OSError: [Errno 101] Network is unreachable PID=10879"
+    ],
+    "distinct_netns_verified": true,
+    "inference_output_excerpt": []
+  },
+  "ALL_PASSED": true
+}

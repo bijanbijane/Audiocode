@@ -1,0 +1,77 @@
+{
+  "generated_utc": "2026-11-22T20:20:18.682896+00:00",
+  "execution_id": "AVP-P02-RECOVERY-007",
+  "dataset_version": "avp-p02-v2",
+  "baseline_preserved": "datasets/phase02/manifest_v1.jsonl",
+  "manifest_path": "datasets/phase02/manifest_v2.jsonl",
+  "manifest_sha256": "dbf0c6a56a3b158204cc2ff3f3d13d5148d4a56b4a8e9f4afaccefe8e607bdbf",
+  "neyshekar_provenance": {
+    "repo": "sananazari/Neyshekar",
+    "revision": "4e3db589fd62b4b7a71e3570ba0b18a49368afeb",
+    "license": "CC0-1.0",
+    "terms_respected": "No speaker identification performed; anonymous speaker_id preserved solely for speaker-disjoint split verification.",
+    "parquet_sha256": {
+      "validation-00000-of-00004.parquet": "9c7566d8807bafb26677ecd5e16575451d1ca3a19e39c43219c89a25cd7685f4",
+      "validation-00001-of-00004.parquet": "bb3188593365dd764c40a35bd8a8aac9d9019ab42851fd7bdbf5e0f265a2f638",
+      "validation-00002-of-00004.parquet": "e0105b4474de8ef160633b4f3525781cfee2e67589f5b109b06fbcd19eb14c72",
+      "validation-00003-of-00004.parquet": "0b92b2f8cbfef6bac318ceff54d44810c33fa3d9b48399248ce923b25b7f2e0d",
+      "test-00000-of-00004.parquet": "17e367fb26aee6ab676abff20e28d9d449173e31ea4625eb45c371729c040945",
+      "test-00001-of-00004.parquet": "6013cb812d73cdbf226adaaeeb76e701a167dff08e5e070a55c32d327762b47b",
+      "test-00002-of-00004.parquet": "e1c659a520a4d81d428f57285142a48bb8e2c34e2c5c5c7550383d0d91256a54",
+      "test-00003-of-00004.parquet": "187b273a35289a369f9391ef4e4e1f795ce77cee52e37ac1146275b2b11de14a"
+    },
+    "validation_clips": 1882,
+    "validation_hours": 3.1358,
+    "validation_distinct_speakers": 26,
+    "validation_informal_text_read_clips": 272,
+    "test_clips": 2132,
+    "test_hours": 3.8472,
+    "test_distinct_speakers": 30,
+    "test_informal_text_read_clips": 282,
+    "val_test_speaker_overlap_count": 0
+  },
+  "counts": {
+    "total_clips": 4778,
+    "v1_preserved_clips": 764,
+    "v2_added_clips": 4014,
+    "exact_duplicates_skipped": 21,
+    "by_split": {
+      "dev": 2082,
+      "held_out": 2695,
+      "long_audio_eval": 1
+    },
+    "by_stratum": {
+      "PERSIAN_READ_SPEECH": 4383,
+      "PERSIAN_CONVERSATIONAL_SPEECH": 0,
+      "PERSIAN_DISFLUENCY_SPEECH": 0,
+      "PERSIAN_ENGLISH_CODE_SWITCHING": 0,
+      "ENGLISH_SPEECH": 395,
+      "PERSIAN_WORD_ALIGNMENT_GOLD": 0
+    }
+  },
+  "durations_hours": {
+    "total_verified_hours": 10.5465,
+    "dev_split_hours": 3.8196,
+    "heldout_split_hours": 5.7371,
+    "continuous_long_audio_hours": 0.9898,
+    "by_stratum_hours": {
+      "PERSIAN_READ_SPEECH": 8.5108,
+      "PERSIAN_CONVERSATIONAL_SPEECH": 0.0,
+      "PERSIAN_DISFLUENCY_SPEECH": 0.0,
+      "PERSIAN_ENGLISH_CODE_SWITCHING": 0.0,
+      "ENGLISH_SPEECH": 2.0357,
+      "PERSIAN_WORD_ALIGNMENT_GOLD": 0.0
+    }
+  },
+  "gate_status": {
+    "total_ge_6h_met": true,
+    "dev_ge_2h_met": true,
+    "heldout_ge_4h_met": true,
+    "heldout_verified_distinct_speakers": 30,
+    "heldout_ge_20_speakers_met": true,
+    "persian_conversational_met": false,
+    "natural_disfluencies_ge_30m_met": false,
+    "natural_code_switching_ge_30m_met": false,
+    "manual_word_ground_truth_ge_60m_met": false
+  }
+}

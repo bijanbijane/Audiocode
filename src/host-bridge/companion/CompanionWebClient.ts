@@ -38,6 +38,8 @@ export interface CompanionHealthResponse {
     readonly installedModels: readonly CompanionModelInfo[];
     readonly processRssMb: number;
   };
+  readonly sampleAudioAvailable?: boolean;
+  readonly sampleAudioFilename?: string | null;
   readonly activeJobs: number;
 }
 
@@ -95,6 +97,15 @@ function bytesToBase64(bytes: Uint8Array): string {
     binary += String.fromCharCode(...bytes.subarray(i, i + chunkSize));
   }
   return btoa(binary);
+}
+
+function base64ToBytes(base64: string): Uint8Array {
+  const binary = atob(base64);
+  const out = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) {
+    out[i] = binary.charCodeAt(i);
+  }
+  return out;
 }
 
 /**
@@ -410,5 +421,40 @@ export class CompanionWebClient {
     } finally {
       params.signal?.removeEventListener('abort', onAbort);
     }
+  }
+
+  public async fetchBundledSamplePersianAudio(signal?: AbortSignal): Promise<{
+    readonly filename: string;
+    readonly modelId: string;
+    readonly mimeType: string;
+    readonly wavBytes: Uint8Array;
+  }> {
+    const resp = await this.sendIpc<{
+      ok: boolean;
+      filename: string;
+      modelId: string;
+      mimeType: string;
+      audioBase64: string;
+    }>('CAPABILITY_EXECUTE', { action: 'GET_SAMPLE_PERSIAN_AUDIO' }, signal);
+    if (!resp.ok || !resp.audioBase64) {
+      throw new Error('نمونه صوتی فارسی همراه مدل در دسترس نیست.');
+    }
+    return {
+      filename: resp.filename || 'shenava-sample-0.wav',
+      modelId: resp.modelId || 'Reza2kn/Shenava-Rizeh',
+      mimeType: resp.mimeType || 'audio/wav',
+      wavBytes: base64ToBytes(resp.audioBase64),
+    };
+  }
+
+  public async installNativeRuntime(signal?: AbortSignal): Promise<CompanionHealthResponse> {
+    const resp = await this.sendIpc<{
+      ok: boolean;
+      health?: CompanionHealthResponse;
+    }>('CAPABILITY_EXECUTE', { action: 'INSTALL_NATIVE_RUNTIME' }, signal);
+    if (!resp.ok || !resp.health) {
+      throw new Error('نصب موتور بومی Sherpa-ONNX ناموفق بود.');
+    }
+    return resp.health;
   }
 }

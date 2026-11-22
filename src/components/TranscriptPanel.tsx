@@ -42,6 +42,7 @@ import {
 } from '../engine/persianAsrTranscriber';
 import { EnglishScriptRenderMode } from '../ai-engine/asr/MultilingualCodeSwitchAndArabicEngine';
 import { AudioRedactionMaskMode } from '../../packages/audio-runtime/src/SensitiveContentAndPiiRedactorEngine';
+import type { CompanionHealthResponse } from '../host-bridge/companion/CompanionWebClient';
 
 type TranscriptLayer = 'display' | 'normalized' | 'original';
 
@@ -68,9 +69,15 @@ interface TranscriptPanelProps {
   isTranscribingAsr?: boolean;
   executionMode?: 'LOCAL' | 'CLOUD';
   cloudAsrConfigured?: boolean;
+  companionHealth?: CompanionHealthResponse | null;
+  isCheckingCompanion?: boolean;
+  isInstallingNativeAsr?: boolean;
   projectSessionNonce?: number;
   asrInlineFeedback?: AsrInlineFeedbackState | null;
   onDismissAsrInlineFeedback?: () => void;
+  onRetryCompanionConnection?: () => void;
+  onInstallNativeCompanionEngine?: () => void;
+  onLoadAndTranscribeSamplePersianAudio?: () => void;
   onRunCloudGeminiAsr?: () => void;
   onRunAcousticSegmentation?: () => void;
   onOpenLocalModelInstaller?: () => void;
@@ -111,9 +118,15 @@ export const TranscriptPanel: React.FC<TranscriptPanelProps> = ({
   isTranscribingAsr = false,
   executionMode = 'LOCAL',
   cloudAsrConfigured = false,
+  companionHealth = null,
+  isCheckingCompanion = false,
+  isInstallingNativeAsr = false,
   projectSessionNonce = 0,
   asrInlineFeedback = null,
   onDismissAsrInlineFeedback,
+  onRetryCompanionConnection,
+  onInstallNativeCompanionEngine,
+  onLoadAndTranscribeSamplePersianAudio,
   onRunCloudGeminiAsr,
   onRunAcousticSegmentation,
   onOpenLocalModelInstaller,
@@ -445,6 +458,69 @@ export const TranscriptPanel: React.FC<TranscriptPanelProps> = ({
           <p className="text-xs text-slate-600 dark:text-slate-400 mt-0.5">
             روی هر واژه کلیک کنید تا انتخاب شود؛ با حذف یا بوق سانسور، صدای آن به‌صورت هوشمند و همگام روی تایم‌لاین اعمال می‌شود
           </p>
+          <div
+            data-testid="transcript-shahab-status"
+            className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px]"
+          >
+            {companionHealth?.runtime?.available ? (
+              <>
+                <span className="inline-flex items-center gap-1.5 font-medium text-emerald-700 dark:text-emerald-400">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0" aria-hidden="true" />
+                  <span>
+                    موتور بومی شهاب/شناوا: متصل (
+                    <bdi dir="ltr" className="font-mono">
+                      {companionHealth.runtime.activeModelId ?? 'Reza2kn/Shenava-Rizeh'}
+                    </bdi>{' '}
+                    INT8 · ۱۰۰٪ آفلاین روی CPU)
+                  </span>
+                </span>
+                {companionHealth.sampleAudioAvailable && onLoadAndTranscribeSamplePersianAudio && (
+                  <button
+                    type="button"
+                    data-testid="btn-header-sample-persian"
+                    disabled={isTranscribingAsr}
+                    onClick={onLoadAndTranscribeSamplePersianAudio}
+                    className="inline-flex items-center gap-1 px-2 py-0.5 rounded border border-emerald-600/35 dark:border-emerald-500/40 bg-emerald-500/10 text-emerald-800 dark:text-emerald-300 hover:bg-emerald-500/20 disabled:opacity-50 cursor-pointer"
+                  >
+                    <span>تست با نمونه صوت واقعی فارسی</span>
+                  </button>
+                )}
+              </>
+            ) : isCheckingCompanion && !companionHealth ? (
+              <span className="inline-flex items-center gap-1.5 text-sky-700 dark:text-sky-300">
+                <Loader2 className="w-3 h-3 animate-spin" aria-hidden="true" />
+                <span>در حال بررسی اتصال موتور بومی شهاب/شناوا...</span>
+              </span>
+            ) : (
+              <span className="inline-flex flex-wrap items-center gap-2 text-amber-800 dark:text-amber-300">
+                <span className="inline-flex items-center gap-1.5">
+                  <span className="w-1.5 h-1.5 rounded-full bg-amber-500 shrink-0" aria-hidden="true" />
+                  <span>موتور بومی شهاب/شناوا متصل نیست</span>
+                </span>
+                {onRetryCompanionConnection && (
+                  <button
+                    type="button"
+                    data-testid="btn-header-retry-companion"
+                    onClick={onRetryCompanionConnection}
+                    className="px-2 py-0.5 rounded border border-amber-500/40 bg-amber-500/10 text-amber-900 dark:text-amber-200 hover:bg-amber-500/20 cursor-pointer"
+                  >
+                    اتصال مجدد
+                  </button>
+                )}
+                {companionHealth && onInstallNativeCompanionEngine && (
+                  <button
+                    type="button"
+                    data-testid="btn-header-install-native-asr"
+                    disabled={isInstallingNativeAsr}
+                    onClick={onInstallNativeCompanionEngine}
+                    className="px-2 py-0.5 rounded bg-emerald-500 text-slate-950 font-semibold hover:bg-emerald-400 disabled:opacity-50 cursor-pointer"
+                  >
+                    {isInstallingNativeAsr ? 'در حال نصب...' : 'نصب خودکار موتور شهاب'}
+                  </button>
+                )}
+              </span>
+            )}
+          </div>
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
@@ -1326,6 +1402,64 @@ export const TranscriptPanel: React.FC<TranscriptPanelProps> = ({
                 </button>
               )}
 
+              {asrInlineFeedback.kind === 'NO_SPEECH' &&
+                companionHealth?.sampleAudioAvailable &&
+                onLoadAndTranscribeSamplePersianAudio && (
+                  <button
+                    type="button"
+                    data-testid="btn-inline-test-sample-persian"
+                    disabled={isTranscribingAsr}
+                    onClick={onLoadAndTranscribeSamplePersianAudio}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded bg-emerald-500 text-slate-950 font-semibold text-xs hover:bg-emerald-400 disabled:opacity-50 cursor-pointer"
+                  >
+                    {isTranscribingAsr ? (
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" aria-hidden="true" />
+                    ) : (
+                      <Mic className="w-3.5 h-3.5" aria-hidden="true" />
+                    )}
+                    <span>آزمایش با نمونه صوت واقعی فارسی (مدل شهاب / شناوا)</span>
+                  </button>
+                )}
+
+              {(asrInlineFeedback.kind === 'MODEL_NOT_INSTALLED' ||
+                asrInlineFeedback.kind === 'INFERENCE_ERROR') &&
+                onRetryCompanionConnection && (
+                  <button
+                    type="button"
+                    data-testid="btn-inline-retry-companion"
+                    disabled={isCheckingCompanion || isInstallingNativeAsr}
+                    onClick={onRetryCompanionConnection}
+                    className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded bg-sky-500 text-slate-950 font-semibold text-xs hover:bg-sky-400 disabled:opacity-50 cursor-pointer"
+                  >
+                    <span>
+                      {isCheckingCompanion ? 'در حال بررسی اتصال...' : 'بررسی مجدد اتصال شهاب/شناوا'}
+                    </span>
+                  </button>
+                )}
+
+              {(asrInlineFeedback.kind === 'MODEL_NOT_INSTALLED' ||
+                asrInlineFeedback.kind === 'INFERENCE_ERROR') &&
+                onInstallNativeCompanionEngine && (
+                  <button
+                    type="button"
+                    data-testid="btn-inline-install-native-asr"
+                    disabled={isInstallingNativeAsr}
+                    onClick={onInstallNativeCompanionEngine}
+                    className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded bg-emerald-500 text-slate-950 font-semibold text-xs hover:bg-emerald-400 disabled:opacity-50 cursor-pointer"
+                  >
+                    {isInstallingNativeAsr ? (
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" aria-hidden="true" />
+                    ) : (
+                      <Download className="w-3.5 h-3.5" aria-hidden="true" />
+                    )}
+                    <span>
+                      {isInstallingNativeAsr
+                        ? 'در حال نصب موتور بومی شهاب/شناوا...'
+                        : 'نصب خودکار موتور بومی شهاب/شناوا'}
+                    </span>
+                  </button>
+                )}
+
               {asrInlineFeedback.kind === 'MODEL_NOT_INSTALLED' && onOpenLocalModelInstaller && (
                 <button
                   type="button"
@@ -1372,6 +1506,25 @@ export const TranscriptPanel: React.FC<TranscriptPanelProps> = ({
                   </span>
                 </button>
               )}
+
+              {companionHealth?.runtime?.available &&
+                companionHealth.sampleAudioAvailable &&
+                onLoadAndTranscribeSamplePersianAudio && (
+                  <button
+                    type="button"
+                    data-testid="btn-empty-test-sample-persian"
+                    disabled={isTranscribingAsr}
+                    onClick={onLoadAndTranscribeSamplePersianAudio}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-emerald-500 text-slate-950 font-semibold text-xs hover:bg-emerald-400 disabled:opacity-50 cursor-pointer"
+                  >
+                    {isTranscribingAsr ? (
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" aria-hidden="true" />
+                    ) : (
+                      <Mic className="w-3.5 h-3.5" aria-hidden="true" />
+                    )}
+                    <span>آزمایش با نمونه صوت واقعی فارسی (مدل شهاب / شناوا)</span>
+                  </button>
+                )}
 
               <button
                 type="button"

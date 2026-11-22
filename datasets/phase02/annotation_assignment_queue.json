@@ -1,0 +1,547 @@
+{
+  "generated_utc": "2026-11-22T16:54:49.026524+00:00",
+  "status": "AWAITING_HUMAN_ANNOTATORS",
+  "double_annotation_overlap_ratio": 0.2,
+  "clips": [
+    {
+      "sample_id": "fleurs-fa-dev-0001",
+      "language": "fa",
+      "duration_sec": 16.5,
+      "audio_sha256": "4d1ebde825d5b132fcbd18e5a88d244a2746239ac5d617c9103f779f1564df45",
+      "source_transcript_reference": "محققان اظهار داشتند كه حتی اگر این دم یک دایناسور جوان باشد، باز هم این نمونه نشان دهنده پر حیوان بالغ است نه کرک یک جوجه.",
+      "double_annotate_for_iaa": true,
+      "annotation_state": "PENDING_HUMAN_PRAAT"
+    },
+    {
+      "sample_id": "fleurs-fa-dev-0002",
+      "language": "fa",
+      "duration_sec": 15.72,
+      "audio_sha256": "b76d950ee8dd87d8cea0c7f6d91cc1cbdea4ec1a34dce124946fe09548d93dd0",
+      "source_transcript_reference": "محققان اظهار داشتند كه حتی اگر این دم یک دایناسور جوان باشد، باز هم این نمونه نشان دهنده پر حیوان بالغ است نه کرک یک جوجه.",
+      "double_annotate_for_iaa": false,
+      "annotation_state": "PENDING_HUMAN_PRAAT"
+    },
+    {
+      "sample_id": "fleurs-fa-dev-0003",
+      "language": "fa",
+      "duration_sec": 19.92,
+      "audio_sha256": "af589bc3db0396b1b11108ccf65c5bb724eb14dae780eef56eb0041255776cf8",
+      "source_transcript_reference": "محققان اظهار داشتند كه حتی اگر این دم یک دایناسور جوان باشد، باز هم این نمونه نشان دهنده پر حیوان بالغ است نه کرک یک جوجه.",
+      "double_annotate_for_iaa": false,
+      "annotation_state": "PENDING_HUMAN_PRAAT"
+    },
+    {
+      "sample_id": "fleurs-fa-dev-0004",
+      "language": "fa",
+      "duration_sec": 39.0,
+      "audio_sha256": "9495bd5bc0e6a7a31af32a9347a1a3c07dc8a83b92f6c1c02b2b23cf4e0f71a7",
+      "source_transcript_reference": "او به عنوان مشاور امنیت ملی در امور سیاسی جهان به کاربر مشاوره داد؛ اموری مثل پیمان کمپ دیوید، 1978؛ عادی کردن روابط ایالت متحده و چین در اواخر دهه هفتاد؛ انقلاب ایران که منجر به بحران گروگانگیری در ایران شد، 1979؛ و حمله شوری به افغانستان، 1979.",
+      "double_annotate_for_iaa": false,
+      "annotation_state": "PENDING_HUMAN_PRAAT"
+    },
+    {
+      "sample_id": "fleurs-fa-dev-0005",
+      "language": "fa",
+      "duration_sec": 35.64,
+      "audio_sha256": "daf7eef2f8f54d92cc7a1d00bb07f380ae2f8e81a8ee1cc7503785d0119b4733",
+      "source_transcript_reference": "او به عنوان مشاور امنیت ملی در امور سیاسی جهان به کاربر مشاوره داد؛ اموری مثل پیمان کمپ دیوید، 1978؛ عادی کردن روابط ایالت متحده و چین در اواخر دهه هفتاد؛ انقلاب ایران که منجر به بحران گروگانگیری در ایران شد، 1979؛ و حمله شوری به افغانستان، 1979.",
+      "double_annotate_for_iaa": false,
+      "annotation_state": "PENDING_HUMAN_PRAAT"
+    },
+    {
+      "sample_id": "fleurs-fa-dev-0006",
+      "language": "fa",
+      "duration_sec": 17.04,
+      "audio_sha256": "6b22fb4dca1daf82717e4abf698d613d212bf4553a699baba2477fedbc38449b",
+      "source_transcript_reference": "وقتی درگیری متوقف شد و زخمی‌ها به بیمارستان انتقال داده شدند، حدود 40 زندانی باقیمانده دیگر در حیاط ماندند و از بازگشت به سلول‌هایشان خودداری کردند.",
+      "double_annotate_for_iaa": true,
+      "annotation_state": "PENDING_HUMAN_PRAAT"
+    },
+    {
+      "sample_id": "fleurs-fa-dev-0007",
+      "language": "fa",
+      "duration_sec": 18.06,
+      "audio_sha256": "e8ef48c8d527468cf185d124aad979851c66d887438a62988eed3284dbb092f4",
+      "source_transcript_reference": "وقتی درگیری متوقف شد و زخمی‌ها به بیمارستان انتقال داده شدند، حدود 40 زندانی باقیمانده دیگر در حیاط ماندند و از بازگشت به سلول‌هایشان خودداری کردند.",
+      "double_annotate_for_iaa": false,
+      "annotation_state": "PENDING_HUMAN_PRAAT"
+    },
+    {
+      "sample_id": "fleurs-fa-dev-0008",
+      "language": "fa",
+      "duration_sec": 15.72,
+      "audio_sha256": "0765bece154db0858113fedfb06c22e1e8279b67adeadbd1a93dc4a0690b3da4",
+      "source_transcript_reference": "وقتی درگیری متوقف شد و زخمی‌ها به بیمارستان انتقال داده شدند، حدود 40 زندانی باقیمانده دیگر در حیاط ماندند و از بازگشت به سلول‌هایشان خودداری کردند.",
+      "double_annotate_for_iaa": false,
+      "annotation_state": "PENDING_HUMAN_PRAAT"
+    },
+    {
+      "sample_id": "fleurs-fa-dev-0009",
+      "language": "fa",
+      "duration_sec": 13.32,
+      "audio_sha256": "e93852b9cd0a59c91e15750fa2b09cb65699789043cc2f36210a35a8c786dc8c",
+      "source_transcript_reference": "بیشتر دوران زندگی این خانواده یهودی در فضای باز گذشت.",
+      "double_annotate_for_iaa": false,
+      "annotation_state": "PENDING_HUMAN_PRAAT"
+    },
+    {
+      "sample_id": "fleurs-fa-dev-0010",
+      "language": "fa",
+      "duration_sec": 9.48,
+      "audio_sha256": "9336c77731db0c19fe098b607e659cf4bb29d48d3671653cb6da503804907576",
+      "source_transcript_reference": "بیشتر دوران زندگی این خانواده یهودی در فضای باز گذشت.",
+      "double_annotate_for_iaa": false,
+      "annotation_state": "PENDING_HUMAN_PRAAT"
+    },
+    {
+      "sample_id": "fleurs-fa-dev-0011",
+      "language": "fa",
+      "duration_sec": 8.04,
+      "audio_sha256": "0dffc3b4aaabfe5d286986035f8a9e01609507fae2cb3d1ca3d997846df5214d",
+      "source_transcript_reference": "بیشتر دوران زندگی این خانواده یهودی در فضای باز گذشت.",
+      "double_annotate_for_iaa": true,
+      "annotation_state": "PENDING_HUMAN_PRAAT"
+    },
+    {
+      "sample_id": "fleurs-fa-dev-0012",
+      "language": "fa",
+      "duration_sec": 17.88,
+      "audio_sha256": "da54b7a50216b9e3f64e966bc604f2742d00b952a84d870317bbcc6075431a61",
+      "source_transcript_reference": "آرمند ورساچه گفت: «من خواهر و دوستم را از دست دادم و در مسیر من دو معلول روی صندلی چرخدار بودند، مردم فقط می پریدند و آنها را هل می‌دادند».",
+      "double_annotate_for_iaa": false,
+      "annotation_state": "PENDING_HUMAN_PRAAT"
+    },
+    {
+      "sample_id": "fleurs-fa-dev-0013",
+      "language": "fa",
+      "duration_sec": 17.52,
+      "audio_sha256": "11dc0a4c7ec435b055eff93ce33ac7474a4ad46727c1355484ac3242c2e5532a",
+      "source_transcript_reference": "آرمند ورساچه گفت: «من خواهر و دوستم را از دست دادم و در مسیر من دو معلول روی صندلی چرخدار بودند، مردم فقط می پریدند و آنها را هل می‌دادند».",
+      "double_annotate_for_iaa": false,
+      "annotation_state": "PENDING_HUMAN_PRAAT"
+    },
+    {
+      "sample_id": "fleurs-fa-dev-0014",
+      "language": "fa",
+      "duration_sec": 21.54,
+      "audio_sha256": "b7d6d1ba62f6247be3b705d5fa2147ff30d72b58c149033b3751188f72eff361",
+      "source_transcript_reference": "آرمند ورساچه گفت: «من خواهر و دوستم را از دست دادم و در مسیر من دو معلول روی صندلی چرخدار بودند، مردم فقط می پریدند و آنها را هل می‌دادند».",
+      "double_annotate_for_iaa": false,
+      "annotation_state": "PENDING_HUMAN_PRAAT"
+    },
+    {
+      "sample_id": "fleurs-fa-dev-0015",
+      "language": "fa",
+      "duration_sec": 7.38,
+      "audio_sha256": "30deeffb7d3c4c157dde5ad94aba617c191c0d4822f7eadf96437a0ba984c6c2",
+      "source_transcript_reference": "در ابتدا لباس عمدتاً‌ متأثر از فرهنگ بیزانس در شرق بود.",
+      "double_annotate_for_iaa": false,
+      "annotation_state": "PENDING_HUMAN_PRAAT"
+    },
+    {
+      "sample_id": "fleurs-fa-dev-0016",
+      "language": "fa",
+      "duration_sec": 10.62,
+      "audio_sha256": "b5de8e305dc8d8c11f6dc57c5c632ff603b5e1ff8931e0c0e2f39e91ce9b79a6",
+      "source_transcript_reference": "در ابتدا لباس عمدتاً‌ متأثر از فرهنگ بیزانس در شرق بود.",
+      "double_annotate_for_iaa": true,
+      "annotation_state": "PENDING_HUMAN_PRAAT"
+    },
+    {
+      "sample_id": "fleurs-fa-dev-0017",
+      "language": "fa",
+      "duration_sec": 7.8,
+      "audio_sha256": "ae7fa7e34d71997b0586850e1ec76e1171ff64c545b16c09f872ab60c3eb688b",
+      "source_transcript_reference": "در ابتدا لباس عمدتاً‌ متأثر از فرهنگ بیزانس در شرق بود.",
+      "double_annotate_for_iaa": false,
+      "annotation_state": "PENDING_HUMAN_PRAAT"
+    },
+    {
+      "sample_id": "fleurs-fa-dev-0018",
+      "language": "fa",
+      "duration_sec": 29.64,
+      "audio_sha256": "af4246ebcf6736a4715c2cf49405530d8ac79f92d231d454f73cc26c37904772",
+      "source_transcript_reference": "او بخاطر تعدد نظرات مثبت و تشویق‌های ارسال شده به او از طرف مردان و زنان به این نتیجه رسید. آنها خواستار این بودند که داروهای ضدبارداری به عنوان اقلام ضروری پزشکی محسوب شوند.",
+      "double_annotate_for_iaa": false,
+      "annotation_state": "PENDING_HUMAN_PRAAT"
+    },
+    {
+      "sample_id": "fleurs-fa-dev-0019",
+      "language": "fa",
+      "duration_sec": 16.14,
+      "audio_sha256": "4aff72b9845d16416eb798442644b82de50414d0e6279ed14cfa62ff0f97a2df",
+      "source_transcript_reference": "بدلیل فاصله زیاد از قاره، حیوانات پستاندار نمی‌توانستند تا آنجا سفر کنند، از این رو لاکپشت بزرگ اصلی‌ترین حیوانی است که در گالاپاگوس چرا می‌کند.",
+      "double_annotate_for_iaa": false,
+      "annotation_state": "PENDING_HUMAN_PRAAT"
+    },
+    {
+      "sample_id": "fleurs-fa-dev-0020",
+      "language": "fa",
+      "duration_sec": 17.64,
+      "audio_sha256": "1d118dc0be114b8c84017bba529cf651c3791e7876bff04a8647aaf3889a355e",
+      "source_transcript_reference": "بدلیل فاصله زیاد از قاره، حیوانات پستاندار نمی‌توانستند تا آنجا سفر کنند، از این رو لاکپشت بزرگ اصلی‌ترین حیوانی است که در گالاپاگوس چرا می‌کند.",
+      "double_annotate_for_iaa": false,
+      "annotation_state": "PENDING_HUMAN_PRAAT"
+    },
+    {
+      "sample_id": "fleurs-fa-dev-0021",
+      "language": "fa",
+      "duration_sec": 15.84,
+      "audio_sha256": "ee3337505f57ade2a9bdd1e13e6bfa83683579149a06e1dba469de2d11d2227d",
+      "source_transcript_reference": "عربها اسلام را به این سرزمین‌ها نیز آوردند، و در جزایر کومور و مایوت در مقیاس وسیع شکل گرفت.",
+      "double_annotate_for_iaa": true,
+      "annotation_state": "PENDING_HUMAN_PRAAT"
+    },
+    {
+      "sample_id": "fleurs-fa-dev-0022",
+      "language": "fa",
+      "duration_sec": 14.52,
+      "audio_sha256": "e558df2056970c3d2d19ba51bb13c5836c0a730fbbed3041186d9659344284ef",
+      "source_transcript_reference": "عربها اسلام را به این سرزمین‌ها نیز آوردند، و در جزایر کومور و مایوت در مقیاس وسیع شکل گرفت.",
+      "double_annotate_for_iaa": false,
+      "annotation_state": "PENDING_HUMAN_PRAAT"
+    },
+    {
+      "sample_id": "fleurs-fa-dev-0023",
+      "language": "fa",
+      "duration_sec": 10.8,
+      "audio_sha256": "fc4d329e6db61c2a2df107664850ba20dce00c90797c33a763be13109314e978",
+      "source_transcript_reference": "عربها اسلام را به این سرزمین‌ها نیز آوردند، و در جزایر کومور و مایوت در مقیاس وسیع شکل گرفت.",
+      "double_annotate_for_iaa": false,
+      "annotation_state": "PENDING_HUMAN_PRAAT"
+    },
+    {
+      "sample_id": "fleurs-fa-dev-0024",
+      "language": "fa",
+      "duration_sec": 8.64,
+      "audio_sha256": "aa419fabe536542d1d12d562005eda421f06412189450605f7742ee273617e87",
+      "source_transcript_reference": "اولین مورد این بیماری در این فصل در اواخر جولای گزارش شد.",
+      "double_annotate_for_iaa": false,
+      "annotation_state": "PENDING_HUMAN_PRAAT"
+    },
+    {
+      "sample_id": "fleurs-fa-dev-0025",
+      "language": "fa",
+      "duration_sec": 8.4,
+      "audio_sha256": "fb89f9b7d850224240722d073051c8e0ddd3ee31648ba16e2af89447041ae993",
+      "source_transcript_reference": "اولین مورد این بیماری در این فصل در اواخر جولای گزارش شد.",
+      "double_annotate_for_iaa": false,
+      "annotation_state": "PENDING_HUMAN_PRAAT"
+    },
+    {
+      "sample_id": "fleurs-fa-dev-0026",
+      "language": "fa",
+      "duration_sec": 6.48,
+      "audio_sha256": "ea712996817930466923fe8471483830f59b34adcf17f1dcdd0d8a99e4a06a7c",
+      "source_transcript_reference": "دین اصلی مردم مولداوی مسیحیت ارتدکس است.",
+      "double_annotate_for_iaa": true,
+      "annotation_state": "PENDING_HUMAN_PRAAT"
+    },
+    {
+      "sample_id": "fleurs-fa-dev-0027",
+      "language": "fa",
+      "duration_sec": 7.32,
+      "audio_sha256": "1bc8f6abd25a2fba326bed257541b9c84066db4cf1f03269fee111591ef83297",
+      "source_transcript_reference": "دین اصلی مردم مولداوی مسیحیت ارتدکس است.",
+      "double_annotate_for_iaa": false,
+      "annotation_state": "PENDING_HUMAN_PRAAT"
+    },
+    {
+      "sample_id": "fleurs-fa-dev-0028",
+      "language": "fa",
+      "duration_sec": 10.14,
+      "audio_sha256": "3057ce4b7c76b66dffb516f1e736241ad5b100ab6ae9bcdb9b278e6ebdd28a6b",
+      "source_transcript_reference": "دین اصلی مردم مولداوی مسیحیت ارتدکس است.",
+      "double_annotate_for_iaa": false,
+      "annotation_state": "PENDING_HUMAN_PRAAT"
+    },
+    {
+      "sample_id": "fleurs-fa-dev-0029",
+      "language": "fa",
+      "duration_sec": 13.56,
+      "audio_sha256": "9b37ab75bdf43540457d0608fc4b02e3920b50115a67faf440ab0d1360e22b74",
+      "source_transcript_reference": "هزاران سال پیش، مردی به نام آریستارخوس گفت که منظومه شمسی به دور خورشید حرکت می کند.",
+      "double_annotate_for_iaa": false,
+      "annotation_state": "PENDING_HUMAN_PRAAT"
+    },
+    {
+      "sample_id": "fleurs-fa-dev-0030",
+      "language": "fa",
+      "duration_sec": 14.16,
+      "audio_sha256": "6e6ee69550fff8ea3cae8d52cc95b87a2918df8d4afb2d31505267df0e4f53b2",
+      "source_transcript_reference": "هزاران سال پیش، مردی به نام آریستارخوس گفت که منظومه شمسی به دور خورشید حرکت می کند.",
+      "double_annotate_for_iaa": false,
+      "annotation_state": "PENDING_HUMAN_PRAAT"
+    },
+    {
+      "sample_id": "fleurs-en-dev-0001",
+      "language": "en",
+      "duration_sec": 11.46,
+      "audio_sha256": "987936fae1233b7e09f82d7a9a46574ac20ef0a0a05ce90a3119841dba944e42",
+      "source_transcript_reference": "The main local beer is 'Number One', it is not a complex beer, but pleasant and refreshing. The other local beer is called \"Manta\".",
+      "double_annotate_for_iaa": true,
+      "annotation_state": "PENDING_HUMAN_PRAAT"
+    },
+    {
+      "sample_id": "fleurs-en-dev-0002",
+      "language": "en",
+      "duration_sec": 10.58,
+      "audio_sha256": "436c466dcb7657138bc2cbca30ed1e93a403a3a1ebf671d71d10855cd505a4eb",
+      "source_transcript_reference": "The main local beer is 'Number One', it is not a complex beer, but pleasant and refreshing. The other local beer is called \"Manta\".",
+      "double_annotate_for_iaa": false,
+      "annotation_state": "PENDING_HUMAN_PRAAT"
+    },
+    {
+      "sample_id": "fleurs-en-dev-0003",
+      "language": "en",
+      "duration_sec": 12.84,
+      "audio_sha256": "1f1b9ab54c8373d7c4c24c263c063a0c64c885b1442855df93c999ba9820f189",
+      "source_transcript_reference": "Insects were the first animals to take to the air. Their ability to fly helped them evade enemies more easily and find food and mates more efficiently.",
+      "double_annotate_for_iaa": false,
+      "annotation_state": "PENDING_HUMAN_PRAAT"
+    },
+    {
+      "sample_id": "fleurs-en-dev-0004",
+      "language": "en",
+      "duration_sec": 9.12,
+      "audio_sha256": "3f43b249f0a71daa9cbf90b91355c8f8a63e511af734f694ead932f1ed8e1a76",
+      "source_transcript_reference": "Insects were the first animals to take to the air. Their ability to fly helped them evade enemies more easily and find food and mates more efficiently.",
+      "double_annotate_for_iaa": false,
+      "annotation_state": "PENDING_HUMAN_PRAAT"
+    },
+    {
+      "sample_id": "fleurs-en-dev-0005",
+      "language": "en",
+      "duration_sec": 9.12,
+      "audio_sha256": "c1499714841c3cc73701f7bb08aa2eb586e03c72ab693d211ad9bf1daf9aa1df",
+      "source_transcript_reference": "Insects were the first animals to take to the air. Their ability to fly helped them evade enemies more easily and find food and mates more efficiently.",
+      "double_annotate_for_iaa": false,
+      "annotation_state": "PENDING_HUMAN_PRAAT"
+    },
+    {
+      "sample_id": "fleurs-en-dev-0006",
+      "language": "en",
+      "duration_sec": 6.0,
+      "audio_sha256": "1b0004567b003a0a05926592de8a4fc5bf8e5a88c7af20bc7a905a40a33694d8",
+      "source_transcript_reference": "There are many beaches, due to Auckland's straddling of two harbours. The most popular ones are in three areas.",
+      "double_annotate_for_iaa": true,
+      "annotation_state": "PENDING_HUMAN_PRAAT"
+    },
+    {
+      "sample_id": "fleurs-en-dev-0007",
+      "language": "en",
+      "duration_sec": 10.68,
+      "audio_sha256": "4d4cd791e68b0c73bc99b51597893391f772328d38de5a3999ce915170a25203",
+      "source_transcript_reference": "There are many beaches, due to Auckland's straddling of two harbours. The most popular ones are in three areas.",
+      "double_annotate_for_iaa": false,
+      "annotation_state": "PENDING_HUMAN_PRAAT"
+    },
+    {
+      "sample_id": "fleurs-en-dev-0008",
+      "language": "en",
+      "duration_sec": 7.5,
+      "audio_sha256": "523b7679b80030c38a2adf0211803ce46e43f34f8f5eeb2d351a1c29daf2f9aa",
+      "source_transcript_reference": "After seeing the horrors and atrocities of war during World War I, nations desired to avoid such a situation again in the future.",
+      "double_annotate_for_iaa": false,
+      "annotation_state": "PENDING_HUMAN_PRAAT"
+    },
+    {
+      "sample_id": "fleurs-en-dev-0009",
+      "language": "en",
+      "duration_sec": 10.68,
+      "audio_sha256": "aedd768a6fc581ec9128bf1f1de4844ca43f212d7669f50cb12442a7ea6fcfd5",
+      "source_transcript_reference": "After seeing the horrors and atrocities of war during World War I, nations desired to avoid such a situation again in the future.",
+      "double_annotate_for_iaa": false,
+      "annotation_state": "PENDING_HUMAN_PRAAT"
+    },
+    {
+      "sample_id": "fleurs-en-dev-0010",
+      "language": "en",
+      "duration_sec": 7.8,
+      "audio_sha256": "178c5efebdcf7f19dd8b89090f350a897a0beb7b869d79b7f7909894c8da9972",
+      "source_transcript_reference": "After seeing the horrors and atrocities of war during World War I, nations desired to avoid such a situation again in the future.",
+      "double_annotate_for_iaa": false,
+      "annotation_state": "PENDING_HUMAN_PRAAT"
+    },
+    {
+      "sample_id": "fleurs-en-dev-0011",
+      "language": "en",
+      "duration_sec": 10.0,
+      "audio_sha256": "314b3a5139b0213c5389f28d7f313edfc99510b5018d7d888d85c05234e70e29",
+      "source_transcript_reference": "Robin Uthappa made the innings highest score, 70 runs in just 41 balls by hitting 11 fours and 2 sixes.",
+      "double_annotate_for_iaa": true,
+      "annotation_state": "PENDING_HUMAN_PRAAT"
+    },
+    {
+      "sample_id": "fleurs-en-dev-0012",
+      "language": "en",
+      "duration_sec": 8.64,
+      "audio_sha256": "501f89dbddde87ed248e86fb313ff382f00baf0f12c6da4b9d81f5ba22dbeb9b",
+      "source_transcript_reference": "Robin Uthappa made the innings highest score, 70 runs in just 41 balls by hitting 11 fours and 2 sixes.",
+      "double_annotate_for_iaa": false,
+      "annotation_state": "PENDING_HUMAN_PRAAT"
+    },
+    {
+      "sample_id": "fleurs-en-dev-0013",
+      "language": "en",
+      "duration_sec": 12.38,
+      "audio_sha256": "74ddf8add26974074fa224b0d5196795646b1cbce30085a99a871217ed443b0c",
+      "source_transcript_reference": "Robin Uthappa made the innings highest score, 70 runs in just 41 balls by hitting 11 fours and 2 sixes.",
+      "double_annotate_for_iaa": false,
+      "annotation_state": "PENDING_HUMAN_PRAAT"
+    },
+    {
+      "sample_id": "fleurs-en-dev-0014",
+      "language": "en",
+      "duration_sec": 7.92,
+      "audio_sha256": "f22914f3b4982309ae427edcda0dbcb6250a1749cbd4b27bbff21f0f60d7e0f5",
+      "source_transcript_reference": "Scientists think that ocelots follow and find animals to eat (prey) by smell, sniffing for where they've been on the ground.",
+      "double_annotate_for_iaa": false,
+      "annotation_state": "PENDING_HUMAN_PRAAT"
+    },
+    {
+      "sample_id": "fleurs-en-dev-0015",
+      "language": "en",
+      "duration_sec": 9.0,
+      "audio_sha256": "65d9fa6ba188b3903a340e0335dffbd67f570e3c1049ff99ec2ff143b698399d",
+      "source_transcript_reference": "Scientists think that ocelots follow and find animals to eat (prey) by smell, sniffing for where they've been on the ground.",
+      "double_annotate_for_iaa": false,
+      "annotation_state": "PENDING_HUMAN_PRAAT"
+    },
+    {
+      "sample_id": "fleurs-en-dev-0016",
+      "language": "en",
+      "duration_sec": 11.3,
+      "audio_sha256": "6e5fda78ce7a9dcc751ed5ce8b9218d267d434ac7bc5aa83ad9eb7c452ce9f44",
+      "source_transcript_reference": "Scientists think that ocelots follow and find animals to eat (prey) by smell, sniffing for where they've been on the ground.",
+      "double_annotate_for_iaa": true,
+      "annotation_state": "PENDING_HUMAN_PRAAT"
+    },
+    {
+      "sample_id": "fleurs-en-dev-0017",
+      "language": "en",
+      "duration_sec": 12.76,
+      "audio_sha256": "559a99e2d2f24a69aa8a6777faf4c6436c5c1952af84ead73a8e091469907c87",
+      "source_transcript_reference": "Ancient Roman meals couldn't have included foods that came to Europe from America or from Asia in later centuries.",
+      "double_annotate_for_iaa": false,
+      "annotation_state": "PENDING_HUMAN_PRAAT"
+    },
+    {
+      "sample_id": "fleurs-en-dev-0018",
+      "language": "en",
+      "duration_sec": 8.4,
+      "audio_sha256": "c7d5811ce144fc2268718c5ba497ab3eb68ab1fefca96431e4851f49f5d32aff",
+      "source_transcript_reference": "Ancient Roman meals couldn't have included foods that came to Europe from America or from Asia in later centuries.",
+      "double_annotate_for_iaa": false,
+      "annotation_state": "PENDING_HUMAN_PRAAT"
+    },
+    {
+      "sample_id": "fleurs-en-dev-0019",
+      "language": "en",
+      "duration_sec": 10.68,
+      "audio_sha256": "902f0e4213840b7bcdf9342b535129e7e8c9b7404273be7961d1e1de4309448a",
+      "source_transcript_reference": "Ancient Roman meals couldn't have included foods that came to Europe from America or from Asia in later centuries.",
+      "double_annotate_for_iaa": false,
+      "annotation_state": "PENDING_HUMAN_PRAAT"
+    },
+    {
+      "sample_id": "fleurs-en-dev-0020",
+      "language": "en",
+      "duration_sec": 6.58,
+      "audio_sha256": "00f5908595b45bc56afee5bb8ea4b75cede2544e9da2a458df018f0ed6e40aa8",
+      "source_transcript_reference": "Safaris are perhaps the greatest tourism draw in Africa and the highlight for many visitors.",
+      "double_annotate_for_iaa": false,
+      "annotation_state": "PENDING_HUMAN_PRAAT"
+    },
+    {
+      "sample_id": "fleurs-en-dev-0021",
+      "language": "en",
+      "duration_sec": 6.24,
+      "audio_sha256": "415d31d2a64226fb32b00b78f602db99a4438d11a74e12a75209719fcbb82754",
+      "source_transcript_reference": "Safaris are perhaps the greatest tourism draw in Africa and the highlight for many visitors.",
+      "double_annotate_for_iaa": true,
+      "annotation_state": "PENDING_HUMAN_PRAAT"
+    },
+    {
+      "sample_id": "fleurs-en-dev-0022",
+      "language": "en",
+      "duration_sec": 13.68,
+      "audio_sha256": "4bccdea8c1f5e6db3e7c55e465c61e4f1ecc55818e3e839e9d30f2f87be4680e",
+      "source_transcript_reference": "Out of 1,400 people polled prior to the 2010 federal election, those who oppose Australia becoming a republic grew by 8 per cent since 2008.",
+      "double_annotate_for_iaa": false,
+      "annotation_state": "PENDING_HUMAN_PRAAT"
+    },
+    {
+      "sample_id": "fleurs-en-dev-0023",
+      "language": "en",
+      "duration_sec": 14.94,
+      "audio_sha256": "9cf560c8a352e3c7e90689792ba27dffabaca5ebd406782d20a51852eedbfb49",
+      "source_transcript_reference": "Out of 1,400 people polled prior to the 2010 federal election, those who oppose Australia becoming a republic grew by 8 per cent since 2008.",
+      "double_annotate_for_iaa": false,
+      "annotation_state": "PENDING_HUMAN_PRAAT"
+    },
+    {
+      "sample_id": "fleurs-en-dev-0024",
+      "language": "en",
+      "duration_sec": 9.36,
+      "audio_sha256": "9e7a8e138beb9d29fbd996b6cf8638cbcb57fb066972649773e2372f3ff625bc",
+      "source_transcript_reference": "Out of 1,400 people polled prior to the 2010 federal election, those who oppose Australia becoming a republic grew by 8 per cent since 2008.",
+      "double_annotate_for_iaa": false,
+      "annotation_state": "PENDING_HUMAN_PRAAT"
+    },
+    {
+      "sample_id": "fleurs-en-dev-0025",
+      "language": "en",
+      "duration_sec": 13.26,
+      "audio_sha256": "5b0c89246d98f0553717704789c5bdedd27385497924986948a3b521c52d643f",
+      "source_transcript_reference": "Though it is widely used, especially among non-Romani, the word \"Gypsy\" is often considered offensive because of its associations with negative stereotypes and inaccurate perceptions of Romani people.",
+      "double_annotate_for_iaa": false,
+      "annotation_state": "PENDING_HUMAN_PRAAT"
+    },
+    {
+      "sample_id": "fleurs-en-dev-0026",
+      "language": "en",
+      "duration_sec": 14.3,
+      "audio_sha256": "21eda6fdd7df8e183d949b438fcbbd1b10147f64cea1b299b3a09091f166fc67",
+      "source_transcript_reference": "Though it is widely used, especially among non-Romani, the word \"Gypsy\" is often considered offensive because of its associations with negative stereotypes and inaccurate perceptions of Romani people.",
+      "double_annotate_for_iaa": true,
+      "annotation_state": "PENDING_HUMAN_PRAAT"
+    },
+    {
+      "sample_id": "fleurs-en-dev-0027",
+      "language": "en",
+      "duration_sec": 12.36,
+      "audio_sha256": "b2ad90aa89580e22b16b4286974686e30ea5b94fde85d7476d02ab1938fe65e9",
+      "source_transcript_reference": "Though it is widely used, especially among non-Romani, the word \"Gypsy\" is often considered offensive because of its associations with negative stereotypes and inaccurate perceptions of Romani people.",
+      "double_annotate_for_iaa": false,
+      "annotation_state": "PENDING_HUMAN_PRAAT"
+    },
+    {
+      "sample_id": "fleurs-en-dev-0028",
+      "language": "en",
+      "duration_sec": 8.64,
+      "audio_sha256": "1fb9046f50435e4a10ec7b36a79e1336ac4ffa8a6e67aaa44659d8eac0ba6dbb",
+      "source_transcript_reference": "Arly Velasquez of Mexico finished fifteenth in the men's sitting Super-G. New Zealand's Adam Hall finished ninth in the men's standing Super-G.",
+      "double_annotate_for_iaa": false,
+      "annotation_state": "PENDING_HUMAN_PRAAT"
+    },
+    {
+      "sample_id": "fleurs-en-dev-0029",
+      "language": "en",
+      "duration_sec": 14.34,
+      "audio_sha256": "462896adeeb7e076d20a03aaa9d975b0d9e3daf9849be8c23a7edae02342eb8d",
+      "source_transcript_reference": "Arly Velasquez of Mexico finished fifteenth in the men's sitting Super-G. New Zealand's Adam Hall finished ninth in the men's standing Super-G.",
+      "double_annotate_for_iaa": false,
+      "annotation_state": "PENDING_HUMAN_PRAAT"
+    },
+    {
+      "sample_id": "fleurs-en-dev-0030",
+      "language": "en",
+      "duration_sec": 6.84,
+      "audio_sha256": "e866bc6f5205fa09ccd3fde20c3df62e0829049f6b89ba444b5d4efa47a6f879",
+      "source_transcript_reference": "With only eighteen medals available a day, a number of countries have failed to make the medal podium.",
+      "double_annotate_for_iaa": false,
+      "annotation_state": "PENDING_HUMAN_PRAAT"
+    }
+  ]
+}

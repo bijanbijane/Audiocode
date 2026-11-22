@@ -1,0 +1,347 @@
+{
+  "window_key": "2b",
+  "global_offset_sec": 1500,
+  "duration_sec": 300.0,
+  "num_threads": 3,
+  "wav_sha256": "2a8e8bb9672106dfb9774b8a4c70597251a7f1153584b141ada1f1e5a31d92d6",
+  "rc": 0,
+  "preprocess_sec": 0.177,
+  "wall_sec": 215.108,
+  "decode_sec": 205.42,
+  "rtf": 0.6847,
+  "peak_rss_mib": 2017.49,
+  "post_warmup_rss_min_mib": 1628.14,
+  "post_warmup_rss_max_mib": 2017.49,
+  "post_warmup_rss_growth_mib": 389.35,
+  "steady_state_second_half_rss_drift_mib": 12.0,
+  "segments_count": 36,
+  "words_count": 734,
+  "alignment_probe": {
+    "segments_tested": 3,
+    "all_rc_zero": true,
+    "align_rtf": 0.01058,
+    "samples": [
+      {
+        "segment_index": 0,
+        "seg_dur_sec": 5.294,
+        "rc": 0,
+        "align_decode_sec": 0.06,
+        "align_rtf": 0.01133
+      },
+      {
+        "segment_index": 1,
+        "seg_dur_sec": 9.838,
+        "rc": 0,
+        "align_decode_sec": 0.095,
+        "align_rtf": 0.00966
+      },
+      {
+        "segment_index": 2,
+        "seg_dur_sec": 10.67,
+        "rc": 0,
+        "align_decode_sec": 0.118,
+        "align_rtf": 0.01106
+      }
+    ]
+  },
+  "segments": [
+    {
+      "local_start_sec": 0.094,
+      "local_end_sec": 5.388,
+      "global_start_sec": 1500.094,
+      "global_end_sec": 1505.388,
+      "text": "to have made myself enough of a favorite with her to make her sorry then."
+    },
+    {
+      "local_start_sec": 6.046,
+      "local_end_sec": 15.884,
+      "global_start_sec": 1506.046,
+      "global_end_sec": 1515.884,
+      "text": "when she gave me one cold parting kiss upon my forehead like a thaw drop from the stone porch it was a very frosty day"
+    },
+    {
+      "local_start_sec": 16.414,
+      "local_end_sec": 27.084,
+      "global_start_sec": 1516.414,
+      "global_end_sec": 1527.084,
+      "text": "i felt so miserable and self-reproachful that i clung to her and told her it was my fault i knew that she could say good-bye so easily"
+    },
+    {
+      "local_start_sec": 27.998,
+      "local_end_sec": 31.692,
+      "global_start_sec": 1527.998,
+      "global_end_sec": 1531.692,
+      "text": "No, Esther, she returned, it is your misfortune."
+    },
+    {
+      "local_start_sec": 32.766,
+      "local_end_sec": 42.7,
+      "global_start_sec": 1532.766,
+      "global_end_sec": 1542.7,
+      "text": "The coach was at the little lawn gate. We had not come out until we heard the wheels, and thus I left her with a sorrowful heart."
+    },
+    {
+      "local_start_sec": 43.518,
+      "local_end_sec": 48.588,
+      "global_start_sec": 1543.518,
+      "global_end_sec": 1548.588,
+      "text": "She went in before my boxes were lifted to the coach roof and shut the door."
+    },
+    {
+      "local_start_sec": 49.214,
+      "local_end_sec": 54.508,
+      "global_start_sec": 1549.214,
+      "global_end_sec": 1554.508,
+      "text": "As long as I could see the house, I looked back at it from the window through my tears."
+    },
+    {
+      "local_start_sec": 55.006,
+      "local_end_sec": 60.268,
+      "global_start_sec": 1555.006,
+      "global_end_sec": 1560.268,
+      "text": "My godmother had left Mrs. Rachel, all the little property she possessed."
+    },
+    {
+      "local_start_sec": 60.734,
+      "local_end_sec": 62.54,
+      "global_start_sec": 1560.734,
+      "global_end_sec": 1562.54,
+      "text": "and there was to be a sail."
+    },
+    {
+      "local_start_sec": 63.134,
+      "local_end_sec": 73.708,
+      "global_start_sec": 1563.134,
+      "global_end_sec": 1573.708,
+      "text": "and an old hearth-rug with roses on it which always seemed to me the first thing in the world i had ever seen was hanging outside in the frost and snow"
+    },
+    {
+      "local_start_sec": 74.398,
+      "local_end_sec": 89.004,
+      "global_start_sec": 1574.398,
+      "global_end_sec": 1589.004,
+      "text": "a day or two before i had wrapped the dear old doll in her own shawl and quietly laid her i am half ashamed to tell it in the garden earth under the tree that shaded my old window"
+    },
+    {
+      "local_start_sec": 89.662,
+      "local_end_sec": 96.876,
+      "global_start_sec": 1589.662,
+      "global_end_sec": 1596.876,
+      "text": "I had no companion left but my bird, and him I carried with me in his cage."
+    },
+    {
+      "local_start_sec": 97.726,
+      "local_end_sec": 109.036,
+      "global_start_sec": 1597.726,
+      "global_end_sec": 1609.036,
+      "text": "when the house was out of sight i sat with my birdcage in the straw at my feet forward on the low seat to look out of the high window"
+    },
+    {
+      "local_start_sec": 109.982,
+      "local_end_sec": 114.892,
+      "global_start_sec": 1609.982,
+      "global_end_sec": 1614.892,
+      "text": "watching the frosty trees that were like beautiful pieces of spar."
+    },
+    {
+      "local_start_sec": 115.358,
+      "local_end_sec": 131.948,
+      "global_start_sec": 1615.358,
+      "global_end_sec": 1631.948,
+      "text": "and the fields all smooth and white with last night's snow and the sun so red but yielding so little heat and the ice dark like metal where the skaters and sliders had brushed the snow away"
+    },
+    {
+      "local_start_sec": 132.862,
+      "local_end_sec": 145.356,
+      "global_start_sec": 1632.862,
+      "global_end_sec": 1645.356,
+      "text": "there was a gentleman in the coach who sat on the opposite seat and looked very large in a quantity of wrappings but he sat gazing out of the other window and took no notice of me"
+    },
+    {
+      "local_start_sec": 146.398,
+      "local_end_sec": 166.94,
+      "global_start_sec": 1646.398,
+      "global_end_sec": 1666.94,
+      "text": "I thought of my dead godmother, of the night when I read to her, of her frowning so fixedly and sternly in her bed, of the strange place I was going to, of the people I should find there, and what they would be like, and what they would say to me, when a voice in the coach gave me a terrible start."
+    },
+    {
+      "local_start_sec": 167.678,
+      "local_end_sec": 168.588,
+      "global_start_sec": 1667.678,
+      "global_end_sec": 1668.588,
+      "text": "It said,"
+    },
+    {
+      "local_start_sec": 169.054,
+      "local_end_sec": 171.116,
+      "global_start_sec": 1669.054,
+      "global_end_sec": 1671.116,
+      "text": "What the devil are you crying for?"
+    },
+    {
+      "local_start_sec": 172.19,
+      "local_end_sec": 177.708,
+      "global_start_sec": 1672.19,
+      "global_end_sec": 1677.708,
+      "text": "I was so frightened that I lost my voice and could only answer in a whisper. Me, sir?"
+    },
+    {
+      "local_start_sec": 178.494,
+      "local_end_sec": 185.484,
+      "global_start_sec": 1678.494,
+      "global_end_sec": 1685.484,
+      "text": "for of course i knew it must have been the gentleman in the quantity of wrappings though he was still looking out of his window"
+    },
+    {
+      "local_start_sec": 186.078,
+      "local_end_sec": 188.364,
+      "global_start_sec": 1686.078,
+      "global_end_sec": 1688.364,
+      "text": "Yes, you, he said, turning round."
+    },
+    {
+      "local_start_sec": 189.054,
+      "local_end_sec": 192.012,
+      "global_start_sec": 1689.054,
+      "global_end_sec": 1692.012,
+      "text": "I didn't know I was crying, sir, I faltered."
+    },
+    {
+      "local_start_sec": 192.702,
+      "local_end_sec": 209.548,
+      "global_start_sec": 1692.702,
+      "global_end_sec": 1709.548,
+      "text": "but you are said the gentleman look here he came quite opposite to me from the other corner of the coach brushed one of his large furry cuffs across my eyes but without hurting me and showed me that it was wet"
+    },
+    {
+      "local_start_sec": 210.334,
+      "local_end_sec": 213.772,
+      "global_start_sec": 1710.334,
+      "global_end_sec": 1713.772,
+      "text": "There, now you know you are, he said, don't you?"
+    },
+    {
+      "local_start_sec": 214.462,
+      "local_end_sec": 220.62,
+      "global_start_sec": 1714.462,
+      "global_end_sec": 1720.62,
+      "text": "yes sir i said and what are you crying for said the gentleman don't you want to go there"
+    },
+    {
+      "local_start_sec": 221.63,
+      "local_end_sec": 222.412,
+      "global_start_sec": 1721.63,
+      "global_end_sec": 1722.412,
+      "text": "Where, sir?"
+    },
+    {
+      "local_start_sec": 223.198,
+      "local_end_sec": 226.38,
+      "global_start_sec": 1723.198,
+      "global_end_sec": 1726.38,
+      "text": "where why wherever you are going said the gentleman"
+    },
+    {
+      "local_start_sec": 227.198,
+      "local_end_sec": 230.156,
+      "global_start_sec": 1727.198,
+      "global_end_sec": 1730.156,
+      "text": "I am very glad to go there, I answered."
+    },
+    {
+      "local_start_sec": 230.782,
+      "local_end_sec": 233.548,
+      "global_start_sec": 1730.782,
+      "global_end_sec": 1733.548,
+      "text": "\"Well, then, look glad,\" said the gentleman."
+    },
+    {
+      "local_start_sec": 234.334,
+      "local_end_sec": 240.332,
+      "global_start_sec": 1734.334,
+      "global_end_sec": 1740.332,
+      "text": "I thought he was very strange, or at least that what I could see of him was very strange."
+    },
+    {
+      "local_start_sec": 240.798,
+      "local_end_sec": 255.82,
+      "global_start_sec": 1740.798,
+      "global_end_sec": 1755.82,
+      "text": "for he was wrapped up to the chin and his face was almost hidden in a fur cap with broad fur straps at the side of his head fastened under his chin but i was composed again and not afraid of him"
+    },
+    {
+      "local_start_sec": 256.318,
+      "local_end_sec": 266.572,
+      "global_start_sec": 1756.318,
+      "global_end_sec": 1766.572,
+      "text": "so i told him that i thought i must have been crying because of my godmother's death and because of mrs rachel's not being sorry to part with me"
+    },
+    {
+      "local_start_sec": 267.934,
+      "local_end_sec": 274.636,
+      "global_start_sec": 1767.934,
+      "global_end_sec": 1774.636,
+      "text": "confound mrs rachel said the gentleman let her fly away in a high wind on a broomstick"
+    },
+    {
+      "local_start_sec": 275.486,
+      "local_end_sec": 281.26,
+      "global_start_sec": 1775.486,
+      "global_end_sec": 1781.26,
+      "text": "I began to be really afraid of him now, and looked at him with the greatest astonishment."
+    },
+    {
+      "local_start_sec": 282.174,
+      "local_end_sec": 292.012,
+      "global_start_sec": 1782.174,
+      "global_end_sec": 1792.012,
+      "text": "but i thought that he had pleasant eyes although he kept on muttering to himself in an angry manner and calling mrs rachel names"
+    }
+  ],
+  "rss_timeline_sampled": [
+    {
+      "elapsed_sec": 0.0,
+      "rss_mib": 6.49
+    },
+    {
+      "elapsed_sec": 20.0,
+      "rss_mib": 1657.64
+    },
+    {
+      "elapsed_sec": 40.0,
+      "rss_mib": 1657.64
+    },
+    {
+      "elapsed_sec": 60.0,
+      "rss_mib": 1687.64
+    },
+    {
+      "elapsed_sec": 80.0,
+      "rss_mib": 1759.64
+    },
+    {
+      "elapsed_sec": 100.0,
+      "rss_mib": 1933.49
+    },
+    {
+      "elapsed_sec": 120.1,
+      "rss_mib": 2011.49
+    },
+    {
+      "elapsed_sec": 140.1,
+      "rss_mib": 2011.49
+    },
+    {
+      "elapsed_sec": 160.1,
+      "rss_mib": 2011.49
+    },
+    {
+      "elapsed_sec": 180.1,
+      "rss_mib": 2017.49
+    },
+    {
+      "elapsed_sec": 200.1,
+      "rss_mib": 2017.49
+    }
+  ]
+}

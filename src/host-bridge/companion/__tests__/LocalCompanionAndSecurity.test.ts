@@ -22,12 +22,14 @@ import http from 'node:http';
 import path from 'node:path';
 import test from 'node:test';
 import express from 'express';
+import os from 'node:os';
 import {
   LocalCompanionService,
   isAllowedCompanionOrigin,
   isAllowedLoopbackHostHeader,
   validateLocalAudioFilePath,
 } from '../LocalCompanionService';
+import { verifyModelFilesIntegrity } from '../../../asr-core/LocalSherpaNeuralEngine';
 import {
   deduplicateChunkOverlap,
   runBoundedLongAudioPipeline,
@@ -271,12 +273,41 @@ test('Red-Team: Live Companion HTTP server enforces HMAC auth, nonce replay, Ori
       body: replayPayload,
     });
     assert.equal(firstCall.status, 200);
+    const capListData = (await firstCall.json()) as { ok: boolean; capabilities?: string[] };
+    assert.equal(capListData.ok, true);
+    assert.ok(Array.isArray(capListData.capabilities) && capListData.capabilities.length >= 6);
     const replayCall = await fetch(`${baseUrl}/ipc`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${hs.session_token}` },
       body: replayPayload,
     });
     assert.equal(replayCall.status, 409);
+
+    // E2. Bundled sample Persian WAV retrieval when runtime and sample audio exist
+    if ((health as { sampleAudioAvailable?: boolean }).sampleAudioAvailable) {
+      const sampleResp = await fetch(`${baseUrl}/ipc`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${hs.session_token}` },
+        body: JSON.stringify({
+          ipc_protocol_version: '1.0.0',
+          session_id: hs.session_id,
+          nonce: 'nonce-sample-wav-001',
+          timestamp_ms: Date.now(),
+          command: 'CAPABILITY_EXECUTE',
+          payload: { action: 'GET_SAMPLE_PERSIAN_AUDIO' },
+        }),
+      });
+      assert.equal(sampleResp.status, 200);
+      const sampleJson = (await sampleResp.json()) as {
+        ok: boolean;
+        audioBase64?: string;
+        filename?: string;
+      };
+      assert.equal(sampleJson.ok, true);
+      assert.ok(sampleJson.audioBase64 && sampleJson.audioBase64.length > 100);
+      const wavBuf = Buffer.from(sampleJson.audioBase64, 'base64');
+      assert.equal(wavBuf.subarray(0, 4).toString('ascii'), 'RIFF');
+    }
 
     // F. Path traversal via JOB_SUBMIT rejected with 403
     const travCall = await fetch(`${baseUrl}/ipc`, {
@@ -535,4 +566,32 @@ test('Chunked Companion upload and same-origin reverse-proxy guard work securely
     await new Promise<void>((resolve) => server.close(() => resolve()));
   }
 });
+
+test('verifyModelFilesIntegrity verifies genuine Shenava-Rizeh SHA-256 digests and rejects tampered weights', () => {
+  const realModelDir = path.join(
+    os.homedir(),
+    '.avapardaz',
+    'models',
+    'sherpa-onnx-nemo-ctc-fa-shenava-rizeh-v1.0-non-streaming-int8-2026-06-26',
+  );
+  const realOnnx = path.join(realModelDir, 'model.int8.onnx');
+  const realTokens = path.join(realModelDir, 'tokens.txt');
+  if (fs.existsSync(realOnnx) && fs.existsSync(realTokens)) {
+    assert.equal(verifyModelFilesIntegrity([realOnnx, realTokens]), true);
+  }
+
+  // Tampered model file (wrong size / wrong digest) MUST fail strict integrity verification
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'avp-integrity-test-'));
+  try {
+    const fakeOnnx = path.join(tmpDir, 'model.int8.onnx');
+    const fakeTokens = path.join(tmpDir, 'tokens.txt');
+    fs.writeFileSync(fakeOnnx, Buffer.from('corrupt-weights-placeholder'));
+    fs.writeFileSync(fakeTokens, Buffer.from('<blk> 0\n'));
+    assert.equal(verifyModelFilesIntegrity([fakeOnnx, fakeTokens]), false);
+    assert.equal(verifyModelFilesIntegrity([]), false);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
 

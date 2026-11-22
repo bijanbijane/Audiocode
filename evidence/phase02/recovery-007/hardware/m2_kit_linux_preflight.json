@@ -1,0 +1,27 @@
+{
+  "generated_utc": "2026-11-22T20:23:24.326674+00:00",
+  "execution_id": "AVP-P02-RECOVERY-007",
+  "host_platform": {
+    "system": "Linux",
+    "machine": "x86_64",
+    "release": "4.19.0-gvisor",
+    "is_physical_apple_m2": false
+  },
+  "dry_run_preflight": {
+    "returncode": 0,
+    "stdout": "{\n  \"preflight_mode\": true,\n  \"hardware\": {\n    \"timestamp_utc\": \"2026-11-22T20:23:24.167108+00:00\",\n    \"os\": \"Linux\",\n    \"os_release\": \"4.19.0-gvisor\",\n    \"macos_version\": null,\n    \"arch\": \"x86_64\",\n    \"cpu_brand\": \"UNKNOWN\",\n    \"cpu_logical_cores\": 4,\n    \"physical_memory_bytes\": 13958643712,\n    \"physical_memory_gib\": 13.0,\n    \"device_mode_enforced\": \"CPU_ONLY_NO_METAL\",\n    \"prerequisite_checks\": {\n      \"os_is_darwin\": false,\n      \"arch_is_arm64\": false,\n      \"cpu_matches_m2\": false,\n      \"memory_matches_8gb\": false\n    },\n    \"is_qualified_m2_8gb_target\": false\n  },\n  \"config_valid\": true\n}",
+    "stderr": ""
+  },
+  "linux_failsafe_execution": {
+    "returncode": 10,
+    "expected_failsafe_rc": 10,
+    "failsafe_aborted_cleanly": true,
+    "stdout": "",
+    "stderr": "FAIL-SAFE ABORT: Target hardware prerequisites NOT met for Apple Silicon M2 / 8 GB qualification.\n{\n  \"timestamp_utc\": \"2026-11-22T20:23:24.314843+00:00\",\n  \"os\": \"Linux\",\n  \"os_release\": \"4.19.0-gvisor\",\n  \"macos_version\": null,\n  \"arch\": \"x86_64\",\n  \"cpu_brand\": \"UNKNOWN\",\n  \"cpu_logical_cores\": 4,\n  \"physical_memory_bytes\": 13958643712,\n  \"physical_memory_gib\": 13.0,\n  \"device_mode_enforced\": \"CPU_ONLY_NO_METAL\",\n  \"prerequisite_checks\": {\n    \"os_is_darwin\": false,\n    \"arch_is_arm64\": false,\n    \"cpu_matches_m2\": false,\n    \"memory_matches_8gb\": false\n  },\n  \"is_qualified_m2_8gb_target\": false\n}"
+  },
+  "hardware_qualification_status": {
+    "PHYSICAL_M2": "NOT_RUN",
+    "AUDITION_COEXISTENCE": "NOT_RUN",
+    "THERMAL_QUALIFICATION": "NOT_RUN"
+  }
+}

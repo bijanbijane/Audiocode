@@ -1,0 +1,13 @@
+{
+  "experiment_id": "exp3_stability_50_jobs",
+  "state": "COMPLETED",
+  "config_hash": "ecf53910ff26689b8865923f15afbc5ce010b88fedd73c235454ca346162c736",
+  "runtime_version": "sherpa-onnx-v2.0.2 (ORT 1.28.2 CPU)",
+  "hardware_profile": "Linux 4.19.0-gvisor x86_64",
+  "total_items": 50,
+  "completed_valid_items": 50,
+  "failed_items": 0,
+  "corrupted_journal_lines_ignored": 0,
+  "reason": "Run finished",
+  "updated_utc": "2026-11-22T17:51:43.605079+00:00"
+}

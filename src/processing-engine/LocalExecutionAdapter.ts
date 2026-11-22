@@ -26,6 +26,11 @@ export interface LocalExecutionAdapterOptions {
   readonly memoryBudgetManager?: MemoryBudgetManager;
   readonly simulateRuntimeUnavailable?: boolean;
   readonly neuralWeightsInstalled?: boolean;
+  readonly checkNeuralWeightsAvailable?: () => {
+    readonly available: boolean;
+    readonly modelId?: string | null;
+    readonly modelVersion?: string | null;
+  };
 }
 
 /**
@@ -46,12 +51,14 @@ export class LocalExecutionAdapter implements UnifiedExecutionAdapter {
   private readonly memoryBudget: MemoryBudgetManager;
   private readonly simulateRuntimeUnavailable: boolean;
   private readonly neuralWeightsInstalled: boolean;
+  private readonly checkNeuralWeightsAvailable?: LocalExecutionAdapterOptions['checkNeuralWeightsAvailable'];
 
   constructor(options?: LocalExecutionAdapterOptions) {
     this.coreRouter = options?.coreRouter ?? new CoreModelRouter();
     this.memoryBudget = options?.memoryBudgetManager ?? getSharedMemoryBudgetManager();
     this.simulateRuntimeUnavailable = Boolean(options?.simulateRuntimeUnavailable);
     this.neuralWeightsInstalled = Boolean(options?.neuralWeightsInstalled);
+    this.checkNeuralWeightsAvailable = options?.checkNeuralWeightsAvailable;
   }
 
   public async discoverCapabilities(): Promise<readonly ProviderCapabilityDescriptor[]> {
@@ -76,17 +83,21 @@ export class LocalExecutionAdapter implements UnifiedExecutionAdapter {
     }
 
     const hostBackends = probeRuntimeBackendAvailability();
+    const externalProbe = this.checkNeuralWeightsAvailable?.();
     const descriptors: ProviderCapabilityDescriptor[] = hostBackends.map((b) => {
       let availability: CapabilityAvailabilityState;
+      const isExternalNeuralReady =
+        b.backendId === 'EXTERNAL_ONNX_RUNTIME' &&
+        (b.availableOnThisHost || this.neuralWeightsInstalled || Boolean(externalProbe?.available));
+
       if (b.backendId === 'LOCAL_CPU_ACOUSTIC_CTC_ADAPTER') {
         availability = b.availableOnThisHost ? 'AVAILABLE_NOW' : 'MISSING_REQUIRED_RUNTIME';
       } else if (b.backendId === 'EXTERNAL_ONNX_RUNTIME') {
-        availability =
-          b.availableOnThisHost || this.neuralWeightsInstalled
-            ? 'AVAILABLE_NOW'
-            : b.weightsPresent
-              ? 'MISSING_REQUIRED_RUNTIME'
-              : 'MISSING_MODEL_WEIGHTS';
+        availability = isExternalNeuralReady
+          ? 'AVAILABLE_NOW'
+          : b.weightsPresent
+            ? 'MISSING_REQUIRED_RUNTIME'
+            : 'MISSING_MODEL_WEIGHTS';
       } else {
         availability = b.availableOnThisHost
           ? 'AVAILABLE_NOW'
@@ -98,19 +109,24 @@ export class LocalExecutionAdapter implements UnifiedExecutionAdapter {
         providerId: b.backendId,
         displayName: b.displayName,
         availability,
-        reason:
-          b.reasonIfUnavailable ??
-          (b.backendId === 'LOCAL_CPU_ACOUSTIC_CTC_ADAPTER'
-            ? 'Deterministic local CPU acoustic CTC adapter verified (not an open-vocabulary neural model).'
-            : 'Verified local neural runtime available.'),
+        reason: isExternalNeuralReady
+          ? `Verified local Sherpa-ONNX CPU neural runtime ready (${externalProbe?.modelId ?? 'Reza2kn/Shenava-Rizeh'}).`
+          : b.reasonIfUnavailable ??
+            (b.backendId === 'LOCAL_CPU_ACOUSTIC_CTC_ADAPTER'
+              ? 'Deterministic local CPU acoustic CTC adapter verified (not an open-vocabulary neural model).'
+              : 'Verified local neural runtime available.'),
         modelId:
           b.backendId === 'LOCAL_CPU_ACOUSTIC_CTC_ADAPTER'
             ? this.coreRouter.acousticEngine.getModelVersionId()
-            : null,
+            : isExternalNeuralReady
+              ? (externalProbe?.modelId ?? 'Reza2kn/Shenava-Rizeh')
+              : null,
         modelVersion:
           b.backendId === 'LOCAL_CPU_ACOUSTIC_CTC_ADAPTER'
             ? this.coreRouter.acousticEngine.getModelVersionId()
-            : null,
+            : isExternalNeuralReady
+              ? (externalProbe?.modelVersion ?? 'INT8')
+              : null,
         isGenuineNeuralModel: b.backendId !== 'LOCAL_CPU_ACOUSTIC_CTC_ADAPTER',
         supportedProcessingModes: ['batch', 'long_form', 'streaming'] as const,
         supportedCapabilities:

@@ -1,0 +1,128 @@
+{
+  "timestamp_utc": "2026-11-22T16:14:50.631824+00:00",
+  "model": {
+    "model_id": "Reza2kn/Shenava-Rizeh",
+    "architecture": "NeMo FastConformer CTC INT8",
+    "license": "Apache-2.0",
+    "onnx_sha256": "6bdd4ab80626ddfe0b19338a5c96fcc4f2021ad78899cece20a805a48dc5250d",
+    "tokens_sha256": "8e192963f6e666dfa5721e5cbd4710bc1ef592460a45f08cefc94b2db16a6954",
+    "runtime": "sherpa-onnx-offline v2.0.2 (ONNX Runtime 1.28.2 CPU)"
+  },
+  "source_wavs": {
+    "wav_0_duration_sec": 14.466,
+    "wav_0_sha256": "abe148a30cb9730778189c4c220ef081b38be56d2a7b4006593ff3a63d3dea7c",
+    "wav_1_duration_sec": 2.536,
+    "wav_1_sha256": "37d0e153cbf87937e372800893f8061ebfe420e3fb0faf35446fcf348fca2ceb"
+  },
+  "offline_enforced": true,
+  "thread_scaling": [
+    {
+      "num_threads": 1,
+      "rc": 0,
+      "cold_start_ms": 1936.0,
+      "decode_sec": 0.677,
+      "wall_sec": 2.6715,
+      "rtf": 0.0468,
+      "cpu_user_sec": 2.61,
+      "cpu_sys_sec": 0.01,
+      "cpu_util_pct_of_1core": 98.1,
+      "peak_rss_mib": 200.2
+    },
+    {
+      "num_threads": 2,
+      "rc": 0,
+      "cold_start_ms": 1873.0,
+      "decode_sec": 0.528,
+      "wall_sec": 2.4564,
+      "rtf": 0.0365,
+      "cpu_user_sec": 2.88,
+      "cpu_sys_sec": 0.04,
+      "cpu_util_pct_of_1core": 118.9,
+      "peak_rss_mib": 199.87
+    },
+    {
+      "num_threads": 4,
+      "rc": 0,
+      "cold_start_ms": 1665.0,
+      "decode_sec": 0.433,
+      "wall_sec": 2.1477,
+      "rtf": 0.0299,
+      "cpu_user_sec": 3.24,
+      "cpu_sys_sec": 0.01,
+      "cpu_util_pct_of_1core": 151.3,
+      "peak_rss_mib": 204.09
+    }
+  ],
+  "clean_baselines": {
+    "wav_0_text": "اما بزرگ بابازرگ دیگه هیچ وقت راجع نیست آ حرف نش با این قلب ششی این حقیقتیه که منوک هیچ وقت باها کنار نیومدی",
+    "wav_0_word_count": 24,
+    "wav_1_text": "و چنانچه به آن ها اعتماد شود",
+    "wav_1_word_count": 7
+  },
+  "timestamp_accuracy_probe": {
+    "inserted_lead_silence_sec": 2.0,
+    "inserted_internal_pause_sec": 2.5,
+    "expected_take1_first_word_sec": 2.72,
+    "observed_take1_first_word_sec": 2.72,
+    "take1_error_ms": 0.0,
+    "expected_take2_first_word_sec": 7.756,
+    "observed_take2_first_word_sec": 7.76,
+    "take2_error_ms": 3.8,
+    "total_words_emitted": 14,
+    "base_wav1_words": 7,
+    "transcript": "و چنانچه به آن ها اعتماد شود و چنانچه به آن ها اعتماد شود"
+  },
+  "verbatim_repetition_test": {
+    "expected_repeated_text": "و چنانچه به آن ها اعتماد شود و چنانچه به آن ها اعتماد شود",
+    "observed_text": "و چنانچه به آن ها اعتماد شود و چنانچه به آن ها اعتماد شود",
+    "expected_word_count": 14,
+    "observed_word_count": 14,
+    "preserved_verbatim": true,
+    "cer_vs_expected_pct": 0.0
+  },
+  "silence_hallucination_test": {
+    "pure_silence_10s_text": "",
+    "pure_silence_hallucination": false,
+    "room_noise_minus45dbfs_10s_text": "",
+    "room_noise_hallucination": false
+  },
+  "acoustic_stress_tests": {
+    "snr_15db_white_noise": {
+      "cer_vs_clean_pct": 36.47,
+      "text": "آقا بزرگ بابازرگ دیگه هیچ وقت راجع به عالی با اینقدرشون این حتی که جمشید هیچ وقت باهاش کنار"
+    },
+    "snr_8db_white_noise": {
+      "cer_vs_clean_pct": 44.71,
+      "text": "بابا بزرگ بابازرگ به هیچ وقت راجع آ با این کار این حتیه که من هیچ وقت مشکل"
+    },
+    "slow_speech_085x": {
+      "cer_vs_clean_pct": 18.82,
+      "text": "بزرگ بابازرگ دیگه هیچ وقت راجع نیست ع حرف می و این قلبشون این حتیه که منو هیچ وقت با کنار نیومدی"
+    },
+    "fast_speech_120x": {
+      "cer_vs_clean_pct": 24.71,
+      "text": "ز بزرگ باباابزرگ دیگه هیچ وقت حاجع آ حرف نش با این قلبشون میاد این حتیه که منو هیچ وقت با کنار نیومدی"
+    }
+  },
+  "long_audio_5min_chunked_test": {
+    "total_audio_sec": 300.0,
+    "chunk_duration_sec": 25.0,
+    "chunk_count": 12,
+    "all_chunks_passed": true,
+    "mean_rtf": 0.0292,
+    "min_rtf": 0.0263,
+    "max_rtf": 0.039,
+    "min_peak_rss_mib": 273.2,
+    "max_peak_rss_mib": 279.16,
+    "rss_drift_mib": 5.96,
+    "word_count_consistent": true
+  },
+  "sequential_stability_10x": {
+    "runs": 10,
+    "success_count": 10,
+    "deterministic_output_rate_pct": 100.0,
+    "mean_rtf": 0.0295,
+    "max_peak_rss_mib": 204.0,
+    "min_peak_rss_mib": 198.15
+  }
+}

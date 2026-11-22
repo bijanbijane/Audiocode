@@ -1,0 +1,12 @@
+{
+  "timestamp_utc": "2026-11-22T17:36:34.358306+00:00",
+  "execution_id": "AVP-P02-RECOVERY-004",
+  "isolation_mechanism": "Linux kernel network namespace via unshare -r -n (zero proxy env vars, reversible per-process isolation, zero host networking modifications)",
+  "host_netns_inode": "net:[2]",
+  "isolated_netns_inode": "net:[82]",
+  "distinct_kernel_netns_verified": true,
+  "isolated_ip_link": "1: lo: <LOOPBACK,UP,LOWER_UP> mtu 65522 \n    link/loopback 00:00:00:00:00:00 brd ff:ff:ff:ff:ff:ff",
+  "isolated_ip_route": "::1 dev lo proto unspec scope link \n127.0.0.0/8 dev lo proto unspec scope link",
+  "raw_tcp_egress_attempt_without_proxy": "OSError: [Errno 101] Network is unreachable",
+  "kernel_egress_blocked": true
+}

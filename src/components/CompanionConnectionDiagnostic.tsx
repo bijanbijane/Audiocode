@@ -26,6 +26,7 @@ interface CompanionConnectionDiagnosticProps {
   onChangeEndpoint: (nextEndpoint: string) => void;
   locale?: WorkflowLocale;
   defaultExpanded?: boolean;
+  onReportUpdated?: (report: CompanionConnectionReport) => void;
 }
 
 function getOverallStatusCopy(
@@ -117,6 +118,7 @@ export const CompanionConnectionDiagnostic: React.FC<CompanionConnectionDiagnost
   onChangeEndpoint,
   locale = 'fa',
   defaultExpanded = true,
+  onReportUpdated,
 }) => {
   const isFa = locale === 'fa';
   const inputId = useId();
@@ -126,6 +128,8 @@ export const CompanionConnectionDiagnostic: React.FC<CompanionConnectionDiagnost
   const [report, setReport] = useState<CompanionConnectionReport | null>(null);
   const [isExpanded, setIsExpanded] = useState<boolean>(defaultExpanded);
   const abortRef = useRef<AbortController | null>(null);
+  const onReportUpdatedRef = useRef(onReportUpdated);
+  onReportUpdatedRef.current = onReportUpdated;
 
   useEffect(() => {
     setDraftEndpoint(endpoint);
@@ -143,6 +147,7 @@ export const CompanionConnectionDiagnostic: React.FC<CompanionConnectionDiagnost
       });
       if (!controller.signal.aborted) {
         setReport(nextReport);
+        onReportUpdatedRef.current?.(nextReport);
       }
     } finally {
       if (!controller.signal.aborted) {

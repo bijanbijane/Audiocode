@@ -1,0 +1,87 @@
+{
+  "kit_version": "3.0.0",
+  "execution_id": "AVP-P02-RECOVERY-003",
+  "target_hardware": {
+    "required_os": "Darwin",
+    "required_arch": "arm64",
+    "expected_cpu_substring": "Apple M2",
+    "expected_memory_gib": 8,
+    "memory_tolerance_gib": 0.5,
+    "device_mode": "CPU_ONLY_NO_METAL"
+  },
+  "acceptance_thresholds": {
+    "median_cpu_rtf_max": 1.0,
+    "preferred_median_cpu_rtf_max": 0.5,
+    "peak_process_memory_gib_max": 5.0,
+    "preferred_peak_process_memory_gib_max": 4.0,
+    "post_warmup_swap_growth_mib_max": 512.0,
+    "stability_jobs_full": 50,
+    "stability_jobs_smoke": 5,
+    "crashes_allowed": 0,
+    "cold_start_runs": 3,
+    "warm_runs": 5
+  },
+  "relative_paths": {
+    "sherpa_offline_bin": "artifacts/runtime/bin/sherpa-onnx-offline",
+    "sherpa_fa_bin": "artifacts/runtime/bin/sherpa-onnx-fa",
+    "sherpa_lib_dir": "artifacts/runtime/lib",
+    "whisper_cpp_bin": "artifacts/runtime/bin/whisper-cli",
+    "audio_dir": "audio",
+    "output_base_dir": "evidence_output"
+  },
+  "models": [
+    {
+      "id": "shenava-rizeh-v1-int8",
+      "name": "Reza2kn/Shenava-Rizeh v1.0 INT8",
+      "license": "Apache-2.0",
+      "runtime": "sherpa-onnx-offline",
+      "language": "fa",
+      "files": [
+        {
+          "path": "artifacts/models/sherpa-onnx-nemo-ctc-fa-shenava-rizeh-v1.0-non-streaming-int8-2026-06-26/model.int8.onnx",
+          "sha256": "6bdd4ab80626ddfe0b19338a5c96fcc4f2021ad78899cece20a805a48dc5250d"
+        },
+        {
+          "path": "artifacts/models/sherpa-onnx-nemo-ctc-fa-shenava-rizeh-v1.0-non-streaming-int8-2026-06-26/tokens.txt",
+          "sha256": "8e192963f6e666dfa5721e5cbd4710bc1ef592460a45f08cefc94b2db16a6954"
+        }
+      ],
+      "cli_args": [
+        "--provider=cpu",
+        "--num-threads=4",
+        "--nemo-ctc-model=artifacts/models/sherpa-onnx-nemo-ctc-fa-shenava-rizeh-v1.0-non-streaming-int8-2026-06-26/model.int8.onnx",
+        "--tokens=artifacts/models/sherpa-onnx-nemo-ctc-fa-shenava-rizeh-v1.0-non-streaming-int8-2026-06-26/tokens.txt"
+      ]
+    },
+    {
+      "id": "whisper-large-v3-turbo-int8",
+      "name": "openai/whisper-large-v3-turbo INT8",
+      "license": "MIT",
+      "runtime": "sherpa-onnx-offline",
+      "language": "en",
+      "files": [
+        {
+          "path": "artifacts/models/sherpa-onnx-whisper-turbo/turbo-encoder.int8.onnx",
+          "sha256": "b02dcdf54f348741e93fe732b67d933c8dcb6735655f710640143081db38878b"
+        },
+        {
+          "path": "artifacts/models/sherpa-onnx-whisper-turbo/turbo-decoder.int8.onnx",
+          "sha256": "20accd02388482eb3a46bd615631adfdc85e1eb2c7db9ea3f02a40ffe6b81547"
+        },
+        {
+          "path": "artifacts/models/sherpa-onnx-whisper-turbo/turbo-tokens.txt",
+          "sha256": "b34b360dbb493e781e479794586d661700670d65564001f23024971d1f2fa126"
+        }
+      ],
+      "cli_args": [
+        "--provider=cpu",
+        "--num-threads=4",
+        "--whisper-encoder=artifacts/models/sherpa-onnx-whisper-turbo/turbo-encoder.int8.onnx",
+        "--whisper-decoder=artifacts/models/sherpa-onnx-whisper-turbo/turbo-decoder.int8.onnx",
+        "--tokens=artifacts/models/sherpa-onnx-whisper-turbo/turbo-tokens.txt",
+        "--whisper-language=en",
+        "--whisper-task=transcribe"
+      ]
+    }
+  ]
+}
