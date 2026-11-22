@@ -99,6 +99,15 @@ export class SpeakerEmbeddingOnnxRunner {
       }
     }
 
+    if (this.inputMode === 'KALDI_FBANK') {
+      return this.extractWespeakerKaldiSubsegments(
+        pcm16kMono,
+        vadSegments,
+        windowDurationSec,
+        hopDurationSec,
+      );
+    }
+
     const embeddings: FrameSpeakerEmbedding[] = [];
 
     for (const seg of vadSegments) {
@@ -133,6 +142,128 @@ export class SpeakerEmbeddingOnnxRunner {
           vadProbability: seg.peakSpeechProb,
         });
         if (end === seg.endSample16k) break;
+      }
+    }
+
+    return embeddings;
+  }
+
+  /**
+   * Match WeSpeaker's official diarization extraction:
+   * compute FBANK on each complete VAD region without CMN, split by configured
+   * frame windows, resize short/tail feature matrices to the fixed window length,
+   * then apply per-subsegment CMN before ONNX inference.
+   */
+  private async extractWespeakerKaldiSubsegments(
+    pcm16kMono: Float32Array,
+    vadSegments: VadSpeechSegment[],
+    windowDurationSec: number,
+    hopDurationSec: number,
+  ): Promise<FrameSpeakerEmbedding[]> {
+    const sampleRate = 16000;
+    const frameShiftSamples = 160;
+    const numMelBins = 80;
+    const windowFrames = Math.floor((windowDurationSec * 1000) / 10);
+    const hopFrames = Math.floor((hopDurationSec * 1000) / 10);
+    const minSegmentSamples = Math.floor(sampleRate * 0.255);
+
+    if (windowFrames < 1 || hopFrames < 1 || hopFrames > windowFrames) {
+      throw new RangeError('WESPEAKER_SUBSEGMENT_FRAME_WINDOW_OR_HOP_INVALID');
+    }
+
+    const embeddings: FrameSpeakerEmbedding[] = [];
+    for (const segment of vadSegments) {
+      const segmentSamples = segment.endSample16k - segment.startSample16k;
+      if (segmentSamples < minSegmentSamples) continue;
+
+      const segmentPcm = pcm16kMono.subarray(
+        segment.startSample16k,
+        segment.endSample16k,
+      );
+      const fbank = this.wespeakerFbank.compute(segmentPcm, {
+        applyCepstralMeanNormalization: false,
+      });
+      if (fbank.numFrames === 0) continue;
+
+      // WeSpeaker derives subsegment length from the original VAD duration in
+      // 10 ms frames. Kaldi snip-edges FBANK has two fewer frames; the official
+      // recipe repeats available rows to fill each fixed-size subsegment.
+      const segmentLengthFrames = Math.floor(segmentSamples / frameShiftSamples);
+      const subsegmentRanges: Array<{ startFrame: number; endFrame: number }> = [];
+
+      if (segmentLengthFrames <= windowFrames) {
+        subsegmentRanges.push({ startFrame: 0, endFrame: segmentLengthFrames });
+      } else {
+        const maxSubsegmentStart = segmentLengthFrames - windowFrames + hopFrames;
+        for (let startFrame = 0; startFrame < maxSubsegmentStart; startFrame += hopFrames) {
+          subsegmentRanges.push({
+            startFrame,
+            endFrame: Math.min(startFrame + windowFrames, segmentLengthFrames),
+          });
+        }
+      }
+
+      for (const subsegment of subsegmentRanges) {
+        const availableStart = Math.min(subsegment.startFrame, fbank.numFrames);
+        const availableEnd = Math.min(subsegment.endFrame, fbank.numFrames);
+        const availableFrames = availableEnd - availableStart;
+        if (availableFrames <= 0) continue;
+
+        const windowFeatures = new Float32Array(windowFrames * numMelBins);
+        for (let frame = 0; frame < windowFrames; frame++) {
+          const sourceFrame = availableStart + (frame % availableFrames);
+          const sourceOffset = sourceFrame * numMelBins;
+          const targetOffset = frame * numMelBins;
+          windowFeatures.set(
+            fbank.features.subarray(sourceOffset, sourceOffset + numMelBins),
+            targetOffset,
+          );
+        }
+
+        // Official diarization applies CMN independently after subsegmenting.
+        const means = new Float64Array(numMelBins);
+        for (let frame = 0; frame < windowFrames; frame++) {
+          const offset = frame * numMelBins;
+          for (let mel = 0; mel < numMelBins; mel++) {
+            means[mel] += windowFeatures[offset + mel];
+          }
+        }
+        for (let mel = 0; mel < numMelBins; mel++) means[mel] /= windowFrames;
+        for (let frame = 0; frame < windowFrames; frame++) {
+          const offset = frame * numMelBins;
+          for (let mel = 0; mel < numMelBins; mel++) {
+            windowFeatures[offset + mel] -= means[mel];
+          }
+        }
+
+        const input = this.ortProvider.createTensor(
+          'float32',
+          windowFeatures,
+          [1, windowFrames, numMelBins],
+        );
+        const outputs = await this.session!.run({ [this.inputTensorName]: input });
+        const output = this.outputTensorName
+          ? outputs[this.outputTensorName]
+          : Object.values(outputs)[0];
+        if (!output || !(output.data instanceof Float32Array) || output.data.length === 0) {
+          throw new Error('SPEAKER_EMBEDDING_MODEL_RETURNED_EMPTY_OR_NON_FLOAT_OUTPUT');
+        }
+
+        const startSample = segment.startSample16k + subsegment.startFrame * frameShiftSamples;
+        const endSample = Math.min(
+          segment.endSample16k,
+          segment.startSample16k + subsegment.endFrame * frameShiftSamples,
+        );
+        if (endSample <= startSample) continue;
+
+        embeddings.push({
+          range: {
+            start: TimeMath.samplesToFlicks(startSample, sampleRate),
+            end: TimeMath.samplesToFlicks(endSample, sampleRate),
+          },
+          embeddingVector: this.l2Normalize(new Float32Array(output.data)),
+          vadProbability: segment.peakSpeechProb,
+        });
       }
     }
 
