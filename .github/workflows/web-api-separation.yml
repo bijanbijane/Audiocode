@@ -10,6 +10,7 @@ on:
       - 'vite.config.ts'
       - 'scripts/start-api.ts'
       - 'scripts/audit-runtime-dependencies.mjs'
+      - 'scripts/audit-express-route-ownership.mjs'
       - 'backend/Dockerfile.api'
       - 'backend/src/SeparatedRuntimeRoutingContract.test.ts'
       - 'backend/src/PlatformBackendServices.ts'
@@ -50,6 +51,12 @@ jobs:
           mkdir -p ci-logs
           set -o pipefail
           npm run audit:runtime-deps 2>&1 | tee ci-logs/runtime-dependency-inventory.json
+
+      - name: Inventory Express routes and mounted routers
+        run: |
+          mkdir -p ci-logs
+          set -o pipefail
+          npm run audit:express-routes 2>&1 | tee ci-logs/express-route-ownership.json
 
       - name: Test separated routing and Platform API client contracts
         run: |
