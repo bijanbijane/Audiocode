@@ -83,7 +83,7 @@ Observed Fastify registrations in:
 | `POST /api/v1/license/lease` | `PlatformBackendServices` | Platform offline lease |
 | `POST /api/v1/license/enforce-device-seat`, `POST /api/v1/license/sync-state` | `BackendLicenseAndModelRevocationService` | Platform license device enforcement/state sync |
 | `POST /api/v1/admin/models/:modelId/:version/revoke` | `BackendLicenseAndModelRevocationService` | Platform admin revocation |
-| `GET /api/v1/models/catalog`, `GET /api/v1/models/:modelId/:version/manifest`, `GET /api/v1/models/:modelId/:version/chunks/:chunkIndex` | `PlatformBackendServices` | Platform catalog and signed model delivery |
+| `GET /api/v1/models/catalog`, `GET /api/v1/models/:modelId/:version/manifest`, `GET /api/v1/models/:modelId/:version/chunks/:chunkIndex` | `PlatformBackendServices` | Platform catalog and signed model delivery; chunk delivery now rechecks the live PostgreSQL release status and returns 410 for REVOKED versions before reading the file; strict allow-list validation protects model/version/chunk path components |
 | `POST /api/v1/telemetry/model-delivery` | `PlatformBackendServices` | Privacy-minimized delivery telemetry |
 | `POST /api/v1/asr/transcribe-chunk` | `PlatformBackendServices` | Server-side ASR extension point; disabled by default in v1 |
 | `POST /api/v1/admin/enterprise-keys` | `BackendApplicationFactory` | Platform admin API keys |
@@ -157,7 +157,7 @@ Observed Fastify registrations in:
 - The separated-container workflow likewise failed before runner allocation and produced no artifacts; retry attempt 2 also received no runner.
 - GitHub's job-log download currently returns an object-storage 404, so there is no command-level diagnostic log from these jobs.
 - The new Fastify executable entrypoint, package manifest, TypeScript config, standalone Dockerfile and workflow are committed, but none has been executed because GitHub has not assigned a runner.
-- Source-level tests now cover the Fastify legacy license envelope and public-key discovery against `OfflineCryptoVerifier`, paid subscription expiry, UUID lease IDs, legacy model-manifest response, root proxy/Compose routing, Local-mode loopback binding, and the no-Vite API-only path. The standalone Fastify test/typecheck set is scoped to runtime-owned files. These are added tests, not executed results.
+- Source-level tests now cover the Fastify legacy license envelope and public-key discovery against `OfflineCryptoVerifier`, paid subscription expiry, UUID lease IDs, legacy model-manifest response, REVOKED chunk-delivery denial, strict model path validation, root proxy/Compose routing, Local-mode loopback binding, and the no-Vite API-only path. The standalone Fastify test/typecheck set is scoped to runtime-owned files. These are added tests, not executed results.
 - No claim is made that Docker build, typecheck, Vite build, Fastify startup, PostgreSQL integration, local ASR, Companion/CEP or offline-license tests passed in this editing session.
 
 ## 6. Stop conditions (safety, not excuses)
