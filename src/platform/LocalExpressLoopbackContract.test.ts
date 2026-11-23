@@ -1,0 +1,24 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { resolveAudioApiSecurityConfig, resolveServerBindHost } from '../security/AudioApiSecurityGuard';
+
+test('local Compose keeps the Express API on a real loopback bind in production mode', () => {
+  const env = {
+    NODE_ENV: 'production',
+    AVAPARDAZ_DEPLOYMENT_MODE: 'local',
+    AVAPARDAZ_BIND_HOST: '127.0.0.1',
+  };
+  const config = resolveAudioApiSecurityConfig(env);
+  assert.equal(config.mode, 'local');
+  assert.equal(resolveServerBindHost(env, config), '127.0.0.1');
+});
+
+test('hosted Express mode defaults to a non-loopback bind only when explicitly configured', () => {
+  const env = {
+    NODE_ENV: 'production',
+    AVAPARDAZ_DEPLOYMENT_MODE: 'hosted',
+  };
+  const config = resolveAudioApiSecurityConfig(env);
+  assert.equal(config.mode, 'hosted');
+  assert.equal(resolveServerBindHost(env, config), '0.0.0.0');
+});
