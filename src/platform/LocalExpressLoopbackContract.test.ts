@@ -28,7 +28,7 @@ test('hosted Express mode defaults to a non-loopback bind only when explicitly c
   assert.equal(resolveServerBindHost(env, config), '0.0.0.0');
 });
 
-test('API-only Express boot does not load Vite and Hosted mode blocks demo lease issuance', () => {
+test('API-only Express boot does not load Vite and Hosted mode delegates legacy platform routes to Fastify', () => {
   const server = readServerSource();
   assert.ok(!server.includes("import { createServer as createViteServer } from 'vite';"));
   assert.ok(server.includes("const { createServer: createViteServer } = await import('vite');"));
