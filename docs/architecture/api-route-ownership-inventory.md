@@ -102,6 +102,8 @@ Observed Fastify registrations in:
 - Separate static Nginx image and API/local-runtime image exist.
 - Legacy combined `npm run dev` and legacy `backend/Dockerfile` remain as rollback paths.
 - API proxy preserves `/api` and `/v1` paths and disables request buffering for streaming bodies.
+- Nginx body ceiling matches the current 100 MiB server-side upload ceiling; route-level lower limits remain enforced by Express. Proxy timeouts allow 240-second edit operations.
+- COOP/COEP/CORP isolation headers are explicitly repeated in cache-controlled locations so index and asset responses retain the browser audio/WASM isolation policy.
 - Status: **implemented, not yet CI-validated**.
 
 ### Gate B — Canonical route contract
