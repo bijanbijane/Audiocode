@@ -68,7 +68,7 @@ The existing `backend/Dockerfile` is intentionally not overwritten. It remains t
 This change does not move or rewrite:
 - local CPU/ONNX ASR, browser-local inference, DSP, project/timeline, EDL, preview, export, undo/redo, or crash-recovery code;
 - Adobe Audition CEP, JSX host adapter, Companion IPC, or loopback security;
-- Ed25519 lease/signature logic, P-256 device binding, or offline entitlement semantics;
+- P-256 device binding, secure local storage, or the offline verifier. The Fastify compatibility signer uses the existing production Ed25519 key pair and keyVersion during this migration; no key rotation is authorized here;
 - the local-only cloud-ASR prohibition.
 
 The web tier is static-only. It does not receive private keys, database credentials, model storage, or audio-processing server code.
