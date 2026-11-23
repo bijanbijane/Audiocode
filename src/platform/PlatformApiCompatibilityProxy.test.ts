@@ -86,13 +86,17 @@ test('legacy raw device fingerprints are hashed before entering the Platform API
     deviceFingerprint: rawFingerprint,
     displayName: 'Editor',
     plan: 'PRO',
+    graceDays: 90,
+    unexpectedAdminOverride: true,
   }) as Record<string, unknown>;
 
   const expectedHash = crypto.createHash('sha256').update(rawFingerprint, 'utf8').digest('hex');
   assert.equal(normalized.deviceFingerprint, rawFingerprint);
   assert.equal(normalized.deviceFingerprintHash, expectedHash);
   assert.equal(normalized.userId, 'authenticated-user');
-  assert.equal(normalized.plan, 'PRO');
+  assert.equal('plan' in normalized, false);
+  assert.equal('graceDays' in normalized, false);
+  assert.equal('unexpectedAdminOverride' in normalized, false);
 });
 
 test('legacy Express adapter forwards only Bearer auth and bounded JSON to the internal Platform API', async () => {
