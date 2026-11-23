@@ -482,14 +482,39 @@ export class PlatformBackendServices {
       '/api/v1/models/:modelId/:version/chunks/:chunkIndex',
       async (request, reply) => {
         const { modelId, version, chunkIndex } = request.params;
-        const safeIdx = parseInt(chunkIndex, 10);
-        if (!Number.isInteger(safeIdx) || safeIdx < 0) {
+        if (!/^[a-zA-Z0-9_-]{1,64}$/.test(modelId)) {
+          return reply.status(400).send({ error: 'INVALID_MODEL_ID' });
+        }
+        if (!/^[a-zA-Z0-9._-]{1,32}$/.test(version)) {
+          return reply.status(400).send({ error: 'INVALID_MODEL_VERSION' });
+        }
+        if (!/^(0|[1-9][0-9]{0,8})$/.test(chunkIndex)) {
+          return reply.status(400).send({ error: 'INVALID_CHUNK_INDEX' });
+        }
+        const safeIdx = Number(chunkIndex);
+        if (!Number.isSafeInteger(safeIdx)) {
           return reply.status(400).send({ error: 'INVALID_CHUNK_INDEX' });
         }
 
-        // جلوگیری از Path Traversal
-        const safeModel = modelId.replace(/[^a-zA-Z0-9_-]/g, '');
-        const safeVer = version.replace(/[^a-zA-Z0-9._-]/g, '');
+        // Re-check the authoritative catalog state at download time. A signed
+        // REVOKED manifest is useful to clients, but the server must never serve
+        // the underlying revoked model bytes.
+        const modelState = await this.db.query<{ release_status: string }>(
+          `SELECT release_status
+           FROM ai_models_catalog
+           WHERE model_id = $1 AND version = $2`,
+          [modelId, version],
+        );
+        if (modelState.rows.length === 0) {
+          return reply.status(404).send({ error: 'MODEL_VERSION_NOT_FOUND' });
+        }
+        if (modelState.rows[0].release_status === 'REVOKED') {
+          return reply.status(410).send({ error: 'MODEL_VERSION_REVOKED' });
+        }
+
+        // Both path segments have strict allow-list validation before joining.
+        const safeModel = modelId;
+        const safeVer = version;
         const fileName = `chunk_${String(safeIdx).padStart(4, '0')}.bin`;
         const fullPath = path.join(
           this.config.modelStorageRootDir,
