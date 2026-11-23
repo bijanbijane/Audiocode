@@ -27,6 +27,23 @@ test('PlatformApiClient sends login to the isolated same-origin prefix', async (
   assert.equal(capturedInit?.method, 'POST');
 });
 
+test('model catalogue uses the isolated Platform API prefix', async () => {
+  let calledUrl = '';
+  const client = new PlatformApiClient({
+    fetchImpl: async (input) => {
+      calledUrl = String(input);
+      return new Response(JSON.stringify({ models: [] }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    },
+  });
+
+  const result = await client.getModelCatalog();
+  assert.equal(calledUrl, '/platform-api/api/v1/models/catalog');
+  assert.deepEqual(result.models, []);
+});
+
 test('license issuance sends only a hashed device identity and bearer token, never plan or user override', async () => {
   let capturedUrl = '';
   let capturedInit: RequestInit | undefined;
