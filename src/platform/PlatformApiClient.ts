@@ -92,14 +92,11 @@ export class PlatformApiClient {
   private readonly fetchImpl: typeof fetch;
 
   constructor(options: PlatformApiClientOptions = {}) {
-    const basePath = (options.basePath ?? '/platform-api').trim();
-    if (!basePath.startsWith('/') || basePath.startsWith('//')) {
-      throw new Error('PLATFORM_API_BASE_PATH_MUST_BE_SAME_ORIGIN');
+    const basePath = (options.basePath ?? '/platform-api').trim().replace(/\/+$/, '');
+    if (basePath !== '/platform-api') {
+      throw new Error('PLATFORM_API_BASE_PATH_MUST_BE_PLATFORM_PREFIX');
     }
-    this.basePath = basePath.replace(/\/+$/, '');
-    if (!this.basePath) {
-      throw new Error('PLATFORM_API_BASE_PATH_REQUIRED');
-    }
+    this.basePath = basePath;
     this.fetchImpl = options.fetchImpl ?? fetch;
   }
 
