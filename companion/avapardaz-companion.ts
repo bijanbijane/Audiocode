@@ -16,7 +16,17 @@ import express from 'express';
 import { LocalCompanionService } from '../src/host-bridge/companion/LocalCompanionService';
 
 const COMPANION_HOST = '127.0.0.1';
-const COMPANION_PORT = Number(process.env.AVAPARDAZ_COMPANION_PORT || 47291);
+const RAW_COMPANION_PORT = Number(process.env.AVAPARDAZ_COMPANION_PORT || 47291);
+if (!Number.isInteger(RAW_COMPANION_PORT) || RAW_COMPANION_PORT < 1024 || RAW_COMPANION_PORT > 65535) {
+  console.error(
+    JSON.stringify({
+      event: 'AVAPARDAZ_COMPANION_INVALID_PORT',
+      message: 'AVAPARDAZ_COMPANION_PORT must be an integer between 1024 and 65535.',
+    }),
+  );
+  process.exit(1);
+}
+const COMPANION_PORT = RAW_COMPANION_PORT;
 const LOCK_FILE_PATH =
   process.env.AVAPARDAZ_COMPANION_LOCK_PATH ||
   path.join(os.tmpdir(), `avapardaz-companion-${COMPANION_PORT}.lock`);

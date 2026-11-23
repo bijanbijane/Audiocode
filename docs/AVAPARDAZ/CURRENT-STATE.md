@@ -1,11 +1,14 @@
-# AVAPARDAZ — CURRENT EXECUTION STATE (AUTHORITATIVE — FINAL ROADMAP CLOSE)
+# AVAPARDAZ — CURRENT EXECUTION STATE (HISTORICAL SNAPSHOT — SUPERSEDED BY AUTHORITATIVE STATE)
 
-**Document ID:** `AVP-CURRENT-STATE-4.0`  
-**Supersedes:** `AVP-CURRENT-STATE-3.1` (`PHASE-01` snapshot)  
-**Last Updated:** `2026-11-20T14:57:00Z`  
+> **AUTHORITATIVE POINTER (`2026-11-23`):** این سند یک تصویر تاریخی از وضعیت پروژه است. **تنها مرجع معتبر و واحد پروژه (Single Source of Truth)** سند [`docs/AVAPARDAZ/AUTHORITATIVE-PROJECT-STATE.md`](./AUTHORITATIVE-PROJECT-STATE.md) (`AVP-AUTH-STATE-0.1`) است. در هرگونه تعارض (از جمله وضعیت `PHASE-02`، مسیرهای ASR، نقاط حافظه و یافته‌های امنیتی)، `AUTHORITATIVE-PROJECT-STATE.md` ملاک قطعی است.
+
+**Document ID:** `AVP-CURRENT-STATE-4.1`  
+**Supersedes:** `AVP-CURRENT-STATE-4.0` (`2026-11-20` snapshot)  
+**Authoritative Reference:** [`docs/AVAPARDAZ/AUTHORITATIVE-PROJECT-STATE.md`](./AUTHORITATIVE-PROJECT-STATE.md)  
+**Last Updated:** `2026-11-23`  
 **Workspace Root:** `/app/applet`  
-**Current Branch:** `NONE (Not a Git working tree — .git absent)`  
-**Current Commit:** `NONE (Not a Git working tree — COMMIT: NOT_AVAILABLE)`
+**Current Branch:** `UNKNOWN (Not a Git working tree — .git absent)`  
+**Current Commit:** `UNKNOWN (Not a Git working tree — COMMIT: NOT_AVAILABLE)`
 
 ---
 
@@ -14,10 +17,10 @@
 | Field | Value |
 | :--- | :--- |
 | **Roadmap Version** | `Master Roadmap v3.1` + User Directives (`PHASE-02`, `PHASE-08`..`PHASE-15`) |
-| **Completed & Verified Phases** | `PHASE-00` (`ACCEPTED`), `PHASE-01` (`ACCEPTED`), `PHASE-02` (`ACCEPTED` — `7/7` Gates, `25/25` real audio CPU benchmark), `PHASE-08` (`VERIFIED ON LINUX CPU`), `PHASE-09`/`10`/`11` (`IMPLEMENTED` — Audition CEP package + Shared Companion + Web integration; Host GUI untested in Linux), `PHASE-12` (`VERIFIED` Red-Team `7/7` PASS; `npm audit` `ENOLOCK` blocker), `PHASE-14` (`LICENSES CLEARED`; payments/signing external blockers) |
-| **Phase-15 Final Verdict (Public Commercial Release)** | **`BLOCKED`** (Physical macOS/Windows + live Adobe Audition GUI test, signed `.zxp`/`.dmg`/`.msi`, `package-lock.json` CVE scan, GPU bilingual code-switching fine-tuning, live payment gateway + model CDN) |
-| **Phase-15 Final Verdict (Internal Linux Technical Alpha)** | **`READY WITH RESTRICTIONS`** (Real offline CPU Persian/English ASR + hardened Shared Companion IPC + `O(1)` 60m pipeline + Web build verified live) |
-| **Roadmap State** | **TERMINATED CLEANLY AT `PHASE-15` ACCEPTANCE GATE (`ADR-026`)** |
+| **Completed & Verified Phases** | `PHASE-00` (`ACCEPTED`), `PHASE-01` (`ACCEPTED`), `PHASE-02` (**`BLOCKED`** — superseded on `2026-11-22` by `docs/phase-02/RECOVERY-003-ACCEPTANCE-GAP.md`; dataset `3.5635 h < 6.0 h`, `0.0 h` conversational/disfluency/code-switching/TextGrid, `M2_HARDWARE = NOT_AVAILABLE`), `PHASE-08` (`VERIFIED ON LINUX CPU`), `PHASE-09`/`10`/`11` (`IMPLEMENTED` — Audition CEP package + Shared Companion + Web integration; Host GUI untested in Linux), `PHASE-12` (`PARTIAL / RE-OPENED BY PHASE-0 AUDIT` — see `AUTHORITATIVE-PROJECT-STATE.md` §12 for P0/P1 findings on `server.ts` & `LocalSherpaNeuralEngine.ts`), `PHASE-14` (`LICENSES CLEARED`; payments/signing external blockers) |
+| **Phase-15 Final Verdict (Public Commercial Release)** | **`BLOCKED`** (Physical macOS/Windows + live Adobe Audition GUI test, signed `.zxp`/`.dmg`/`.msi`, `package-lock.json` CVE scan, Phase-02 dataset & alignment gap, P0 memory streaming & security hardening) |
+| **Phase-15 Final Verdict (Internal Linux Technical Alpha)** | **`READY WITH RESTRICTIONS`** (See `AUTHORITATIVE-PROJECT-STATE.md` for verified memory, ASR routing, and security caveats) |
+| **Roadmap State** | **SUPERSEDED BY PHASE 0 AUDIT (`AVP-AUTH-STATE-0.1`) — NEXT EXECUTION: PHASE 1 MEMORY STREAMING & SECURITY HARDENING** |
 
 ---
 
@@ -39,8 +42,8 @@
   - `npx tsx --test src/host-bridge/companion/__tests__/LocalCompanionAndSecurity.test.ts`: **`7 / 7` PASS** (`4.87s` — includes live offline Persian neural transcription over HTTP HMAC IPC, `10s..60m` `O(1)` memory stress, `AbortSignal`, DNS rebinding/Origin CSRF/nonce replay/path traversal/corrupt WAV Red-Team tests, and CEP manifest/CSP verification).
   - `python3 -m unittest benchmarks/phase02/test_evaluation_metrics.py -v`: **`6 / 6` PASS** (`0.013s`).
   - `npm run build` (`vite build`): **`PASS`**.
-  - `tsc --noEmit`: **`0` errors** in all Phase-01..15 production & test files (only pre-existing 8 stale Phase-00 legacy `.test.ts` files fail).
-  - Binary & Secret Hygiene: **`0`** `.onnx`/`.wav` files in repo; **`0`** hardcoded secrets.
+  - `tsc --noEmit` (`npm run lint`): **`0` errors** across the entire TypeScript workspace (`[Observed Fact]` verified `2026-11-23`; earlier `2026-11-20` note about 8 stale Phase-00 `.test.ts` files is resolved).
+  - Binary & Secret Hygiene (`[Observed Fact]` reconciled `2026-11-23`): `models/persian-zipformer-transducer/1.0.0/` contains on-disk INT8 Zipformer ONNX assets (`115,757,880 B` mandatory: `encoder.int8.onnx`, `decoder.int8.onnx`, `joiner.int8.onnx`, `tokens.txt`) plus `sample.wav` (`775,738 B`) acquired in `AVP-PERSIAN-ZIPFORMER-ASSET-ACQUISITION-001`; prior `2026-11-20` note stating "`0` `.onnx`/`.wav` files in repo" is superseded.
 
 ---
 

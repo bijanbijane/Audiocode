@@ -78,7 +78,7 @@ export function probeAudioStreamInfo(filePath: string): {
         'json',
         filePath,
       ],
-      { encoding: 'utf8', timeout: 8000 },
+      { encoding: 'utf8', timeout: 8000, stdio: ['ignore', 'pipe', 'pipe'] },
     );
     const parsed = JSON.parse(raw) as {
       streams?: Array<{ sample_rate?: string; channels?: number; codec_name?: string }>;
@@ -413,7 +413,7 @@ export function ingestAudioBufferToCanonical16kMono(params: {
         's16le',
         outStereo16kRaw,
       ],
-      { timeout: 25_000 },
+      { timeout: 25_000, stdio: ['ignore', 'pipe', 'pipe'] },
     );
 
     const decodedStat = fs.statSync(outStereo16kRaw);

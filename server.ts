@@ -85,6 +85,15 @@ import {
 } from './src/processing-engine/index.ts';
 import { LocalCompanionService } from './src/host-bridge/companion/LocalCompanionService.ts';
 import { createSmartAudioEditHttpRouter } from './src/workflow/SmartAudioEditHttpRouter.ts';
+import {
+  ShahabZipformerAsrRuntime,
+} from './src/shahab/ShahabZipformerAsrRuntime.ts';
+import { createShahabHttpRouter } from './src/shahab/ShahabHttpRouter.ts';
+import {
+  AudioApiSecurityGuard,
+  resolveServerBindHost,
+} from './src/security/AudioApiSecurityGuard.ts';
+import { createLocalModelArtifactHttpRouter } from './src/lifecycle/LocalModelArtifactHttpRouter.ts';
 
 interface SandboxStudioScope {
   readonly tenantId: string;
@@ -180,6 +189,8 @@ async function startServer() {
   const coreAsrRouter = new CoreModelRouter();
   coreAsrRouter.warmup();
   const localCompanionService = new LocalCompanionService();
+  const shahabZipformerRuntime = new ShahabZipformerAsrRuntime();
+  const audioApiSecurityGuard = new AudioApiSecurityGuard();
   const unifiedProcessingOrchestrator = new UnifiedProcessingOrchestrator({
     localAdapter: new LocalExecutionAdapter({
       coreRouter: coreAsrRouter,
@@ -308,13 +319,42 @@ async function startServer() {
     });
   });
 
-  // AVP-P08/P09/P10: Shared Local Companion Service (Loopback-only, HMAC IPC v1.0.0)
-  // Mounted BEFORE global express.json() so it enforces its own Host/Origin/Loopback security guards.
-  app.use('/api/v2/companion', localCompanionService.createExpressRouter({ allowSameOriginProxyHost: true }));
+  // Phase 1A: Ephemeral Local Session Bootstrap (active ONLY in Local/Desktop mode; 404 in Hosted mode)
+  app.post('/api/local-auth/session', audioApiSecurityGuard.createLocalSessionEndpoint());
 
-  // AVP-EXECUTION-001: Unified 3-Engine Smart Audio Edit Vertical Slice (/api/v2/smart-edit/*)
+  // AVP-P08/P09/P10: Shared Local Companion Service (Loopback-only, HMAC IPC v1.0.0)
+  // Isolated strictly to local mode; never exposed in Hosted Mode.
+  if (audioApiSecurityGuard.config.mode === 'local') {
+    app.use(
+      '/api/v2/companion',
+      localCompanionService.createExpressRouter({
+        allowSameOriginProxyHost: audioApiSecurityGuard.config.allowSameOriginProxyHost,
+      }),
+    );
+  } else {
+    app.use('/api/v2/companion', (_req, res) => {
+      res.status(404).json({
+        error: 'COMPANION_LOCAL_ONLY',
+        message: 'Native Companion IPC is only available in local/desktop mode.',
+      });
+    });
+  }
+
+  // AVP-SHAHAB-001 + Phase 1A: Hardened SHAHAB Zipformer-Transducer Execution Routes (/api/shahab/*)
+  // Auth, Origin/Host/Loopback, Replay Defense & Rate/Concurrency Limits run BEFORE express.raw().
+  app.use(
+    '/api/shahab',
+    createShahabHttpRouter({
+      shahabZipformerRuntime,
+      securityGuard: audioApiSecurityGuard,
+    }),
+  );
+
+  // AVP-EXECUTION-001 + Phase 1A: Hardened 3-Engine Smart Audio Edit Vertical Slice (/api/v2/smart-edit/*)
   const { router: smartEditRouter } = createSmartAudioEditHttpRouter({
     neuralEngine: localCompanionService.neuralEngine,
+    shahabZipformerRuntime,
+    securityGuard: audioApiSecurityGuard,
   });
   app.use('/api/v2/smart-edit', smartEditRouter);
 
@@ -394,116 +434,15 @@ async function startServer() {
     res.json(envelope);
   });
 
-  // Verified local Persian ONNX model preparation & Range-streamed artifact delivery for Browser OPFS
-  app.post('/api/v1/local-models/shenava-rizen/prepare', async (_req, res) => {
-    try {
-      const ensured = await localCompanionService.neuralEngine.ensureShenavaRizehModelArtifacts();
-      res.json({
-        ok: true,
-        modelId: ensured.modelId,
-        upstreamModelId: ensured.upstreamModelId,
-        modelVersion: ensured.modelVersion,
-        architecture: ensured.architecture,
-        sampleAudioAvailable: Boolean(ensured.sampleWavPath),
-        artifacts: {
-          'model.int8.onnx': {
-            byteLength: ensured.modelOnnxBytes,
-            sha256Hex: ensured.modelOnnxSha256Hex,
-            url: '/api/v1/local-models/shenava-rizen/artifacts/model.int8.onnx',
-          },
-          'tokens.txt': {
-            byteLength: ensured.tokensBytes,
-            sha256Hex: ensured.tokensSha256Hex,
-            url: '/api/v1/local-models/shenava-rizen/artifacts/tokens.txt',
-          },
-        },
-      });
-    } catch (err) {
-      res.status(500).json({
-        ok: false,
-        error: 'MODEL_PREPARE_FAILED',
-        message: sanitizePublicErrorOutput(err instanceof Error ? err.message : String(err)),
-      });
-    }
-  });
-
-  app.get('/api/v1/local-models/shenava-rizen/artifacts/:filename', async (req, res) => {
-    const requestedName = req.params.filename;
-    if (
-      requestedName !== 'model.int8.onnx' &&
-      requestedName !== 'tokens.txt' &&
-      requestedName !== 'sample-0.wav'
-    ) {
-      res.status(404).json({ ok: false, error: 'ARTIFACT_NOT_FOUND' });
-      return;
-    }
-
-    try {
-      const ensured = await localCompanionService.neuralEngine.ensureShenavaRizehModelArtifacts();
-      let targetPath: string | null = null;
-      let contentType = 'application/octet-stream';
-      let expectedBytes: number | null = null;
-
-      if (requestedName === 'model.int8.onnx') {
-        targetPath = ensured.modelOnnxPath;
-        contentType = 'application/octet-stream';
-        expectedBytes = ensured.modelOnnxBytes;
-      } else if (requestedName === 'tokens.txt') {
-        targetPath = ensured.tokensPath;
-        contentType = 'text/plain; charset=utf-8';
-        expectedBytes = ensured.tokensBytes;
-      } else if (requestedName === 'sample-0.wav') {
-        targetPath = ensured.sampleWavPath;
-        contentType = 'audio/wav';
-      }
-
-      if (!targetPath || !fs.existsSync(targetPath)) {
-        res.status(404).json({ ok: false, error: 'ARTIFACT_UNAVAILABLE' });
-        return;
-      }
-
-      const stat = fs.statSync(targetPath);
-      if (!stat.isFile() || stat.size <= 0 || (expectedBytes !== null && stat.size !== expectedBytes)) {
-        res.status(500).json({ ok: false, error: 'ARTIFACT_INTEGRITY_ERROR' });
-        return;
-      }
-
-      res.setHeader('Accept-Ranges', 'bytes');
-      res.setHeader('Content-Type', contentType);
-      res.setHeader('Cross-Origin-Resource-Policy', 'same-origin');
-      res.setHeader('Cache-Control', 'private, max-age=86400');
-
-      const rangeHeader = typeof req.headers.range === 'string' ? req.headers.range.trim() : '';
-      if (rangeHeader) {
-        const match = /^bytes=(\d+)-(\d*)$/i.exec(rangeHeader);
-        if (!match) {
-          res.status(416).setHeader('Content-Range', `bytes */${stat.size}`).end();
-          return;
-        }
-        const start = Number.parseInt(match[1], 10);
-        const rawEnd = match[2] ? Number.parseInt(match[2], 10) : stat.size - 1;
-        const end = Math.min(stat.size - 1, rawEnd);
-        if (!Number.isFinite(start) || !Number.isFinite(end) || start < 0 || start > end || start >= stat.size) {
-          res.status(416).setHeader('Content-Range', `bytes */${stat.size}`).end();
-          return;
-        }
-        res.status(206);
-        res.setHeader('Content-Range', `bytes ${start}-${end}/${stat.size}`);
-        res.setHeader('Content-Length', String(end - start + 1));
-        fs.createReadStream(targetPath, { start, end }).pipe(res);
-        return;
-      }
-
-      res.setHeader('Content-Length', String(stat.size));
-      fs.createReadStream(targetPath).pipe(res);
-    } catch (err) {
-      res.status(500).json({
-        ok: false,
-        error: 'ARTIFACT_DELIVERY_FAILED',
-        message: sanitizePublicErrorOutput(err instanceof Error ? err.message : String(err)),
-      });
-    }
-  });
+  // Phase 1A.1: Hardened Public/Immutable Browser Model Artifact Router
+  // Enforces manifest-only allowlist, realpath confinement, 1 MiB Range cap, multi-range rejection,
+  // single-flight preparation lock, rate/concurrency limits, integrity verification, ETag & immutable cache.
+  app.use(
+    '/api/v1/local-models/shenava-rizen',
+    createLocalModelArtifactHttpRouter({
+      provider: localCompanionService.neuralEngine,
+    }),
+  );
 
   // ── Phases 1–4 API Routes: Engines, Leaderboards, Model Development ─────────
   app.post('/api/v1/lab/provider-transcribe', (req, res) => {
@@ -1510,6 +1449,16 @@ async function startServer() {
     fs.appendFileSync(resolved, `${JSON.stringify(entry)}\n`, 'utf8');
   };
 
+  // Phase 1A: Protect Shahab operational & context-memory routes with deployment-mode security guard
+  app.use(
+    ['/api/shahab/state', '/api/shahab/memory', '/api/shahab/operations'],
+    audioApiSecurityGuard.middleware({
+      requireAuth: audioApiSecurityGuard.config.mode === 'hosted',
+      rateLimitBucket: 'shahab-ops',
+      rateLimitMax: 60,
+    }),
+  );
+
   app.get('/api/shahab/state', (_req, res) => {
     const implementationState = readShahabJsonSafe('SHAHAB_IMPLEMENTATION_STATE.json');
     const consentRecords = readShahabJsonSafe('SHAHAB_CONSENT_RECORDS.json');
@@ -1834,8 +1783,11 @@ async function startServer() {
     });
   }
 
-  app.listen(PORT, '0.0.0.0', () => {
-    console.log(`Avapardaz Express+Vite server listening on http://0.0.0.0:${PORT}`);
+  const bindHost = resolveServerBindHost(process.env, audioApiSecurityGuard.config);
+  app.listen(PORT, bindHost, () => {
+    console.log(
+      `Avapardaz Express+Vite server listening on http://${bindHost}:${PORT} (mode=${audioApiSecurityGuard.config.mode})`,
+    );
   });
 }
 

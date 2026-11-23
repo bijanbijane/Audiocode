@@ -1,8 +1,11 @@
-# AVAPARDAZ — IMPLEMENTATION LEDGER (AUTHORITATIVE TASK LEDGER)
+# AVAPARDAZ — IMPLEMENTATION LEDGER (TASK LEDGER)
 
-**Document ID:** `AVP-IMPL-LEDGER-3.1`  
-**Supersedes:** `AVP-IMPL-LEDGER-3.0` (updated for `MASTER v3.1` phase order per `AVP-ADR-PHASE-ORDER-001`)  
-**Last Updated:** `2026-11-20`  
+> **AUTHORITATIVE POINTER (`2026-11-23`):** مرجع واحد و قطعی وضعیت فعلی پروژه سند [`docs/AVAPARDAZ/AUTHORITATIVE-PROJECT-STATE.md`](./AUTHORITATIVE-PROJECT-STATE.md) (`AVP-AUTH-STATE-0.1`) است. وضعیت فازها و گپ‌های پذیرش در این دفترچه با آن سند و با `docs/phase-02/RECOVERY-003-ACCEPTANCE-GAP.md` هم‌تراز شده است.
+
+**Document ID:** `AVP-IMPL-LEDGER-3.2`  
+**Supersedes:** `AVP-IMPL-LEDGER-3.1`  
+**Authoritative Reference:** [`docs/AVAPARDAZ/AUTHORITATIVE-PROJECT-STATE.md`](./AUTHORITATIVE-PROJECT-STATE.md)  
+**Last Updated:** `2026-11-23`  
 **Status Vocabulary:** `NOT_STARTED` | `IN_PROGRESS` | `BLOCKED` | `IMPLEMENTED` | `VERIFIED` | `ACCEPTED`  
 **Anti-Repetition Rule:** Tasks marked `ACCEPTED` MUST NOT be re-executed unless invalidated by regression, code/dependency changes, or explicit re-audit.
 
@@ -42,15 +45,15 @@
 
 ---
 
-## 3. PHASE-02 — Open-Source Model Discovery & Multi-Device CPU Benchmark (`ACCEPTED`)
+## 3. PHASE-02 — Open-Source Model Discovery & Multi-Device CPU Benchmark (`BLOCKED` — Re-Audited `2026-11-22`)
 
 | Task ID | Task Title | Status | Direct Evidence | Date |
 | :--- | :--- | :---: | :--- | :---: |
 | `AVP-P02-001` | Upstream License, Model Card & Commercial Rights Audit | `ACCEPTED` | `PHASE-02-LICENSE-AUDIT.md`, `PHASE-14-COMMERCIAL-READINESS.md` (`Apache-2.0`/`MIT` cleared; `CC-BY-NC` rejected) | 2026-11-20 |
-| `AVP-P02-002` | Acquire Legally Licensed Real Evaluation Audio Set (`25` FLEURS `dev` WAVs, `277.33s`) | `ACCEPTED` | `benchmarks/phase02/prepare_fleurs_dev_eval.py` (`10` FA, `10` EN, `5` FA-EN concat, `CC-BY-4.0`, zero WAVs in repo) | 2026-11-20 |
+| `AVP-P02-002` | Acquire Legally Licensed Real Evaluation Audio Set (`25` FLEURS `dev` WAVs, `277.33s`) | `BLOCKED` *(Dataset Gate)* | Initial `25` FLEURS clips superseded by `docs/phase-02/RECOVERY-003-ACCEPTANCE-GAP.md` (`2026-11-22`): `3.5635 h < 6.0 h`, `0.0 h` conversational/disfluency/code-switching/TextGrid | 2026-11-22 |
 | `AVP-P02-003` | Prepare Offline Native CPU Runtime & SHA-256 Model Provenance | `ACCEPTED` | `sherpa-onnx v2.0.2` + `MODEL-PROVENANCE.md` (exact byte lengths & SHA-256 for 5 ONNX models + 4 WASM files) | 2026-11-20 |
-| `AVP-P02-004` | Execute Reproducible 5-Model Offline CPU Bake-Off + Paired Bootstrap 95% CIs | `ACCEPTED` | `benchmarks/phase02/results-2026-11-20.json` (`90,250 B`, `25/25` `rc=0` per model); `test_evaluation_metrics.py` `6/6` PASS | 2026-11-20 |
-| `AVP-P02-005` | Assign `AVP_MODEL_LITE` / `BALANCED` / `QUALITY` & Issue Phase-02 Acceptance | `ACCEPTED` | `MODEL-SELECTION-REPORT.md`, `MODEL-REGISTRY.md`, `PHASE-02-ACCEPTANCE-REPORT.md`, `ADR-023` | 2026-11-20 |
+| `AVP-P02-004` | Execute Reproducible 5-Model Offline CPU Bake-Off + Paired Bootstrap 95% CIs | `VERIFIED` *(Linux CPU Only)* | `benchmarks/phase02/results-2026-11-20.json` + `recovery-verification-2026-11-22.json`; M2 8GB hardware (`M2_HARDWARE = NOT_AVAILABLE`) & fair head-to-head vs Zipformer still pending | 2026-11-22 |
+| `AVP-P02-005` | Assign `AVP_MODEL_LITE` / `BALANCED` / `QUALITY` & Issue Phase-02 Acceptance | `BLOCKED` | Earlier `2026-11-20` acceptance invalidated by `docs/phase-02/RECOVERY-003-ACCEPTANCE-GAP.md` (`FINAL PHASE-02 STATUS: BLOCKED`, `R03-14` word-end alignment gap, `M2_HARDWARE = NOT_AVAILABLE`) | 2026-11-22 |
 
 ---
 
@@ -84,4 +87,10 @@
 | `AVP-PERSIAN-ZIPFORMER-ASSET-ACQUISITION-001` | Genuine Persian Zipformer-Transducer ONNX Asset Acquisition | `VERIFIED (ASSETS ONLY)` *(`BLK-002`)* | `models/persian-zipformer-transducer/1.0.0/` (`115,757,880` B mandatory verified via `scripts/acquire-persian-zipformer.mjs --verify-only`), NOT wired to CTC | 2026-11-21 |
 | `AVP-P0-012` | Persian Lexical Fidelity, Contextual Disambiguation & Proper-Noun Preservation | `VERIFIED` | `PersianLexicalDisambiguationEngine.ts` (10k O(1) index, guess quarantine, proper-noun guard, P0-010 routing), `AVP-P0-012-PERSIAN-LEXICAL-FIDELITY-AND-DISAMBIGUATION.md` | 2026-11-21 |
 
+---
 
+## 6. Rebuild 2.1 — Phase 0 Reference Architecture, Execution-Path & Memory Audit (`2026-11-23`)
+
+| Task ID | Task Title | Status | Direct Evidence / Scope | Date |
+| :--- | :--- | :---: | :--- | :---: |
+| `AVP-REBUILD-P0-001` | Phase 0 Read-Only Audit, 3-Path ASR Call Graph, Full-PCM Memory Map, `AudioSourceHandle` Spec & Doc Reconciliation | `VERIFIED (DOCS ONLY)` | Created `docs/AVAPARDAZ/AUTHORITATIVE-PROJECT-STATE.md` (`AVP-AUTH-STATE-0.1`); reconciled `CURRENT-STATE.md` & `IMPLEMENTATION-LEDGER.md` with `RECOVERY-003-ACCEPTANCE-GAP.md`; verified `npm run lint` (`0` errors); **zero** production source files modified | 2026-11-23 |

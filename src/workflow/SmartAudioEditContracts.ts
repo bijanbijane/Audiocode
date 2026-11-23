@@ -57,7 +57,7 @@ export interface TranscriptDocument {
   readonly language: 'fa' | 'en' | 'fa-en';
   readonly modelId: string;
   readonly modelVersion: string;
-  readonly runtime: 'sherpa-onnx-cpu' | 'browser-onnx-web';
+  readonly runtime: 'shahab-zipformer-onnx-cpu' | 'sherpa-onnx-cpu' | 'browser-onnx-web';
   /** Verbatim ASR output — Engine 01 NEVER deletes fillers or repetitions */
   readonly rawText: string;
   readonly normalizedText: string;
@@ -72,7 +72,7 @@ export interface TranscriptDocument {
 export interface ShahabAsrRuntimeMetrics {
   readonly modelId: string;
   readonly upstreamModelId: string;
-  readonly runtime: 'sherpa-onnx-cpu' | 'browser-onnx-web';
+  readonly runtime: 'shahab-zipformer-onnx-cpu' | 'sherpa-onnx-cpu' | 'browser-onnx-web';
   readonly durationSec: number;
   readonly processingTimeMs: number;
   readonly realTimeFactor: number;

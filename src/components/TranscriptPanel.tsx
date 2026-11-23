@@ -43,6 +43,7 @@ import {
 import { EnglishScriptRenderMode } from '../ai-engine/asr/MultilingualCodeSwitchAndArabicEngine';
 import { AudioRedactionMaskMode } from '../../packages/audio-runtime/src/SensitiveContentAndPiiRedactorEngine';
 import type { CompanionHealthResponse } from '../host-bridge/companion/CompanionWebClient';
+import type { ShahabLocalRuntimeStatusResponse } from '../asr-core/ShahabLocalHttpClient';
 
 type TranscriptLayer = 'display' | 'normalized' | 'original';
 
@@ -73,6 +74,7 @@ interface TranscriptPanelProps {
   isCheckingCompanion?: boolean;
   isInstallingNativeAsr?: boolean;
   hasBrowserInstalledModel?: boolean;
+  shahabRuntimeStatus?: ShahabLocalRuntimeStatusResponse | null;
   isInstallingBrowserModel?: boolean;
   browserModelInstallPct?: number | null;
   projectSessionNonce?: number;
@@ -126,6 +128,7 @@ export const TranscriptPanel: React.FC<TranscriptPanelProps> = ({
   isCheckingCompanion = false,
   isInstallingNativeAsr = false,
   hasBrowserInstalledModel = false,
+  shahabRuntimeStatus = null,
   isInstallingBrowserModel = false,
   browserModelInstallPct = null,
   projectSessionNonce = 0,
@@ -470,7 +473,31 @@ export const TranscriptPanel: React.FC<TranscriptPanelProps> = ({
             data-testid="transcript-shahab-status"
             className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px]"
           >
-            {hasBrowserInstalledModel ? (
+            {shahabRuntimeStatus?.available ? (
+              <>
+                <span className="inline-flex items-center gap-1.5 font-medium text-emerald-700 dark:text-emerald-400">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0" aria-hidden="true" />
+                  <span>
+                    موتور تبدیل صوت به متن شهاب (
+                    <bdi dir="ltr" className="font-mono">
+                      Zipformer INT8
+                    </bdi>
+                    ): متصل و آماده (۱۰۰٪ محلی)
+                  </span>
+                </span>
+                {shahabRuntimeStatus.sampleAudioAvailable && onLoadAndTranscribeSamplePersianAudio && (
+                  <button
+                    type="button"
+                    data-testid="btn-header-sample-persian"
+                    disabled={isTranscribingAsr}
+                    onClick={onLoadAndTranscribeSamplePersianAudio}
+                    className="inline-flex items-center gap-1 px-2 py-0.5 rounded border border-emerald-600/35 dark:border-emerald-500/40 bg-emerald-500/10 text-emerald-800 dark:text-emerald-300 hover:bg-emerald-500/20 disabled:opacity-50 cursor-pointer"
+                  >
+                    <span>تست با نمونه صوت واقعی فارسی</span>
+                  </button>
+                )}
+              </>
+            ) : hasBrowserInstalledModel ? (
               <>
                 <span className="inline-flex items-center gap-1.5 font-medium text-emerald-700 dark:text-emerald-400">
                   <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0" aria-hidden="true" />
@@ -1559,7 +1586,8 @@ export const TranscriptPanel: React.FC<TranscriptPanelProps> = ({
                 </button>
               )}
 
-              {((companionHealth?.runtime?.available && companionHealth.sampleAudioAvailable) ||
+              {((shahabRuntimeStatus?.available && shahabRuntimeStatus.sampleAudioAvailable) ||
+                (companionHealth?.runtime?.available && companionHealth.sampleAudioAvailable) ||
                 hasBrowserInstalledModel) &&
                 onLoadAndTranscribeSamplePersianAudio && (
                   <button
@@ -1574,7 +1602,7 @@ export const TranscriptPanel: React.FC<TranscriptPanelProps> = ({
                     ) : (
                       <Mic className="w-3.5 h-3.5" aria-hidden="true" />
                     )}
-                    <span>آزمایش با نمونه صوت واقعی فارسی (مدل شهاب / شناوا)</span>
+                    <span>آزمایش با نمونه صوت واقعی فارسی (موتور شهاب)</span>
                   </button>
                 )}
 
@@ -1594,12 +1622,13 @@ export const TranscriptPanel: React.FC<TranscriptPanelProps> = ({
                   {isInstallingBrowserModel
                     ? `در حال نصب خودکار مدل فارسی محلی (${browserModelInstallPct ?? 0}٪)...`
                     : isTranscribingAsr
-                      ? 'در حال استخراج متن و هم‌ترازی آوایی...'
-                      : 'اجرای تبدیل صوت به متن و هم‌ترازی آوایی'}
+                      ? 'در حال استخراج متن با موتور شهاب...'
+                      : 'اجرای تبدیل صوت به متن (موتور شهاب)'}
                 </span>
               </button>
 
-              {!hasBrowserInstalledModel &&
+              {!shahabRuntimeStatus?.available &&
+                !hasBrowserInstalledModel &&
                 !companionHealth?.runtime?.available &&
                 onInstallBrowserPersianModel && (
                   <button

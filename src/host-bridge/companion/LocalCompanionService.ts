@@ -44,6 +44,7 @@ import {
   type ExportableTranscriptSegment,
   type TranscriptExportFormat,
 } from '../../utils/subtitleExporter';
+import { sanitizeDiagnosticString } from '../../security/SecurityTrustBoundaryGuards';
 
 export const COMPANION_SERVICE_VERSION = '1.0.0' as const;
 
@@ -212,6 +213,7 @@ export class LocalCompanionService {
   public readonly audioTransfers: CompanionAudioTransferManager;
   private readonly jobs = new Map<string, InternalJobEntry>();
   private readonly stagedUploads = new Map<string, StagedAudioUpload>();
+  private readonly handshakeTimestampsMs: number[] = [];
   private readonly maxRetainedJobs: number;
   private readonly maxConcurrentJobs: number;
 
@@ -524,7 +526,7 @@ export class LocalCompanionService {
       };
     }
 
-    const jobId = `job_${crypto.randomBytes(6).toString('hex')}`;
+    const jobId = `job_${crypto.randomBytes(16).toString('hex')}`;
     const nowIso = new Date().toISOString();
     const abortController = new AbortController();
 
@@ -610,7 +612,7 @@ export class LocalCompanionService {
           status: 'FAILED',
           elapsedMs: Math.round(performance.now() - startedMs),
           errorCode: isFormat ? 'UNSUPPORTED_OR_CORRUPT_AUDIO' : 'LOCAL_INFERENCE_FAILED',
-          errorMessage: msg.slice(0, 320),
+          errorMessage: sanitizeDiagnosticString(msg).slice(0, 320),
           updatedAtIso: new Date().toISOString(),
         };
       })
@@ -650,8 +652,31 @@ export class LocalCompanionService {
     const router = express.Router();
     const allowSameOriginProxyHost = Boolean(options?.allowSameOriginProxyHost);
 
-    // Strict loopback + DNS rebinding + Origin guard middleware on ALL Companion routes
+    // Strict loopback + DNS rebinding + Origin + query-token guard middleware on ALL Companion routes
     router.use((req: Request, res: Response, next) => {
+      res.setHeader('Cache-Control', 'no-store');
+
+      // Forbid passing tokens in URL query string
+      const queryObj = req.query as Record<string, unknown> | undefined;
+      if (queryObj && typeof queryObj === 'object') {
+        for (const key of Object.keys(queryObj)) {
+          const lk = key.toLowerCase();
+          if (
+            lk === 'token' ||
+            lk === 'session_token' ||
+            lk === 'access_token' ||
+            lk === 'authorization' ||
+            lk === 'api_key'
+          ) {
+            res.status(400).json({
+              error: 'IPC_TOKEN_IN_QUERY_FORBIDDEN',
+              message: 'Passing authentication tokens in URL query parameters is forbidden.',
+            });
+            return;
+          }
+        }
+      }
+
       const remoteAddr = req.socket?.remoteAddress ?? req.ip;
       if (!isLoopbackRemoteAddress(remoteAddr)) {
         res.status(403).json({
@@ -661,35 +686,59 @@ export class LocalCompanionService {
         return;
       }
 
+      const secFetchSite =
+        typeof req.headers['sec-fetch-site'] === 'string'
+          ? req.headers['sec-fetch-site'].trim().toLowerCase()
+          : undefined;
+      if (secFetchSite === 'cross-site') {
+        res.status(403).json({
+          error: 'UNTRUSTED_ORIGIN_BLOCKED',
+          message: 'Local Companion rejected cross-site browser request.',
+        });
+        return;
+      }
+
       const rawHost = typeof req.headers.host === 'string' ? req.headers.host.trim().toLowerCase() : '';
       const rawForwardedHost =
         typeof req.headers['x-forwarded-host'] === 'string'
           ? req.headers['x-forwarded-host'].split(',')[0].trim().toLowerCase()
           : '';
-      const effectiveHost = allowSameOriginProxyHost && rawForwardedHost ? rawForwardedHost : rawHost;
-      const origin = typeof req.headers.origin === 'string' ? req.headers.origin : undefined;
+      const origin = typeof req.headers.origin === 'string' ? req.headers.origin.trim() : undefined;
 
+      // Strict DNS-rebinding defense: Host MUST be loopback (127.0.0.1 / localhost / [::1]).
+      // Never accept arbitrary non-loopback Host merely because Origin also matches that Host.
+      const hostOk = isAllowedLoopbackHostHeader(req.headers.host);
+      if (!hostOk) {
+        res.status(403).json({
+          error: 'DNS_REBINDING_BLOCKED',
+          message: 'Host header must be localhost, 127.0.0.1, or [::1].',
+        });
+        return;
+      }
+
+      // Same-origin reverse-proxy preview is allowed ONLY when Host is loopback and X-Forwarded-Host matches Origin.
       let sameOriginPreviewMatch = false;
-      if (allowSameOriginProxyHost && origin && origin !== 'null') {
+      if (allowSameOriginProxyHost && rawForwardedHost && origin && origin.toLowerCase() !== 'null') {
         try {
-          const originHost = new URL(origin).host.toLowerCase();
-          sameOriginPreviewMatch =
-            Boolean(originHost) && (originHost === effectiveHost || originHost === rawHost);
+          const parsed = new URL(origin);
+          if (parsed.protocol === 'http:' || parsed.protocol === 'https:') {
+            sameOriginPreviewMatch = parsed.host.toLowerCase() === rawForwardedHost;
+          }
         } catch {
           sameOriginPreviewMatch = false;
         }
       }
 
-      const hostOk =
-        isAllowedLoopbackHostHeader(req.headers.host) ||
-        (allowSameOriginProxyHost &&
-          Boolean(effectiveHost) &&
-          (!origin || origin === 'null' || sameOriginPreviewMatch));
-
-      if (!hostOk) {
+      // Reject sandboxed web iframe Origin: null when Sec-Fetch-Site indicates a browser cross-context fetch.
+      if (
+        origin &&
+        origin.toLowerCase() === 'null' &&
+        secFetchSite !== undefined &&
+        secFetchSite !== 'none'
+      ) {
         res.status(403).json({
-          error: 'DNS_REBINDING_BLOCKED',
-          message: 'Host header must be localhost, 127.0.0.1, or [::1].',
+          error: 'UNTRUSTED_ORIGIN_BLOCKED',
+          message: 'Local Companion rejected sandboxed null-origin browser request.',
         });
         return;
       }
@@ -725,6 +774,21 @@ export class LocalCompanionService {
     });
 
     router.post('/handshake', (req, res) => {
+      const nowMs = Date.now();
+      while (this.handshakeTimestampsMs.length > 0 && nowMs - this.handshakeTimestampsMs[0] > 60_000) {
+        this.handshakeTimestampsMs.shift();
+      }
+      if (this.handshakeTimestampsMs.length >= 60) {
+        res.setHeader('Retry-After', '5');
+        res.status(429).json({
+          compatible: false,
+          error: 'HANDSHAKE_RATE_LIMITED',
+          message: 'Too many Companion handshake requests; retry shortly.',
+        });
+        return;
+      }
+      this.handshakeTimestampsMs.push(nowMs);
+
       const remoteAddr = req.socket?.remoteAddress ?? req.ip;
       const out = this.ipcBridge.handshake(req.body as CompanionHandshakeRequest, remoteAddr);
       res.status(out.statusCode).json(out.body);
@@ -1003,13 +1067,15 @@ export class LocalCompanionService {
       }
     });
 
-    // Always return JSON on body-parser / middleware errors (never HTML error pages)
+    // Always return JSON on body-parser / middleware errors (never HTML error pages or internal paths)
     router.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
       const status =
         typeof err === 'object' && err !== null && 'status' in err && typeof (err as { status?: unknown }).status === 'number'
           ? (err as { status: number }).status
           : 400;
-      const message = err instanceof Error ? err.message : 'Companion request error.';
+      const message = sanitizeDiagnosticString(
+        err instanceof Error ? err.message : 'Companion request error.',
+      );
       res.status(status).json({
         ok: false,
         error: status === 413 ? 'PAYLOAD_TOO_LARGE' : 'COMPANION_REQUEST_ERROR',

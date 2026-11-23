@@ -9,23 +9,30 @@
     { "id": "TB-04", "boundary": "Browser Runtime <-> Outbound Network", "control": "AVAPARDAZ_LOCAL_EXECUTION_POLICY blocks Cloud ASR; zero fetch calls verified in offline ORT test", "status": "VERIFIED" },
     { "id": "TB-05", "boundary": "Project Loader <-> Untrusted Project JSON", "control": "validateUntrustedProjectPayload blocks __proto__/constructor/prototype pollution, excessive nesting, and invalid numeric bounds", "status": "VERIFIED" },
     { "id": "TB-06", "boundary": "Adobe Audition CEP Panel <-> ExtendScript Host", "control": "Strict CSP in packages/audition-cep-plugin/client/index.html + sourceIdentity validation", "status": "VERIFIED" },
-    { "id": "TB-07", "boundary": "Client (Web/CEP) <-> Native Companion Loopback HTTP", "control": "127.0.0.1 loopback-only bind, strict Host DNS-rebinding guard, Origin CSRF allowlist", "status": "VERIFIED" },
+    { "id": "TB-07", "boundary": "Client (Web/CEP) <-> Native Companion Loopback HTTP", "control": "127.0.0.1 loopback-only bind, strict loopback Host DNS-rebinding guard (blocks Host:evil+Origin:evil even in proxy mode), Origin/Sec-Fetch-Site CSRF allowlist (blocks sandboxed iframe Origin:null while preserving CEP), query-string token rejection, handshake rate limit", "status": "VERIFIED" },
     { "id": "TB-08", "boundary": "Companion IPC Envelope Authentication", "control": "HMAC-SHA256 signature + nonce replay protection + request_id deduplication + expires_at_ms TTL", "status": "VERIFIED" },
     { "id": "TB-09", "boundary": "Companion Audio Chunk Upload", "control": "CompanionAudioTransferManager enforces sequential chunk ordering, size ceilings, per-chunk & full SHA-256", "status": "VERIFIED" },
     { "id": "TB-10", "boundary": "Companion Filesystem Access", "control": "assertPathWithinAllowedRoot with realpath symlink resolution preventing traversal escapes", "status": "VERIFIED" },
     { "id": "TB-11", "boundary": "Companion Single-Instance Process Lock", "control": "CompanionLifecycleManager atomic lockfile with stale-PID detection & recovery", "status": "VERIFIED" },
     { "id": "TB-12", "boundary": "Model Supply Chain & Update Integrity", "control": "Checksum-vs-signature separation (UNSIGNED_CHECKSUM_ONLY vs SIGNATURE_VERIFIED); 17-state atomic update + rollback", "status": "VERIFIED_WITH_SIGNING_KEY_BLOCKER" },
-    { "id": "TB-13", "boundary": "Diagnostic Logs & Telemetry Privacy", "control": "sanitizeLogMessage redacts bearer tokens, HMAC secrets, transcript payloads, and user filesystem paths", "status": "VERIFIED" }
+    { "id": "TB-13", "boundary": "Diagnostic Logs & Telemetry Privacy", "control": "sanitizeLogMessage redacts bearer tokens, HMAC secrets, transcript payloads, and user filesystem paths", "status": "VERIFIED" },
+    { "id": "TB-14", "boundary": "Audio Processing HTTP APIs (/api/shahab/* & /api/v2/smart-edit/*)", "control": "AudioApiSecurityGuard explicit Local vs Hosted separation, fail-closed Hosted auth requiring independent per-user IdP/issuer + aud/iss/sub/exp validation (rejects bare shared secret and generic subjects), untrusted X-Forwarded-Host rejection, strict loopback/trusted-proxy DNS-rebinding defense, explicit Origin requirement + revocation on /api/local-auth/session, nonce+timestamp replay defense, pre-body-parse checks, binary audio magic validation, rate/concurrency/timeout/disconnect abort", "status": "VERIFIED" },
+    { "id": "TB-15", "boundary": "Smart Edit Job Multi-User Ownership (Anti-IDOR)", "control": "128-bit cryptographic Job IDs + mandatory requireExplicitOwnerId enforcement in SmartAudioEditJobManager + rejection of forged ownerId in body (400) and headers + tenant-scoped resource status + per-owner quotas + byte-budgeted idle eviction + TTL cleanup", "status": "VERIFIED" },
+    { "id": "TB-16", "boundary": "Model & Runtime Supply-Chain Download/Extraction (SafeModelSupplyChain & LocalSherpaNeuralEngine)", "control": "HTTPS-only allowlisted downloads (github.com, objects.githubusercontent.com, release-assets.githubusercontent.com), per-hop redirect & DNS/private-IP SSRF defense with IP pinning, sensitive header stripping on host change, streaming maxBytes + connect/total timeouts + AbortSignal cleanup, SHA-256 verification, member-by-member safe tar.bz2 extraction (zero extractall / zero unsafe tar -xjf fallback; blocks traversal, symlink, hardlink, special files, Tar Bomb), and atomic directory activation with rollback", "status": "VERIFIED_WITH_SIGNING_KEY_BLOCKER" },
+    { "id": "TB-17", "boundary": "Public Browser Model Artifact Delivery (/api/v1/local-models/shenava-rizen/*)", "control": "LocalModelArtifactHttpRouter separated from private audio/job APIs: manifest-only allowlist + realpath confinement, strict 1 MiB Range cap + multi-range/invalid-range/unbounded-large-file 416 rejection, single-flight /prepare lock, rate & stream concurrency limits, pre-delivery SHA-256 integrity verification, strong ETag/304, immutable Cache-Control, and disconnect stream cleanup", "status": "VERIFIED" }
   ],
   "staticGuardrails": {
     "zeroBundledOnnxWeightsInWebBundle": true,
     "zeroHardcodedSecretsDetected": true,
     "zeroCloudAsrEndpointsInBrowserAdapter": true,
-    "testSuite": "src/security/ArchitectureAndSecurityGuardrails.test.ts"
+    "testSuite": "src/security/ArchitectureAndSecurityGuardrails.test.ts",
+    "phase1ATestSuite": "src/security/AudioApiSecurityPhase1A.test.ts",
+    "phase1A1TestSuite": "src/security/Phase1A1SupplyChainAndAuthClosure.test.ts"
   },
   "openSecurityBlockers": [
     "Provision production Ed25519/ECDSA publisher signing keys for detached manifest & installer signatures.",
     "Generate canonical package-lock.json to enable automated npm audit CVE scanning in CI.",
-    "Sign production macOS (.dmg), Windows (.msi), and Adobe Audition (.zxp) distribution packages with OS/Adobe vendor certificates."
+    "Sign production macOS (.dmg), Windows (.msi), and Adobe Audition (.zxp) distribution packages with OS/Adobe vendor certificates.",
+    "Execute live GUI & hardware validation on macOS Apple Silicon (M2 8GB) and Windows x64 with real Adobe Audition 24/25."
   ]
 }

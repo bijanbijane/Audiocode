@@ -17,14 +17,18 @@
 
 import crypto from 'node:crypto';
 import fs from 'node:fs';
-import https from 'node:https';
 import os from 'node:os';
 import path from 'node:path';
-import { execFile, spawn } from 'node:child_process';
-import { promisify } from 'node:util';
+import { spawn } from 'node:child_process';
 import { ingestAudioBufferToCanonical16kMono, float32ToPcm16Buffer } from './CoreAudioIngestion';
+import {
+  ALLOWED_MODEL_DOWNLOAD_HOSTS,
+  activateDirectoryAtomically,
+  downloadFileWithRedirects,
+  extractTarBz2Safe,
+} from './SafeModelSupplyChain';
 
-const execFileAsync = promisify(execFile);
+export { ALLOWED_MODEL_DOWNLOAD_HOSTS, downloadFileWithRedirects, extractTarBz2Safe };
 import { buildAllNormalizationProfiles, detectTextLanguageTag } from './CoreNormalizationAndLanguage';
 import {
   findBestBoundaryValleySample,
@@ -424,57 +428,9 @@ function discoverModelsInRoot(rootDir: string): InstalledLocalNeuralModel[] {
   return discovered;
 }
 
-async function downloadFileWithRedirects(
-  url: string,
-  destPath: string,
-  redirectDepth = 0,
-): Promise<void> {
-  if (redirectDepth > 6) {
-    throw new Error(`TOO_MANY_REDIRECTS downloading ${url}`);
-  }
-  await new Promise<void>((resolve, reject) => {
-    const req = https.get(
-      url,
-      { headers: { 'User-Agent': 'avapardaz-native-asr-installer/1.0' } },
-      (res) => {
-        const status = res.statusCode ?? 0;
-        if (status >= 300 && status < 400 && res.headers.location) {
-          res.resume();
-          const nextUrl = new URL(res.headers.location, url).toString();
-          void downloadFileWithRedirects(nextUrl, destPath, redirectDepth + 1)
-            .then(resolve)
-            .catch(reject);
-          return;
-        }
-        if (status !== 200) {
-          res.resume();
-          reject(new Error(`DOWNLOAD_HTTP_${status} for ${url}`));
-          return;
-        }
-        const out = fs.createWriteStream(destPath);
-        res.pipe(out);
-        out.on('finish', () => out.close(() => resolve()));
-        out.on('error', reject);
-        res.on('error', reject);
-      },
-    );
-    req.on('error', reject);
-  });
-}
-
-async function extractTarBz2Safe(archivePath: string, destDir: string): Promise<void> {
-  fs.mkdirSync(destDir, { recursive: true });
-  try {
-    await execFileAsync('python3', [
-      '-c',
-      'import sys, tarfile; tf = tarfile.open(sys.argv[1], "r:bz2"); tf.extractall(sys.argv[2])',
-      archivePath,
-      destDir,
-    ]);
-  } catch {
-    await execFileAsync('tar', ['-xjf', archivePath, '-C', destDir]);
-  }
-}
+// Hardened downloadFileWithRedirects and extractTarBz2Safe are imported and re-exported
+// from ./SafeModelSupplyChain (HTTPS-only allowlist, SSRF/redirect defense, streaming size ceiling,
+// timeouts, AbortSignal cancellation, member-by-member tar extraction with zero unsafe tar fallback).
 
 /**
  * Reconstructs honest word-level timestamps strictly from genuine SentencePiece token timestamps
@@ -656,7 +612,9 @@ export class LocalSherpaNeuralEngine {
    * are present locally on disk with SHA-256 provenance verification, for either Browser WASM OPFS
    * streaming or Native Companion CPU inference. Safe against concurrent callers.
    */
-  public async ensureShenavaRizehModelArtifacts(): Promise<EnsuredShenavaModelArtifacts> {
+  public async ensureShenavaRizehModelArtifacts(options?: {
+    readonly signal?: AbortSignal;
+  }): Promise<EnsuredShenavaModelArtifacts> {
     const existing = this.findVerifiedShenavaArtifactsOnDisk();
     if (existing) {
       return existing;
@@ -678,26 +636,54 @@ export class LocalSherpaNeuralEngine {
       fs.mkdirSync(downloadsDir, { recursive: true });
       fs.mkdirSync(modelsDir, { recursive: true });
 
-      const uniqueSuffix = `${Date.now()}_${process.pid}`;
-      const mdlArchive = path.join(downloadsDir, `${uniqueSuffix}_${SHENAVA_RIZEH_RUNTIME_RELEASE.modelArchiveName}`);
+      const uniqueSuffix = `${Date.now()}_${process.pid}_${crypto.randomBytes(4).toString('hex')}`;
+      const mdlArchive = path.join(
+        downloadsDir,
+        `${uniqueSuffix}_${SHENAVA_RIZEH_RUNTIME_RELEASE.modelArchiveName}`,
+      );
+      const stageParent = fs.mkdtempSync(path.join(downloadsDir, 'avp-mdl-stage-'));
       const targetModelDir = path.join(modelsDir, SHENAVA_RIZEH_RUNTIME_RELEASE.modelDirName);
 
       try {
-        await downloadFileWithRedirects(SHENAVA_RIZEH_RUNTIME_RELEASE.modelUrl, mdlArchive);
-        await extractTarBz2Safe(mdlArchive, modelsDir);
+        await downloadFileWithRedirects(SHENAVA_RIZEH_RUNTIME_RELEASE.modelUrl, mdlArchive, {
+          allowedHosts: ALLOWED_MODEL_DOWNLOAD_HOSTS,
+          maxRedirects: 5,
+          maxBytes: 120 * 1024 * 1024, // 120 MiB ceiling for ~36 MiB INT8 archive
+          connectTimeoutMs: 15_000,
+          totalTimeoutMs: 180_000,
+          signal: options?.signal,
+        });
+
+        await extractTarBz2Safe(mdlArchive, stageParent, {
+          maxFiles: 64,
+          maxSingleFileBytes: 80 * 1024 * 1024,
+          maxTotalBytes: 120 * 1024 * 1024,
+          allowExecutablesInBin: false,
+        });
+
+        const stagedModelDir = path.join(stageParent, SHENAVA_RIZEH_RUNTIME_RELEASE.modelDirName);
+        if (!fs.existsSync(stagedModelDir) || !fs.statSync(stagedModelDir).isDirectory()) {
+          throw new Error(
+            'SHENAVA_STRUCTURE_INVALID: Extracted archive did not contain expected Shenava-Rizeh directory.',
+          );
+        }
+
+        await activateDirectoryAtomically({
+          stagedDir: stagedModelDir,
+          targetDir: targetModelDir,
+          validateStaged: (dir) => {
+            const onnxPath = path.join(dir, 'model.int8.onnx');
+            const tokensPath = path.join(dir, 'tokens.txt');
+            if (!fs.existsSync(onnxPath) || !fs.existsSync(tokensPath)) return false;
+            if (fs.lstatSync(onnxPath).isSymbolicLink() || fs.lstatSync(tokensPath).isSymbolicLink()) {
+              return false;
+            }
+            return verifyModelFilesIntegrity([onnxPath, tokensPath]);
+          },
+        });
       } finally {
         fs.rmSync(mdlArchive, { force: true });
-      }
-
-      const required = [
-        path.join(targetModelDir, 'model.int8.onnx'),
-        path.join(targetModelDir, 'tokens.txt'),
-      ];
-      if (!verifyModelFilesIntegrity(required)) {
-        fs.rmSync(targetModelDir, { recursive: true, force: true });
-        throw new Error(
-          'SHENAVA_INTEGRITY_VERIFICATION_FAILED: Extracted model failed SHA-256 provenance verification.',
-        );
+        fs.rmSync(stageParent, { recursive: true, force: true });
       }
 
       const ensured = this.findVerifiedShenavaArtifactsOnDisk();
@@ -718,7 +704,9 @@ export class LocalSherpaNeuralEngine {
     return this.ensureShenavaArtifactsPromise;
   }
 
-  public async installShenavaRizehRuntime(): Promise<LocalNeuralRuntimeStatus> {
+  public async installShenavaRizehRuntime(options?: {
+    readonly signal?: AbortSignal;
+  }): Promise<LocalNeuralRuntimeStatus> {
     if (process.platform !== 'linux' || process.arch !== 'x64') {
       throw new Error(
         `NATIVE_INSTALLER_UNSUPPORTED_PLATFORM: Automatic server-side installer targets linux-x64 (current: ${process.platform}-${process.arch}).`,
@@ -734,34 +722,52 @@ export class LocalSherpaNeuralEngine {
       const downloadsDir = path.join(baseDir, 'downloads');
       const runtimeDir = path.join(baseDir, 'runtime');
       fs.mkdirSync(downloadsDir, { recursive: true });
-      fs.mkdirSync(runtimeDir, { recursive: true });
+      fs.mkdirSync(baseDir, { recursive: true });
 
       const { binaryPath } = detectSherpaBinary();
       if (!binaryPath) {
         const rtArchive = path.join(
           downloadsDir,
-          `${Date.now()}_${SHENAVA_RIZEH_RUNTIME_RELEASE.runtimeArchiveName}`,
+          `${Date.now()}_${process.pid}_${SHENAVA_RIZEH_RUNTIME_RELEASE.runtimeArchiveName}`,
         );
-        const rtTempExtract = fs.mkdtempSync(path.join(os.tmpdir(), 'avp-rt-'));
+        const rtTempExtract = fs.mkdtempSync(path.join(downloadsDir, 'avp-rt-stage-'));
         try {
-          await downloadFileWithRedirects(SHENAVA_RIZEH_RUNTIME_RELEASE.runtimeUrl, rtArchive);
-          await extractTarBz2Safe(rtArchive, rtTempExtract);
+          await downloadFileWithRedirects(SHENAVA_RIZEH_RUNTIME_RELEASE.runtimeUrl, rtArchive, {
+            allowedHosts: ALLOWED_MODEL_DOWNLOAD_HOSTS,
+            maxRedirects: 5,
+            maxBytes: 250 * 1024 * 1024, // 250 MiB ceiling for runtime archive
+            connectTimeoutMs: 15_000,
+            totalTimeoutMs: 240_000,
+            signal: options?.signal,
+          });
+          await extractTarBz2Safe(rtArchive, rtTempExtract, {
+            maxFiles: 512,
+            maxSingleFileBytes: 150 * 1024 * 1024,
+            maxTotalBytes: 400 * 1024 * 1024,
+            allowExecutablesInBin: true,
+          });
           const extractedRoot = fs
             .readdirSync(rtTempExtract, { withFileTypes: true })
             .find((d) => d.isDirectory())?.name;
           const srcRoot = extractedRoot ? path.join(rtTempExtract, extractedRoot) : rtTempExtract;
-          fs.cpSync(srcRoot, runtimeDir, { recursive: true, force: true });
-          const installedBin = path.join(runtimeDir, 'bin', 'sherpa-onnx-offline');
-          if (fs.existsSync(installedBin)) {
-            fs.chmodSync(installedBin, 0o755);
-          }
+
+          await activateDirectoryAtomically({
+            stagedDir: srcRoot,
+            targetDir: runtimeDir,
+            validateStaged: (dir) => {
+              const stagedBin = path.join(dir, 'bin', 'sherpa-onnx-offline');
+              if (!fs.existsSync(stagedBin) || fs.lstatSync(stagedBin).isSymbolicLink()) return false;
+              fs.chmodSync(stagedBin, 0o755);
+              return fs.statSync(stagedBin).size > 0;
+            },
+          });
         } finally {
           fs.rmSync(rtTempExtract, { recursive: true, force: true });
           fs.rmSync(rtArchive, { force: true });
         }
       }
 
-      await this.ensureShenavaRizehModelArtifacts();
+      await this.ensureShenavaRizehModelArtifacts({ signal: options?.signal });
       return this.getStatus();
     })();
 

@@ -431,10 +431,11 @@ export function decodeWavToMono16k(wavBytes: Uint8Array): {
   }
 
   let offset = 12;
-  let audioFormat = 1;
-  let channels = 1;
-  let sampleRate = 16000;
-  let bitsPerSample = 16;
+  let foundFmt = false;
+  let audioFormat = 0;
+  let channels = 0;
+  let sampleRate = 0;
+  let bitsPerSample = 0;
   let dataOffset = -1;
   let dataSize = 0;
 
@@ -444,47 +445,119 @@ export function decodeWavToMono16k(wavBytes: Uint8Array): {
     const body = offset + 8;
     if (chunkId === 0x666d7420) {
       // fmt
+      if (chunkSize < 16 || body + 16 > wavBytes.byteLength) {
+        throw new Error('INVALID_WAV_FMT: Truncated fmt chunk.');
+      }
       audioFormat = view.getUint16(body, true);
       channels = view.getUint16(body + 2, true);
       sampleRate = view.getUint32(body + 4, true);
       bitsPerSample = view.getUint16(body + 14, true);
+      foundFmt = true;
     } else if (chunkId === 0x64617461) {
       // data
       dataOffset = body;
       dataSize = Math.min(chunkSize, wavBytes.byteLength - body);
       break;
     }
-    offset = body + chunkSize + (chunkSize % 2);
+    const nextOffset = body + chunkSize + (chunkSize % 2);
+    if (!Number.isSafeInteger(nextOffset) || nextOffset <= offset) {
+      break;
+    }
+    offset = nextOffset;
   }
 
+  if (!foundFmt) {
+    throw new Error('INVALID_WAV_FMT: Missing fmt chunk.');
+  }
+  if (channels < 1 || channels > 8) {
+    throw new Error(`INVALID_WAV_CHANNELS: Unsupported channel count (${channels}).`);
+  }
+  if (!Number.isFinite(sampleRate) || sampleRate < 4000 || sampleRate > 384000) {
+    throw new Error(`INVALID_WAV_SAMPLE_RATE: Unsupported sample rate (${sampleRate}).`);
+  }
+  const isPcm16 = audioFormat === 1 && bitsPerSample === 16;
+  const isPcm24 = audioFormat === 1 && bitsPerSample === 24;
+  const isFloat32 = audioFormat === 3 && bitsPerSample === 32;
+  if (!isPcm16 && !isPcm24 && !isFloat32) {
+    throw new Error(`UNSUPPORTED_WAV_FORMAT: format=${audioFormat}, bits=${bitsPerSample}`);
+  }
   if (dataOffset < 0 || dataSize <= 0) {
     throw new Error('INVALID_WAV_DATA: Missing PCM data chunk.');
   }
 
   const bytesPerSample = bitsPerSample / 8;
-  const totalFrames = Math.floor(dataSize / (bytesPerSample * channels));
-  const mono = new Float32Array(totalFrames);
+  const frameBytes = bytesPerSample * channels;
+  const totalFrames = Math.floor(dataSize / frameBytes);
+  if (totalFrames <= 0) {
+    throw new Error('INVALID_WAV_DATA: WAV contains 0 audio frames.');
+  }
 
-  for (let i = 0; i < totalFrames; i++) {
-    let acc = 0;
-    for (let ch = 0; ch < channels; ch++) {
-      const pos = dataOffset + (i * channels + ch) * bytesPerSample;
-      if (audioFormat === 3 && bitsPerSample === 32) {
-        acc += view.getFloat32(pos, true);
-      } else if (bitsPerSample === 16) {
-        acc += view.getInt16(pos, true) / 32768;
-      } else if (bitsPerSample === 24) {
-        const b0 = wavBytes[pos];
-        const b1 = wavBytes[pos + 1];
-        const b2 = wavBytes[pos + 2];
-        let v = b0 | (b1 << 8) | (b2 << 16);
-        if (v & 0x800000) v |= ~0xffffff;
-        acc += v / 8388608;
-      } else {
-        throw new Error(`UNSUPPORTED_WAV_FORMAT: format=${audioFormat}, bits=${bitsPerSample}`);
+  const readSample = (pos: number): number => {
+    if (isFloat32) {
+      const v = view.getFloat32(pos, true);
+      return Number.isFinite(v) ? Math.max(-1, Math.min(1, v)) : 0;
+    }
+    if (isPcm16) {
+      return view.getInt16(pos, true) / 32768;
+    }
+    const b0 = wavBytes[pos];
+    const b1 = wavBytes[pos + 1];
+    const b2 = wavBytes[pos + 2];
+    let v = b0 | (b1 << 8) | (b2 << 16);
+    if (v & 0x800000) v |= ~0xffffff;
+    return v / 8388608;
+  };
+
+  const mono = new Float32Array(totalFrames);
+  if (channels === 1) {
+    for (let i = 0; i < totalFrames; i++) {
+      mono[i] = readSample(dataOffset + i * bytesPerSample);
+    }
+  } else {
+    // Phase-aware & dead-channel-aware stereo/multi-channel downmix:
+    // Prevents out-of-phase stereo (L = -R) from cancelling to 0.0 silence.
+    const ch0 = new Float32Array(totalFrames);
+    const ch1 = new Float32Array(totalFrames);
+    let sumSq0 = 0;
+    let sumSq1 = 0;
+    let dot01 = 0;
+    for (let i = 0; i < totalFrames; i++) {
+      const base = dataOffset + i * frameBytes;
+      const s0 = readSample(base);
+      const s1 = readSample(base + bytesPerSample);
+      ch0[i] = s0;
+      ch1[i] = s1;
+      sumSq0 += s0 * s0;
+      sumSq1 += s1 * s1;
+      dot01 += s0 * s1;
+    }
+    const rms0 = Math.sqrt(sumSq0 / totalFrames);
+    const rms1 = Math.sqrt(sumSq1 / totalFrames);
+    const db0 = rms0 > 1e-6 ? 20 * Math.log10(rms0) : -120;
+    const db1 = rms1 > 1e-6 ? 20 * Math.log10(rms1) : -120;
+    const denom = Math.sqrt(sumSq0 * sumSq1);
+    const corr = denom > 1e-12 ? dot01 / denom : 0;
+
+    const phaseInversionRisk = corr < -0.55;
+    const silentOneChannel = (db0 < -72 && db1 > -50) || (db1 < -72 && db0 > -50);
+
+    if (channels === 2 && (phaseInversionRisk || silentOneChannel)) {
+      const dominant = rms0 >= rms1 ? ch0 : ch1;
+      mono.set(dominant);
+    } else if (channels === 2) {
+      for (let i = 0; i < totalFrames; i++) {
+        mono[i] = (ch0[i] + ch1[i]) * 0.5;
+      }
+    } else {
+      for (let i = 0; i < totalFrames; i++) {
+        const base = dataOffset + i * frameBytes;
+        let acc = ch0[i] + ch1[i];
+        for (let ch = 2; ch < channels; ch++) {
+          acc += readSample(base + ch * bytesPerSample);
+        }
+        mono[i] = acc / channels;
       }
     }
-    mono[i] = acc / channels;
   }
 
   let pcm16k = mono;
@@ -1282,6 +1355,7 @@ export class SHAHABFrozenModelAdapter implements LocalAsrRuntimeAdapter {
   private encoderSession: ort.InferenceSession | null = null;
   private decoderSession: ort.InferenceSession | null = null;
   private joinerSession: ort.InferenceSession | null = null;
+  private initPromise: Promise<void> | null = null;
   private vocab: readonly string[] = [];
   private verifiedHashes: { encoder: string; decoder: string; joiner: string; tokens: string } | null = null;
   private loadTimeMs: number | null = null;
@@ -1372,26 +1446,52 @@ export class SHAHABFrozenModelAdapter implements LocalAsrRuntimeAdapter {
 
   public async initializeRuntime(): Promise<void> {
     if (this.encoderSession && this.decoderSession && this.joinerSession) return;
-    const immut = this.verifyWeightImmutability();
-    if (!immut.immutable) {
-      throw new AsrRuntimeError({
-        code: 'MODEL_INTEGRITY_FAILURE',
-        message: `Weight immutability check failed: ${immut.mismatches.join('; ')}`,
-        runtimeTarget: this.runtimeTarget,
-      });
+    if (this.initPromise) {
+      return this.initPromise;
     }
-    this.verifiedHashes = immut.hashes;
-    this.vocab = loadZipformerTokensTxt(path.join(this.modelDir, 'tokens.txt'));
 
-    const t0 = performance.now();
-    const encBytes = fs.readFileSync(path.join(this.modelDir, 'encoder.int8.onnx'));
-    const decBytes = fs.readFileSync(path.join(this.modelDir, 'decoder.int8.onnx'));
-    const joinBytes = fs.readFileSync(path.join(this.modelDir, 'joiner.int8.onnx'));
+    this.initPromise = (async () => {
+      const immut = this.verifyWeightImmutability();
+      if (!immut.immutable) {
+        throw new AsrRuntimeError({
+          code: 'MODEL_INTEGRITY_FAILURE',
+          message: `Weight immutability check failed: ${immut.mismatches.join('; ')}`,
+          runtimeTarget: this.runtimeTarget,
+        });
+      }
+      this.verifiedHashes = immut.hashes;
+      this.vocab = loadZipformerTokensTxt(path.join(this.modelDir, 'tokens.txt'));
 
-    this.decoderSession = await ort.InferenceSession.create(decBytes, { executionProviders: ['wasm'] });
-    this.joinerSession = await ort.InferenceSession.create(joinBytes, { executionProviders: ['wasm'] });
-    this.encoderSession = await ort.InferenceSession.create(encBytes, { executionProviders: ['wasm'] });
-    this.loadTimeMs = Math.round(performance.now() - t0);
+      const t0 = performance.now();
+      const encBytes = fs.readFileSync(path.join(this.modelDir, 'encoder.int8.onnx'));
+      const decBytes = fs.readFileSync(path.join(this.modelDir, 'decoder.int8.onnx'));
+      const joinBytes = fs.readFileSync(path.join(this.modelDir, 'joiner.int8.onnx'));
+
+      let dec: ort.InferenceSession | null = null;
+      let join: ort.InferenceSession | null = null;
+      let enc: ort.InferenceSession | null = null;
+      try {
+        dec = await ort.InferenceSession.create(decBytes, { executionProviders: ['wasm'] });
+        join = await ort.InferenceSession.create(joinBytes, { executionProviders: ['wasm'] });
+        enc = await ort.InferenceSession.create(encBytes, { executionProviders: ['wasm'] });
+        this.decoderSession = dec;
+        this.joinerSession = join;
+        this.encoderSession = enc;
+        this.loadTimeMs = Math.round(performance.now() - t0);
+      } catch (err) {
+        await enc?.release().catch(() => {});
+        await join?.release().catch(() => {});
+        await dec?.release().catch(() => {});
+        this.encoderSession = null;
+        this.joinerSession = null;
+        this.decoderSession = null;
+        throw err;
+      }
+    })().finally(() => {
+      this.initPromise = null;
+    });
+
+    return this.initPromise;
   }
 
   public async validateModel(descriptor: AsrModelLoadDescriptor): Promise<AsrModelValidationReport> {
@@ -1501,17 +1601,30 @@ export class SHAHABFrozenModelAdapter implements LocalAsrRuntimeAdapter {
     const tEnc0 = performance.now();
     const xTensor = new ort.Tensor('float32', features.data, [1, features.numFrames, 80]);
     const xLensTensor = new ort.Tensor('int64', BigInt64Array.from([BigInt(features.numFrames)]), [1]);
-    const out = await this.encoderSession!.run({ x: xTensor, x_lens: xLensTensor });
-    const encMs = Math.round(performance.now() - tEnc0);
-    this.encoderInvocationCount++;
-
-    const encData = new Float32Array(out.encoder_out.data as Float32Array);
-    const encLens = out.encoder_out_lens.data as BigInt64Array;
-    const validFrames = Number(encLens[0]);
-    const dim = Number(out.encoder_out.dims[2] ?? 384);
-    const trimmed = encData.subarray(0, validFrames * dim);
-    const copy = new Float32Array(trimmed.length);
-    copy.set(trimmed);
+    let copy: Float32Array;
+    let validFrames: number;
+    let dim: number;
+    let encMs: number;
+    try {
+      const out = await this.encoderSession!.run({ x: xTensor, x_lens: xLensTensor });
+      encMs = Math.round(performance.now() - tEnc0);
+      this.encoderInvocationCount++;
+      try {
+        const encRaw = out.encoder_out.data as Float32Array;
+        const encLens = out.encoder_out_lens.data as BigInt64Array;
+        validFrames = Number(encLens[0]);
+        dim = Number(out.encoder_out.dims[2] ?? 384);
+        const trimmed = encRaw.subarray(0, validFrames * dim);
+        copy = new Float32Array(trimmed.length);
+        copy.set(trimmed);
+      } finally {
+        out.encoder_out.dispose?.();
+        out.encoder_out_lens.dispose?.();
+      }
+    } finally {
+      xTensor.dispose?.();
+      xLensTensor.dispose?.();
+    }
 
     const encoderOutput: ShahabEncoderOutputTensor = {
       data: copy,

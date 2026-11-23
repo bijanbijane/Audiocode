@@ -41,6 +41,7 @@ import { AuditionTransportBar, WaveformSelectionState } from './components/Audit
 import { AuditionSideDock } from './components/AuditionSideDock';
 import { WorkflowStageBar } from './components/WorkflowStageBar';
 import { CompanionConnectionDiagnostic } from './components/CompanionConnectionDiagnostic';
+import { ShahabLiveStatusWidget } from './components/ShahabLiveStatusWidget';
 import { EdlReviewPanel } from './components/EdlReviewPanel';
 import { RenderExportModal } from './components/RenderExportModal';
 import {
@@ -160,6 +161,12 @@ import { BrowserOnnxAsrRuntimeAdapter } from './asr-core/BrowserOnnxAsrRuntimeAd
 import { NativeCompanionAsrRuntimeAdapter } from './asr-core/NativeCompanionAsrRuntimeAdapter';
 import { UnifiedLocalAsrWorkflowService } from './workflow/UnifiedLocalAsrWorkflowService';
 import { installShenavaRizehInBrowser } from './lifecycle/BrowserPersianModelInstaller';
+import {
+  fetchShahabRuntimeStatus,
+  fetchShahabSampleAudioFile,
+  transcribePcmWithShahabLocal,
+  type ShahabLocalRuntimeStatusResponse,
+} from './asr-core/ShahabLocalHttpClient';
 
 const DEFAULT_DSP_PARAMS: EphemeralDspParams = {
   highPassHz: 80,
@@ -186,6 +193,15 @@ export default function App() {
   const [isInstallingBrowserModel, setIsInstallingBrowserModel] = useState<boolean>(false);
   const [browserModelInstallPct, setBrowserModelInstallPct] = useState<number | null>(null);
   const [hasBrowserInstalledModel, setHasBrowserInstalledModel] = useState<boolean>(false);
+  const [shahabRuntimeStatus, setShahabRuntimeStatus] =
+    useState<ShahabLocalRuntimeStatusResponse | null>(null);
+  const [shahabStatusCheckedOnce, setShahabStatusCheckedOnce] = useState<boolean>(false);
+  const [shahabStatusLastCheckedMs, setShahabStatusLastCheckedMs] = useState<number | null>(null);
+  const [isRefreshingShahabStatus, setIsRefreshingShahabStatus] = useState<boolean>(false);
+  const shahabRuntimeStatusRef = useRef<ShahabLocalRuntimeStatusResponse | null>(null);
+  const shahabProbeSeqRef = useRef<number>(0);
+  const shahabProbeAbortRef = useRef<AbortController | null>(null);
+  const activeShahabTranscribeAbortRef = useRef<AbortController | null>(null);
   const [asrInlineFeedback, setAsrInlineFeedback] =
     useState<AsrInlineFeedbackState | null>(null);
   const [englishRenderMode, setEnglishRenderMode] =
@@ -315,6 +331,13 @@ export default function App() {
         modelId: null,
         modelVersion: null,
         message: snap.lastError ?? 'عدم تطابق امضای SHA-256 در فایل مدل ذخیره‌شده.',
+      });
+    } else if (shahabRuntimeStatusRef.current?.available) {
+      workflowRef.current?.setAsrState({
+        state: 'MODEL_READY',
+        modelId: shahabRuntimeStatusRef.current.modelId,
+        modelVersion: shahabRuntimeStatusRef.current.modelVersion,
+        message: `موتور شهاب (${shahabRuntimeStatusRef.current.modelId}) متصل و آماده اجرا است.`,
       });
     } else {
       workflowRef.current?.setAsrState({
@@ -521,11 +544,40 @@ export default function App() {
         }
       });
 
+    void fetchShahabRuntimeStatus()
+      .then((status) => {
+        if (cancelled) return;
+        setShahabStatusCheckedOnce(true);
+        setShahabStatusLastCheckedMs(Date.now());
+        if (status) {
+          shahabRuntimeStatusRef.current = status;
+          setShahabRuntimeStatus(status);
+          if (status.available) {
+            workflowRef.current?.setAsrState({
+              state: 'MODEL_READY',
+              modelId: status.modelId,
+              modelVersion: status.modelVersion,
+              message: `موتور شهاب (${status.modelId}) متصل و آماده اجرا است.`,
+            });
+          }
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setShahabStatusCheckedOnce(true);
+          setShahabStatusLastCheckedMs(Date.now());
+        }
+      });
+
     return () => {
       cancelled = true;
       isMountedRef.current = false;
       activeImportAbortRef.current?.abort();
       activeImportAbortRef.current = null;
+      shahabProbeAbortRef.current?.abort();
+      shahabProbeAbortRef.current = null;
+      activeShahabTranscribeAbortRef.current?.abort();
+      activeShahabTranscribeAbortRef.current = null;
       isImportingAudioRef.current = false;
       brokerReadyPromiseRef.current = null;
       unregisterEviction();
@@ -535,6 +587,64 @@ export default function App() {
       broker.dispose();
     };
   }, []);
+
+  const refreshShahabRuntimeStatus = useCallback(async (showSpinner = false) => {
+    const seq = ++shahabProbeSeqRef.current;
+    shahabProbeAbortRef.current?.abort();
+    const probeController = new AbortController();
+    shahabProbeAbortRef.current = probeController;
+
+    if (showSpinner) setIsRefreshingShahabStatus(true);
+    try {
+      const status = await fetchShahabRuntimeStatus(probeController.signal);
+      if (!isMountedRef.current || seq !== shahabProbeSeqRef.current || probeController.signal.aborted) {
+        return;
+      }
+      setShahabStatusCheckedOnce(true);
+      setShahabStatusLastCheckedMs(Date.now());
+      shahabRuntimeStatusRef.current = status;
+      setShahabRuntimeStatus(status);
+      if (status?.available) {
+        const currentAsrState = workflowRef.current?.getState().asrState;
+        if (currentAsrState === 'MODEL_NOT_INSTALLED' || currentAsrState === 'RUNTIME_UNAVAILABLE') {
+          workflowRef.current?.setAsrState({
+            state: 'MODEL_READY',
+            modelId: status.modelId,
+            modelVersion: status.modelVersion,
+            message: `موتور شهاب (${status.modelId}) متصل و آماده اجرا است.`,
+          });
+        }
+      }
+    } finally {
+      if (showSpinner && isMountedRef.current && seq === shahabProbeSeqRef.current) {
+        setIsRefreshingShahabStatus(false);
+      }
+    }
+  }, []);
+
+  // Real-time live polling for SHAHAB engine status widget while on Studio tab
+  useEffect(() => {
+    if (activeTab !== 'studio') return;
+    const intervalMs = isTranscribingAsr ? 1500 : 4000;
+    const timer = window.setInterval(() => {
+      if (typeof document !== 'undefined' && document.hidden) return;
+      void refreshShahabRuntimeStatus(false);
+    }, intervalMs);
+    const onVisibilityChange = () => {
+      if (typeof document !== 'undefined' && !document.hidden) {
+        void refreshShahabRuntimeStatus(false);
+      }
+    };
+    if (typeof document !== 'undefined') {
+      document.addEventListener('visibilitychange', onVisibilityChange);
+    }
+    return () => {
+      window.clearInterval(timer);
+      if (typeof document !== 'undefined') {
+        document.removeEventListener('visibilitychange', onVisibilityChange);
+      }
+    };
+  }, [activeTab, isTranscribingAsr, refreshShahabRuntimeStatus]);
 
   // Real project session lock acquisition, crash recovery inspection, lock-loss guard & clean shutdown
   useEffect(() => {
@@ -1600,6 +1710,120 @@ export default function App() {
       return;
     }
 
+    // Primary local ASR path: Real SHAHAB Zipformer-Transducer engine on local runtime
+    const liveShahab = shahabRuntimeStatus ?? (await fetchShahabRuntimeStatus());
+    if (liveShahab && !shahabRuntimeStatus) {
+      setShahabRuntimeStatus(liveShahab);
+    }
+
+    if (liveShahab?.available) {
+      const speakerLabel = primaryTrack.speakerLabel || primaryTrack.name || 'گوینده ۱';
+      setIsTranscribingAsr(true);
+      setActiveFailure(null);
+      setAsrInlineFeedback(null);
+      setStatusNotice(
+        'در حال اجرای موتور محلی شهاب (SHAHAB Zipformer INT8) روی صدای ترک اصلی...',
+      );
+
+      const transcribeAbort = new AbortController();
+      activeShahabTranscribeAbortRef.current?.abort();
+      activeShahabTranscribeAbortRef.current = transcribeAbort;
+
+      try {
+        const { response, tokens: nextTokens } = await transcribePcmWithShahabLocal({
+          pcm: resolved.pcm,
+          sampleRate: project.sampleRate,
+          trackId: primaryTrack.id,
+          speakerName: speakerLabel,
+          filename: resolved.asset.name || 'studio-track.wav',
+          decodePolicy: 'BALANCED',
+          signal: transcribeAbort.signal,
+          onProgress: (p) => {
+            if (p.totalChunks > 1) {
+              setStatusNotice(
+                `در حال رونویسی با موتور شهاب — قطعه ${p.currentChunk} از ${p.totalChunks} (${p.percent}٪)...`,
+              );
+            }
+          },
+        });
+
+        await refreshShahabRuntimeStatus(false);
+
+        if (nextTokens.length === 0) {
+          workflowRef.current?.setAsrState({
+            state: 'NO_SPEECH_DETECTED',
+            modelId: response.transcript.modelId,
+            modelVersion: response.transcript.modelVersion,
+            message: `موتور شهاب (${response.transcript.modelId}) گفتار فارسی قابل تشخیصی در این سیگنال صوتی پیدا نکرد.`,
+          });
+          setAsrInlineFeedback({
+            kind: 'NO_SPEECH',
+            titleFa: 'گفتار فارسی در این ترک صوتی تشخیص داده نشد',
+            messageFa:
+              'موتور شهاب (Zipformer INT8) صوت فعلی را پردازش کرد اما گفتار انسانی فارسی نیافت (پروژه پیش‌فرض دارای موج مصنوعی آزمایشی است). برای تست واقعی، دکمه «تست با نمونه صوت واقعی فارسی» را بزنید یا فایل صوتی خود را وارد کنید.',
+          });
+          setStatusNotice(
+            `موتور شهاب گفتاری در این فایل تشخیص نداد (${response.transcript.modelId} | RTF=${response.metrics.realTimeFactor}).`,
+          );
+          return;
+        }
+
+        const beforeTokensSnapshot = cloneTokens(tokens);
+        historyRef.current.commitTransaction({
+          coalescingKey: '',
+          type: 'restore-clip',
+          description: `رونویسی محلی با موتور شهاب (${response.transcript.modelId})`,
+          beforeTracks: tracks,
+          afterTracks: tracks,
+          beforeTokens: beforeTokensSnapshot,
+          afterTokens: nextTokens,
+          beforeRecommendations: recommendations,
+          afterRecommendations: recommendations,
+        });
+        setTokens(nextTokens);
+        syncWorkflowTranscript(nextTokens, `رونویسی محلی شهاب (${response.transcript.modelId})`);
+        setHistoryTick((v) => v + 1);
+
+        workflowRef.current?.setAsrState({
+          state: 'TRANSCRIPTION_COMPLETED',
+          modelId: response.transcript.modelId,
+          modelVersion: response.transcript.modelVersion,
+          message: `رونویسی با موتور شهاب انجام شد (${nextTokens.length} واژه | RTF=${response.metrics.realTimeFactor}).`,
+        });
+        setAsrInlineFeedback(null);
+        setStatusNotice(
+          `رونویسی موتور شهاب کامل شد (${nextTokens.length} واژه | ${response.transcript.modelId} | RTF=${response.metrics.realTimeFactor})`,
+        );
+        return;
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        workflowRef.current?.setAsrState({
+          state: 'INFERENCE_FAILED',
+          message: msg,
+        });
+        const classified = classifyError(err, { subsystem: 'ASR_RUNTIME' });
+        getSharedDiagnosticLogger().log({
+          severity: 'ERROR',
+          subsystem: 'ASR_RUNTIME',
+          code: 'SHAHAB_INFERENCE_FAILED',
+          message: msg,
+        });
+        setActiveFailure(buildUserFacingFailure(classified, workflowState.locale));
+        setAsrInlineFeedback({
+          kind: 'INFERENCE_ERROR',
+          titleFa: 'خطا در اجرای موتور شهاب',
+          messageFa: msg,
+        });
+        setStatusNotice(`خطا در اجرای موتور شهاب: ${msg}`);
+        return;
+      } finally {
+        if (activeShahabTranscribeAbortRef.current === transcribeAbort) {
+          activeShahabTranscribeAbortRef.current = null;
+        }
+        setIsTranscribingAsr(false);
+      }
+    }
+
     const browserAdapter = new BrowserOnnxAsrRuntimeAdapter({
       modelManager: modelManagerRef.current,
       memoryBudgetManager: getSharedMemoryBudgetManager(),
@@ -1834,6 +2058,99 @@ export default function App() {
 
     if (installedOk && autoRunAfter) {
       await handleRunPersianAsr();
+    }
+  };
+
+  const handleLoadAndTranscribeSamplePersianAudio = async () => {
+    if (isReadOnlyLocked) {
+      setStatusNotice('ویرایش غیرفعال است: پروژه بدون قفل انحصاری در حالت فقط‌خواندنی قرار دارد.');
+      return;
+    }
+    if (isTranscribingAsr || isImportingAudio) return;
+
+    setIsTranscribingAsr(true);
+    setActiveFailure(null);
+    setAsrInlineFeedback(null);
+    setStatusNotice('در حال بارگذاری نمونه صوتی واقعی فارسی و اجرای موتور شهاب (Zipformer INT8)...');
+
+    const sampleAbort = new AbortController();
+    activeShahabTranscribeAbortRef.current?.abort();
+    activeShahabTranscribeAbortRef.current = sampleAbort;
+
+    try {
+      const sampleFile = await fetchShahabSampleAudioFile(sampleAbort.signal);
+      const loaded = await importAudioProject(sampleFile, {
+        broker: brokerRef.current,
+        brokerReady: brokerReadyPromiseRef.current,
+        memoryBudgetManager: getSharedMemoryBudgetManager(),
+        retainActivePcmMirror: true,
+      });
+
+      const primaryAsset = Object.values(loaded.assets)[0];
+      const primaryTrack = loaded.tracks[0];
+      const samplePcm = primaryAsset ? loaded.pcmSources[primaryAsset.id] : undefined;
+      if (!primaryAsset || !primaryTrack || !samplePcm) {
+        loaded.runtimeResourceLease?.dispose();
+        throw new Error('بارگذاری داده‌های PCM فایل صوتی نمونه شهاب ناموفق بود.');
+      }
+
+      transportRef.current?.stop();
+      setIsPlaying(false);
+      projectResourceLeaseRef.current.replaceWith(loaded.runtimeResourceLease ?? null);
+      historyRef.current = new TimelineHistoryManager();
+      const nextTracks = cloneTracks(loaded.tracks);
+      const nextRecs = cloneRecommendations(loaded.recommendations);
+      setProject(loaded);
+      setProjectSessionNonce((n) => n + 1);
+      setTracks(nextTracks);
+      setTokens([]);
+      setRecommendations(nextRecs);
+      setSelectedRecId(nextRecs[0]?.id ?? null);
+      setSelection(null);
+      setPlayheadSec(0);
+      setEphemeralDsp(DEFAULT_DSP_PARAMS);
+      setCommittedDsp(DEFAULT_DSP_PARAMS);
+      setEqResponseCurveDb(null);
+      setHistoryTick((v) => v + 1);
+
+      setStatusNotice('فایل نمونه صوتی فارسی بارگذاری شد — در حال استنتاج با موتور شهاب (Zipformer INT8)...');
+
+      const { response, tokens: nextTokens } = await transcribePcmWithShahabLocal({
+        pcm: samplePcm,
+        sampleRate: loaded.sampleRate,
+        trackId: primaryTrack.id,
+        speakerName: primaryTrack.speakerLabel || primaryTrack.name || 'گوینده فارسی',
+        filename: sampleFile.name,
+        decodePolicy: 'BALANCED',
+        signal: sampleAbort.signal,
+      });
+
+      await refreshShahabRuntimeStatus(false);
+
+      setTokens(nextTokens);
+      syncWorkflowTranscript(nextTokens, `رونویسی شهاب روی نمونه صوتی فارسی (${response.transcript.modelId})`);
+      workflowRef.current?.setAsrState({
+        state: nextTokens.length > 0 ? 'TRANSCRIPTION_COMPLETED' : 'NO_SPEECH_DETECTED',
+        modelId: response.transcript.modelId,
+        modelVersion: response.transcript.modelVersion,
+        message: `رونویسی شهاب انجام شد (${nextTokens.length} واژه | RTF=${response.metrics.realTimeFactor}).`,
+      });
+      setStatusNotice(
+        `رونویسی موتور شهاب کامل شد (${nextTokens.length} واژه | ${response.transcript.modelId} | RTF=${response.metrics.realTimeFactor})`,
+      );
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setAsrInlineFeedback({
+        kind: 'INFERENCE_ERROR',
+        titleFa: 'خطا در اجرای نمونه صوتی با موتور شهاب',
+        messageFa: msg,
+      });
+      setStatusNotice(`خطا در اجرای نمونه صوتی شهاب: ${msg}`);
+    } finally {
+      if (activeShahabTranscribeAbortRef.current === sampleAbort) {
+        activeShahabTranscribeAbortRef.current = null;
+      }
+      setIsTranscribingAsr(false);
     }
   };
 
@@ -3578,11 +3895,13 @@ export default function App() {
           </div>
         </section>
 
-        <CompanionConnectionDiagnostic
-          endpoint={companionEndpoint}
-          onChangeEndpoint={handleChangeCompanionEndpoint}
-          locale={workflowState.locale}
-        />
+        {!shahabRuntimeStatus?.available && (
+          <CompanionConnectionDiagnostic
+            endpoint={companionEndpoint}
+            onChangeEndpoint={handleChangeCompanionEndpoint}
+            locale={workflowState.locale}
+          />
+        )}
 
         {statusNotice && (
           <div
@@ -3604,6 +3923,17 @@ export default function App() {
 
         {activeTab === 'studio' && (
           <div className="space-y-4">
+            <ShahabLiveStatusWidget
+              status={shahabRuntimeStatus}
+              isTranscribing={isTranscribingAsr}
+              hasCheckedOnce={shahabStatusCheckedOnce}
+              isRefreshing={isRefreshingShahabStatus}
+              lastCheckedAtMs={shahabStatusLastCheckedMs}
+              locale={workflowState.locale}
+              onRefresh={() => {
+                void refreshShahabRuntimeStatus(true);
+              }}
+            />
             {/* Adobe Audition DAW Split Workspace: Side Media/Effects/Markers Bin + Multi-Track Editor */}
             <div className="grid grid-cols-1 xl:grid-cols-[290px_1fr] gap-4 items-start">
               <AuditionSideDock
@@ -3677,6 +4007,7 @@ export default function App() {
                       totalDurationSec={totalDurationSec}
                       isTranscribingAsr={isTranscribingAsr}
                       hasBrowserInstalledModel={hasBrowserInstalledModel}
+                      shahabRuntimeStatus={shahabRuntimeStatus}
                       isInstallingBrowserModel={isInstallingBrowserModel}
                       browserModelInstallPct={browserModelInstallPct}
                       executionMode={executionMode}
@@ -3685,6 +4016,7 @@ export default function App() {
                       asrInlineFeedback={asrInlineFeedback}
                       onDismissAsrInlineFeedback={() => setAsrInlineFeedback(null)}
                       onInstallBrowserPersianModel={handleInstallBrowserPersianModel}
+                      onLoadAndTranscribeSamplePersianAudio={handleLoadAndTranscribeSamplePersianAudio}
                       onRunAcousticSegmentation={handleRunAcousticSegmentation}
                       onOpenLocalModelInstaller={() => {
                         setLifecycleInitialTab('model');
