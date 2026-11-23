@@ -87,11 +87,12 @@ Observed Fastify registrations in:
 
 1. Root `package.json` has no direct `fastify` or `pg` dependency.
 2. Root `bun.lock` is the repository CI lockfile; the audited lock does not contain Fastify or PostgreSQL's `pg` client.
-3. `backend/package.json` and a standalone backend lockfile were absent when inspected.
-4. Root `backend/Dockerfile` is explicitly documented as the combined Express+Vite runtime; it bundles root `server.ts`, not `backend/src/server.ts`.
-5. Fastify bootstrap requires `DATABASE_URL`, Ed25519 private/public PEM keys, and `PAYMENT_WEBHOOK_HMAC_SECRET`; these must be provisioned only in the Platform API environment, never in the Vite bundle.
-6. `src/App.tsx` imports browser-local ASR/runtime, Companion client, workflow and DSP modules. Moving all of `src/` under a server package would break the product.
-7. Multiple routers are mounted through Express; a direct-route grep is not a complete API inventory. This includes Platform Control Plane, Model Factory, Speech Security, Smart Audio Edit, Shahab, local model artifacts and Companion routers.
+3. The repository previously had no standalone backend package. This branch now adds `backend/package.json`, `backend/tsconfig.json`, and the explicit executable `backend/src/main.ts` entrypoint. These files create a package boundary but have not yet been typechecked or run.
+4. A standalone image definition now exists at `backend/Dockerfile.platform-api`. The original `backend/Dockerfile` remains the legacy combined Express+Vite image, and `backend/Dockerfile.api` is the separated Express/local-runtime image.
+5. No committed `backend/package-lock.json` or `backend/bun.lock` exists yet. The new standalone Platform API workflow generates an npm lockfile in the runner and uploads it as an artifact. The Dockerfile currently resolves exact top-level package versions during image build; it is not production-reproducible until the generated lockfile is committed and Docker switches to `npm ci`.
+6. The Fastify bootstrap requires `DATABASE_URL`, Ed25519 private/public PEM keys, and `PAYMENT_WEBHOOK_HMAC_SECRET`; these must be provisioned only in the Platform API environment, never in the Vite bundle. `ADMIN_API_SECRET_KEY` should also be provisioned for protected admin operations.
+7. `src/App.tsx` imports browser-local ASR/runtime, Companion client, workflow and DSP modules. Moving all of `src/` under a server package would break the product.
+8. Multiple routers are mounted through Express; a direct-route grep is not a complete API inventory. This includes Platform Control Plane, Model Factory, Speech Security, Smart Audio Edit, Shahab, local model artifacts and Companion routers.
 
 ## 4. Migration sequence and acceptance gates
 
@@ -112,9 +113,10 @@ Observed Fastify registrations in:
 
 ### Gate C — Independently runnable Platform API
 
-- Add `backend/package.json`, its own pinned lockfile and TypeScript/build/test configuration.
-- Declare Fastify, `pg`, and only the runtime/build dependencies actually imported.
-- Build and test the Platform API without importing root Express/Vite entrypoints.
+- **Scaffold added in this PR:** `backend/package.json`, `backend/tsconfig.json`, `backend/src/main.ts`, `backend/Dockerfile.platform-api`, and a dedicated CI workflow.
+- The manifest declares Fastify `5.12.8`, PostgreSQL client `pg` `8.23.1`, and `tsx`; the npm registry pages showed those as the current stable releases when this change was authored. [Fastify](https://www.npmjs.com/package/fastify) · [pg](https://www.npmjs.com/package/pg)
+- **Still open:** commit a generated standalone `backend/package-lock.json`; change the Platform API image to `npm ci`; execute typecheck, all backend tests, Docker build, and PostgreSQL integration tests.
+- Build and run the Platform API without importing root Express/Vite entrypoints.
 - Keep its environment secrets isolated; fail closed when required values are missing.
 - Run PostgreSQL migrations and integration tests in a disposable test database.
 - Do not proxy overlapping license/model endpoints until signature and response parity tests pass.
@@ -144,6 +146,7 @@ Observed Fastify registrations in:
 - The main-branch baseline quality workflows at `90fafa8d03a1699614269564a759a63c6bd247f3` also failed before runner allocation (`runner_id=0`, zero executed steps).
 - The separated-container workflow likewise failed before runner allocation and produced no artifacts; retry attempt 2 also received no runner.
 - GitHub's job-log download currently returns an object-storage 404, so there is no command-level diagnostic log from these jobs.
+- The new Fastify executable entrypoint, package manifest, TypeScript config, standalone Dockerfile and workflow are committed, but none has been executed because GitHub has not assigned a runner.
 - No claim is made that Docker build, typecheck, Vite build, Fastify startup, PostgreSQL integration, local ASR, Companion/CEP or offline-license tests passed in this editing session.
 
 ## 6. Stop conditions (safety, not excuses)
