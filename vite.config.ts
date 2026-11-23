@@ -41,7 +41,7 @@ export default defineConfig(({mode}) => {
         '/platform-api': {
           target: process.env.PLATFORM_API_PROXY_TARGET ?? 'http://127.0.0.1:4000',
           changeOrigin: false,
-          rewrite: (requestPath) => requestPath.replace(/^\\/platform-api/, ''),
+          rewrite: (requestPath) => requestPath.replace(/^\/platform-api/, ''),
         },
       }
     : undefined;
