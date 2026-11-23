@@ -15,6 +15,7 @@ on:
       - 'backend/src/PlatformBackendServices.test.ts'
       - 'src/platform/PlatformApiClient.ts'
       - 'src/platform/PlatformApiClient.test.ts'
+      - 'src/platform/LocalExpressLoopbackContract.test.ts'
       - 'deploy/docker-compose.separated.yml'
       - 'deploy/.env.separated.example'
       - 'deploy/web/**'
