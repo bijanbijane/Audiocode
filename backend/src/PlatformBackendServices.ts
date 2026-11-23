@@ -521,38 +521,63 @@ export class PlatformBackendServices {
           return reply.status(400).send({ error: 'INVALID_CHUNK_INDEX' });
         }
 
-        // Re-check the authoritative catalog state at download time. A signed
-        // REVOKED manifest is useful to clients, but the server must never serve
-        // the underlying revoked model bytes.
-        const modelState = await this.db.query<{ release_status: string }>(
-          `SELECT release_status
-           FROM ai_models_catalog
-           WHERE model_id = $1 AND version = $2`,
-          [modelId, version],
+        // Re-check both the authoritative model state and the exact chunk registration
+        // at download time. A caller must not be able to guess an orphan file path.
+        const modelState = await this.db.query<{
+          release_status: string;
+          chunk_sha256_hex: string | null;
+          chunk_byte_length: number | null;
+        }>(
+          `SELECT catalog.release_status,
+                  chunk.sha256_hex AS chunk_sha256_hex,
+                  chunk.byte_length AS chunk_byte_length
+           FROM ai_models_catalog AS catalog
+           LEFT JOIN ai_model_chunks AS chunk
+             ON chunk.model_id = catalog.model_id
+            AND chunk.version = catalog.version
+            AND chunk.chunk_index = $3
+           WHERE catalog.model_id = $1 AND catalog.version = $2`,
+          [modelId, version, safeIdx],
         );
         if (modelState.rows.length === 0) {
           return reply.status(404).send({ error: 'MODEL_VERSION_NOT_FOUND' });
         }
-        if (modelState.rows[0].release_status === 'REVOKED') {
+        const modelChunk = modelState.rows[0];
+        if (modelChunk.release_status === 'REVOKED') {
           return reply.status(410).send({ error: 'MODEL_VERSION_REVOKED' });
+        }
+        if (
+          !modelChunk.chunk_sha256_hex ||
+          !/^[a-f0-9]{64}$/i.test(modelChunk.chunk_sha256_hex) ||
+          !Number.isSafeInteger(modelChunk.chunk_byte_length) ||
+          (modelChunk.chunk_byte_length ?? 0) <= 0
+        ) {
+          return reply.status(404).send({ error: 'MODEL_CHUNK_NOT_REGISTERED' });
         }
 
         // Both path segments have strict allow-list validation before joining.
         const safeModel = modelId;
         const safeVer = version;
         const fileName = `chunk_${String(safeIdx).padStart(4, '0')}.bin`;
-        const fullPath = path.join(
-          this.config.modelStorageRootDir,
-          safeModel,
-          safeVer,
-          fileName,
-        );
+        const storageRoot = this.config.modelStorageRootDir;
+        const fullPath = path.join(storageRoot, safeModel, safeVer, fileName);
 
-        if (!fs.existsSync(fullPath)) {
+        if (!fs.existsSync(storageRoot) || !fs.existsSync(fullPath)) {
           return reply.status(404).send({ error: 'CHUNK_FILE_NOT_FOUND' });
         }
 
-        const stat = fs.statSync(fullPath);
+        // Reject symlinks escaping the model root and files whose byte count
+        // differs from the signed PostgreSQL manifest metadata.
+        const realRoot = fs.realpathSync(storageRoot);
+        const realFile = fs.realpathSync(fullPath);
+        const relativeFile = path.relative(realRoot, realFile);
+        if (relativeFile.startsWith('..') || path.isAbsolute(relativeFile)) {
+          return reply.status(403).send({ error: 'MODEL_CHUNK_PATH_OUTSIDE_STORAGE_ROOT' });
+        }
+        const stat = fs.statSync(realFile);
+        if (!stat.isFile() || stat.size !== modelChunk.chunk_byte_length) {
+          return reply.status(409).send({ error: 'MODEL_CHUNK_FILE_SIZE_MISMATCH' });
+        }
         const totalSize = stat.size;
         const rangeHeader = request.headers.range;
 
