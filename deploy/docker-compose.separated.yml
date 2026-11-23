@@ -10,7 +10,8 @@
 #   /api/*, /v1/*        -> Express on shared loopback :3000
 #   /platform-api/*      -> Fastify/PostgreSQL Platform API (prefix stripped)
 #
-# Existing Express and new Platform API use DIFFERENT Ed25519 key pairs during migration.
+# Keep the currently deployed Ed25519 key pair identical in Express Local compatibility
+# and Fastify until a versioned key-rotation rollout updates every client.
 # Local-mode legacy clients may continue to use Express demo compatibility routes.
 # Hosted subscription issuance is blocked on Express and belongs to Fastify only.
 
