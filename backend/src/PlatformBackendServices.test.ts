@@ -7,9 +7,21 @@ import {
   FastifyReplyLike,
   PgPoolLike,
   PlatformBackendServices,
+  verifyModelChunkBytes,
 } from './PlatformBackendServices';
 
 const VALID_FP_1 = '1'.repeat(64);
+
+test('model chunk bytes must match the authoritative SHA-256 and exact byte length', () => {
+  const content = Buffer.from('avapardaz-model-chunk', 'utf8');
+  const correctHash = crypto.createHash('sha256').update(content).digest('hex');
+
+  assert.equal(verifyModelChunkBytes(content, content.byteLength, correctHash), true);
+  assert.equal(verifyModelChunkBytes(content, content.byteLength, '0'.repeat(64)), false);
+  assert.equal(verifyModelChunkBytes(content, content.byteLength + 1, correctHash), false);
+  assert.equal(verifyModelChunkBytes(content, 0, correctHash), false);
+  assert.equal(verifyModelChunkBytes(content, 17 * 1024 * 1024, correctHash), false);
+});
 
 test('Section 100: PlatformBackendServices issues Ed25519-signed license leases using authenticatedUserId inside a pinned transaction and enforces V1 local-only ASR policy', async () => {
   const { privateKey, publicKey } = crypto.generateKeyPairSync('ed25519');
