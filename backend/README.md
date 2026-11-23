@@ -61,9 +61,10 @@ The API fails closed during startup if any of these are missing:
 | `PAYMENT_WEBHOOK_HMAC_SECRET` | Payment webhook authentication secret |
 
 Optional runtime settings include:
-- `HOST` (default `0.0.0.0`)
+- `HOST` (default `127.0.0.1` in development; `0.0.0.0` in production)
 - `PORT` (default `4000`)
 - `TRUST_PROXY` (default `false`; set `true` only behind the separated Nginx edge, which overwrites forwarded client-IP headers)
+- `PLATFORM_API_INTERNAL_ORIGIN` (required by Hosted Express compatibility facades; private service origin such as `http://avapardaz-platform-api:4000`, never client-controlled)
 - `ADMIN_API_SECRET_KEY` (required for admin revocation operations)
 - `MODEL_STORAGE_DIR` (default `/var/lib/paudio/models`)
 - `ED25519_KEY_ID` (default `ed25519_prod_key_v1`)
@@ -71,6 +72,12 @@ Optional runtime settings include:
 - `ENABLE_CLOUD_ASR` (must remain `false` under the current local-only ASR product policy)
 
 Never put these values in Vite environment variables, browser code, static assets, or the Audition CEP bundle.
+
+
+
+## Express Hosted compatibility adapter
+
+The root Express Local Audio Runtime uses the server-only `PLATFORM_API_INTERNAL_ORIGIN` variable to forward the legacy public-key, lease and model-manifest URLs to the Fastify service in Hosted mode. Do not expose this variable to Vite or the browser. The local Compose stack sets it to `http://avapardaz-platform-api:4000` on the private Docker network.
 
 ## Health checks
 
