@@ -537,7 +537,7 @@ export class PlatformBackendServices {
         if (!/^[a-zA-Z0-9_-]{1,64}$/.test(modelId)) {
           return reply.status(400).send({ error: 'INVALID_MODEL_ID' });
         }
-        if (!/^[a-zA-Z0-9._-]{1,32}$/.test(version)) {
+        if (!/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,31}$/.test(version)) {
           return reply.status(400).send({ error: 'INVALID_MODEL_VERSION' });
         }
         if (!/^(0|[1-9][0-9]{0,8})$/.test(chunkIndex)) {
