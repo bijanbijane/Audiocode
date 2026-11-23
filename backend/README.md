@@ -45,6 +45,8 @@ Open `http://localhost:8080`. The Nginx/Web port is bound to host loopback. The 
 
 The Compose stack is for local-only operation, not a public Hosted deployment. The Express Local Audio Runtime is now a separate process/container and no longer eagerly imports Vite, but `backend/Dockerfile.api` still uses the root Bun dependency lock because the runtime imports the root `src/` module graph. A separate Local Audio Runtime package and lockfile remain a future migration gate.
 
+The Compose API container's `/healthz` endpoint is **process liveness only**. `/api/v1/asr/health` reports `status: DEGRADED` and `localInferenceProvisioningStatus: NOT_PROVISIONED` until an executable local Sherpa runtime and at least one integrity-verified model are present. The current automatic Sherpa server installer explicitly supports `linux-x64` only; it does not make the ARM64 Docker image on an Apple Silicon Mac inference-ready. Do not treat a healthy Express container or a green `/healthz` as proof that local transcription works. For Adobe Audition/Companion and native CPU inference, run the host Local Audio Runtime with `npm run dev:api` after installing the native runtime/model for that host architecture; verify `/api/v1/asr/health` reports `status: OK` and `localInferenceProvisioned: true`.
+
 The PostgreSQL init scripts run only when the named `pg_data` volume is first initialized. Existing databases require the repository's migration process; do not delete a live volume to force reinitialization. The cloud-ASR queue migration `migration_003_cloud_jobs.sql` is intentionally not mounted because server-side audio ingestion/inference remains disabled under the local-only ASR policy.
 
 `backend/Dockerfile.platform-api` uses `npm ci` and requires the generated, committed `backend/package-lock.json`. Until that file is produced by CI and committed, the Platform API image build is intentionally blocked.
@@ -81,8 +83,10 @@ The root Express Local Audio Runtime uses the server-only `PLATFORM_API_INTERNAL
 
 ## Health checks
 
-- `GET /healthz`: process liveness
-- `GET /readyz`: PostgreSQL readiness
+- Express Local Audio Runtime `GET /healthz`: process liveness only; it does not assert model readiness.
+- Express `GET /api/v1/asr/health`: ASR subsystem state; `status` is `DEGRADED` until a verified native runtime binary and model are installed.
+- Fastify `GET /healthz`: Platform API process liveness.
+- Fastify `GET /readyz`: PostgreSQL readiness.
 
 ## Migration and release status
 
