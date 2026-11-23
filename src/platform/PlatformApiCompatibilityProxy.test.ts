@@ -10,6 +10,7 @@ import {
 function makeRequest(params: {
   readonly body?: unknown;
   readonly authorization?: string;
+  readonly forwardedFor?: string;
 } = {}): Request {
   const listeners = new Map<string, Set<(...args: unknown[]) => void>>();
   return {
@@ -17,6 +18,7 @@ function makeRequest(params: {
     aborted: false,
     headers: {
       ...(params.authorization ? { authorization: params.authorization } : {}),
+      ...(params.forwardedFor ? { 'x-forwarded-for': params.forwardedFor } : {}),
     },
     on(event: string, listener: (...args: unknown[]) => void) {
       const set = listeners.get(event) ?? new Set();
@@ -108,6 +110,7 @@ test('legacy raw device fingerprints are hashed before entering the Platform API
 test('legacy Express adapter forwards only Bearer auth and bounded JSON to the internal Platform API', async () => {
   const req = makeRequest({
     authorization: 'Bearer user-jwt',
+    forwardedFor: '192.0.2.44',
     body: { deviceFingerprintHash: 'a'.repeat(64), displayName: 'Editor' },
   });
   const res = new FakeResponse();
@@ -132,6 +135,7 @@ test('legacy Express adapter forwards only Bearer auth and bounded JSON to the i
   assert.equal(capturedInit?.method, 'POST');
   assert.equal(capturedInit?.redirect, 'manual');
   assert.equal(new Headers(capturedInit?.headers).get('authorization'), 'Bearer user-jwt');
+  assert.equal(new Headers(capturedInit?.headers).get('x-forwarded-for'), '192.0.2.44');
   assert.equal(new Headers(capturedInit?.headers).get('content-type'), 'application/json');
   assert.deepEqual(JSON.parse(String(capturedInit?.body)), {
     deviceFingerprintHash: 'a'.repeat(64),
@@ -140,6 +144,28 @@ test('legacy Express adapter forwards only Bearer auth and bounded JSON to the i
   assert.equal(res.statusCode, 201);
   assert.deepEqual(JSON.parse(String(res.body)), { licenseId: 'uuid' });
   assert.equal(res.headers.get('cache-control'), 'no-store');
+});
+
+test('legacy adapter discards spoofable multi-hop or malformed forwarded IP values', async () => {
+  for (const forwardedFor of [
+    '192.0.2.44, 10.0.0.1',
+    'not-an-ip',
+    ' 192.0.2.44',
+  ]) {
+    const req = makeRequest({ forwardedFor });
+    const res = new FakeResponse();
+    let capturedHeaders: Headers | undefined;
+    await forwardPlatformApiCompatibilityRequest(req, res.asResponse(), {
+      baseUrl: 'http://platform-internal:4000',
+      path: '/api/v1/crypto/public-key',
+      method: 'GET',
+      fetchImpl: async (_input, init) => {
+        capturedHeaders = new Headers(init?.headers);
+        return new Response('{}', { status: 200 });
+      },
+    });
+    assert.equal(capturedHeaders?.has('x-forwarded-for'), false);
+  }
 });
 
 test('legacy adapter fails closed when the internal Platform API origin is absent or unsafe', async () => {
