@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { resolveAudioApiSecurityConfig, resolveServerBindHost } from '../../src/security/AudioApiSecurityGuard';
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const read = (relativePath: string): string =>
@@ -34,6 +35,17 @@ test('separated web sends the new platform prefix to Fastify and leaves legacy A
   assert.ok(vite.includes("requestPath.replace(/^\\/platform-api/, '')"));
   assert.ok(vite.includes("'/api': {"));
   assert.ok(vite.includes("'/v1': {"));
+});
+
+test('local Compose keeps the Express API on a real loopback bind in production mode', () => {
+  const env = {
+    NODE_ENV: 'production',
+    AVAPARDAZ_DEPLOYMENT_MODE: 'local',
+    AVAPARDAZ_BIND_HOST: '127.0.0.1',
+  };
+  const config = resolveAudioApiSecurityConfig(env);
+  assert.equal(config.mode, 'local');
+  assert.equal(resolveServerBindHost(env, config), '127.0.0.1');
 });
 
 test('three-runtime compose keeps Web, Express, Fastify and PostgreSQL isolated', () => {
