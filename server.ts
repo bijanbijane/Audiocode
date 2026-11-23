@@ -365,8 +365,18 @@ async function startServer() {
     res.json(licenseService.getPublicKeyInfo());
   });
 
-  // Issue cryptographically signed Ed25519 offline license lease
+  // Local/demo lease endpoint only. Hosted subscription issuance must use the
+  // authenticated PostgreSQL Platform API; never trust a client-supplied plan/userId
+  // on the legacy Express route in Hosted mode.
   app.post('/api/v1/license/lease', (req, res) => {
+    if (audioApiSecurityGuard.config.mode !== 'local') {
+      res.status(404).json({
+        error: 'PLATFORM_API_LICENSE_REQUIRED',
+        messageFa: 'صدور مجوز حساب کاربری فقط از API احراز هویت‌شده پلتفرم انجام می‌شود.',
+      });
+      return;
+    }
+
     const body = req.body as {
       userId?: unknown;
       displayName?: unknown;
