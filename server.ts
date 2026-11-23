@@ -557,8 +557,9 @@ async function startServer() {
     ];
 
     res.status(200).json({
-      // API process liveness is separate from the native inference provisioning state.
-      status: 'OK',
+      // Keep HTTP liveness at 200, but never report the ASR subsystem as healthy
+      // until an executable runtime and at least one integrity-verified local model exist.
+      status: neuralRuntime.available ? 'OK' : 'DEGRADED',
       apiStatus: 'LIVE',
       localInferenceProvisioningStatus: neuralRuntime.available ? 'PROVISIONED' : 'NOT_PROVISIONED',
       localInferenceProvisioned: neuralRuntime.available,
