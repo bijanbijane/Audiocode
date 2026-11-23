@@ -62,6 +62,32 @@ export interface BackendLegacySignedEnvelope<T> {
 export type BackendModelTier = 'GROUP_A' | 'GROUP_B';
 export type BackendModelLifecycleStatus = 'ACTIVE' | 'SUPPORTED' | 'DEPRECATED' | 'REVOKED';
 
+const MAX_MODEL_CHUNK_BYTES = 16 * 1024 * 1024;
+
+/** Verify bytes against the signed PostgreSQL chunk metadata before serving them. */
+export function verifyModelChunkBytes(
+  bytes: Buffer,
+  expectedByteLength: number | null,
+  expectedSha256Hex: string | null,
+): boolean {
+  if (
+    !Buffer.isBuffer(bytes) ||
+    typeof expectedByteLength !== 'number' ||
+    !Number.isSafeInteger(expectedByteLength) ||
+    expectedByteLength <= 0 ||
+    expectedByteLength > MAX_MODEL_CHUNK_BYTES ||
+    bytes.byteLength !== expectedByteLength ||
+    typeof expectedSha256Hex !== 'string' ||
+    !/^[a-f0-9]{64}$/i.test(expectedSha256Hex)
+  ) {
+    return false;
+  }
+
+  const actual = crypto.createHash('sha256').update(bytes).digest();
+  const expected = Buffer.from(expectedSha256Hex, 'hex');
+  return actual.byteLength === expected.byteLength && crypto.timingSafeEqual(actual, expected);
+}
+
 export interface BackendLegacySignedModelManifest {
   readonly modelId: string;
   readonly version: string;
@@ -393,6 +419,7 @@ export class PlatformBackendServices {
           chunk.chunk_index !== index ||
           !Number.isSafeInteger(chunk.byte_length) ||
           chunk.byte_length <= 0 ||
+          chunk.byte_length > MAX_MODEL_CHUNK_BYTES ||
           !/^[a-f0-9]{64}$/i.test(chunk.sha256_hex),
         );
         const actualTotalBytes = chunkResult.rows.reduce(
@@ -549,8 +576,10 @@ export class PlatformBackendServices {
         if (
           !modelChunk.chunk_sha256_hex ||
           !/^[a-f0-9]{64}$/i.test(modelChunk.chunk_sha256_hex) ||
+          typeof modelChunk.chunk_byte_length !== 'number' ||
           !Number.isSafeInteger(modelChunk.chunk_byte_length) ||
-          (modelChunk.chunk_byte_length ?? 0) <= 0
+          modelChunk.chunk_byte_length <= 0 ||
+          modelChunk.chunk_byte_length > MAX_MODEL_CHUNK_BYTES
         ) {
           return reply.status(404).send({ error: 'MODEL_CHUNK_NOT_REGISTERED' });
         }
@@ -578,7 +607,20 @@ export class PlatformBackendServices {
         if (!stat.isFile() || stat.size !== modelChunk.chunk_byte_length) {
           return reply.status(409).send({ error: 'MODEL_CHUNK_FILE_SIZE_MISMATCH' });
         }
-        const totalSize = stat.size;
+
+        // Verify the actual content-addressed bytes before setting immutable cache headers.
+        // Model chunks are bounded to 16 MiB, so using one verified buffer also avoids a
+        // TOCTOU gap between hashing a file and later opening a second stream for delivery.
+        const verifiedChunkBytes = fs.readFileSync(realFile);
+        if (!verifyModelChunkBytes(
+          verifiedChunkBytes,
+          modelChunk.chunk_byte_length,
+          modelChunk.chunk_sha256_hex,
+        )) {
+          return reply.status(409).send({ error: 'MODEL_CHUNK_SHA256_MISMATCH' });
+        }
+
+        const totalSize = verifiedChunkBytes.byteLength;
         const rangeHeader = request.headers.range;
 
         reply.header('Accept-Ranges', 'bytes');
@@ -602,11 +644,11 @@ export class PlatformBackendServices {
           reply.status(206);
           reply.header('Content-Range', `bytes ${start}-${end}/${totalSize}`);
           reply.header('Content-Length', end - start + 1);
-          return reply.send(fs.createReadStream(fullPath, { start, end }));
+          return reply.send(verifiedChunkBytes.subarray(start, end + 1));
         }
 
         reply.header('Content-Length', totalSize);
-        return reply.send(fs.createReadStream(fullPath));
+        return reply.send(verifiedChunkBytes);
       },
     );
 
