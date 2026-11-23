@@ -54,10 +54,11 @@ docker build -f deploy/web/Dockerfile -t avapardaz-web .
 - `avapardaz-web` serves only the Vite build through Nginx on port 8080.
 - For the local-only Compose topology, these remain separate containers but share a network namespace. Nginx reaches Express at `127.0.0.1:3000`, so `AudioApiSecurityGuard` continues to see a real loopback peer and does not need a weakened proxy exception.
 - `avapardaz-platform-api` is a third, separately networked Fastify/PostgreSQL service. The browser addresses it through `/platform-api/`; Nginx strips this prefix before forwarding. The legacy `/api/` and `/v1/` paths still reach Express.
-- The local Compose ports are bound to `127.0.0.1` on the host. This configuration is for local use, not an internet-facing hosted deployment.
+- The Nginx/Web port alone is bound to `127.0.0.1` on the host. The containerized Express port is deliberately not published: Companion validates the true socket peer as loopback, while Docker host-port NAT may present a bridge IP. For host Audition/Companion, run `npm run dev:api` natively on `127.0.0.1:3000`; do not weaken the Companion guard. This configuration is local-only, not an internet-facing hosted deployment.
 - Nginx forwards `/api` and `/v1` without rewriting the paths. Request buffering is disabled for these routes so streaming audio requests are not unnecessarily buffered at the web tier.
 - The Nginx static tier emits COOP, COEP, and CORP headers required by the browser audio/WASM environment, including cache-controlled HTML and asset locations.
 - The Fastify model chunk volume is separate and read-only to the Platform API; it is not shared with the Local Audio Runtime's model storage.
+- The Fastify chunk endpoint re-checks the live release state, requires a PostgreSQL chunk registration, confines the resolved path under the model root, caps chunk sizes at 16 MiB, checks exact file length, and verifies SHA-256 before returning either a full chunk or a range.
 - Nginx permits up to the current 100 MiB public-audio ingress ceiling, while Express applies its own narrower route-level limits (for example, 64 MiB for Smart Audio Edit). Proxy timeouts are set to 240 seconds to cover the existing three-minute edit operation timeout.
 
 The existing `backend/Dockerfile` is intentionally not overwritten. It remains the legacy combined image until the separated deployment has passed parity checks.
@@ -76,15 +77,15 @@ The web tier is static-only. It does not receive private keys, database credenti
 
 This is a real web/API **process and container split** plus a separately packaged Platform API scaffold, with a dedicated `/platform-api/` ingress route; it is not the completed route migration.
 
-The current Express `server.ts` still combines local-audio APIs and several platform-facing routes. Fastify/PostgreSQL now has its own package, executable entrypoint, image definition, and dedicated `/platform-api/` ingress. Compatibility implementations now exist for public-key discovery, offline lease signing/expiry, and the old signed model-manifest shape; source tests invoke the existing `OfflineCryptoVerifier` for both lease and manifest. This does not yet make Fastify the canonical owner: real login/account UI wiring, model chunk delivery parity, full PostgreSQL integration, and CI execution remain unverified. The standalone npm lockfile has not yet been generated and committed. The Platform API Dockerfile requires it and uses `npm ci`, so its image remains intentionally unbuildable from a fresh checkout until the lockfile is committed.
+The current Express `server.ts` still combines local-audio APIs and several platform-facing routes. Fastify/PostgreSQL now has its own package, executable entrypoint, image definition, and dedicated `/platform-api/` ingress. Hosted Express compatibility facades now forward legacy public-key, offline-lease and model-manifest requests to Fastify; Local mode retains the old local signer. Source tests invoke the existing `OfflineCryptoVerifier` for lease and manifest. The adapter strips plan/grace overrides, and Fastify checks JWT identity plus the raw-device-fingerprint/hash relationship. Fastify retains the existing production Ed25519 key pair and keyVersion during this phase. Model chunk delivery has registration, revocation, root-confinement, byte-length and SHA-256 checks in source, but full PostgreSQL integration remains unverified. Real login/account UI wiring and CI execution are still incomplete. The standalone npm lockfile has not yet been generated and committed. The Platform API Dockerfile requires it and uses `npm ci`, so its image remains intentionally unbuildable from a fresh checkout until the lockfile is committed.
 
 Do not delete Express, merge the duplicate license paths, or move local runtime modules until the next migration stage has:
 1. a complete route and environment-variable ownership matrix;
 2. a generated and committed `backend/package-lock.json`, with the image switched to `npm ci`;
 3. successful Platform API typecheck, backend tests, Docker build and PostgreSQL integration tests;
 4. route-level response/authentication/signature parity tests;
-5. explicit ownership for overlapping Ed25519/license/model routes;
-6. passing web build, local-ASR tests, Companion/CEP tests, and security/offline-entitlement tests.
+5. explicit ownership for overlapping Ed25519/license/model routes, preserving the existing Ed25519 key identity until a versioned client rotation is completed;
+7. passing web build, local-ASR tests, Companion/CEP tests, and security/offline-entitlement tests.
 
 ## Validation status for this slice
 
