@@ -73,7 +73,7 @@ The web tier is static-only. It does not receive private keys, database credenti
 
 This is a real web/API **process and container split** plus a separately packaged Platform API scaffold; it is not the completed route migration.
 
-The current Express `server.ts` still combines local-audio APIs and several platform-facing routes. Fastify/PostgreSQL now has its own `backend/package.json`, `backend/tsconfig.json`, `backend/src/main.ts`, and `backend/Dockerfile.platform-api`, but it is not yet the canonical production API. The standalone npm lockfile has not yet been generated and committed, and no full Express↔Fastify route-parity proof exists.
+The current Express `server.ts` still combines local-audio APIs and several platform-facing routes. Fastify/PostgreSQL now has its own `backend/package.json`, `backend/tsconfig.json`, `backend/src/main.ts`, and `backend/Dockerfile.platform-api`, but it is not yet the canonical production API. The standalone npm lockfile has not yet been generated and committed. The Platform API Dockerfile now requires it and uses `npm ci`; until CI can generate and the branch can commit that lock, the standalone Platform API image is intentionally not buildable from a fresh checkout. No full Express↔Fastify route-parity proof exists.
 
 Do not delete Express, merge the duplicate license paths, or move local runtime modules until the next migration stage has:
 1. a complete route and environment-variable ownership matrix;
