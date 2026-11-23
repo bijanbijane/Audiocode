@@ -18,6 +18,7 @@ test('Section 100: PlatformBackendServices issues Ed25519-signed license leases 
   const txLog: string[] = [];
   let catalogTotalBytes = '6';
   let catalogStatus = 'ACTIVE';
+  let catalogChunkExists = true;
   const runQuery = async <TRow>(
     sql: string,
   ): Promise<{ rows: TRow[]; rowCount: number | null }> => {
@@ -41,9 +42,13 @@ test('Section 100: PlatformBackendServices issues Ed25519-signed license leases 
     if (sql.includes('SELECT lease_id, device_fingerprint_hash')) {
       return { rows: [], rowCount: 0 };
     }
-    if (sql.includes('SELECT release_status FROM ai_models_catalog')) {
+    if (sql.includes('LEFT JOIN ai_model_chunks')) {
       return {
-        rows: [{ release_status: catalogStatus } as unknown as TRow],
+        rows: [{
+          release_status: catalogStatus,
+          chunk_sha256_hex: catalogChunkExists ? 'a'.repeat(64) : null,
+          chunk_byte_length: catalogChunkExists ? 4 : null,
+        } as unknown as TRow],
         rowCount: 1,
       };
     }
@@ -314,6 +319,17 @@ test('Section 100: PlatformBackendServices issues Ed25519-signed license leases 
   );
   assert.equal(statusCode, 410);
   assert.equal((sentBody as { error: string }).error, 'MODEL_VERSION_REVOKED');
+
+  // A path for a chunk not present in PostgreSQL is rejected before filesystem lookup.
+  catalogChunkExists = false;
+  statusCode = 200;
+  await getRoutes.get('/api/v1/models/:modelId/:version/chunks/:chunkIndex')!(
+    { params: { modelId: 'model-test', version: '1.0.0', chunkIndex: '0' }, query: {}, headers: {} },
+    mockReply,
+  );
+  assert.equal(statusCode, 404);
+  assert.equal((sentBody as { error: string }).error, 'MODEL_CHUNK_NOT_REGISTERED');
+  catalogChunkExists = true;
 
   // Strict path parameters reject encoded or malformed values before any file access.
   statusCode = 200;
