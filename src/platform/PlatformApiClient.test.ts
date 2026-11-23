@@ -43,7 +43,7 @@ test('license issuance sends only a hashed device identity and bearer token, nev
 
   await client.issueOfflineLicenseLease('valid-jwt', 'A'.repeat(64), 'Editor');
   assert.equal(capturedUrl, '/platform-api/api/v1/license/lease');
-  assert.equal((capturedInit?.headers as Record<string, string>).Authorization, 'Bearer valid-jwt');
+  assert.equal(new Headers(capturedInit?.headers).get('authorization'), 'Bearer valid-jwt');
   const body = JSON.parse(String(capturedInit?.body)) as Record<string, unknown>;
   assert.equal(body.deviceFingerprintHash, 'a'.repeat(64));
   assert.equal(body.displayName, 'Editor');
