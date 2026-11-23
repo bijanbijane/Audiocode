@@ -27,6 +27,42 @@ test('PlatformApiClient sends login to the isolated same-origin prefix', async (
   assert.equal(capturedInit?.method, 'POST');
 });
 
+test('public key and model manifest use the isolated prefix and validate the model identifier', async () => {
+  const urls: string[] = [];
+  const client = new PlatformApiClient({
+    fetchImpl: async (input) => {
+      urls.push(String(input));
+      return new Response(JSON.stringify({ publicKeySpkiBase64: 'key', algorithm: 'Ed25519', keyVersion: 1, keyId: 'test' }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    },
+  });
+
+  await client.getPublicKeyInfo();
+  await client.getSignedModelManifest('model-fa_v1');
+  assert.deepEqual(urls, [
+    '/platform-api/api/v1/crypto/public-key',
+    '/platform-api/api/v1/models/model-fa_v1/manifest',
+  ]);
+
+  assert.throws(
+    () => client.getSignedModelManifest('../other'),
+    /PLATFORM_API_MODEL_ID_INVALID/,
+  );
+});
+
+test('Platform API base path rejects external and protocol-relative URLs', () => {
+  assert.throws(
+    () => new PlatformApiClient({ basePath: 'https://attacker.example' }),
+    /PLATFORM_API_BASE_PATH_MUST_BE_SAME_ORIGIN/,
+  );
+  assert.throws(
+    () => new PlatformApiClient({ basePath: '//attacker.example' }),
+    /PLATFORM_API_BASE_PATH_MUST_BE_SAME_ORIGIN/,
+  );
+});
+
 test('model catalogue uses the isolated Platform API prefix', async () => {
   let calledUrl = '';
   const client = new PlatformApiClient({
