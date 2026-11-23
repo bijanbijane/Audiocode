@@ -21,7 +21,17 @@
     "allowSyntheticDefaultImports": true
   },
   "include": [
-    "src/**/*.ts"
+    "src/main.ts",
+    "src/server.ts",
+    "src/PlatformBackendServices.ts",
+    "src/BackendAuthAndPaymentService.ts",
+    "src/BackendLicenseAndModelRevocationService.ts",
+    "src/license/DeviceSeatEnforcementService.ts",
+    "src/db/PinnedPostgresTransaction.ts",
+    "src/BackendAuthAndPaymentService.test.ts",
+    "src/BackendLicenseAndModelRevocationService.test.ts",
+    "src/server.test.ts",
+    "src/PlatformBackendServices.smoke.test.ts"
   ],
   "exclude": [
     "node_modules",
