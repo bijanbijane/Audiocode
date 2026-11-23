@@ -30,14 +30,18 @@ export function normalizeLegacyPlatformLeaseRequestBody(body: unknown): unknown 
   if (typeof record.deviceFingerprintHash === 'string') {
     normalized.deviceFingerprintHash = record.deviceFingerprintHash;
   }
-  if (typeof record.deviceFingerprint === 'string') {
-    const rawFingerprint = record.deviceFingerprint.trim();
-    if (
-      rawFingerprint.length > 0 &&
-      rawFingerprint.length <= MAX_LEGACY_DEVICE_FINGERPRINT_CHARS
-    ) {
-      normalized.deviceFingerprint = rawFingerprint;
-      if (typeof record.deviceFingerprintHash !== 'string') {
+  if (record.deviceFingerprint !== undefined) {
+    // Preserve even malformed legacy values so Fastify can reject them explicitly.
+    // Never silently drop a raw identifier and issue a lease bound only to its hash.
+    normalized.deviceFingerprint = record.deviceFingerprint;
+    if (typeof record.deviceFingerprint === 'string') {
+      const rawFingerprint = record.deviceFingerprint.trim();
+      if (
+        rawFingerprint.length > 0 &&
+        rawFingerprint.length <= MAX_LEGACY_DEVICE_FINGERPRINT_CHARS &&
+        typeof record.deviceFingerprintHash !== 'string'
+      ) {
+        normalized.deviceFingerprint = rawFingerprint;
         normalized.deviceFingerprintHash = crypto
           .createHash('sha256')
           .update(rawFingerprint, 'utf8')
