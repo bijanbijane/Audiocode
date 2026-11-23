@@ -19,7 +19,8 @@
     "dev:web": "vite --mode separate --host 0.0.0.0 --port 5173 --strictPort",
     "preview:web": "vite preview --mode separate --host 0.0.0.0 --port 4173 --strictPort",
     "test:separation": "tsx --test src/platform/PlatformApiClient.test.ts src/platform/PlatformApiCompatibilityProxy.test.ts src/platform/LocalExpressLoopbackContract.test.ts backend/src/SeparatedRuntimeRoutingContract.test.ts backend/src/PlatformBackendServices.test.ts",
-    "dev:platform-api": "npm run --prefix backend dev"
+    "dev:platform-api": "npm run --prefix backend dev",
+    "audit:runtime-deps": "node scripts/audit-runtime-dependencies.mjs"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",
