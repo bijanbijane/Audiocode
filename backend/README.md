@@ -24,6 +24,29 @@ npm run --prefix backend test
 npm run --prefix backend start
 ```
 
+
+## Three-container local deployment
+
+A staging/local Compose topology is provided at `deploy/docker-compose.separated.yml`.
+
+1. Copy `deploy/.env.separated.example` to `deploy/.env.separated`.
+2. Preserve the **existing Express Ed25519 key pair** in the `LOCAL_ED25519_*` values.
+3. Generate a **different Platform API Ed25519 key pair** for `PLATFORM_ED25519_*`; do not share or rotate the existing Express key during this migration.
+4. Set `PLATFORM_DATABASE_URL` to the Compose PostgreSQL service, with a URL-encoded password that matches `POSTGRES_PASSWORD`.
+5. Set `PUBLIC_CDN_BASE_URL` to the browser-visible `/platform-api` base, for example `http://localhost:8080/platform-api`.
+
+Start the stack:
+
+```bash
+docker compose --env-file deploy/.env.separated -f deploy/docker-compose.separated.yml up --build -d
+```
+
+Open `http://localhost:8080`. The UI and local API ports are deliberately bound to host loopback only. The Express service remains a separate container, but shares the Web container's network namespace so Nginx reaches it at `127.0.0.1:3000`. This preserves the Local Audio Runtime's strict loopback/DNS-rebinding boundary; it is not a public hosted deployment recipe. Fastify/PostgreSQL remains a separate network service and is exposed only through `/platform-api/`.
+
+The PostgreSQL init scripts run only when the named `pg_data` volume is first initialized. Existing databases require the repository's migration process; do not delete a live volume to force reinitialization.
+
+`backend/Dockerfile.platform-api` uses `npm ci` and requires the generated, committed `backend/package-lock.json`. Until that file is produced by CI and committed, the Platform API image build is intentionally blocked.
+
 ## Required server environment
 
 The API fails closed during startup if any of these are missing:
