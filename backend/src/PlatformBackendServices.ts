@@ -63,6 +63,12 @@ export type BackendModelTier = 'GROUP_A' | 'GROUP_B';
 export type BackendModelLifecycleStatus = 'ACTIVE' | 'SUPPORTED' | 'DEPRECATED' | 'REVOKED';
 
 const MAX_MODEL_CHUNK_BYTES = 16 * 1024 * 1024;
+const PUBLIC_MODEL_RELEASE_STATUSES = new Set([
+  'ACTIVE',
+  'SUPPORTED',
+  'LIMITED_RELEASE',
+  'DEPRECATED',
+]);
 
 /** Verify bytes against the signed PostgreSQL chunk metadata before serving them. */
 export function verifyModelChunkBytes(
@@ -496,6 +502,9 @@ export class PlatformBackendServices {
             messageFa: 'این نسخه از مدل به دلایل امنیتی یا کیفی ابطال شده است.',
           });
         }
+        if (!PUBLIC_MODEL_RELEASE_STATUSES.has(meta.release_status)) {
+          return reply.status(404).send({ error: 'MODEL_VERSION_NOT_AVAILABLE' });
+        }
 
         const chunksRes = await this.db.query<{
           chunk_index: number;
@@ -572,6 +581,9 @@ export class PlatformBackendServices {
         const modelChunk = modelState.rows[0];
         if (modelChunk.release_status === 'REVOKED') {
           return reply.status(410).send({ error: 'MODEL_VERSION_REVOKED' });
+        }
+        if (!PUBLIC_MODEL_RELEASE_STATUSES.has(modelChunk.release_status)) {
+          return reply.status(404).send({ error: 'MODEL_VERSION_NOT_AVAILABLE' });
         }
         if (
           !modelChunk.chunk_sha256_hex ||
