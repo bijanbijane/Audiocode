@@ -50,7 +50,7 @@ docker build -f backend/Dockerfile.api -t avapardaz-api .
 docker build -f deploy/web/Dockerfile -t avapardaz-web .
 ```
 
-- `avapardaz-api` runs the existing Express API/local runtime on port 3000 with `DISABLE_WEB_HOST=true`; it does not serve the SPA.
+- `avapardaz-api` runs the existing Express API/local runtime on port 3000 with `DISABLE_WEB_HOST=true`; it does not serve the SPA. Its image still builds from the root `package.json`/`bun.lock` because the Local Audio Runtime imports the current root `src/` module graph. This is process/container separation, not yet a separately locked local-runtime package.
 - `avapardaz-web` serves only the Vite build through Nginx on port 8080.
 - For the local-only Compose topology, these remain separate containers but share a network namespace. Nginx reaches Express at `127.0.0.1:3000`, so `AudioApiSecurityGuard` continues to see a real loopback peer and does not need a weakened proxy exception.
 - `avapardaz-platform-api` is a third, separately networked Fastify/PostgreSQL service. The browser addresses it through `/platform-api/`; Nginx strips this prefix before forwarding. The legacy `/api/` and `/v1/` paths still reach Express.
@@ -90,5 +90,6 @@ Do not delete Express, merge the duplicate license paths, or move local runtime 
 
 - GitHub source changes are committed on `refactor/separate-web-platform-local-runtime`.
 - The existing PR quality workflows currently report failure on the earlier documentation-only commit. The GitHub connector did not return their job logs (the log-download endpoint returned a storage 404), so the failure cause is not yet established.
-- A separate Fastify package, executable entrypoint and Dockerfile are committed, but the standalone lockfile generation/build workflow is currently blocked before runner allocation.
-- No local Docker build, Vite build, TypeScript check, Fastify startup or runtime test has been executed through the GitHub connector. The new CI run must be inspected before this slice is called validated.
+- A separate Fastify package, executable entrypoint and Dockerfile are committed. Its typecheck/test set is now limited to the live Fastify bootstrap and directly owned services; the root integration suite separately covers Web/Express/Fastify contracts.
+- The standalone lockfile generation/build workflow and the web/API container workflow repeatedly fail before runner allocation (`runner_id=0`, zero steps, no artifacts). The same behavior is present on the base `main` commit.
+- No local Docker build, Vite build, TypeScript check, Fastify startup or runtime test has been executed through the GitHub connector. These checks remain unverified.
