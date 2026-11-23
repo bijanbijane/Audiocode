@@ -14,6 +14,8 @@ on:
       - 'backend/src/PlatformBackendServices.ts'
       - 'backend/src/PlatformBackendServices.test.ts'
       - 'src/platform/PlatformApiClient.ts'
+      - 'src/platform/PlatformApiCompatibilityProxy.ts'
+      - 'src/platform/PlatformApiCompatibilityProxy.test.ts'
       - 'src/platform/PlatformApiClient.test.ts'
       - 'src/platform/LocalExpressLoopbackContract.test.ts'
       - 'deploy/docker-compose.separated.yml'
