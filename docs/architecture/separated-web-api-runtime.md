@@ -52,9 +52,12 @@ docker build -f deploy/web/Dockerfile -t avapardaz-web .
 
 - `avapardaz-api` runs the existing Express API/local runtime on port 3000 with `DISABLE_WEB_HOST=true`; it does not serve the SPA.
 - `avapardaz-web` serves only the Vite build through Nginx on port 8080.
-- Put both containers on the same Docker network and make the API container resolvable as `avapardaz-api`, or change the upstream in `deploy/web/nginx.conf`.
+- For the local-only Compose topology, these remain separate containers but share a network namespace. Nginx reaches Express at `127.0.0.1:3000`, so `AudioApiSecurityGuard` continues to see a real loopback peer and does not need a weakened proxy exception.
+- `avapardaz-platform-api` is a third, separately networked Fastify/PostgreSQL service. The browser addresses it through `/platform-api/`; Nginx strips this prefix before forwarding. The legacy `/api/` and `/v1/` paths still reach Express.
+- The local Compose ports are bound to `127.0.0.1` on the host. This configuration is for local use, not an internet-facing hosted deployment.
 - Nginx forwards `/api` and `/v1` without rewriting the paths. Request buffering is disabled for these routes so streaming audio requests are not unnecessarily buffered at the web tier.
 - The Nginx static tier emits COOP, COEP, and CORP headers required by the browser audio/WASM environment, including cache-controlled HTML and asset locations.
+- The Fastify model chunk volume is separate and read-only to the Platform API; it is not shared with the Local Audio Runtime's model storage.
 - Nginx permits up to the current 100 MiB public-audio ingress ceiling, while Express applies its own narrower route-level limits (for example, 64 MiB for Smart Audio Edit). Proxy timeouts are set to 240 seconds to cover the existing three-minute edit operation timeout.
 
 The existing `backend/Dockerfile` is intentionally not overwritten. It remains the legacy combined image until the separated deployment has passed parity checks.
@@ -71,7 +74,7 @@ The web tier is static-only. It does not receive private keys, database credenti
 
 ## Explicitly not complete yet
 
-This is a real web/API **process and container split** plus a separately packaged Platform API scaffold; it is not the completed route migration.
+This is a real web/API **process and container split** plus a separately packaged Platform API scaffold, with a dedicated `/platform-api/` ingress route; it is not the completed route migration.
 
 The current Express `server.ts` still combines local-audio APIs and several platform-facing routes. Fastify/PostgreSQL now has its own `backend/package.json`, `backend/tsconfig.json`, `backend/src/main.ts`, and `backend/Dockerfile.platform-api`, but it is not yet the canonical production API. The standalone npm lockfile has not yet been generated and committed. The Platform API Dockerfile now requires it and uses `npm ci`; until CI can generate and the branch can commit that lock, the standalone Platform API image is intentionally not buildable from a fresh checkout. No full Express↔Fastify route-parity proof exists.
 
