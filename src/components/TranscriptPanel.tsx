@@ -72,11 +72,15 @@ interface TranscriptPanelProps {
   companionHealth?: CompanionHealthResponse | null;
   isCheckingCompanion?: boolean;
   isInstallingNativeAsr?: boolean;
+  hasBrowserInstalledModel?: boolean;
+  isInstallingBrowserModel?: boolean;
+  browserModelInstallPct?: number | null;
   projectSessionNonce?: number;
   asrInlineFeedback?: AsrInlineFeedbackState | null;
   onDismissAsrInlineFeedback?: () => void;
   onRetryCompanionConnection?: () => void;
   onInstallNativeCompanionEngine?: () => void;
+  onInstallBrowserPersianModel?: (autoRunAfter?: boolean) => void;
   onLoadAndTranscribeSamplePersianAudio?: () => void;
   onRunCloudGeminiAsr?: () => void;
   onRunAcousticSegmentation?: () => void;
@@ -121,11 +125,15 @@ export const TranscriptPanel: React.FC<TranscriptPanelProps> = ({
   companionHealth = null,
   isCheckingCompanion = false,
   isInstallingNativeAsr = false,
+  hasBrowserInstalledModel = false,
+  isInstallingBrowserModel = false,
+  browserModelInstallPct = null,
   projectSessionNonce = 0,
   asrInlineFeedback = null,
   onDismissAsrInlineFeedback,
   onRetryCompanionConnection,
   onInstallNativeCompanionEngine,
+  onInstallBrowserPersianModel,
   onLoadAndTranscribeSamplePersianAudio,
   onRunCloudGeminiAsr,
   onRunAcousticSegmentation,
@@ -462,7 +470,27 @@ export const TranscriptPanel: React.FC<TranscriptPanelProps> = ({
             data-testid="transcript-shahab-status"
             className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px]"
           >
-            {companionHealth?.runtime?.available ? (
+            {hasBrowserInstalledModel ? (
+              <>
+                <span className="inline-flex items-center gap-1.5 font-medium text-emerald-700 dark:text-emerald-400">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0" aria-hidden="true" />
+                  <span>
+                    مدل فارسی مرورگر (شناوا ریزه INT8): آماده در OPFS (۱۰۰٪ مستقل و آفلاین)
+                  </span>
+                </span>
+                {onLoadAndTranscribeSamplePersianAudio && (
+                  <button
+                    type="button"
+                    data-testid="btn-header-sample-persian"
+                    disabled={isTranscribingAsr}
+                    onClick={onLoadAndTranscribeSamplePersianAudio}
+                    className="inline-flex items-center gap-1 px-2 py-0.5 rounded border border-emerald-600/35 dark:border-emerald-500/40 bg-emerald-500/10 text-emerald-800 dark:text-emerald-300 hover:bg-emerald-500/20 disabled:opacity-50 cursor-pointer"
+                  >
+                    <span>تست با نمونه صوت واقعی فارسی</span>
+                  </button>
+                )}
+              </>
+            ) : companionHealth?.runtime?.available ? (
               <>
                 <span className="inline-flex items-center gap-1.5 font-medium text-emerald-700 dark:text-emerald-400">
                   <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0" aria-hidden="true" />
@@ -489,13 +517,13 @@ export const TranscriptPanel: React.FC<TranscriptPanelProps> = ({
             ) : isCheckingCompanion && !companionHealth ? (
               <span className="inline-flex items-center gap-1.5 text-sky-700 dark:text-sky-300">
                 <Loader2 className="w-3 h-3 animate-spin" aria-hidden="true" />
-                <span>در حال بررسی اتصال موتور بومی شهاب/شناوا...</span>
+                <span>در حال بررسی موتور محلی شهاب/شناوا...</span>
               </span>
             ) : (
               <span className="inline-flex flex-wrap items-center gap-2 text-amber-800 dark:text-amber-300">
                 <span className="inline-flex items-center gap-1.5">
                   <span className="w-1.5 h-1.5 rounded-full bg-amber-500 shrink-0" aria-hidden="true" />
-                  <span>موتور بومی شهاب/شناوا متصل نیست</span>
+                  <span>مدل فارسی محلی (مرورگر/Companion) هنوز نصب نشده است</span>
                 </span>
                 {onRetryCompanionConnection && (
                   <button
@@ -1423,6 +1451,29 @@ export const TranscriptPanel: React.FC<TranscriptPanelProps> = ({
 
               {(asrInlineFeedback.kind === 'MODEL_NOT_INSTALLED' ||
                 asrInlineFeedback.kind === 'INFERENCE_ERROR') &&
+                onInstallBrowserPersianModel && (
+                  <button
+                    type="button"
+                    data-testid="btn-inline-install-browser-persian-model"
+                    disabled={isInstallingBrowserModel || isTranscribingAsr}
+                    onClick={() => onInstallBrowserPersianModel(true)}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded bg-emerald-500 text-slate-950 font-semibold text-xs hover:bg-emerald-400 disabled:opacity-50 cursor-pointer"
+                  >
+                    {isInstallingBrowserModel ? (
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" aria-hidden="true" />
+                    ) : (
+                      <Download className="w-3.5 h-3.5" aria-hidden="true" />
+                    )}
+                    <span>
+                      {isInstallingBrowserModel
+                        ? `در حال نصب مدل فارسی در مرورگر (${browserModelInstallPct ?? 0}٪)...`
+                        : 'نصب خودکار و اجرای مدل فارسی مرورگر (شناوا ریزه · ۳۶ مگابایت · آفلاین)'}
+                    </span>
+                  </button>
+                )}
+
+              {(asrInlineFeedback.kind === 'MODEL_NOT_INSTALLED' ||
+                asrInlineFeedback.kind === 'INFERENCE_ERROR') &&
                 onRetryCompanionConnection && (
                   <button
                     type="button"
@@ -1439,13 +1490,14 @@ export const TranscriptPanel: React.FC<TranscriptPanelProps> = ({
 
               {(asrInlineFeedback.kind === 'MODEL_NOT_INSTALLED' ||
                 asrInlineFeedback.kind === 'INFERENCE_ERROR') &&
+                companionHealth &&
                 onInstallNativeCompanionEngine && (
                   <button
                     type="button"
                     data-testid="btn-inline-install-native-asr"
                     disabled={isInstallingNativeAsr}
                     onClick={onInstallNativeCompanionEngine}
-                    className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded bg-emerald-500 text-slate-950 font-semibold text-xs hover:bg-emerald-400 disabled:opacity-50 cursor-pointer"
+                    className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded border border-emerald-500/40 bg-emerald-500/10 text-emerald-900 dark:text-emerald-200 font-semibold text-xs hover:bg-emerald-500/20 disabled:opacity-50 cursor-pointer"
                   >
                     {isInstallingNativeAsr ? (
                       <Loader2 className="w-3.5 h-3.5 animate-spin" aria-hidden="true" />
@@ -1455,7 +1507,7 @@ export const TranscriptPanel: React.FC<TranscriptPanelProps> = ({
                     <span>
                       {isInstallingNativeAsr
                         ? 'در حال نصب موتور بومی شهاب/شناوا...'
-                        : 'نصب خودکار موتور بومی شهاب/شناوا'}
+                        : 'نصب موتور بومی شهاب/شناوا (Companion)'}
                     </span>
                   </button>
                 )}
@@ -1467,7 +1519,7 @@ export const TranscriptPanel: React.FC<TranscriptPanelProps> = ({
                   onClick={onOpenLocalModelInstaller}
                   className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded border border-slate-300 dark:border-[#252F42] bg-white dark:bg-[#0E131D] text-slate-800 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-[#1E2738] text-xs cursor-pointer"
                 >
-                  <span>نصب یا انتخاب فایل مدل محلی (.onnx)</span>
+                  <span>وارد کردن دستی فایل مدل (.onnx و tokens.txt)</span>
                 </button>
               )}
             </div>
@@ -1507,8 +1559,8 @@ export const TranscriptPanel: React.FC<TranscriptPanelProps> = ({
                 </button>
               )}
 
-              {companionHealth?.runtime?.available &&
-                companionHealth.sampleAudioAvailable &&
+              {((companionHealth?.runtime?.available && companionHealth.sampleAudioAvailable) ||
+                hasBrowserInstalledModel) &&
                 onLoadAndTranscribeSamplePersianAudio && (
                   <button
                     type="button"
@@ -1529,21 +1581,46 @@ export const TranscriptPanel: React.FC<TranscriptPanelProps> = ({
               <button
                 type="button"
                 data-testid="btn-empty-run-persian-asr"
-                disabled={isTranscribingAsr}
+                disabled={isTranscribingAsr || isInstallingBrowserModel}
                 onClick={onRunPersianAsr}
                 className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-sky-500 text-slate-950 font-semibold text-xs hover:bg-sky-400 disabled:opacity-50 cursor-pointer"
               >
-                {isTranscribingAsr ? (
+                {isTranscribingAsr || isInstallingBrowserModel ? (
                   <Loader2 className="w-3.5 h-3.5 animate-spin" aria-hidden="true" />
                 ) : (
                   <Mic className="w-3.5 h-3.5" aria-hidden="true" />
                 )}
                 <span>
-                  {isTranscribingAsr
-                    ? 'در حال استخراج متن و هم‌ترازی آوایی...'
-                    : 'اجرای تبدیل صوت به متن و هم‌ترازی آوایی'}
+                  {isInstallingBrowserModel
+                    ? `در حال نصب خودکار مدل فارسی محلی (${browserModelInstallPct ?? 0}٪)...`
+                    : isTranscribingAsr
+                      ? 'در حال استخراج متن و هم‌ترازی آوایی...'
+                      : 'اجرای تبدیل صوت به متن و هم‌ترازی آوایی'}
                 </span>
               </button>
+
+              {!hasBrowserInstalledModel &&
+                !companionHealth?.runtime?.available &&
+                onInstallBrowserPersianModel && (
+                  <button
+                    type="button"
+                    data-testid="btn-empty-install-browser-persian-model"
+                    disabled={isInstallingBrowserModel || isTranscribingAsr}
+                    onClick={() => onInstallBrowserPersianModel(true)}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-emerald-500 text-slate-950 font-semibold text-xs hover:bg-emerald-400 disabled:opacity-50 cursor-pointer"
+                  >
+                    {isInstallingBrowserModel ? (
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" aria-hidden="true" />
+                    ) : (
+                      <Download className="w-3.5 h-3.5" aria-hidden="true" />
+                    )}
+                    <span>
+                      {isInstallingBrowserModel
+                        ? `در حال نصب مدل فارسی مرورگر (${browserModelInstallPct ?? 0}٪)...`
+                        : 'نصب خودکار و اجرای مدل فارسی مرورگر (۳۶ مگابایت · آفلاین)'}
+                    </span>
+                  </button>
+                )}
 
               {onRunAcousticSegmentation && (
                 <button

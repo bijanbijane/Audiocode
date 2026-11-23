@@ -6,3 +6,4 @@ export * from './EditRiskEvaluator';
 export * from './EditConflictResolver';
 export * from './EditDecisionValidator';
 export * from './EditDecisionEngine';
+export * from './ShahabToEngine02Adapter';

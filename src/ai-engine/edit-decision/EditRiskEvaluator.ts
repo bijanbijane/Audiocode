@@ -71,9 +71,20 @@ export class EditRiskEvaluator {
 
     // 2. Word boundary uncertainty
     let wordBoundaryLevel: EditRiskLevel = 'LOW';
+    const hasMissingWordTiming =
+      event.provenance.timingPrecision === 'NONE' ||
+      matchedTokens.some((t) => t.alignmentPrecision === 'missing' || t.timingValid === false);
+    const hasSegmentWordTiming =
+      event.provenance.timingPrecision === 'SEGMENT_ONLY' ||
+      matchedTokens.some(
+        (t) => t.alignmentPrecision === 'segment_only' || t.alignmentPrecision === 'distributed_segment',
+      );
+
     if (event.category === 'SILENCE' && !event.relatedTokenIds?.length) {
       wordBoundaryLevel = boundary.boundaryConfidence === 'HIGH' ? 'LOW' : 'MEDIUM';
-    } else if (matchedTokens.some((t) => t.alignmentPrecision === 'distributed_segment')) {
+    } else if (hasMissingWordTiming) {
+      wordBoundaryLevel = 'UNKNOWN';
+    } else if (hasSegmentWordTiming) {
       wordBoundaryLevel = 'HIGH';
     } else if (
       (event.category === 'FILLER' || event.category === 'WORD_REPETITION') &&
@@ -89,7 +100,9 @@ export class EditRiskEvaluator {
       reason:
         wordBoundaryLevel === 'LOW'
           ? 'Word boundaries are consistent with available timing metadata.'
-          : 'Word alignment timestamps are estimated or unverified against forced alignment.',
+          : hasSegmentWordTiming
+            ? 'Only segment-level timestamps are available; exact word boundaries are unmeasured.'
+            : 'Word alignment timestamps are missing, estimated, or unverified against forced alignment.',
       evidenceNotes: matchedTokens.map(
         (t) => `${t.tokenId}: precision=${t.alignmentPrecision ?? 'unspecified'}, conf=${t.confidence}`,
       ),
@@ -271,6 +284,8 @@ export class EditRiskEvaluator {
     } else if (
       event.detectionState === 'UNCERTAIN' ||
       event.uncertaintyState === 'INSUFFICIENT_EVIDENCE' ||
+      event.provenance.timingPrecision === 'NONE' ||
+      (Boolean(event.provenance.hasIncompleteTimestamps) && event.category !== 'SILENCE') ||
       (isDestructive && boundary.proposedInterval === null)
     ) {
       insufficientLevel = 'UNKNOWN';

@@ -394,6 +394,117 @@ async function startServer() {
     res.json(envelope);
   });
 
+  // Verified local Persian ONNX model preparation & Range-streamed artifact delivery for Browser OPFS
+  app.post('/api/v1/local-models/shenava-rizen/prepare', async (_req, res) => {
+    try {
+      const ensured = await localCompanionService.neuralEngine.ensureShenavaRizehModelArtifacts();
+      res.json({
+        ok: true,
+        modelId: ensured.modelId,
+        upstreamModelId: ensured.upstreamModelId,
+        modelVersion: ensured.modelVersion,
+        architecture: ensured.architecture,
+        sampleAudioAvailable: Boolean(ensured.sampleWavPath),
+        artifacts: {
+          'model.int8.onnx': {
+            byteLength: ensured.modelOnnxBytes,
+            sha256Hex: ensured.modelOnnxSha256Hex,
+            url: '/api/v1/local-models/shenava-rizen/artifacts/model.int8.onnx',
+          },
+          'tokens.txt': {
+            byteLength: ensured.tokensBytes,
+            sha256Hex: ensured.tokensSha256Hex,
+            url: '/api/v1/local-models/shenava-rizen/artifacts/tokens.txt',
+          },
+        },
+      });
+    } catch (err) {
+      res.status(500).json({
+        ok: false,
+        error: 'MODEL_PREPARE_FAILED',
+        message: sanitizePublicErrorOutput(err instanceof Error ? err.message : String(err)),
+      });
+    }
+  });
+
+  app.get('/api/v1/local-models/shenava-rizen/artifacts/:filename', async (req, res) => {
+    const requestedName = req.params.filename;
+    if (
+      requestedName !== 'model.int8.onnx' &&
+      requestedName !== 'tokens.txt' &&
+      requestedName !== 'sample-0.wav'
+    ) {
+      res.status(404).json({ ok: false, error: 'ARTIFACT_NOT_FOUND' });
+      return;
+    }
+
+    try {
+      const ensured = await localCompanionService.neuralEngine.ensureShenavaRizehModelArtifacts();
+      let targetPath: string | null = null;
+      let contentType = 'application/octet-stream';
+      let expectedBytes: number | null = null;
+
+      if (requestedName === 'model.int8.onnx') {
+        targetPath = ensured.modelOnnxPath;
+        contentType = 'application/octet-stream';
+        expectedBytes = ensured.modelOnnxBytes;
+      } else if (requestedName === 'tokens.txt') {
+        targetPath = ensured.tokensPath;
+        contentType = 'text/plain; charset=utf-8';
+        expectedBytes = ensured.tokensBytes;
+      } else if (requestedName === 'sample-0.wav') {
+        targetPath = ensured.sampleWavPath;
+        contentType = 'audio/wav';
+      }
+
+      if (!targetPath || !fs.existsSync(targetPath)) {
+        res.status(404).json({ ok: false, error: 'ARTIFACT_UNAVAILABLE' });
+        return;
+      }
+
+      const stat = fs.statSync(targetPath);
+      if (!stat.isFile() || stat.size <= 0 || (expectedBytes !== null && stat.size !== expectedBytes)) {
+        res.status(500).json({ ok: false, error: 'ARTIFACT_INTEGRITY_ERROR' });
+        return;
+      }
+
+      res.setHeader('Accept-Ranges', 'bytes');
+      res.setHeader('Content-Type', contentType);
+      res.setHeader('Cross-Origin-Resource-Policy', 'same-origin');
+      res.setHeader('Cache-Control', 'private, max-age=86400');
+
+      const rangeHeader = typeof req.headers.range === 'string' ? req.headers.range.trim() : '';
+      if (rangeHeader) {
+        const match = /^bytes=(\d+)-(\d*)$/i.exec(rangeHeader);
+        if (!match) {
+          res.status(416).setHeader('Content-Range', `bytes */${stat.size}`).end();
+          return;
+        }
+        const start = Number.parseInt(match[1], 10);
+        const rawEnd = match[2] ? Number.parseInt(match[2], 10) : stat.size - 1;
+        const end = Math.min(stat.size - 1, rawEnd);
+        if (!Number.isFinite(start) || !Number.isFinite(end) || start < 0 || start > end || start >= stat.size) {
+          res.status(416).setHeader('Content-Range', `bytes */${stat.size}`).end();
+          return;
+        }
+        res.status(206);
+        res.setHeader('Content-Range', `bytes ${start}-${end}/${stat.size}`);
+        res.setHeader('Content-Length', String(end - start + 1));
+        fs.createReadStream(targetPath, { start, end }).pipe(res);
+        return;
+      }
+
+      res.setHeader('Content-Length', String(stat.size));
+      fs.createReadStream(targetPath).pipe(res);
+    } catch (err) {
+      res.status(500).json({
+        ok: false,
+        error: 'ARTIFACT_DELIVERY_FAILED',
+        message: sanitizePublicErrorOutput(err instanceof Error ? err.message : String(err)),
+      });
+    }
+  });
+
   // ── Phases 1–4 API Routes: Engines, Leaderboards, Model Development ─────────
   app.post('/api/v1/lab/provider-transcribe', (req, res) => {
     const body = req.body as { engineId?: string };

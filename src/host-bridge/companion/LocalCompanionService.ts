@@ -282,6 +282,7 @@ export class LocalCompanionService {
       runtimeAvailable: runtime.available,
       activeJobs,
     });
+    const sampleAudio = this.neuralEngine.getBundledSampleAudioPath();
     return {
       service: 'avapardaz-local-companion',
       serviceVersion: COMPANION_SERVICE_VERSION,
@@ -293,6 +294,8 @@ export class LocalCompanionService {
       offlineOnlyEnforced: true,
       cloudUploadDisabled: true,
       runtime,
+      sampleAudioAvailable: Boolean(sampleAudio),
+      sampleAudioFilename: sampleAudio?.filename ?? null,
       activeJobs,
       maxConcurrentJobs: this.maxConcurrentJobs,
       timestampIso: new Date().toISOString(),
@@ -727,7 +730,7 @@ export class LocalCompanionService {
       res.status(out.statusCode).json(out.body);
     });
 
-    router.post('/ipc', (req, res) => {
+    router.post('/ipc', async (req, res) => {
       const remoteAddr = req.socket?.remoteAddress ?? req.ip;
       const authHeader = typeof req.headers.authorization === 'string' ? req.headers.authorization : '';
       const bearerToken = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : '';
@@ -756,6 +759,26 @@ export class LocalCompanionService {
             ok: true,
             serviceVersion: COMPANION_SERVICE_VERSION,
             runtime: status,
+            capabilities: [
+              'CAPABILITY_LIST',
+              'HOST_CAPABILITY_MATRIX',
+              'JOB_SUBMIT',
+              'JOB_STATUS',
+              'JOB_LIST',
+              'JOB_CANCEL',
+              'JOB_RECONNECT',
+              'AUDIO_TRANSFER_INIT',
+              'AUDIO_TRANSFER_CHUNK',
+              'AUDIO_TRANSFER_FINALIZE',
+              'AUDIO_TRANSFER_ABORT',
+              'AUDIO_UPLOAD_INIT',
+              'AUDIO_UPLOAD_CHUNK',
+              'AUDIO_UPLOAD_ABORT',
+              'GET_SAMPLE_PERSIAN_AUDIO',
+              'INSTALL_NATIVE_RUNTIME',
+              'MODEL_UNLOAD',
+              'EXPORT_TRANSCRIPT',
+            ],
           });
           return;
         }
@@ -904,6 +927,51 @@ export class LocalCompanionService {
           }
           if (action === 'MODEL_UNLOAD') {
             res.json({ ok: true, ...this.neuralEngine.unloadActiveModel() });
+            return;
+          }
+          if (action === 'GET_SAMPLE_PERSIAN_AUDIO') {
+            const sample = this.neuralEngine.getBundledSampleAudioPath();
+            if (!sample) {
+              res.status(404).json({
+                ok: false,
+                error: 'SAMPLE_AUDIO_NOT_AVAILABLE',
+                message: 'Bundled Persian sample audio is unavailable on local disk.',
+              });
+              return;
+            }
+            try {
+              const wavBytes = fs.readFileSync(sample.filePath);
+              res.json({
+                ok: true,
+                filename: sample.filename,
+                modelId: sample.modelId,
+                mimeType: 'audio/wav',
+                audioBase64: wavBytes.toString('base64'),
+              });
+            } catch (err) {
+              res.status(500).json({
+                ok: false,
+                error: 'SAMPLE_AUDIO_READ_FAILED',
+                message: err instanceof Error ? err.message : 'Failed to read sample audio file.',
+              });
+            }
+            return;
+          }
+          if (action === 'INSTALL_NATIVE_RUNTIME') {
+            try {
+              await this.neuralEngine.installShenavaRizehRuntime();
+              this.syncLifecycleState();
+              res.json({
+                ok: true,
+                health: this.getHealth(),
+              });
+            } catch (err) {
+              res.status(500).json({
+                ok: false,
+                error: 'NATIVE_RUNTIME_INSTALL_FAILED',
+                message: err instanceof Error ? err.message : 'Failed to install native runtime.',
+              });
+            }
             return;
           }
           if (action === 'EXPORT_TRANSCRIPT') {

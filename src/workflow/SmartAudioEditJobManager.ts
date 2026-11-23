@@ -11,6 +11,7 @@
  */
 
 import type { AudioRenderConfig, AudioRenderResult } from '../audio-renderer/AudioRenderTypes';
+import { readRenderArtifactToUint8Array } from '../audio-renderer/RenderOutputArtifact';
 import type { AudioEditJob } from './AudioEditJobStateMachine';
 import { transitionAudioEditJob } from './AudioEditJobStateMachine';
 import type {
@@ -148,7 +149,7 @@ export class SmartAudioEditJobManager {
       entry.job = afterAsr.job;
       entry.session = afterAsr.session;
 
-      const afterAnalysis = this.pipeline.analyzeAndGenerateEdl({
+      const afterAnalysis = await this.pipeline.analyzeAndGenerateEdl({
         job: entry.job,
         session: entry.session,
         audio: entry.audio,
@@ -283,13 +284,10 @@ export class SmartAudioEditJobManager {
         verifiedOutputHash: res.renderResult.postValidation?.verifiedOutputHash ?? null,
       };
 
-      let wavBytes = new Uint8Array(0);
+      let wavBytes: Uint8Array = new Uint8Array(0);
       if (res.renderResult.outputArtifact) {
         try {
-          wavBytes = await res.renderResult.outputArtifact.readRange(
-            0,
-            res.renderResult.outputArtifact.sizeBytes,
-          );
+          wavBytes = await readRenderArtifactToUint8Array(res.renderResult.outputArtifact);
           entry.lastOutputWav = wavBytes;
         } finally {
           await res.renderResult.outputArtifact.dispose();

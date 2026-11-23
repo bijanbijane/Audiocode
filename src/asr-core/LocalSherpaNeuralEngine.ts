@@ -528,11 +528,28 @@ function buildWordTimingsFromTokens(
   return words;
 }
 
+export interface EnsuredShenavaModelArtifacts {
+  readonly modelId: 'shenava-rizen-fa-fastconformer-int8';
+  readonly upstreamModelId: 'Reza2kn/Shenava-Rizeh';
+  readonly modelVersion: '1.0.0';
+  readonly architecture: 'FASTCONFORMER_CTC';
+  readonly rootDir: string;
+  readonly modelOnnxPath: string;
+  readonly modelOnnxBytes: number;
+  readonly modelOnnxSha256Hex: string;
+  readonly tokensPath: string;
+  readonly tokensBytes: number;
+  readonly tokensSha256Hex: string;
+  readonly sampleWavPath: string | null;
+}
+
 export class LocalSherpaNeuralEngine {
   private readonly modelSearchDirs: readonly string[];
   private activeModelId: string | null = null;
   private cachedModels: InstalledLocalNeuralModel[] = [];
   private readonly defaultCpuThreads: number;
+  private ensureShenavaArtifactsPromise: Promise<EnsuredShenavaModelArtifacts> | null = null;
+  private installShenavaRuntimePromise: Promise<LocalNeuralRuntimeStatus> | null = null;
 
   constructor(options?: { readonly modelSearchDirs?: readonly string[]; readonly cpuThreads?: number }) {
     this.modelSearchDirs = options?.modelSearchDirs ?? DEFAULT_MODEL_SEARCH_DIRS;
@@ -600,49 +617,71 @@ export class LocalSherpaNeuralEngine {
     return null;
   }
 
-  public async installShenavaRizehRuntime(): Promise<LocalNeuralRuntimeStatus> {
-    if (process.platform !== 'linux' || process.arch !== 'x64') {
-      throw new Error(
-        `NATIVE_INSTALLER_UNSUPPORTED_PLATFORM: Automatic server-side installer targets linux-x64 (current: ${process.platform}-${process.arch}).`,
-      );
-    }
-
-    const baseDir = path.join(os.homedir(), '.avapardaz');
-    const downloadsDir = path.join(baseDir, 'downloads');
-    const runtimeDir = path.join(baseDir, 'runtime');
-    const modelsDir = path.join(baseDir, 'models');
-    fs.mkdirSync(downloadsDir, { recursive: true });
-    fs.mkdirSync(runtimeDir, { recursive: true });
-    fs.mkdirSync(modelsDir, { recursive: true });
-
-    const { binaryPath } = detectSherpaBinary();
-    if (!binaryPath) {
-      const rtArchive = path.join(downloadsDir, SHENAVA_RIZEH_RUNTIME_RELEASE.runtimeArchiveName);
-      const rtTempExtract = fs.mkdtempSync(path.join(os.tmpdir(), 'avp-rt-'));
-      try {
-        await downloadFileWithRedirects(SHENAVA_RIZEH_RUNTIME_RELEASE.runtimeUrl, rtArchive);
-        await extractTarBz2Safe(rtArchive, rtTempExtract);
-        const extractedRoot = fs
-          .readdirSync(rtTempExtract, { withFileTypes: true })
-          .find((d) => d.isDirectory())?.name;
-        const srcRoot = extractedRoot ? path.join(rtTempExtract, extractedRoot) : rtTempExtract;
-        fs.cpSync(srcRoot, runtimeDir, { recursive: true, force: true });
-        const installedBin = path.join(runtimeDir, 'bin', 'sherpa-onnx-offline');
-        if (fs.existsSync(installedBin)) {
-          fs.chmodSync(installedBin, 0o755);
-        }
-      } finally {
-        fs.rmSync(rtTempExtract, { recursive: true, force: true });
-        fs.rmSync(rtArchive, { force: true });
-      }
-    }
-
+  private findVerifiedShenavaArtifactsOnDisk(): EnsuredShenavaModelArtifacts | null {
     this.refreshInstalledModels();
-    const hasVerifiedShenava = this.cachedModels.some(
+    const installed = this.cachedModels.find(
       (m) => m.modelId === 'Reza2kn/Shenava-Rizeh' && m.integrityVerified,
     );
-    if (!hasVerifiedShenava) {
-      const mdlArchive = path.join(downloadsDir, SHENAVA_RIZEH_RUNTIME_RELEASE.modelArchiveName);
+    if (!installed) return null;
+
+    const modelOnnxPath = path.join(installed.rootDir, 'model.int8.onnx');
+    const tokensPath = path.join(installed.rootDir, 'tokens.txt');
+    if (!verifyModelFilesIntegrity([modelOnnxPath, tokensPath])) {
+      return null;
+    }
+
+    const candidateSample = path.join(installed.rootDir, 'test_wavs', '0.wav');
+    const sampleWavPath = fileSizeSafe(candidateSample) > 44 ? candidateSample : null;
+    const onnxProvenance = KNOWN_MODEL_ARTIFACT_PROVENANCE['model.int8.onnx'];
+    const tokensProvenance = KNOWN_MODEL_ARTIFACT_PROVENANCE['tokens.txt'];
+
+    return {
+      modelId: 'shenava-rizen-fa-fastconformer-int8',
+      upstreamModelId: 'Reza2kn/Shenava-Rizeh',
+      modelVersion: '1.0.0',
+      architecture: 'FASTCONFORMER_CTC',
+      rootDir: installed.rootDir,
+      modelOnnxPath,
+      modelOnnxBytes: onnxProvenance.expectedBytes,
+      modelOnnxSha256Hex: onnxProvenance.sha256Hex,
+      tokensPath,
+      tokensBytes: tokensProvenance.expectedBytes,
+      tokensSha256Hex: tokensProvenance.sha256Hex,
+      sampleWavPath,
+    };
+  }
+
+  /**
+   * Ensures verified Shenava-Rizeh INT8 ONNX weights (`model.int8.onnx`) + CTC vocabulary (`tokens.txt`)
+   * are present locally on disk with SHA-256 provenance verification, for either Browser WASM OPFS
+   * streaming or Native Companion CPU inference. Safe against concurrent callers.
+   */
+  public async ensureShenavaRizehModelArtifacts(): Promise<EnsuredShenavaModelArtifacts> {
+    const existing = this.findVerifiedShenavaArtifactsOnDisk();
+    if (existing) {
+      return existing;
+    }
+
+    if (this.ensureShenavaArtifactsPromise) {
+      return this.ensureShenavaArtifactsPromise;
+    }
+
+    const task = (async (): Promise<EnsuredShenavaModelArtifacts> => {
+      const recheck = this.findVerifiedShenavaArtifactsOnDisk();
+      if (recheck) {
+        return recheck;
+      }
+
+      const baseDir = path.join(os.homedir(), '.avapardaz');
+      const downloadsDir = path.join(baseDir, 'downloads');
+      const modelsDir = path.join(baseDir, 'models');
+      fs.mkdirSync(downloadsDir, { recursive: true });
+      fs.mkdirSync(modelsDir, { recursive: true });
+
+      const uniqueSuffix = `${Date.now()}_${process.pid}`;
+      const mdlArchive = path.join(downloadsDir, `${uniqueSuffix}_${SHENAVA_RIZEH_RUNTIME_RELEASE.modelArchiveName}`);
+      const targetModelDir = path.join(modelsDir, SHENAVA_RIZEH_RUNTIME_RELEASE.modelDirName);
+
       try {
         await downloadFileWithRedirects(SHENAVA_RIZEH_RUNTIME_RELEASE.modelUrl, mdlArchive);
         await extractTarBz2Safe(mdlArchive, modelsDir);
@@ -650,7 +689,6 @@ export class LocalSherpaNeuralEngine {
         fs.rmSync(mdlArchive, { force: true });
       }
 
-      const targetModelDir = path.join(modelsDir, SHENAVA_RIZEH_RUNTIME_RELEASE.modelDirName);
       const required = [
         path.join(targetModelDir, 'model.int8.onnx'),
         path.join(targetModelDir, 'tokens.txt'),
@@ -661,9 +699,79 @@ export class LocalSherpaNeuralEngine {
           'SHENAVA_INTEGRITY_VERIFICATION_FAILED: Extracted model failed SHA-256 provenance verification.',
         );
       }
+
+      const ensured = this.findVerifiedShenavaArtifactsOnDisk();
+      if (!ensured) {
+        throw new Error(
+          'SHENAVA_ARTIFACTS_NOT_DISCOVERABLE: Verified model was extracted but could not be resolved in modelSearchDirs.',
+        );
+      }
+      return ensured;
+    })();
+
+    this.ensureShenavaArtifactsPromise = task.finally(() => {
+      if (this.ensureShenavaArtifactsPromise === task) {
+        this.ensureShenavaArtifactsPromise = null;
+      }
+    });
+
+    return this.ensureShenavaArtifactsPromise;
+  }
+
+  public async installShenavaRizehRuntime(): Promise<LocalNeuralRuntimeStatus> {
+    if (process.platform !== 'linux' || process.arch !== 'x64') {
+      throw new Error(
+        `NATIVE_INSTALLER_UNSUPPORTED_PLATFORM: Automatic server-side installer targets linux-x64 (current: ${process.platform}-${process.arch}).`,
+      );
     }
 
-    return this.getStatus();
+    if (this.installShenavaRuntimePromise) {
+      return this.installShenavaRuntimePromise;
+    }
+
+    const task = (async (): Promise<LocalNeuralRuntimeStatus> => {
+      const baseDir = path.join(os.homedir(), '.avapardaz');
+      const downloadsDir = path.join(baseDir, 'downloads');
+      const runtimeDir = path.join(baseDir, 'runtime');
+      fs.mkdirSync(downloadsDir, { recursive: true });
+      fs.mkdirSync(runtimeDir, { recursive: true });
+
+      const { binaryPath } = detectSherpaBinary();
+      if (!binaryPath) {
+        const rtArchive = path.join(
+          downloadsDir,
+          `${Date.now()}_${SHENAVA_RIZEH_RUNTIME_RELEASE.runtimeArchiveName}`,
+        );
+        const rtTempExtract = fs.mkdtempSync(path.join(os.tmpdir(), 'avp-rt-'));
+        try {
+          await downloadFileWithRedirects(SHENAVA_RIZEH_RUNTIME_RELEASE.runtimeUrl, rtArchive);
+          await extractTarBz2Safe(rtArchive, rtTempExtract);
+          const extractedRoot = fs
+            .readdirSync(rtTempExtract, { withFileTypes: true })
+            .find((d) => d.isDirectory())?.name;
+          const srcRoot = extractedRoot ? path.join(rtTempExtract, extractedRoot) : rtTempExtract;
+          fs.cpSync(srcRoot, runtimeDir, { recursive: true, force: true });
+          const installedBin = path.join(runtimeDir, 'bin', 'sherpa-onnx-offline');
+          if (fs.existsSync(installedBin)) {
+            fs.chmodSync(installedBin, 0o755);
+          }
+        } finally {
+          fs.rmSync(rtTempExtract, { recursive: true, force: true });
+          fs.rmSync(rtArchive, { force: true });
+        }
+      }
+
+      await this.ensureShenavaRizehModelArtifacts();
+      return this.getStatus();
+    })();
+
+    this.installShenavaRuntimePromise = task.finally(() => {
+      if (this.installShenavaRuntimePromise === task) {
+        this.installShenavaRuntimePromise = null;
+      }
+    });
+
+    return this.installShenavaRuntimePromise;
   }
 
   public unloadActiveModel(): { readonly unloadedModelId: string | null; readonly rssMb: number } {

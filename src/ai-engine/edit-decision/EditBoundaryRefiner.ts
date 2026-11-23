@@ -22,8 +22,9 @@ export interface NormalizedTokenSpan {
   readonly startSample: SampleIndex;
   readonly endSample: SampleIndex;
   readonly confidence: number;
-  readonly alignmentPrecision?: PersianWordToken['alignmentPrecision'];
+  readonly alignmentPrecision?: PersianWordToken['alignmentPrecision'] | 'segment_only' | 'missing';
   readonly alignmentSource?: PersianWordToken['alignmentSource'];
+  readonly timingValid?: boolean;
   readonly hasTrailingEzafeRisk?: boolean;
   readonly isStretchedVowel?: boolean;
   readonly hasCharacterSpans: boolean;
@@ -95,6 +96,9 @@ export function normalizeTokensToSampleSpans(
         startSample: Math.round(startFlicks / flicksPerSample),
         endSample: Math.round(endFlicks / flicksPerSample),
         confidence: safeConfidence,
+        alignmentPrecision: tok.alignmentPrecision,
+        timingValid: tok.timingValid,
+        hasTrailingEzafeRisk: tok.hasTrailingEzafeRisk,
         hasCharacterSpans: false,
       });
     } else {
@@ -296,19 +300,33 @@ export class EditBoundaryRefiner {
     const prevToken = this.findNearestLeftToken(trackTokens, origStartSample, relatedIds);
     const nextToken = this.findNearestRightToken(trackTokens, clampedOrigEnd, relatedIds);
 
-    const hasForcedAlignment = matchedTokens.some(
-      (t) =>
-        t.alignmentPrecision === 'forced_aligned' ||
-        t.alignmentPrecision === 'ctc_frame_aligned' ||
-        t.alignmentSource === 'ForcedAlignment',
-    );
-    const hasDistributedApprox = matchedTokens.some(
-      (t) => t.alignmentPrecision === 'distributed_segment',
-    );
-    const hasModelTimestamps = matchedTokens.some(
-      (t) => t.alignmentPrecision === 'model_timestamps',
-    );
-    const phonemeBoundariesAvailable = matchedTokens.some((t) => t.hasCharacterSpans);
+    const hasMissingTiming =
+      event.provenance.timingPrecision === 'NONE' ||
+      matchedTokens.some((t) => t.alignmentPrecision === 'missing' || t.timingValid === false) ||
+      (Boolean(event.provenance.hasIncompleteTimestamps) && event.category !== 'SILENCE');
+    const hasSegmentOnlyTiming =
+      !hasMissingTiming &&
+      (matchedTokens.some((t) => t.alignmentPrecision === 'segment_only') ||
+        (event.provenance.timingPrecision === 'SEGMENT_ONLY' && event.category !== 'SILENCE'));
+
+    const hasForcedAlignment =
+      !hasMissingTiming &&
+      !hasSegmentOnlyTiming &&
+      matchedTokens.some(
+        (t) =>
+          t.alignmentPrecision === 'forced_aligned' ||
+          t.alignmentPrecision === 'ctc_frame_aligned' ||
+          t.alignmentSource === 'ForcedAlignment',
+      );
+    const hasDistributedApprox =
+      hasSegmentOnlyTiming ||
+      matchedTokens.some((t) => t.alignmentPrecision === 'distributed_segment');
+    const hasModelTimestamps =
+      !hasMissingTiming &&
+      !hasSegmentOnlyTiming &&
+      matchedTokens.some((t) => t.alignmentPrecision === 'model_timestamps');
+    const phonemeBoundariesAvailable =
+      !hasMissingTiming && !hasSegmentOnlyTiming && matchedTokens.some((t) => t.hasCharacterSpans);
 
     const hasAcousticEnergy =
       event.acousticEvidence?.rmsDb !== undefined ||
@@ -318,10 +336,27 @@ export class EditBoundaryRefiner {
 
     // Determine honest measurement basis
     let measurementBasis: BoundaryMeasurementBasis = 'UNKNOWN';
-    if (hasForcedAlignment) {
+    if (hasMissingTiming) {
+      measurementBasis = 'UNKNOWN';
+      warnings.push(
+        'زمان‌بندی توکن‌های مرتبط ناقص یا نامعتبر است؛ مختصات برش دقیق قابل اتکا نیست.',
+      );
+    } else if (hasSegmentOnlyTiming) {
+      measurementBasis = 'ESTIMATED_HEURISTIC';
+      warnings.push(
+        'فقط زمان‌بندی در سطح سگمنت موجود است؛ برش خودکار واژه بدون تراز کلمه‌ای مجاز نیست.',
+      );
+      appliedEvidence.push('Segment-level timestamps only (word-level boundaries unavailable).');
+    } else if (hasForcedAlignment) {
       measurementBasis = 'FORCED_ALIGNED';
       appliedEvidence.push('Forced/CTC token alignment timestamps available.');
-    } else if (hasAcousticEnergy && (hasHysteresisPadding || event.category === 'SILENCE' || event.category === 'BREATH' || event.category === 'NON_VERBAL_VOCALIZATION')) {
+    } else if (
+      hasAcousticEnergy &&
+      (hasHysteresisPadding ||
+        event.category === 'SILENCE' ||
+        event.category === 'BREATH' ||
+        event.category === 'NON_VERBAL_VOCALIZATION')
+    ) {
       measurementBasis = 'MEASURED_ACOUSTIC';
       appliedEvidence.push('Acoustic short-time energy & hysteresis envelope measured.');
     } else if (hasModelTimestamps || matchedTokens.length > 0) {
@@ -482,6 +517,13 @@ export class EditBoundaryRefiner {
     let proposedInterval: SourceSampleInterval | null = null;
     if (!isDestructiveOp) {
       proposedInterval = originalInterval;
+    } else if (hasMissingTiming || hasSegmentOnlyTiming) {
+      warnings.push(
+        hasSegmentOnlyTiming
+          ? 'Destructive word cut suppressed because only segment-level timestamps exist.'
+          : 'Destructive cut suppressed because token timing is incomplete or missing.',
+      );
+      proposedInterval = null;
     } else if (propEndSample - propStartSample >= Math.round(sampleRate * 0.02)) {
       proposedInterval = createSourceSampleInterval(propStartSample, propEndSample, sampleRate);
     } else {

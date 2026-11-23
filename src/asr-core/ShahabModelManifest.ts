@@ -338,9 +338,12 @@ export function buildTranscriptDocumentFromNeuralResult(params: {
     modelVersion,
     runtime: 'sherpa-onnx-cpu',
     rawText: neuralResult.rawText,
-    normalizedText: neuralResult.normalizedByProfile.READABLE_PERSIAN ?? neuralResult.rawText,
+    normalizedText: neuralResult.normalizedByProfile['FA-STRICT-V1'] ?? neuralResult.rawText,
     tokens: rawTokens,
-    timestampGranularity: neuralResult.timestampGranularity,
+    timestampGranularity:
+      neuralResult.timestampGranularity === 'WORD' || neuralResult.timestampGranularity === 'SEGMENT'
+        ? neuralResult.timestampGranularity
+        : 'NONE',
     realTimeFactor: neuralResult.realTimeFactor,
     processingTimeMs: neuralResult.processingTimeMs,
     offlineVerified: true,

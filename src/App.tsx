@@ -159,6 +159,7 @@ import { CompanionWebClient } from './host-bridge/companion/CompanionWebClient';
 import { BrowserOnnxAsrRuntimeAdapter } from './asr-core/BrowserOnnxAsrRuntimeAdapter';
 import { NativeCompanionAsrRuntimeAdapter } from './asr-core/NativeCompanionAsrRuntimeAdapter';
 import { UnifiedLocalAsrWorkflowService } from './workflow/UnifiedLocalAsrWorkflowService';
+import { installShenavaRizehInBrowser } from './lifecycle/BrowserPersianModelInstaller';
 
 const DEFAULT_DSP_PARAMS: EphemeralDspParams = {
   highPassHz: 80,
@@ -182,6 +183,9 @@ export default function App() {
     () => project.recommendations[0]?.id ?? null,
   );
   const [isTranscribingAsr, setIsTranscribingAsr] = useState<boolean>(false);
+  const [isInstallingBrowserModel, setIsInstallingBrowserModel] = useState<boolean>(false);
+  const [browserModelInstallPct, setBrowserModelInstallPct] = useState<number | null>(null);
+  const [hasBrowserInstalledModel, setHasBrowserInstalledModel] = useState<boolean>(false);
   const [asrInlineFeedback, setAsrInlineFeedback] =
     useState<AsrInlineFeedbackState | null>(null);
   const [englishRenderMode, setEnglishRenderMode] =
@@ -282,6 +286,7 @@ export default function App() {
   const modelManagerRef = useRef(createSharedLocalModelLifecycleManager());
   const syncModelSnapshotToWorkflow = useCallback(() => {
     const snap = modelManagerRef.current.getSnapshot();
+    setHasBrowserInstalledModel(Boolean(snap.activeModel));
     if (snap.activeModel && snap.runtimeReady) {
       setActiveFailure(null);
       setAsrInlineFeedback((prev) =>
@@ -1604,6 +1609,72 @@ export default function App() {
       companionClient: new CompanionWebClient(companionEndpoint),
       memoryBudgetManager: getSharedMemoryBudgetManager(),
     });
+
+    if (!modelManagerRef.current.getSnapshot().initialized) {
+      await modelManagerRef.current.initialize();
+      syncModelSnapshotToWorkflow();
+    }
+
+    // If no local model is installed in browser OPFS yet and Companion is not active,
+    // automatically provision and SHA-256-verify Shenava-Rizeh INT8 ONNX + tokens.txt.
+    if (!modelManagerRef.current.getSnapshot().activeModel) {
+      let companionAvailable = false;
+      try {
+        const cap = await nativeAdapter.probeCapabilities();
+        companionAvailable = cap.available;
+      } catch {
+        companionAvailable = false;
+      }
+
+      if (!companionAvailable) {
+        setIsInstallingBrowserModel(true);
+        setBrowserModelInstallPct(0);
+        setActiveFailure(null);
+        setAsrInlineFeedback(null);
+        setStatusNotice(
+          'در حال نصب خودکار و راستی‌آزمایی مدل فارسی محلی در مرورگر (شناوا ریزه · ۳۶ مگابایت)...',
+        );
+        try {
+          const installOutcome = await installShenavaRizehInBrowser({
+            modelManager: modelManagerRef.current,
+            onProgress: (pct, stage) => {
+              setBrowserModelInstallPct(pct);
+              const stageFa =
+                stage === 'PREPARING'
+                  ? 'آماده‌سازی فایل‌های مدل فارسی'
+                  : stage === 'VERIFYING_TOKENS'
+                    ? 'راستی‌آزمایی فایل واژگان tokens.txt'
+                    : stage === 'STREAMING_ONNX'
+                      ? 'دریافت و ذخیره مدل .onnx در OPFS مرورگر'
+                      : 'تکمیل نصب مدل فارسی';
+              setStatusNotice(`${stageFa} (${pct}٪)...`);
+            },
+          });
+          syncModelSnapshotToWorkflow();
+
+          if (!installOutcome.ok) {
+            const msgFa =
+              installOutcome.errorMessageFa ??
+              'نصب خودکار مدل فارسی محلی ناموفق بود. می‌توانید فایل .onnx و tokens.txt را به‌صورت دستی وارد کنید.';
+            workflowRef.current?.setAsrState({
+              state: 'MODEL_NOT_INSTALLED',
+              message: msgFa,
+            });
+            setAsrInlineFeedback({
+              kind: 'MODEL_NOT_INSTALLED',
+              titleFa: 'نصب خودکار مدل فارسی محلی ناموفق بود',
+              messageFa: msgFa,
+            });
+            setStatusNotice(msgFa);
+            return;
+          }
+        } finally {
+          setIsInstallingBrowserModel(false);
+          setBrowserModelInstallPct(null);
+        }
+      }
+    }
+
     const workflowService = new UnifiedLocalAsrWorkflowService({
       browserAdapter,
       nativeCompanionAdapter: nativeAdapter,
@@ -1718,6 +1789,51 @@ export default function App() {
     } finally {
       await browserAdapter.dispose().catch(() => {});
       setIsTranscribingAsr(false);
+    }
+  };
+
+  const handleInstallBrowserPersianModel = async (autoRunAfter = true) => {
+    if (isInstallingBrowserModel || isTranscribingAsr) return;
+    setIsInstallingBrowserModel(true);
+    setBrowserModelInstallPct(0);
+    setActiveFailure(null);
+    setStatusNotice(
+      'در حال نصب خودکار و راستی‌آزمایی مدل فارسی محلی در مرورگر (شناوا ریزه · ۳۶ مگابایت)...',
+    );
+    let installedOk = false;
+    try {
+      const res = await installShenavaRizehInBrowser({
+        modelManager: modelManagerRef.current,
+        onProgress: (pct) => {
+          setBrowserModelInstallPct(pct);
+          setStatusNotice(`در حال نصب مدل فارسی در مرورگر (${pct}٪)...`);
+        },
+      });
+      syncModelSnapshotToWorkflow();
+      if (res.ok) {
+        installedOk = true;
+        setAsrInlineFeedback(null);
+        setStatusNotice(
+          `مدل فارسی محلی (${res.modelId}) با ${res.tokenCount ?? 0} توکن نصب و تأیید شد.`,
+        );
+      } else {
+        const msgFa =
+          res.errorMessageFa ??
+          'نصب خودکار مدل فارسی محلی ناموفق بود. لطفاً دوباره تلاش کنید یا فایل مدل را دستی وارد کنید.';
+        setAsrInlineFeedback({
+          kind: 'MODEL_NOT_INSTALLED',
+          titleFa: 'نصب خودکار مدل فارسی محلی ناموفق بود',
+          messageFa: msgFa,
+        });
+        setStatusNotice(msgFa);
+      }
+    } finally {
+      setIsInstallingBrowserModel(false);
+      setBrowserModelInstallPct(null);
+    }
+
+    if (installedOk && autoRunAfter) {
+      await handleRunPersianAsr();
     }
   };
 
@@ -3560,11 +3676,15 @@ export default function App() {
                       playheadSec={playheadSec}
                       totalDurationSec={totalDurationSec}
                       isTranscribingAsr={isTranscribingAsr}
+                      hasBrowserInstalledModel={hasBrowserInstalledModel}
+                      isInstallingBrowserModel={isInstallingBrowserModel}
+                      browserModelInstallPct={browserModelInstallPct}
                       executionMode={executionMode}
                       cloudAsrConfigured={cloudAsrConfigured}
                       projectSessionNonce={projectSessionNonce}
                       asrInlineFeedback={asrInlineFeedback}
                       onDismissAsrInlineFeedback={() => setAsrInlineFeedback(null)}
+                      onInstallBrowserPersianModel={handleInstallBrowserPersianModel}
                       onRunAcousticSegmentation={handleRunAcousticSegmentation}
                       onOpenLocalModelInstaller={() => {
                         setLifecycleInitialTab('model');

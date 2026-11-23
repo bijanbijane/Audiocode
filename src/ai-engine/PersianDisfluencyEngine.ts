@@ -209,6 +209,24 @@ export const PERSIAN_FILLER_LEXICON: readonly PersianFillerLexiconEntry[] = [
   },
 ];
 
+export function createExtendedFillerLexicon(
+  customEntries?: readonly PersianFillerLexiconEntry[],
+): readonly PersianFillerLexiconEntry[] {
+  if (!customEntries || customEntries.length === 0) {
+    return PERSIAN_FILLER_LEXICON;
+  }
+  const merged = new Map<string, PersianFillerLexiconEntry>();
+  for (const entry of PERSIAN_FILLER_LEXICON) {
+    merged.set(entry.lexiconId, entry);
+  }
+  for (const custom of customEntries) {
+    if (custom && custom.lexiconId && custom.surfaceVariants.length > 0) {
+      merged.set(custom.lexiconId, custom);
+    }
+  }
+  return Array.from(merged.values());
+}
+
 export interface DetailedDisfluencyDetection {
   readonly id: string;
   readonly category: SpeechEventCategory;
@@ -229,6 +247,7 @@ export interface DetailedDisfluencyDetection {
   readonly modelTokenConfidence: number | null;
   readonly potentiallyRemovable: boolean;
   readonly requiresHumanReview: boolean;
+  readonly hasIncompleteTiming?: boolean;
   readonly nonMedicalNotice?: string;
   readonly reasonFa: string;
   readonly notes: readonly string[];
@@ -276,6 +295,23 @@ export class PersianDisfluencyEngine {
   private static safeGapMs(startFlicks: number, endFlicks: number, fallback = 0): number {
     if (!Number.isFinite(startFlicks) || !Number.isFinite(endFlicks)) return fallback;
     return TimeMath.flicksToSeconds(endFlicks - startFlicks) * 1000;
+  }
+
+  private static hasValidTokenTiming(tok: TimedPersianToken): boolean {
+    if (tok.timingValid === false || tok.alignmentPrecision === 'missing') return false;
+    return (
+      Number.isFinite(tok.range?.start) &&
+      Number.isFinite(tok.range?.end) &&
+      tok.range.start >= 0 &&
+      tok.range.end > tok.range.start
+    );
+  }
+
+  private static isSegmentOnlyTiming(tok: TimedPersianToken): boolean {
+    return (
+      tok.alignmentPrecision === 'segment_only' ||
+      tok.alignmentPrecision === 'distributed_segment'
+    );
   }
 
   public static analyzeTranscript(
@@ -434,12 +470,16 @@ export class PersianDisfluencyEngine {
    */
   public static analyzeSpeechDisfluenciesDetailed(
     tokens: readonly TimedPersianToken[],
-    options: { hasAcousticEvidence?: boolean } = {},
+    options: {
+      hasAcousticEvidence?: boolean;
+      customFillerLexicon?: readonly PersianFillerLexiconEntry[];
+    } = {},
   ): DetailedDisfluencyDetection[] {
     if (tokens.length === 0) return [];
     const results: DetailedDisfluencyDetection[] = [];
     const consumed = new Set<number>();
     const hasAcoustic = options.hasAcousticEvidence ?? false;
+    const activeLexicon = createExtendedFillerLexicon(options.customFillerLexicon);
 
     for (let i = 0; i < tokens.length; i++) {
       if (consumed.has(i)) continue;
@@ -455,11 +495,15 @@ export class PersianDisfluencyEngine {
         const avgConf =
           spanTokens.reduce((a, t) => a + this.sanitizeConfidence(t.confidence), 0) /
           spanTokens.length;
-        const durationSec = Math.max(
-          0,
-          this.safeGapMs(spanTokens[0].range.start, spanTokens[spanTokens.length - 1].range.end, 0) /
-            1000,
-        );
+        const spanTimingValid = spanTokens.every((t) => this.hasValidTokenTiming(t));
+        const spanSegmentOnly = spanTokens.some((t) => this.isSegmentOnlyTiming(t));
+        const durationSec = spanTimingValid
+          ? Math.max(
+              0,
+              this.safeGapMs(spanTokens[0].range.start, spanTokens[spanTokens.length - 1].range.end, 0) /
+                1000,
+            )
+          : 0;
 
         const isStutterLikeBlock =
           sylMatch.subtype === 'STUTTER_LIKE_BLOCK' || repeatedCount >= 3 || durationSec >= 0.9;
@@ -469,8 +513,11 @@ export class PersianDisfluencyEngine {
           id: `syl_${spanTokens[0].tokenId}`,
           category,
           subtype: sylMatch.subtype,
-          detectionState: hasAcoustic ? 'PROBABLE' : 'UNCERTAIN',
-          uncertaintyState: hasAcoustic ? 'MODERATE_UNCERTAINTY' : 'INSUFFICIENT_EVIDENCE',
+          detectionState: hasAcoustic && spanTimingValid && !spanSegmentOnly ? 'PROBABLE' : 'UNCERTAIN',
+          uncertaintyState:
+            hasAcoustic && spanTimingValid && !spanSegmentOnly
+              ? 'MODERATE_UNCERTAINTY'
+              : 'INSUFFICIENT_EVIDENCE',
           trackId: spanTokens[0].trackId,
           targetRange: {
             start: Number.isFinite(spanTokens[0].range.start) ? spanTokens[0].range.start : 0,
@@ -485,16 +532,28 @@ export class PersianDisfluencyEngine {
           linguisticScore: hasAcoustic ? 0.78 : 0.62,
           ruleEvidenceCount: repeatedCount,
           modelTokenConfidence: Number(avgConf.toFixed(3)),
-          potentiallyRemovable: hasAcoustic,
+          potentiallyRemovable: false,
           requiresHumanReview: true,
+          hasIncompleteTiming: !spanTimingValid || spanSegmentOnly,
           nonMedicalNotice:
             'الگوی قابل مشاهده تکرار هجا/واج آغازین در گفتار؛ این تشخیص به‌هیچ‌وجه ارزیابی پزشکی یا بالینی اختلال گفتار نیست.',
-          reasonFa: hasAcoustic
-            ? `تکرار هجا/واج آغازین پیش از واژه «${sylMatch.resolvedWordToken.displayText}» (نیازمند بررسی انسانی)`
-            : `الگوی احتمالی تکرار هجا/واج پیش از «${sylMatch.resolvedWordToken.displayText}» (بدون داده آکوستیکی تاییدنشده)`,
+          reasonFa:
+            !spanTimingValid
+              ? `الگوی احتمالی تکرار هجا/واج پیش از «${sylMatch.resolvedWordToken.displayText}» (زمان‌بندی ناقص — بدون حذف خودکار)`
+              : spanSegmentOnly
+                ? `الگوی احتمالی تکرار هجا/واج پیش از «${sylMatch.resolvedWordToken.displayText}» (زمان‌بندی در سطح سگمنت؛ نیازمند بررسی انسانی)`
+                : hasAcoustic
+                  ? `تکرار هجا/واج آغازین پیش از واژه «${sylMatch.resolvedWordToken.displayText}» (نیازمند بررسی انسانی)`
+                  : `الگوی احتمالی تکرار هجا/واج پیش از «${sylMatch.resolvedWordToken.displayText}» (بدون داده آکوستیکی تاییدنشده)`,
           notes: [
             `تعداد تکرار قطعه‌تکرار: ${repeatedCount}`,
-            hasAcoustic ? 'نیاز به بازبینی شنیداری پیش از هرگونه برش' : 'شواهد آکوستیکی در دسترس نیست -> وضعیت نامطمئن',
+            !spanTimingValid
+              ? 'زمان‌بندی توکن‌ها ناقص است -> بدون برش خودکار'
+              : spanSegmentOnly
+                ? 'زمان‌بندی کلمه‌به‌کلمه موجود نیست -> محدود به سگمنت'
+                : hasAcoustic
+                  ? 'نیاز به بازبینی شنیداری پیش از هرگونه برش'
+                  : 'شواهد آکوستیکی در دسترس نیست -> وضعیت نامطمئن',
           ],
         });
         continue;
@@ -510,6 +569,8 @@ export class PersianDisfluencyEngine {
           repairOrFalseStart.markStartIdx,
           repairOrFalseStart.markEndIdx + 1,
         );
+        const spanTimingValid = spanTokens.every((t) => this.hasValidTokenTiming(t));
+        const spanSegmentOnly = spanTokens.some((t) => this.isSegmentOnlyTiming(t));
         const avgConf =
           spanTokens.reduce((a, t) => a + this.sanitizeConfidence(t.confidence), 0) /
           spanTokens.length;
@@ -517,8 +578,8 @@ export class PersianDisfluencyEngine {
           id: `fs_${spanTokens[0].tokenId}`,
           category: repairOrFalseStart.category,
           subtype: repairOrFalseStart.subtype,
-          detectionState: 'PROBABLE',
-          uncertaintyState: 'MODERATE_UNCERTAINTY',
+          detectionState: spanTimingValid ? 'PROBABLE' : 'UNCERTAIN',
+          uncertaintyState: spanTimingValid ? 'MODERATE_UNCERTAINTY' : 'INSUFFICIENT_EVIDENCE',
           trackId: spanTokens[0].trackId,
           targetRange: {
             start: Number.isFinite(spanTokens[0].range.start) ? spanTokens[0].range.start : 0,
@@ -535,14 +596,15 @@ export class PersianDisfluencyEngine {
           modelTokenConfidence: Number(avgConf.toFixed(3)),
           potentiallyRemovable: false, // Never auto-delete semantic shifts or false starts
           requiresHumanReview: true,
+          hasIncompleteTiming: !spanTimingValid || spanSegmentOnly,
           reasonFa: repairOrFalseStart.reasonFa,
           notes: repairOrFalseStart.notes,
         });
         continue;
       }
 
-      // C. Context-Sensitive Persian Fillers (Versioned Lexicon)
-      const fillerCheck = this.classifyFillerContext(tokens, i, consumed);
+      // C. Context-Sensitive Persian Fillers (Versioned + Extensible Lexicon)
+      const fillerCheck = this.classifyFillerContext(tokens, i, consumed, activeLexicon);
       if (fillerCheck) {
         for (let k = fillerCheck.startIdx; k <= fillerCheck.endIdx; k++) {
           consumed.add(k);
@@ -555,19 +617,20 @@ export class PersianDisfluencyEngine {
   }
 
   /**
-   * Context-sensitive Persian filler classification against PERSIAN_FILLER_LEXICON.
+   * Context-sensitive Persian filler classification against an extensible filler lexicon.
    * Preserves meaningful uses of «خب», «یعنی», «حالا», «مثلاً», «چیز», etc.
    */
   public static classifyFillerContext(
     tokens: readonly TimedPersianToken[],
     startIdx: number,
     consumed: ReadonlySet<number> = new Set(),
+    lexicon: readonly PersianFillerLexiconEntry[] = PERSIAN_FILLER_LEXICON,
   ): { startIdx: number; endIdx: number; detection: DetailedDisfluencyDetection } | null {
     const first = tokens[startIdx];
-    const firstNormClean = this.cleanPersianLetters(first.normalizedText);
+    const firstNormClean = this.cleanPersianLetters(first.normalizedText || first.originalText);
 
     // 1. Check multi-word lexicon entries first (longest match)
-    const multiEntries = PERSIAN_FILLER_LEXICON.filter((e) =>
+    const multiEntries = lexicon.filter((e) =>
       e.surfaceVariants.some((v) => v.includes(' ')),
     );
     for (const entry of multiEntries) {
@@ -583,7 +646,7 @@ export class PersianDisfluencyEngine {
           if (
             consumed.has(startIdx + k) ||
             tokens[startIdx + k].trackId !== first.trackId ||
-            this.cleanPersianLetters(tokens[startIdx + k].normalizedText) !==
+            this.cleanPersianLetters(tokens[startIdx + k].normalizedText || tokens[startIdx + k].originalText) !==
               this.cleanPersianLetters(words[k])
           ) {
             allMatch = false;
@@ -594,8 +657,10 @@ export class PersianDisfluencyEngine {
 
         const endIdx = startIdx + words.length - 1;
         const spanTokens = tokens.slice(startIdx, endIdx + 1);
+        const spanTimingValid = spanTokens.every((t) => this.hasValidTokenTiming(t));
+        const spanSegmentOnly = spanTokens.some((t) => this.isSegmentOnlyTiming(t));
         const { prevGapMs, nextGapMs } = this.computeAdjacentGapsMs(tokens, startIdx, endIdx);
-        const isolatedByPause = prevGapMs >= 160 && nextGapMs >= 160;
+        const isolatedByPause = spanTimingValid && !spanSegmentOnly && prevGapMs >= 160 && nextGapMs >= 160;
         const repeatedNearby = this.isPhraseRepeatedNearby(tokens, startIdx, words.length);
         const avgConf =
           spanTokens.reduce((a, t) => a + this.sanitizeConfidence(t.confidence), 0) /
@@ -613,8 +678,13 @@ export class PersianDisfluencyEngine {
             id: `fill_${spanTokens[0].tokenId}`,
             category: 'FILLER',
             subtype: isFillerUsage ? 'DISCOURSE_FILLER' : 'MEANINGFUL_DISCOURSE_MARKER_PRESERVED',
-            detectionState: isFillerUsage ? 'PROBABLE' : 'POSSIBLE',
-            uncertaintyState: isFillerUsage ? 'MODERATE_UNCERTAINTY' : 'HIGH_UNCERTAINTY',
+            detectionState: !spanTimingValid ? 'UNCERTAIN' : isFillerUsage ? 'PROBABLE' : 'POSSIBLE',
+            uncertaintyState:
+              !spanTimingValid || spanSegmentOnly
+                ? 'INSUFFICIENT_EVIDENCE'
+                : isFillerUsage
+                  ? 'MODERATE_UNCERTAINTY'
+                  : 'HIGH_UNCERTAINTY',
             trackId: first.trackId,
             targetRange: {
               start: Number.isFinite(spanTokens[0].range.start) ? spanTokens[0].range.start : 0,
@@ -630,11 +700,15 @@ export class PersianDisfluencyEngine {
             linguisticScore: Number(score.toFixed(3)),
             ruleEvidenceCount: (isolatedByPause ? 1 : 0) + (repeatedNearby ? 1 : 0) + 1,
             modelTokenConfidence: Number(avgConf.toFixed(3)),
-            potentiallyRemovable: isFillerUsage && entry.potentiallyRemovable,
+            potentiallyRemovable:
+              isFillerUsage && entry.potentiallyRemovable && spanTimingValid && !spanSegmentOnly,
             requiresHumanReview: true,
-            reasonFa: isFillerUsage
-              ? `تکیه‌کلام/عبارت پرکننده «${entry.canonicalForm}» با مکث پیرامونی`
-              : `عبارت «${entry.canonicalForm}» احتمالاً معنادار یا تعارفی عمدی است (نگهداری توصیه می‌شود)`,
+            hasIncompleteTiming: !spanTimingValid || spanSegmentOnly,
+            reasonFa: !spanTimingValid
+              ? `عبارت «${entry.canonicalForm}» با زمان‌بندی ناقص (نیازمند بررسی دستی)`
+              : isFillerUsage
+                ? `تکیه‌کلام/عبارت پرکننده «${entry.canonicalForm}» با مکث پیرامونی`
+                : `عبارت «${entry.canonicalForm}» احتمالاً معنادار یا تعارفی عمدی است (نگهداری توصیه می‌شود)`,
             notes: [
               `مکث قبل: ${Math.round(prevGapMs)}ms، مکث بعد: ${Math.round(nextGapMs)}ms`,
               isFillerUsage ? 'رفتار مکث‌دار حشو' : 'پیوسته به جمله — حفظ ساختار معنایی',
@@ -644,21 +718,40 @@ export class PersianDisfluencyEngine {
       }
     }
 
-    // 2. Single-token vocal fillers («اِ», «اَم», «اوم», «آ», «اممم», «ااا»)
-    if (this.PURE_VOCAL_FILLERS.test(first.normalizedText) || this.PURE_VOCAL_FILLERS.test(firstNormClean)) {
+    // 2. Single-token vocal fillers («اِ», «اَم», «اوم», «آ», «اممم», «ااا», or custom VOCAL_FILLED_PAUSE)
+    const customVocalEntry = lexicon.find(
+      (e) =>
+        e.category === 'VOCAL_FILLED_PAUSE' &&
+        e.surfaceVariants.some(
+          (v) =>
+            !v.includes(' ') &&
+            this.cleanPersianLetters(PersianTextNormalizer.normalizeTokenText(v)) === firstNormClean,
+        ),
+    );
+    if (
+      this.PURE_VOCAL_FILLERS.test(first.normalizedText) ||
+      this.PURE_VOCAL_FILLERS.test(firstNormClean) ||
+      customVocalEntry !== undefined
+    ) {
       const matchedEntry =
-        PERSIAN_FILLER_LEXICON.find((e) =>
+        customVocalEntry ??
+        lexicon.find((e) =>
           e.surfaceVariants.some(
             (v) => this.cleanPersianLetters(v) === firstNormClean || v === first.displayText,
           ),
-        ) ?? PERSIAN_FILLER_LEXICON[1];
-      const durMs = Math.max(0, this.safeGapMs(first.range.start, first.range.end, 120));
+        ) ??
+        PERSIAN_FILLER_LEXICON[1];
+      const tokTimingValid = this.hasValidTokenTiming(first);
+      const tokSegmentOnly = this.isSegmentOnlyTiming(first);
+      const durMs = tokTimingValid
+        ? Math.max(0, this.safeGapMs(first.range.start, first.range.end, 120))
+        : 0;
       const { prevGapMs, nextGapMs } = this.computeAdjacentGapsMs(tokens, startIdx, startIdx);
       const repeatedVocal =
         startIdx + 1 < tokens.length &&
         this.PURE_VOCAL_FILLERS.test(tokens[startIdx + 1].normalizedText);
-      const stretched = durMs >= 160;
-      const pauseContext = prevGapMs >= 100 || nextGapMs >= 100;
+      const stretched = tokTimingValid && !tokSegmentOnly && durMs >= 160;
+      const pauseContext = tokTimingValid && !tokSegmentOnly && (prevGapMs >= 100 || nextGapMs >= 100);
       const safeConf = this.sanitizeConfidence(first.confidence);
       const score = Math.min(
         0.95,
@@ -672,8 +765,9 @@ export class PersianDisfluencyEngine {
           id: `vfill_${first.tokenId}`,
           category: 'FILLER',
           subtype: 'VOCAL_FILLED_PAUSE',
-          detectionState: 'DETECTED',
-          uncertaintyState: 'LOW_UNCERTAINTY',
+          detectionState: !tokTimingValid ? 'UNCERTAIN' : tokSegmentOnly ? 'PROBABLE' : 'DETECTED',
+          uncertaintyState:
+            !tokTimingValid || tokSegmentOnly ? 'INSUFFICIENT_EVIDENCE' : 'LOW_UNCERTAINTY',
           trackId: first.trackId,
           targetRange: {
             start: Number.isFinite(first.range.start) ? first.range.start : 0,
@@ -687,16 +781,21 @@ export class PersianDisfluencyEngine {
           linguisticScore: Number(score.toFixed(3)),
           ruleEvidenceCount: 1 + (stretched ? 1 : 0) + (pauseContext ? 1 : 0) + (repeatedVocal ? 1 : 0),
           modelTokenConfidence: Number(safeConf.toFixed(3)),
-          potentiallyRemovable: true,
-          requiresHumanReview: durMs < 90 || safeConf < 0.75,
-          reasonFa: `تپق آوایی مستقل «${first.displayText}» (${Math.round(durMs)}ms)`,
+          potentiallyRemovable: tokTimingValid && !tokSegmentOnly && matchedEntry.potentiallyRemovable,
+          requiresHumanReview: !tokTimingValid || tokSegmentOnly || durMs < 90 || safeConf < 0.75,
+          hasIncompleteTiming: !tokTimingValid || tokSegmentOnly,
+          reasonFa: !tokTimingValid
+            ? `تپق آوایی «${first.displayText}» شناسایی شد اما زمان‌بندی دقیق موجود نیست`
+            : tokSegmentOnly
+              ? `تپق آوایی «${first.displayText}» در سطح سگمنت (نیازمند بررسی انسانی؛ زمان‌بندی کلمه‌به‌کلمه موجود نیست)`
+              : `تپق آوایی مستقل «${first.displayText}» (${Math.round(durMs)}ms)`,
           notes: [`مدت: ${Math.round(durMs)}ms`, `مکث اطراف: ${Math.round(prevGapMs)}ms / ${Math.round(nextGapMs)}ms`],
         },
       };
     }
 
-    // 3. Single-token contextual discourse markers («خب», «یعنی», «حالا», «مثلاً», «چیز», «به‌اصطلاح»)
-    const singleEntry = PERSIAN_FILLER_LEXICON.find(
+    // 3. Single-token contextual discourse markers («خب», «یعنی», «حالا», «مثلاً», «چیز», «به‌اصطلاح», + custom)
+    const singleEntry = lexicon.find(
       (e) =>
         e.category !== 'VOCAL_FILLED_PAUSE' &&
         e.surfaceVariants.some(
@@ -707,6 +806,8 @@ export class PersianDisfluencyEngine {
     );
     if (!singleEntry) return null;
 
+    const tokTimingValid = this.hasValidTokenTiming(first);
+    const tokSegmentOnly = this.isSegmentOnlyTiming(first);
     const prevTok = startIdx > 0 && tokens[startIdx - 1].trackId === first.trackId ? tokens[startIdx - 1] : null;
     const nextTok =
       startIdx + 1 < tokens.length && tokens[startIdx + 1].trackId === first.trackId
@@ -715,19 +816,29 @@ export class PersianDisfluencyEngine {
     const prevNorm = prevTok ? this.cleanPersianLetters(prevTok.normalizedText) : '';
     const nextNorm = nextTok ? this.cleanPersianLetters(nextTok.normalizedText) : '';
     const { prevGapMs, nextGapMs } = this.computeAdjacentGapsMs(tokens, startIdx, startIdx);
-    const durMs = Math.max(0, this.safeGapMs(first.range.start, first.range.end, 120));
+    const durMs = tokTimingValid
+      ? Math.max(0, this.safeGapMs(first.range.start, first.range.end, 120))
+      : 0;
     const safeConf = this.sanitizeConfidence(first.confidence);
 
     let preserveReason: string | null = null;
 
     if (singleEntry.canonicalForm === 'خب') {
-      if (startIdx === 0 && nextGapMs < 220) {
+      const adjContextWordsBefore = new Set([
+        'خیلی', 'بسیار', 'واقعا', 'واقعاً', 'چقدر', 'یه', 'یک', 'این', 'خبر', 'حس', 'کار', 'اتفاق', 'روز',
+      ]);
+      const adjContextWordsAfter = new Set([
+        'است', 'بود', 'شد', 'می‌شه', 'میشه', 'هست', 'هستم', 'نیست', 'نبود',
+      ]);
+      if (firstNormClean === 'خوب' && (adjContextWordsBefore.has(prevNorm) || adjContextWordsAfter.has(nextNorm))) {
+        preserveReason = 'واژه «خوب» در نقش صفت یا قید معنادار به کار رفته است';
+      } else if (startIdx === 0 && (nextGapMs < 220 || !tokTimingValid || tokSegmentOnly)) {
         preserveReason = '«خب» در آغاز جمله بدون مکث تردیدی (نشانگر گذار طبیعی گفتمان)';
-      } else if (nextTok && ['است', 'بود', 'شد', 'می‌شه', 'میشه', 'هست'].includes(nextNorm)) {
+      } else if (nextTok && adjContextWordsAfter.has(nextNorm)) {
         preserveReason = 'واژه «خوب/خب» به عنوان صفت یا خبر معنادار به کار رفته است';
       }
     } else if (singleEntry.canonicalForm === 'یعنی') {
-      if (prevTok && nextTok && nextGapMs < 240 && !this.PURE_VOCAL_FILLERS.test(nextTok.normalizedText)) {
+      if (prevTok && nextTok && (nextGapMs < 240 || !tokTimingValid || tokSegmentOnly) && !this.PURE_VOCAL_FILLERS.test(nextTok.normalizedText)) {
         preserveReason = '«یعنی» پیونددهنده توضیح یا تعریف معنایی است (نه حشو تردیدی)';
       }
     } else if (singleEntry.canonicalForm === 'حالا') {
@@ -735,7 +846,7 @@ export class PersianDisfluencyEngine {
         preserveReason = '«حالا» در معنای قید زمان («اکنون») استفاده شده و باید حفظ شود';
       }
     } else if (singleEntry.canonicalForm === 'مثلاً') {
-      if (nextTok && nextGapMs < 240 && !this.PURE_VOCAL_FILLERS.test(nextTok.normalizedText)) {
+      if (nextTok && (nextGapMs < 240 || !tokTimingValid || tokSegmentOnly) && !this.PURE_VOCAL_FILLERS.test(nextTok.normalizedText)) {
         preserveReason = '«مثلاً» معرفی‌کننده یک مثال واقعی در ادامه جمله است';
       }
     } else if (singleEntry.canonicalForm === 'چیز') {
@@ -746,7 +857,7 @@ export class PersianDisfluencyEngine {
 
     const followedByVocalFiller = nextTok ? this.PURE_VOCAL_FILLERS.test(nextTok.normalizedText) : false;
     const precededByVocalFiller = prevTok ? this.PURE_VOCAL_FILLERS.test(prevTok.normalizedText) : false;
-    const isolatedByHesitation = prevGapMs >= 200 && nextGapMs >= 220;
+    const isolatedByHesitation = tokTimingValid && !tokSegmentOnly && prevGapMs >= 200 && nextGapMs >= 220;
     const repeatedSame = nextNorm === firstNormClean;
 
     if (preserveReason && !followedByVocalFiller && !precededByVocalFiller && !repeatedSame && !isolatedByHesitation) {
@@ -774,6 +885,7 @@ export class PersianDisfluencyEngine {
           modelTokenConfidence: Number(safeConf.toFixed(3)),
           potentiallyRemovable: false,
           requiresHumanReview: false,
+          hasIncompleteTiming: !tokTimingValid || tokSegmentOnly,
           reasonFa: preserveReason,
           notes: [`حفظ بر اساس بافت زبانی: ${preserveReason}`],
         },
@@ -801,8 +913,18 @@ export class PersianDisfluencyEngine {
           singleEntry.category === 'COLLOQUIAL_FILLER'
             ? 'CONTEXT_DEPENDENT_COLLOQUIAL'
             : 'DISCOURSE_FILLER',
-        detectionState: strongFillerEvidence ? 'PROBABLE' : 'POSSIBLE',
-        uncertaintyState: strongFillerEvidence ? 'MODERATE_UNCERTAINTY' : 'HIGH_UNCERTAINTY',
+        detectionState:
+          !tokTimingValid
+            ? 'UNCERTAIN'
+            : strongFillerEvidence
+              ? 'PROBABLE'
+              : 'POSSIBLE',
+        uncertaintyState:
+          !tokTimingValid || tokSegmentOnly
+            ? 'INSUFFICIENT_EVIDENCE'
+            : strongFillerEvidence
+              ? 'MODERATE_UNCERTAINTY'
+              : 'HIGH_UNCERTAINTY',
         trackId: first.trackId,
         targetRange: {
           start: Number.isFinite(first.range.start) ? first.range.start : 0,
@@ -820,11 +942,15 @@ export class PersianDisfluencyEngine {
           (followedByVocalFiller || precededByVocalFiller ? 1 : 0) +
           (repeatedSame ? 1 : 0),
         modelTokenConfidence: Number(safeConf.toFixed(3)),
-        potentiallyRemovable: strongFillerEvidence && singleEntry.potentiallyRemovable,
+        potentiallyRemovable:
+          strongFillerEvidence && singleEntry.potentiallyRemovable && tokTimingValid && !tokSegmentOnly,
         requiresHumanReview: true,
-        reasonFa: strongFillerEvidence
-          ? `کاربرد تردیدی/حشو احتمالی برای «${first.displayText}» در بافت مکث‌دار`
-          : `عبارت بافت‌وابسته «${first.displayText}» (اطلاعاتی؛ نیازمند تایید کاربر)`,
+        hasIncompleteTiming: !tokTimingValid || tokSegmentOnly,
+        reasonFa: !tokTimingValid
+          ? `کاربرد احتمالی پرکننده «${first.displayText}» بدون زمان‌بندی دقیق (نیازمند بازبینی انسانی)`
+          : strongFillerEvidence
+            ? `کاربرد تردیدی/حشو احتمالی برای «${first.displayText}» در بافت مکث‌دار`
+            : `عبارت بافت‌وابسته «${first.displayText}» (اطلاعاتی؛ نیازمند تایید کاربر)`,
         notes: [
           `مکث قبل: ${Math.round(prevGapMs)}ms، مکث بعد: ${Math.round(nextGapMs)}ms`,
           preserveReason ? `احتمال کاربرد معنادار نیز وجود دارد: ${preserveReason}` : 'فاقد نشانگر معنایی محافظت‌شده',
@@ -847,14 +973,17 @@ export class PersianDisfluencyEngine {
     if (firstClean.length === 0 || firstClean.length > 3) return null;
     if (this.PURE_VOCAL_FILLERS.test(firstClean)) return null;
 
-    // Look ahead for repeated fragment fragments («م م من», «می می میخواستم», «ب ب باید»)
+    // Look ahead for repeated fragments («م م من», «می می میخواستم», «ب ب باید», «سلا... سلام»)
     let j = startIdx + 1;
     while (j < tokens.length && j - startIdx <= 4) {
       if (tokens[j].trackId !== first.trackId) break;
-      const gapSec =
-        this.safeGapMs(tokens[j - 1].range.end, tokens[j].range.start, Number.POSITIVE_INFINITY) /
-        1000;
-      if (!Number.isFinite(gapSec) || gapSec > 1.2 || gapSec < 0) break;
+      const bothTimed = this.hasValidTokenTiming(tokens[j - 1]) && this.hasValidTokenTiming(tokens[j]);
+      if (bothTimed) {
+        const gapSec =
+          this.safeGapMs(tokens[j - 1].range.end, tokens[j].range.start, Number.POSITIVE_INFINITY) /
+          1000;
+        if (!Number.isFinite(gapSec) || gapSec > 1.2 || gapSec < 0) break;
+      }
 
       const curClean = this.cleanPersianLetters(tokens[j].normalizedText);
       // Either another identical short fragment or the full target word starting with this phoneme/syllable
@@ -865,9 +994,14 @@ export class PersianDisfluencyEngine {
 
       if (curClean.length > firstClean.length && curClean.startsWith(firstClean)) {
         const fragCount = j - startIdx;
-        // Require either >= 2 repeated short fragments («م م من») OR single 1-2 char non-lexical prefix fragment before longer word («ب باید»)
+        // Require either >= 2 repeated short fragments («م م من») OR single 1-char non-lexical fragment («ب باید») OR explicitly broken partial prefix («سلا... سلام»)
         const nonLexicalOneChar = firstClean.length === 1 && !['و'].includes(firstClean);
-        if (fragCount >= 2 || nonLexicalOneChar) {
+        const explicitBrokenPrefix =
+          firstClean.length >= 2 &&
+          curClean.length >= firstClean.length + 2 &&
+          (/[…\-–—]$|\.\.\.$/.test(first.displayText.trim()) ||
+            !new Set(['در', 'با', 'از', 'به', 'تا', 'بر', 'که', 'ما', 'من', 'تو', 'او', 'این', 'آن', 'هم', 'چه', 'کی', 'نه', 'پس', 'سر', 'تن', 'دو', 'سه', 'یک']).has(firstClean));
+        if (fragCount >= 2 || nonLexicalOneChar || explicitBrokenPrefix) {
           return {
             startIdx,
             endIdx: j - 1,
@@ -924,15 +1058,31 @@ export class PersianDisfluencyEngine {
         markerTok.range.start,
         0,
       );
+      const nextAfterMarker = m + 1 <= maxLookahead ? tokens[m + 1] : null;
+      const nextAfterNorm = nextAfterMarker
+        ? this.cleanPersianLetters(nextAfterMarker.normalizedText)
+        : '';
+      const hasCompoundCorrectionMarker =
+        nextAfterMarker !== null &&
+        nextAfterMarker.trackId === startTok.trackId &&
+        (this.EXPLICIT_CORRECTION_MARKERS.has(nextAfterNorm) ||
+          (m + 2 <= maxLookahead &&
+            nextAfterNorm === 'در' &&
+            this.cleanPersianLetters(tokens[m + 2].normalizedText) === 'واقع'));
+
       const hasAbandonedClauseCue =
-        gapBeforeMarkerMs >= 200 ||
+        gapBeforeMarkerMs >= 160 ||
+        hasCompoundCorrectionMarker ||
         /\.\.\.|…|،$/.test(prevBeforeMarker.displayText) ||
         this.MID_CLAUSE_BOUNDARY_WORDS.has(this.cleanPersianLetters(prevBeforeMarker.normalizedText));
 
       if (!hasAbandonedClauseCue) continue;
 
-      const repairStartIdx =
+      let repairStartIdx =
         markerNorm === 'در' && m + 1 <= maxLookahead ? m + 2 : m + 1;
+      if (hasCompoundCorrectionMarker) {
+        repairStartIdx = nextAfterNorm === 'در' ? m + 3 : m + 2;
+      }
       if (repairStartIdx >= tokens.length) continue;
 
       const repairEndIdx = Math.min(tokens.length - 1, repairStartIdx + 3);
@@ -1024,7 +1174,7 @@ export class PersianDisfluencyEngine {
   }
 
   private static cleanPersianLetters(text: string): string {
-    return text.replace(/[،؛.!؟«»()[\]…\s\u200c]/g, '');
+    return PersianTextNormalizer.toCanonicalComparisonForm(text);
   }
 
   private static detectNgramRepetitionWithInterregnum(
@@ -1055,22 +1205,29 @@ export class PersianDisfluencyEngine {
       if (repairStartIdx + n > tokens.length) continue;
       const secondSpan = tokens.slice(repairStartIdx, repairStartIdx + n);
 
-      const gapSeconds =
-        this.safeGapMs(
-          firstSpan[firstSpan.length - 1].range.end,
-          secondSpan[0].range.start,
-          Number.POSITIVE_INFINITY,
-        ) / 1000;
-      if (!Number.isFinite(gapSeconds) || gapSeconds > 2.5 || gapSeconds < 0) continue;
+      const timingComparable =
+        this.hasValidTokenTiming(firstSpan[firstSpan.length - 1]) &&
+        this.hasValidTokenTiming(secondSpan[0]);
+      if (timingComparable) {
+        const gapSeconds =
+          this.safeGapMs(
+            firstSpan[firstSpan.length - 1].range.end,
+            secondSpan[0].range.start,
+            Number.POSITIVE_INFINITY,
+          ) / 1000;
+        if (!Number.isFinite(gapSeconds) || gapSeconds > 2.5 || gapSeconds < 0) continue;
+      }
 
-      const hasSubstantiveToken = firstSpan.some((tok) => tok.normalizedText.length > 1);
+      const hasSubstantiveToken = firstSpan.some(
+        (tok) => this.cleanPersianLetters(tok.normalizedText || tok.originalText).length > 1,
+      );
       if (!hasSubstantiveToken) continue;
 
-      const isExactMatch = firstSpan.every(
-        (tok, idx) =>
-          tok.normalizedText.length > 0 &&
-          tok.normalizedText === secondSpan[idx].normalizedText,
-      );
+      const isExactMatch = firstSpan.every((tok, idx) => {
+        const a = this.cleanPersianLetters(tok.normalizedText || tok.originalText);
+        const b = this.cleanPersianLetters(secondSpan[idx].normalizedText || secondSpan[idx].originalText);
+        return a.length > 0 && a === b;
+      });
 
       if (isExactMatch) {
         return {

@@ -12,7 +12,10 @@ import {
   RejectedNonVocalCandidate,
 } from '../NonVerbalVocalEventDetector';
 import { OnnxPersianAsrAndVadAdapter } from '../OnnxPersianAsrAndVadAdapter';
-import { PersianDisfluencyEngine } from '../PersianDisfluencyEngine';
+import {
+  PersianDisfluencyEngine,
+  PersianFillerLexiconEntry,
+} from '../PersianDisfluencyEngine';
 import {
   ComprehensiveProsodyReport,
   PersianProsodyAndPacingAnalyzer,
@@ -42,6 +45,14 @@ export type WindowPcmReader = (
   sampleCount: number,
 ) => Promise<Float32Array> | Float32Array;
 
+export interface SpeechSegmentTimingInput {
+  readonly segmentId: string;
+  readonly startSec: number;
+  readonly endSec: number;
+  readonly textVerbatim: string;
+  readonly textNormalized?: string;
+}
+
 export interface SpeechEventAnalysisRequest {
   readonly trackId: string;
   readonly sampleRate: SampleRate;
@@ -51,6 +62,10 @@ export interface SpeechEventAnalysisRequest {
   readonly readPcmWindow?: WindowPcmReader;
   readonly tokens?: readonly TimedPersianToken[];
   readonly wordTokens?: readonly PersianWordToken[];
+  readonly segments?: readonly SpeechSegmentTimingInput[];
+  readonly rawTranscriptText?: string;
+  readonly timingGranularity?: 'WORD' | 'SEGMENT' | 'TOKEN' | 'NONE';
+  readonly customFillerLexicon?: readonly PersianFillerLexiconEntry[];
   readonly config?: SpeechAnalysisThresholdConfig;
   readonly vadProvider?: VadProbeProvider | null;
   readonly nonVerbalModelAdapter?: NonVerbalEventModelAdapter | null;
@@ -70,6 +85,7 @@ export interface SpeechEventAnalysisResult {
   readonly engineVersion: string;
   readonly thresholdConfigVersion: string;
   readonly trackId: string;
+  readonly timingGranularity?: 'WORD' | 'SEGMENT_ONLY' | 'PARTIAL' | 'NONE';
   readonly cancelled: boolean;
   readonly completedWindows: number;
   readonly totalWindows: number;
@@ -140,14 +156,63 @@ export class SpeechEventEngine {
     const totalRecordingDurationSec =
       sampleRate > 0 ? Number((totalSamples / sampleRate).toFixed(4)) : 0;
 
-    // Resolve immutable normalized token copy (never mutating caller tokens)
-    const timedTokens: TimedPersianToken[] = (
-      request.tokens
-        ? [...request.tokens].filter((t) => t.trackId === request.trackId)
-        : request.wordTokens
-          ? convertWordTokensToTimedTokens(request.wordTokens, request.trackId)
-          : []
-    ).filter((t) => Number.isFinite(t.range?.start) && Number.isFinite(t.range?.end));
+    // Resolve immutable normalized token copy without dropping untimed tokens from lexical sequence
+    const rawTrackTokens: TimedPersianToken[] = request.tokens
+      ? [...request.tokens].filter((t) => t.trackId === request.trackId)
+      : request.wordTokens
+        ? convertWordTokensToTimedTokens(request.wordTokens, request.trackId)
+        : [];
+
+    const isTokenTimingValid = (t: TimedPersianToken): boolean =>
+      t.timingValid !== false &&
+      t.alignmentPrecision !== 'missing' &&
+      Number.isFinite(t.range?.start) &&
+      Number.isFinite(t.range?.end) &&
+      t.range.start >= 0 &&
+      t.range.end > t.range.start;
+
+    const normalizedLexicalTokens: TimedPersianToken[] = rawTrackTokens.map((t) =>
+      isTokenTimingValid(t)
+        ? { ...t, timingValid: true }
+        : {
+            ...t,
+            alignmentPrecision: 'missing',
+            timingValid: false,
+            range: {
+              start: Number.isFinite(t.range?.start) && t.range.start >= 0 ? t.range.start : 0,
+              end: Number.isFinite(t.range?.end) && t.range.end >= 0 ? t.range.end : 0,
+            },
+          },
+    );
+
+    const timedTokens: TimedPersianToken[] = normalizedLexicalTokens.filter(
+      (t) => t.timingValid === true,
+    );
+    const hasIncompleteTokenTiming =
+      normalizedLexicalTokens.length > 0 && timedTokens.length < normalizedLexicalTokens.length;
+
+    let resolvedTimingGranularity: 'WORD' | 'SEGMENT_ONLY' | 'PARTIAL' | 'NONE' = 'NONE';
+    if (normalizedLexicalTokens.length > 0) {
+      if (timedTokens.length === 0) {
+        resolvedTimingGranularity = 'NONE';
+      } else if (hasIncompleteTokenTiming) {
+        resolvedTimingGranularity = 'PARTIAL';
+      } else if (
+        request.timingGranularity === 'SEGMENT' ||
+        normalizedLexicalTokens.every((t) => t.alignmentPrecision === 'segment_only')
+      ) {
+        resolvedTimingGranularity = 'SEGMENT_ONLY';
+      } else {
+        resolvedTimingGranularity = 'WORD';
+      }
+    } else if (
+      (request.segments && request.segments.length > 0) ||
+      request.timingGranularity === 'SEGMENT'
+    ) {
+      resolvedTimingGranularity = 'SEGMENT_ONLY';
+    } else if (request.rawTranscriptText && request.rawTranscriptText.trim().length > 0) {
+      resolvedTimingGranularity = 'NONE';
+    }
 
     const hasAudio = Boolean(
       sampleRate > 0 && totalSamples > 0 && (request.pcmMono || request.readPcmWindow),
@@ -164,6 +229,26 @@ export class SpeechEventEngine {
     const allEvents: SpeechEvent[] = [];
     const rejectedNonVocalCandidates: RejectedNonVocalCandidate[] = [];
     const warnings: string[] = [];
+
+    if (!hasAudio) {
+      warnings.push(
+        'داده صوتی PCM معتبر (یا با طول غیرصفر) در دسترس نبود؛ تحلیل آکوستیکی انجام نشد.',
+      );
+    } else if (totalRecordingDurationSec > 0 && totalRecordingDurationSec < 0.1) {
+      warnings.push(
+        'مدت صوت ورودی بسیار کوتاه (<100ms) است؛ تحلیل رویدادهای گفتاری با محدودیت انجام شد.',
+      );
+    }
+    if (hasIncompleteTokenTiming) {
+      warnings.push(
+        'برخی واژگان دارای زمان‌بندی ناقص یا نامعتبر هستند؛ برای این موارد پیشنهاد حذف خودکار صادر نمی‌شود.',
+      );
+    }
+    if (resolvedTimingGranularity === 'SEGMENT_ONLY') {
+      warnings.push(
+        'فقط زمان‌بندی در سطح سگمنت موجود است (Word timestamps در دسترس نیستند)؛ زمان واژه‌ها جعل نشد و موارد زبانی صرفاً جهت بازبینی به سگمنت ارجاع داده شدند.',
+      );
+    }
 
     let completedWindows = 0;
     let cancelled = false;
@@ -498,7 +583,12 @@ export class SpeechEventEngine {
           }
 
           // 1c. Window-local word repetitions corroborated with actual PCM acoustics
-          if (windowTokens.length >= 2) {
+          // (Skip per-window lexical matching when token timings are partial/missing so lexical order is preserved globally)
+          if (
+            !hasIncompleteTokenTiming &&
+            resolvedTimingGranularity !== 'SEGMENT_ONLY' &&
+            windowTokens.length >= 2
+          ) {
             const shiftedWindowTokens = windowTokens.map((t) => ({
               ...t,
               range: {
@@ -557,7 +647,9 @@ export class SpeechEventEngine {
                 uncertaintyState:
                   rep.subtype === 'LEGITIMATE_LEXICAL_REPETITION'
                     ? 'LOW_UNCERTAINTY'
-                    : fused.uncertaintyState,
+                    : rep.hasIncompleteTiming
+                      ? 'INSUFFICIENT_EVIDENCE'
+                      : fused.uncertaintyState,
                 scores: fused.scores,
                 provenance: {
                   engineVersion: SPEECH_EVENT_ENGINE_VERSION,
@@ -566,8 +658,12 @@ export class SpeechEventEngine {
                   capabilityMode: 'heuristic',
                   analysisWindowIndex: winIdx,
                   evaluatedSampleRate: sampleRate,
+                  timingPrecision: resolvedTimingGranularity,
+                  hasIncompleteTimestamps: Boolean(rep.hasIncompleteTiming),
                 },
-                eligibleForEditSuggestion: rep.eligibleForDeletionSuggestion,
+                eligibleForEditSuggestion: rep.hasIncompleteTiming
+                  ? false
+                  : rep.eligibleForDeletionSuggestion,
                 requiresHumanReview: rep.requiresHumanReview,
                 explanationFa: rep.reasonFa,
               });
@@ -575,10 +671,15 @@ export class SpeechEventEngine {
           }
 
           // 1d. Window-local detailed disfluencies (fillers, syllable/phoneme reps, false starts, self-corrections)
-          if (windowTokens.length > 0) {
+          if (
+            !hasIncompleteTokenTiming &&
+            resolvedTimingGranularity !== 'SEGMENT_ONLY' &&
+            windowTokens.length > 0
+          ) {
             const detailedDisfluencies =
               PersianDisfluencyEngine.analyzeSpeechDisfluenciesDetailed(windowTokens, {
                 hasAcousticEvidence: true,
+                customFillerLexicon: request.customFillerLexicon,
               });
 
             for (const dis of detailedDisfluencies) {
@@ -659,7 +760,9 @@ export class SpeechEventEngine {
                 uncertaintyState:
                   dis.subtype === 'MEANINGFUL_DISCOURSE_MARKER_PRESERVED'
                     ? 'LOW_UNCERTAINTY'
-                    : fused.uncertaintyState,
+                    : dis.hasIncompleteTiming
+                      ? 'INSUFFICIENT_EVIDENCE'
+                      : fused.uncertaintyState,
                 scores: fused.scores,
                 provenance: {
                   engineVersion: SPEECH_EVENT_ENGINE_VERSION,
@@ -668,8 +771,12 @@ export class SpeechEventEngine {
                   capabilityMode: 'heuristic',
                   analysisWindowIndex: winIdx,
                   evaluatedSampleRate: sampleRate,
+                  timingPrecision: resolvedTimingGranularity,
+                  hasIncompleteTimestamps: Boolean(dis.hasIncompleteTiming),
                 },
-                eligibleForEditSuggestion: dis.potentiallyRemovable,
+                eligibleForEditSuggestion: dis.hasIncompleteTiming
+                  ? false
+                  : dis.potentiallyRemovable,
                 requiresHumanReview: dis.requiresHumanReview,
                 nonMedicalNotice: dis.nonMedicalNotice,
                 explanationFa: dis.reasonFa,
@@ -694,15 +801,14 @@ export class SpeechEventEngine {
           await new Promise<void>((resolve) => setTimeout(resolve, 0));
         }
       }
-    } else if (timedTokens.length > 0 && !request.signal?.aborted) {
+    } else if (normalizedLexicalTokens.length > 0 && !request.signal?.aborted) {
       // Linguistic-only path when PCM is absent -> strictly exposes missing acoustic evidence!
-      warnings.push(
-        'داده صوتی PCM در دسترس نبود؛ رویدادهای نیازمند تأیید آکوستیکی با وضعیت عدم‌قطعیت (INSUFFICIENT_EVIDENCE) علامت‌گذاری شدند.',
-      );
-
       const detailedDisfluencies = PersianDisfluencyEngine.analyzeSpeechDisfluenciesDetailed(
-        timedTokens,
-        { hasAcousticEvidence: false },
+        normalizedLexicalTokens,
+        {
+          hasAcousticEvidence: false,
+          customFillerLexicon: request.customFillerLexicon,
+        },
       );
       for (const dis of detailedDisfluencies) {
         const startSec = Number(TimeMath.flicksToSeconds(dis.targetRange.start).toFixed(4));
@@ -723,7 +829,7 @@ export class SpeechEventEngine {
           trackId: request.trackId,
           category: dis.category,
           subtype: dis.subtype,
-          detectionState: dis.detectionState,
+          detectionState: dis.hasIncompleteTiming ? 'UNCERTAIN' : dis.detectionState,
           startSec,
           endSec,
           durationSec,
@@ -741,22 +847,25 @@ export class SpeechEventEngine {
           },
           detectionMethod: fused.detectionMethod,
           confidence: fused.decisionScore,
-          uncertaintyState: fused.uncertaintyState,
+          uncertaintyState: dis.hasIncompleteTiming ? 'INSUFFICIENT_EVIDENCE' : fused.uncertaintyState,
           scores: fused.scores,
           provenance: {
             engineVersion: SPEECH_EVENT_ENGINE_VERSION,
             thresholdConfigVersion: config.version,
             detectorModule: 'PersianDisfluencyEngine',
             capabilityMode: 'heuristic',
+            timingPrecision: resolvedTimingGranularity,
+            hasIncompleteTimestamps: Boolean(dis.hasIncompleteTiming),
           },
-          eligibleForEditSuggestion: dis.potentiallyRemovable,
+          eligibleForEditSuggestion: dis.hasIncompleteTiming ? false : dis.potentiallyRemovable,
           requiresHumanReview: true,
           nonMedicalNotice: dis.nonMedicalNotice,
           explanationFa: dis.reasonFa,
         });
       }
 
-      const wordReps = PersianSemanticRepetitionEngine.classifyWordRepetitionsDetailed(timedTokens);
+      const wordReps =
+        PersianSemanticRepetitionEngine.classifyWordRepetitionsDetailed(normalizedLexicalTokens);
       for (const rep of wordReps) {
         const startSec = Number(TimeMath.flicksToSeconds(rep.targetRange.start).toFixed(4));
         const endSec = Number(TimeMath.flicksToSeconds(rep.targetRange.end).toFixed(4));
@@ -775,7 +884,7 @@ export class SpeechEventEngine {
           trackId: request.trackId,
           category: 'WORD_REPETITION',
           subtype: rep.subtype,
-          detectionState: rep.detectionState,
+          detectionState: rep.hasIncompleteTiming ? 'UNCERTAIN' : rep.detectionState,
           startSec,
           endSec,
           durationSec,
@@ -786,13 +895,15 @@ export class SpeechEventEngine {
           relatedText: rep.repeatedText,
           detectionMethod: fused.detectionMethod,
           confidence: fused.decisionScore,
-          uncertaintyState: fused.uncertaintyState,
+          uncertaintyState: rep.hasIncompleteTiming ? 'INSUFFICIENT_EVIDENCE' : fused.uncertaintyState,
           scores: fused.scores,
           provenance: {
             engineVersion: SPEECH_EVENT_ENGINE_VERSION,
             thresholdConfigVersion: config.version,
             detectorModule: 'PersianSemanticRepetitionEngine',
             capabilityMode: 'heuristic',
+            timingPrecision: resolvedTimingGranularity,
+            hasIncompleteTimestamps: Boolean(rep.hasIncompleteTiming),
           },
           eligibleForEditSuggestion: false,
           requiresHumanReview: true,
@@ -803,14 +914,321 @@ export class SpeechEventEngine {
       completedWindows = 1;
     }
 
+    // --- 1e. Global Partial-Timing Token Analysis OR Segment-Only Lexical Analysis (no fabricated word timestamps) ---
+    if (!request.signal?.aborted) {
+      if (hasAudio && hasIncompleteTokenTiming && normalizedLexicalTokens.length > 0) {
+        const detailedDisfluencies = PersianDisfluencyEngine.analyzeSpeechDisfluenciesDetailed(
+          normalizedLexicalTokens,
+          {
+            hasAcousticEvidence: Boolean(request.pcmMono),
+            customFillerLexicon: request.customFillerLexicon,
+          },
+        );
+        for (const dis of detailedDisfluencies) {
+          const startSec = Number(TimeMath.flicksToSeconds(dis.targetRange.start).toFixed(4));
+          const endSec = Number(TimeMath.flicksToSeconds(dis.targetRange.end).toFixed(4));
+          const durationSec = Number(Math.max(0, endSec - startSec).toFixed(4));
+          const snippet =
+            !dis.hasIncompleteTiming && request.pcmMono && durationSec > 0
+              ? this.measureTokenAcousticSnippet(
+                  request.pcmMono,
+                  Math.max(0, Math.floor(startSec * sampleRate)),
+                  Math.min(request.pcmMono.length, Math.floor(endSec * sampleRate)),
+                  sampleRate,
+                )
+              : { hasSignal: false, evidence: { notes: ['زمان‌بندی ناقص یا دسترسی به بافر محدود'] } };
+          const acousticScore =
+            !dis.hasIncompleteTiming && snippet.hasSignal
+              ? dis.category === 'FILLER' && dis.subtype === 'VOCAL_FILLED_PAUSE'
+                ? Math.min(0.92, 0.72 + (durationSec >= 0.16 ? 0.14 : 0.04))
+                : 0.68
+              : null;
+          const fused = fuseSpeechEventEvidence({
+            category: dis.category,
+            acousticScore,
+            linguisticScore: dis.linguisticScore,
+            ruleEvidenceCount: dis.ruleEvidenceCount,
+            modelTokenConfidence: dis.modelTokenConfidence,
+            requiresAcousticVerification:
+              dis.category === 'STUTTER' || dis.category === 'SYLLABLE_REPETITION',
+            config,
+          });
+          pushEventBounded({
+            eventId: `${dis.id}_part`,
+            trackId: request.trackId,
+            category: dis.category,
+            subtype: dis.subtype,
+            detectionState: dis.hasIncompleteTiming ? 'UNCERTAIN' : dis.detectionState,
+            startSec,
+            endSec,
+            durationSec,
+            startFlicks: dis.targetRange.start,
+            endFlicks: dis.targetRange.end,
+            durationFlicks: dis.targetRange.end - dis.targetRange.start,
+            relatedTokenIds: dis.affectedTokenIds,
+            relatedText: dis.relatedText,
+            acousticEvidence: snippet.evidence,
+            linguisticEvidence: {
+              matchedLexiconId: dis.matchedLexiconId,
+              canonicalForm: dis.canonicalForm,
+              linguisticRole: dis.linguisticRole,
+              preservedAlternateSpanText: dis.preservedSpanText,
+              notes: dis.notes,
+            },
+            detectionMethod: fused.detectionMethod,
+            confidence: fused.decisionScore,
+            uncertaintyState:
+              dis.subtype === 'MEANINGFUL_DISCOURSE_MARKER_PRESERVED'
+                ? 'LOW_UNCERTAINTY'
+                : dis.hasIncompleteTiming
+                  ? 'INSUFFICIENT_EVIDENCE'
+                  : fused.uncertaintyState,
+            scores: fused.scores,
+            provenance: {
+              engineVersion: SPEECH_EVENT_ENGINE_VERSION,
+              thresholdConfigVersion: config.version,
+              detectorModule: 'PersianDisfluencyEngine',
+              capabilityMode: 'heuristic',
+              evaluatedSampleRate: sampleRate,
+              timingPrecision: 'PARTIAL',
+              hasIncompleteTimestamps: Boolean(dis.hasIncompleteTiming),
+            },
+            eligibleForEditSuggestion: dis.hasIncompleteTiming ? false : dis.potentiallyRemovable,
+            requiresHumanReview: dis.hasIncompleteTiming ? true : dis.requiresHumanReview,
+            nonMedicalNotice: dis.nonMedicalNotice,
+            explanationFa: dis.reasonFa,
+          });
+        }
+
+        const wordReps = PersianSemanticRepetitionEngine.classifyWordRepetitionsDetailed(
+          normalizedLexicalTokens,
+          request.pcmMono ? { pcmMono: request.pcmMono, sampleRate } : {},
+        );
+        for (const rep of wordReps) {
+          const startSec = Number(TimeMath.flicksToSeconds(rep.targetRange.start).toFixed(4));
+          const endSec = Number(TimeMath.flicksToSeconds(rep.targetRange.end).toFixed(4));
+          const durationSec = Number(Math.max(0, endSec - startSec).toFixed(4));
+          const fused = fuseSpeechEventEvidence({
+            category: 'WORD_REPETITION',
+            acousticScore: rep.hasIncompleteTiming ? null : rep.acousticScore,
+            linguisticScore: rep.linguisticScore,
+            ruleEvidenceCount: !rep.hasIncompleteTiming && rep.acousticScore !== null ? 2 : 1,
+            modelTokenConfidence: null,
+            requiresAcousticVerification: rep.subtype === 'ACCIDENTAL_WORD_REPETITION',
+            config,
+          });
+          pushEventBounded({
+            eventId: `${rep.id}_part`,
+            trackId: request.trackId,
+            category: 'WORD_REPETITION',
+            subtype: rep.subtype,
+            detectionState: rep.hasIncompleteTiming ? 'UNCERTAIN' : rep.detectionState,
+            startSec,
+            endSec,
+            durationSec,
+            startFlicks: rep.targetRange.start,
+            endFlicks: rep.targetRange.end,
+            durationFlicks: rep.targetRange.end - rep.targetRange.start,
+            relatedTokenIds: rep.affectedTokenIds,
+            relatedText: rep.repeatedText,
+            detectionMethod: fused.detectionMethod,
+            confidence: fused.decisionScore,
+            uncertaintyState: rep.hasIncompleteTiming ? 'INSUFFICIENT_EVIDENCE' : fused.uncertaintyState,
+            scores: fused.scores,
+            provenance: {
+              engineVersion: SPEECH_EVENT_ENGINE_VERSION,
+              thresholdConfigVersion: config.version,
+              detectorModule: 'PersianSemanticRepetitionEngine',
+              capabilityMode: 'heuristic',
+              evaluatedSampleRate: sampleRate,
+              timingPrecision: 'PARTIAL',
+              hasIncompleteTimestamps: Boolean(rep.hasIncompleteTiming),
+            },
+            eligibleForEditSuggestion: rep.hasIncompleteTiming
+              ? false
+              : rep.eligibleForDeletionSuggestion,
+            requiresHumanReview: true,
+            explanationFa: rep.reasonFa,
+          });
+        }
+      } else if (
+        normalizedLexicalTokens.length === 0 &&
+        ((request.segments && request.segments.length > 0) ||
+          (request.rawTranscriptText && request.rawTranscriptText.trim().length > 0))
+      ) {
+        // Segment-only or raw-text-only path: NEVER invent word-level timestamps!
+        const segmentsSource: readonly SpeechSegmentTimingInput[] =
+          request.segments && request.segments.length > 0
+            ? request.segments
+            : totalRecordingDurationSec > 0
+              ? [
+                  {
+                    segmentId: 'seg_full_0',
+                    startSec: 0,
+                    endSec: totalRecordingDurationSec,
+                    textVerbatim: request.rawTranscriptText ?? '',
+                  },
+                ]
+              : [];
+
+        const isSegmentOnlyPrec = Boolean(request.segments && request.segments.length > 0);
+        const segPrecisionTag: 'SEGMENT_ONLY' | 'NONE' = isSegmentOnlyPrec ? 'SEGMENT_ONLY' : 'NONE';
+
+        for (const seg of segmentsSource) {
+          const words = (seg.textVerbatim ?? '').trim().split(/\s+/).filter(Boolean);
+          if (words.length === 0) continue;
+          const validSegBounds =
+            Number.isFinite(seg.startSec) &&
+            Number.isFinite(seg.endSec) &&
+            seg.startSec >= 0 &&
+            seg.endSec > seg.startSec &&
+            (totalRecordingDurationSec <= 0 || seg.startSec < totalRecordingDurationSec);
+          if (!validSegBounds) continue;
+
+          const clampedEndSec =
+            totalRecordingDurationSec > 0
+              ? Math.min(totalRecordingDurationSec, seg.endSec)
+              : seg.endSec;
+          if (clampedEndSec <= seg.startSec) continue;
+
+          const segStartFlicks = TimeMath.secondsToFlicks(seg.startSec);
+          const segEndFlicks = TimeMath.secondsToFlicks(clampedEndSec);
+
+          const segTokens: TimedPersianToken[] = words.map((w, idx) =>
+            PersianTextNormalizer.createToken({
+              tokenId: `${seg.segmentId}_w${idx}`,
+              trackId: request.trackId,
+              originalText: w,
+              startFlicks: segStartFlicks,
+              endFlicks: segEndFlicks,
+              confidence: 0.75,
+              alignmentPrecision: isSegmentOnlyPrec ? 'segment_only' : 'missing',
+              timingValid: isSegmentOnlyPrec,
+            }),
+          );
+
+          const detailedDisfluencies = PersianDisfluencyEngine.analyzeSpeechDisfluenciesDetailed(
+            segTokens,
+            {
+              hasAcousticEvidence: false,
+              customFillerLexicon: request.customFillerLexicon,
+            },
+          );
+          for (const dis of detailedDisfluencies) {
+            const isPreserved = dis.subtype === 'MEANINGFUL_DISCOURSE_MARKER_PRESERVED';
+            const fused = fuseSpeechEventEvidence({
+              category: dis.category,
+              acousticScore: null,
+              linguisticScore: dis.linguisticScore,
+              ruleEvidenceCount: dis.ruleEvidenceCount,
+              modelTokenConfidence: dis.modelTokenConfidence,
+              requiresAcousticVerification: true,
+              config,
+            });
+            pushEventBounded({
+              eventId: `${dis.id}_${seg.segmentId}`,
+              trackId: request.trackId,
+              category: dis.category,
+              subtype: dis.subtype,
+              detectionState: isPreserved ? 'NOT_DETECTED' : 'UNCERTAIN',
+              startSec: Number(seg.startSec.toFixed(4)),
+              endSec: Number(clampedEndSec.toFixed(4)),
+              durationSec: Number((clampedEndSec - seg.startSec).toFixed(4)),
+              startFlicks: segStartFlicks,
+              endFlicks: segEndFlicks,
+              durationFlicks: segEndFlicks - segStartFlicks,
+              relatedTokenIds: [],
+              relatedText: dis.relatedText,
+              linguisticEvidence: {
+                matchedLexiconId: dis.matchedLexiconId,
+                canonicalForm: dis.canonicalForm,
+                linguisticRole: dis.linguisticRole,
+                preservedAlternateSpanText: dis.preservedSpanText,
+                notes: [
+                  ...(dis.notes ?? []),
+                  'تشخیص در سطح سگمنت بدون زمان‌بندی کلمه‌به‌کلمه (Word timestamps unavailable).',
+                ],
+              },
+              detectionMethod: 'HEURISTIC_LINGUISTIC',
+              confidence: fused.decisionScore,
+              uncertaintyState: isPreserved ? 'LOW_UNCERTAINTY' : 'INSUFFICIENT_EVIDENCE',
+              scores: fused.scores,
+              provenance: {
+                engineVersion: SPEECH_EVENT_ENGINE_VERSION,
+                thresholdConfigVersion: config.version,
+                detectorModule: 'PersianDisfluencyEngine',
+                capabilityMode: 'heuristic',
+                evaluatedSampleRate: sampleRate,
+                timingPrecision: segPrecisionTag,
+                hasIncompleteTimestamps: true,
+              },
+              eligibleForEditSuggestion: false,
+              requiresHumanReview: !isPreserved,
+              nonMedicalNotice: dis.nonMedicalNotice,
+              explanationFa: `${dis.reasonFa} — زمان‌بندی دقیق کلمه موجود نیست و رویداد به بازه سگمنت ارجاع شده است.`,
+            });
+          }
+
+          const wordReps =
+            PersianSemanticRepetitionEngine.classifyWordRepetitionsDetailed(segTokens);
+          for (const rep of wordReps) {
+            const isLegit = rep.subtype === 'LEGITIMATE_LEXICAL_REPETITION';
+            const fused = fuseSpeechEventEvidence({
+              category: 'WORD_REPETITION',
+              acousticScore: null,
+              linguisticScore: rep.linguisticScore,
+              ruleEvidenceCount: 1,
+              modelTokenConfidence: null,
+              requiresAcousticVerification: true,
+              config,
+            });
+            pushEventBounded({
+              eventId: `${rep.id}_${seg.segmentId}`,
+              trackId: request.trackId,
+              category: 'WORD_REPETITION',
+              subtype: rep.subtype,
+              detectionState: isLegit ? 'NOT_DETECTED' : 'UNCERTAIN',
+              startSec: Number(seg.startSec.toFixed(4)),
+              endSec: Number(clampedEndSec.toFixed(4)),
+              durationSec: Number((clampedEndSec - seg.startSec).toFixed(4)),
+              startFlicks: segStartFlicks,
+              endFlicks: segEndFlicks,
+              durationFlicks: segEndFlicks - segStartFlicks,
+              relatedTokenIds: [],
+              relatedText: rep.repeatedText,
+              detectionMethod: 'HEURISTIC_LINGUISTIC',
+              confidence: fused.decisionScore,
+              uncertaintyState: isLegit ? 'LOW_UNCERTAINTY' : 'INSUFFICIENT_EVIDENCE',
+              scores: fused.scores,
+              provenance: {
+                engineVersion: SPEECH_EVENT_ENGINE_VERSION,
+                thresholdConfigVersion: config.version,
+                detectorModule: 'PersianSemanticRepetitionEngine',
+                capabilityMode: 'heuristic',
+                evaluatedSampleRate: sampleRate,
+                timingPrecision: segPrecisionTag,
+                hasIncompleteTimestamps: true,
+              },
+              eligibleForEditSuggestion: false,
+              requiresHumanReview: !isLegit,
+              explanationFa: `${rep.reasonFa} — زمان‌بندی دقیق کلمه موجود نیست و رویداد به بازه سگمنت ارجاع شده است.`,
+            });
+          }
+        }
+      }
+    }
+
     // --- 2. Cross-Window Semantic Retakes & Self-Relative Prosody (only on analyzed span) ---
     const analyzedDurationSec = hasAudio
       ? Number(Math.min(totalRecordingDurationSec, completedWindows * windowSec).toFixed(4))
       : totalRecordingDurationSec;
 
-    const analyzedTokens = timedTokens.filter(
-      (t) => !hasAudio || TimeMath.flicksToSeconds(t.range.start) <= analyzedDurationSec + 0.05,
-    );
+    const analyzedTokens =
+      resolvedTimingGranularity === 'SEGMENT_ONLY'
+        ? []
+        : timedTokens.filter(
+            (t) => !hasAudio || TimeMath.flicksToSeconds(t.range.start) <= analyzedDurationSec + 0.05,
+          );
 
     let prosodyReport: ComprehensiveProsodyReport | null = null;
     if (analyzedTokens.length > 0) {
@@ -950,6 +1368,7 @@ export class SpeechEventEngine {
       engineVersion: SPEECH_EVENT_ENGINE_VERSION,
       thresholdConfigVersion: config.version,
       trackId: request.trackId,
+      timingGranularity: resolvedTimingGranularity,
       cancelled,
       completedWindows,
       totalWindows,

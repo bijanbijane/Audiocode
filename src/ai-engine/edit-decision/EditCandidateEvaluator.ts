@@ -434,13 +434,15 @@ export class EditCandidateEvaluator {
         };
       }
 
-      // Check if silence overlaps any breath or non-verbal vocal event in the recording
+      // Check if trimmable silence interior overlaps any breath or non-verbal vocal event in the recording
+      const silCheckStart = event.candidateStartSec ?? event.startSec;
+      const silCheckEnd = event.candidateEndSec ?? event.endSec;
       const overlappingProtected = (context?.allEventsInRecording ?? []).some(
         (other) =>
           other.eventId !== event.eventId &&
           other.trackId === event.trackId &&
           (other.category === 'BREATH' || other.category === 'NON_VERBAL_VOCALIZATION') &&
-          Math.min(other.endSec, event.endSec) > Math.max(other.startSec, event.startSec),
+          Math.min(other.endSec, silCheckEnd) > Math.max(other.startSec, silCheckStart),
       );
 
       if (overlappingProtected) {

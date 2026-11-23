@@ -20,7 +20,7 @@ export interface DecodedNativeWav {
   readonly monoDownmix: Float32Array;
 }
 
-const SUPPORTED_SAMPLE_RATES: readonly SampleRate[] = [16000, 22050, 44100, 48000, 88200, 96000];
+const SUPPORTED_SAMPLE_RATES: readonly SampleRate[] = [16000, 22050, 24000, 32000, 44100, 48000, 96000];
 
 export function snapToSupportedSampleRate(hz: number): SampleRate {
   if ((SUPPORTED_SAMPLE_RATES as readonly number[]).includes(hz)) {
@@ -42,23 +42,34 @@ export function isSupportedExactSampleRate(hz: number): hz is SampleRate {
   return (SUPPORTED_SAMPLE_RATES as readonly number[]).includes(hz);
 }
 
+function readUint64Le(view: DataView, offset: number): number {
+  const lo = BigInt(view.getUint32(offset, true));
+  const hi = BigInt(view.getUint32(offset + 4, true));
+  return Number((hi << 32n) | lo);
+}
+
 /**
- * Decodes RIFF/WAVE PCM16 / PCM24 / Float32 directly into planar Float32Array channels.
- * Returns null if the buffer is not a standard PCM/Float32 RIFF WAV (caller may use FFmpeg).
+ * Decodes RIFF/WAVE and RF64/WAVE PCM16 / PCM24 / Float32 directly into planar Float32Array channels.
+ * Strictly validates container magic, fmt header consistency (blockAlign & byteRate), and payload bounds.
+ * Returns null if the buffer is not a valid PCM/Float32 RIFF or RF64 WAV.
  */
 export function decodeNativeWavToPlanar(bytes: Buffer | Uint8Array): DecodedNativeWav | null {
   if (bytes.byteLength < 44) return null;
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
 
-  const riff = String.fromCharCode(bytes[0], bytes[1], bytes[2], bytes[3]);
+  const magic = String.fromCharCode(bytes[0], bytes[1], bytes[2], bytes[3]);
   const wave = String.fromCharCode(bytes[8], bytes[9], bytes[10], bytes[11]);
-  if (riff !== 'RIFF' || wave !== 'WAVE') return null;
+  if ((magic !== 'RIFF' && magic !== 'RF64') || wave !== 'WAVE') return null;
 
   let offset = 12;
   let audioFormat = 0;
   let channelCount = 0;
   let rawSampleRateHz = 0;
+  let byteRate = 0;
+  let blockAlign = 0;
   let bitsPerSample = 0;
+  let foundFmt = false;
+  let ds64DataSize: number | null = null;
   let dataOffset = -1;
   let dataSize = 0;
 
@@ -72,21 +83,41 @@ export function decodeNativeWavToPlanar(bytes: Buffer | Uint8Array): DecodedNati
     const chunkSize = view.getUint32(offset + 4, true);
     const payloadStart = offset + 8;
 
-    if (chunkId === 'fmt ' && chunkSize >= 16 && payloadStart + 16 <= bytes.byteLength) {
+    if (chunkId === 'ds64' && chunkSize >= 28 && payloadStart + 28 <= bytes.byteLength) {
+      ds64DataSize = readUint64Le(view, payloadStart + 8);
+    } else if (chunkId === 'fmt ' && chunkSize >= 16 && payloadStart + 16 <= bytes.byteLength) {
       audioFormat = view.getUint16(payloadStart, true);
       channelCount = view.getUint16(payloadStart + 2, true);
       rawSampleRateHz = view.getUint32(payloadStart + 4, true);
+      byteRate = view.getUint32(payloadStart + 8, true);
+      blockAlign = view.getUint16(payloadStart + 12, true);
       bitsPerSample = view.getUint16(payloadStart + 14, true);
+      foundFmt = true;
     } else if (chunkId === 'data') {
       dataOffset = payloadStart;
-      dataSize = Math.min(chunkSize, bytes.byteLength - payloadStart);
+      const declaredSize =
+        magic === 'RF64' && chunkSize === 0xffffffff && ds64DataSize !== null
+          ? ds64DataSize
+          : chunkSize;
+      const availableBytes = bytes.byteLength - payloadStart;
+      if (!Number.isSafeInteger(declaredSize) || declaredSize <= 0 || availableBytes < declaredSize) {
+        return null;
+      }
+      dataSize = declaredSize;
       break;
     }
 
     offset = payloadStart + chunkSize + (chunkSize % 2);
   }
 
-  if (dataOffset < 0 || dataSize <= 0 || channelCount < 1 || channelCount > 8 || rawSampleRateHz <= 0) {
+  if (
+    !foundFmt ||
+    dataOffset < 0 ||
+    dataSize <= 0 ||
+    channelCount < 1 ||
+    channelCount > 8 ||
+    rawSampleRateHz <= 0
+  ) {
     return null;
   }
 
@@ -99,6 +130,12 @@ export function decodeNativeWavToPlanar(bytes: Buffer | Uint8Array): DecodedNati
 
   const bytesPerSample = bitsPerSample / 8;
   const frameBytes = bytesPerSample * channelCount;
+  if (blockAlign !== frameBytes || byteRate !== rawSampleRateHz * frameBytes) {
+    return null;
+  }
+  if (dataSize % frameBytes !== 0) {
+    return null;
+  }
   const totalSamples = Math.floor(dataSize / frameBytes);
   if (totalSamples <= 0) return null;
 

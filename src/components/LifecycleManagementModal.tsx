@@ -19,6 +19,7 @@ import {
   AppUpdateAndShellManager,
   AVAPARDAZ_VERSION_CONTRACT,
   deriveModelIdentityFromFileName,
+  installShenavaRizehInBrowser,
   LocalModelLifecycleManager,
   MAX_SAFE_MODEL_FILE_BYTES,
   MODEL_CHUNK_SIZE_BYTES,
@@ -38,7 +39,10 @@ import {
 import { getSharedMemoryBudgetManager } from '../runtime/memory/MemoryBudgetManager';
 import { LongSessionMonitor } from '../performance';
 import { StudioWorkflowState } from '../workflow/StudioWorkflowController';
-import { saveModelCtcVocabulary } from '../workflow/UnifiedLocalAsrWorkflowService';
+import {
+  loadModelCtcVocabulary,
+  saveModelCtcVocabulary,
+} from '../workflow/UnifiedLocalAsrWorkflowService';
 
 export type LifecycleModalTab =
   | 'model'
@@ -117,6 +121,55 @@ export const LifecycleManagementModal: React.FC<LifecycleManagementModalProps> =
   // Read snapshot after any modelTick update
   void modelTick;
   const modelSnap = modelManager.getSnapshot();
+  const activeCtcVocab = modelSnap.activeModel
+    ? loadModelCtcVocabulary(modelSnap.activeModel.modelId, modelSnap.activeModel.version)
+    : undefined;
+
+  const handleAutoInstallBrowserShenavaModel = async () => {
+    if (isInstallingModel) return;
+    setIsInstallingModel(true);
+    setInstallProgressPct(0);
+    setStatusMessage(
+      isFa
+        ? 'در حال دریافت، نصب تکه‌ای در OPFS و راستی‌آزمایی SHA-256 مدل فارسی «شناوا ریزه» و واژگان tokens.txt...'
+        : 'Downloading, streaming into OPFS, and SHA-256 verifying Persian Shenava-Rizeh ONNX + tokens.txt...',
+    );
+
+    try {
+      const res = await installShenavaRizehInBrowser({
+        modelManager,
+        onProgress: (pct) => {
+          setInstallProgressPct(pct);
+        },
+      });
+
+      setModelTick((t) => t + 1);
+      if (res.ok) {
+        setStatusMessage(
+          isFa
+            ? `مدل فارسی «شناوا ریزه» (${res.modelId}) و فایل واژگان tokens.txt با ${res.tokenCount ?? 0} توکن در OPFS مرورگر نصب و با SHA-256 تأیید شد. اکنون بدون نیاز به Companion یا اینترنت آماده رونویسی است.`
+            : `Persian model "${res.modelId}" and tokens.txt (${res.tokenCount ?? 0} tokens) installed in browser OPFS and SHA-256 verified.`,
+        );
+        onModelStateChanged();
+      } else {
+        setStatusMessage(
+          res.errorMessageFa ??
+            res.errorMessageEn ??
+            (isFa ? 'نصب خودکار مدل فارسی ناموفق بود.' : 'Automatic browser model installation failed.'),
+        );
+        onModelStateChanged();
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setStatusMessage(
+        isFa ? `خطا در نصب خودکار مدل فارسی: ${msg}` : `Failed to install Persian browser model: ${msg}`,
+      );
+      setModelTick((t) => t + 1);
+    } finally {
+      setIsInstallingModel(false);
+      setInstallProgressPct(null);
+    }
+  };
 
   const handleImportCtcTokensTxt = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const inputEl = e.currentTarget;
@@ -613,6 +666,18 @@ export const LifecycleManagementModal: React.FC<LifecycleManagementModalProps> =
                     </div>
                     <div>OPFS Dir: ai-models/{modelSnap.activeModel.storageDirectory}</div>
                     <div>SHA-256: {modelSnap.activeModel.verifiedSha256Hex}</div>
+                    <div>
+                      CTC Vocabulary (tokens.txt):{' '}
+                      {activeCtcVocab && activeCtcVocab.length > 0 ? (
+                        <span className="text-emerald-600 dark:text-emerald-400">
+                          Loaded ({activeCtcVocab.length} tokens)
+                        </span>
+                      ) : (
+                        <span className="text-amber-600 dark:text-amber-400">
+                          Missing — import tokens.txt or click auto-install
+                        </span>
+                      )}
+                    </div>
                   </div>
                 )}
 
@@ -638,6 +703,25 @@ export const LifecycleManagementModal: React.FC<LifecycleManagementModalProps> =
               </div>
 
               <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  data-testid="btn-install-browser-persian-model"
+                  disabled={isInstallingModel}
+                  onClick={handleAutoInstallBrowserShenavaModel}
+                  className="inline-flex items-center gap-1.5 px-3 py-2 rounded-md bg-emerald-500 text-slate-950 font-semibold hover:bg-emerald-400 disabled:opacity-50 cursor-pointer"
+                >
+                  <Download className="w-3.5 h-3.5" />
+                  <span>
+                    {isInstallingModel
+                      ? isFa
+                        ? `در حال نصب خودکار مدل فارسی (${installProgressPct ?? 0}٪)...`
+                        : `Installing Persian model (${installProgressPct ?? 0}%)...`
+                      : isFa
+                        ? 'نصب خودکار مدل فارسی مرورگر (شناوا ریزه · ۳۶ مگابایت · آفلاین)'
+                        : 'Auto-Install Browser Persian Model (Shenava-Rizeh · 36 MB)'}
+                  </span>
+                </button>
+
                 <label className="inline-flex items-center gap-1.5 px-3 py-2 rounded-md bg-amber-400 text-slate-950 font-semibold hover:bg-amber-300 cursor-pointer">
                   <Upload className="w-3.5 h-3.5" />
                   <span>

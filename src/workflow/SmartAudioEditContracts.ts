@@ -7,7 +7,12 @@
  */
 
 import type { SampleRate } from '../contracts/timebase.contract';
-import type { SpeechEventAnalysisResult } from '../ai-engine/speech-events/SpeechEventContracts';
+import type { SpeechEventAnalysisResult } from '../ai-engine/speech-events/SpeechEventEngine';
+import type {
+  SpeechAnalysisThresholdConfig,
+  SpeechEditSensitivityPreset,
+} from '../ai-engine/speech-events/SpeechEventContracts';
+import type { PersianFillerLexiconEntry } from '../ai-engine/PersianDisfluencyEngine';
 import type {
   EditDecisionListSnapshot,
   EditProposal,
@@ -116,6 +121,10 @@ export interface SmartEditAnalysisRequest {
   readonly pcmMonoForAcousticAnalysis: Float32Array;
   readonly analysisSampleRate: SampleRate;
   readonly channelLayout?: 'mono' | 'stereo';
+  readonly thresholdConfig?: SpeechAnalysisThresholdConfig;
+  readonly sensitivityPreset?: SpeechEditSensitivityPreset;
+  readonly customFillerLexicon?: readonly PersianFillerLexiconEntry[];
+  readonly signal?: AbortSignal;
   readonly nowMs?: number;
 }
 
@@ -134,7 +143,7 @@ export interface SmartEditAnalysisResult {
 }
 
 export interface SmartEditDecisionEngine {
-  analyzeAndGenerateEdl(request: SmartEditAnalysisRequest): SmartEditAnalysisResult;
+  analyzeAndGenerateEdl(request: SmartEditAnalysisRequest): Promise<SmartEditAnalysisResult>;
 }
 
 export type SmartEditPreviewMode = 'ORIGINAL' | 'EDITED' | 'FULL';
@@ -243,7 +252,7 @@ export function summarizeEdlProposals(edl: EditDecisionListSnapshot): {
       p.validationStatus === 'VALID' &&
       !p.protectedEvent &&
       p.conflictIds.length === 0 &&
-      p.risk.level === 'LOW' &&
+      p.risk.overallLevel === 'LOW' &&
       (p.operation === 'REMOVE_FILLER' ||
         p.operation === 'SHORTEN_SILENCE' ||
         p.operation === 'REMOVE_ACCIDENTAL_REPETITION')
@@ -284,7 +293,7 @@ export function isProposalLowRiskApprovable(p: EditProposal): boolean {
     p.validationStatus === 'VALID' &&
     !p.protectedEvent &&
     p.conflictIds.length === 0 &&
-    p.risk.level === 'LOW' &&
+    p.risk.overallLevel === 'LOW' &&
     (p.status === 'PROPOSED' || p.status === 'NEEDS_REVIEW') &&
     (p.operation === 'REMOVE_FILLER' ||
       p.operation === 'SHORTEN_SILENCE' ||

@@ -1,4 +1,4 @@
-import { TimedPersianToken } from './PersianTextNormalizer';
+import { PersianTextNormalizer, TimedPersianToken } from './PersianTextNormalizer';
 import { SampleRate, TimeMath, TimeRange } from '../contracts/timebase.contract';
 import type {
   SpeechEventDetectionState,
@@ -40,6 +40,8 @@ export interface WordRepetitionClassification {
   readonly acousticScore: number | null;
   readonly eligibleForDeletionSuggestion: boolean;
   readonly requiresHumanReview: boolean;
+  readonly isPhraseRepetition?: boolean;
+  readonly hasIncompleteTiming?: boolean;
   readonly reasonFa: string;
 }
 
@@ -63,16 +65,35 @@ export class PersianSemanticRepetitionEngine {
     'یک', 'ما', 'من', 'شما', 'او', 'آنها', 'ایشان', 'ولی', 'اما', 'چون', 'اگر', 'هر',
   ]);
 
-  /** Adverbs / intensifiers intentionally repeated in Persian for rhetorical emphasis */
+  /** Adverbs / intensifiers / refusals intentionally repeated in Persian for rhetorical emphasis */
   private static readonly EMPHASIS_INTENSIFIERS = new Set([
     'خیلی', 'بسیار', 'حتماً', 'حتما', 'واقعاً', 'واقعا', 'دقیقاً', 'دقیقا',
-    'کاملاً', 'کاملا', 'اصلاً', 'اصلا', 'فوق‌العاده', 'شدیداً', 'همیشه', 'هرگز', 'زود',
+    'کاملاً', 'کاملا', 'اصلاً', 'اصلا', 'فوقالعاده', 'شدیداً', 'شدیدا',
+    'همیشه', 'هرگز', 'زود', 'جداً', 'جدا', 'نه', 'بله', 'آره',
   ]);
 
   /** Legitimate Persian distributive/idiomatic reduplications */
   private static readonly LEGITIMATE_REDUPLICATIONS = new Set([
-    'کم', 'تند', 'دونه', 'دانه', 'یکی', 'یواش', 'آروم', 'آرام', 'به‌زودی', 'تک', 'گام', 'لحظه',
+    'کم', 'تند', 'دونه', 'دانه', 'یکی', 'یواش', 'آروم', 'آرام', 'بزودی', 'تک', 'گام', 'لحظه',
+    'بارها', 'ذره', 'قطره',
   ]);
+
+  private static isTokenTimingValid(tok: TimedPersianToken): boolean {
+    if (tok.timingValid === false || tok.alignmentPrecision === 'missing') return false;
+    return (
+      Number.isFinite(tok.range?.start) &&
+      Number.isFinite(tok.range?.end) &&
+      tok.range.start >= 0 &&
+      tok.range.end > tok.range.start
+    );
+  }
+
+  private static isSegmentOnly(tok: TimedPersianToken): boolean {
+    return (
+      tok.alignmentPrecision === 'segment_only' ||
+      tok.alignmentPrecision === 'distributed_segment'
+    );
+  }
 
   public static classifyWordRepetitionsDetailed(
     tokens: readonly TimedPersianToken[],
@@ -90,32 +111,121 @@ export class PersianSemanticRepetitionEngine {
     );
 
     for (let i = 0; i < tokens.length - 1; i++) {
+      // Check multi-word consecutive phrase repetition (2..4 tokens) before single-word check
+      let matchedPhraseLen = 0;
+      for (let n = 4; n >= 2; n--) {
+        if (i + n * 2 > tokens.length) continue;
+        const firstSpan = tokens.slice(i, i + n);
+        const secondSpan = tokens.slice(i + n, i + n * 2);
+        if (firstSpan.some((t) => t.trackId !== firstSpan[0].trackId)) continue;
+        if (secondSpan.some((t) => t.trackId !== firstSpan[0].trackId)) continue;
+
+        const formsA = firstSpan.map((t) =>
+          PersianTextNormalizer.toCanonicalComparisonForm(t.normalizedText || t.originalText),
+        );
+        const formsB = secondSpan.map((t) =>
+          PersianTextNormalizer.toCanonicalComparisonForm(t.normalizedText || t.originalText),
+        );
+        if (formsA.some((f) => f.length === 0)) continue;
+        if (!formsA.every((f, idx) => f === formsB[idx])) continue;
+
+        const allValidTiming = [...firstSpan, ...secondSpan].every((t) =>
+          this.isTokenTimingValid(t),
+        );
+        const anySegmentOnly = [...firstSpan, ...secondSpan].some((t) => this.isSegmentOnly(t));
+        const rawGapMs = allValidTiming
+          ? TimeMath.flicksToSeconds(secondSpan[0].range.start - firstSpan[n - 1].range.end) * 1000
+          : 0;
+        if (allValidTiming && (!Number.isFinite(rawGapMs) || rawGapMs < 0 || rawGapMs > 2500)) {
+          continue;
+        }
+        const gapMs = Math.max(0, rawGapMs);
+        const targetRange: TimeRange = {
+          start: Number.isFinite(firstSpan[0].range.start) ? firstSpan[0].range.start : 0,
+          end: Number.isFinite(firstSpan[n - 1].range.end)
+            ? firstSpan[n - 1].range.end
+            : Number.isFinite(firstSpan[0].range.start)
+              ? firstSpan[0].range.start
+              : 0,
+        };
+        const keptRange: TimeRange = {
+          start: Number.isFinite(secondSpan[0].range.start) ? secondSpan[0].range.start : 0,
+          end: Number.isFinite(secondSpan[n - 1].range.end) ? secondSpan[n - 1].range.end : 0,
+        };
+
+        let acousticEnergyRatio: number | null = null;
+        let acousticScore: number | null = null;
+        if (hasAudio && allValidTiming && !anySegmentOnly && pcm && sampleRate) {
+          const rmsA = this.measureRangeRms(pcm, sampleRate, {
+            start: firstSpan[0].range.start,
+            end: firstSpan[n - 1].range.end,
+          });
+          const rmsB = this.measureRangeRms(pcm, sampleRate, keptRange);
+          if (rmsA > 1e-6 && rmsB > 1e-6) {
+            acousticEnergyRatio = Number((rmsB / rmsA).toFixed(3));
+            acousticScore = acousticEnergyRatio >= 0.65 && acousticEnergyRatio <= 1.45 ? 0.8 : 0.6;
+          }
+        }
+
+        const reliableTiming = allValidTiming && !anySegmentOnly;
+        const sufficientAcoustic = reliableTiming && hasAudio && acousticEnergyRatio !== null;
+        const repeatedPhraseText = firstSpan.map((t) => t.displayText).join(' ');
+
+        results.push({
+          id: `prep_${firstSpan[0].tokenId}`,
+          trackId: firstSpan[0].trackId,
+          subtype: 'ACCIDENTAL_WORD_REPETITION',
+          detectionState: sufficientAcoustic ? 'PROBABLE' : 'UNCERTAIN',
+          uncertaintyState: sufficientAcoustic ? 'MODERATE_UNCERTAINTY' : 'INSUFFICIENT_EVIDENCE',
+          targetRange,
+          keptRepetitionRange: keptRange,
+          affectedTokenIds: firstSpan.map((t) => t.tokenId),
+          repeatedText: repeatedPhraseText,
+          temporalSeparationMs: Math.round(gapMs),
+          acousticEnergyRatio,
+          linguisticScore: 0.86,
+          acousticScore,
+          eligibleForDeletionSuggestion: sufficientAcoustic,
+          requiresHumanReview: true,
+          isPhraseRepetition: true,
+          hasIncompleteTiming: !reliableTiming,
+          reasonFa: sufficientAcoustic
+            ? `تکرار عبارت «${repeatedPhraseText}» (پیشنهاد حذف تکرار اول و حفظ اجرای دوم پس از بازبینی)`
+            : `تکرار عبارت «${repeatedPhraseText}» (نیازمند بازبینی انسانی به دلیل محدودیت زمان‌بندی یا شواهد آکوستیک)`,
+        });
+        matchedPhraseLen = n;
+        break;
+      }
+
+      if (matchedPhraseLen > 0) {
+        i += matchedPhraseLen * 2 - 1;
+        continue;
+      }
+
       const first = tokens[i];
       const second = tokens[i + 1];
       if (first.trackId !== second.trackId) continue;
 
-      const normA = first.normalizedText.replace(/[،؛.!؟«»()[\]\u200c\s]/g, '');
-      const normB = second.normalizedText.replace(/[،؛.!؟«»()[\]\u200c\s]/g, '');
+      const normA = PersianTextNormalizer.toCanonicalComparisonForm(
+        first.normalizedText || first.originalText,
+      );
+      const normB = PersianTextNormalizer.toCanonicalComparisonForm(
+        second.normalizedText || second.originalText,
+      );
       if (!normA || normA !== normB) continue;
 
-      if (
-        !Number.isFinite(first.range.start) ||
-        !Number.isFinite(first.range.end) ||
-        !Number.isFinite(second.range.start) ||
-        !Number.isFinite(second.range.end)
-      ) {
-        continue;
-      }
-
-      const rawGapMs = TimeMath.flicksToSeconds(second.range.start - first.range.end) * 1000;
-      if (!Number.isFinite(rawGapMs)) continue;
+      const timingOk = this.isTokenTimingValid(first) && this.isTokenTimingValid(second);
+      const segmentOnly = this.isSegmentOnly(first) || this.isSegmentOnly(second);
+      const rawGapMs = timingOk
+        ? TimeMath.flicksToSeconds(Math.max(0, second.range.start - first.range.end)) * 1000
+        : 0;
+      if (timingOk && (!Number.isFinite(rawGapMs) || rawGapMs > 2200)) continue;
       const gapMs = Math.max(0, rawGapMs);
-      if (gapMs > 2200) continue;
 
-      // Measure acoustic RMS ratio if PCM is supplied
+      // Measure acoustic RMS ratio if PCM is supplied and timing is valid word-level
       let acousticEnergyRatio: number | null = null;
       let acousticScore: number | null = null;
-      if (hasAudio && pcm && sampleRate) {
+      if (hasAudio && timingOk && !segmentOnly && pcm && sampleRate) {
         const rmsA = this.measureRangeRms(pcm, sampleRate, first.range);
         const rmsB = this.measureRangeRms(pcm, sampleRate, second.range);
         if (rmsA > 1e-6 && rmsB > 1e-6) {
@@ -141,6 +251,7 @@ export class PersianSemanticRepetitionEngine {
           acousticScore: hasAudio ? 0.2 : null,
           eligibleForDeletionSuggestion: false,
           requiresHumanReview: false,
+          hasIncompleteTiming: !timingOk || segmentOnly,
           reasonFa: `تکرار دستوری/واژگانی معنادار («${first.displayText} ${second.displayText}») که تغییر معنا می‌دهد و نباید حذف شود.`,
         });
         i++;
@@ -160,8 +271,8 @@ export class PersianSemanticRepetitionEngine {
           id: `wrep_emph_${first.tokenId}`,
           trackId: first.trackId,
           subtype: 'INTENTIONAL_EMPHASIS_REPETITION',
-          detectionState: hasAudio ? 'DETECTED' : 'PROBABLE',
-          uncertaintyState: hasAudio ? 'MODERATE_UNCERTAINTY' : 'INSUFFICIENT_EVIDENCE',
+          detectionState: hasAudio && timingOk ? 'DETECTED' : 'PROBABLE',
+          uncertaintyState: hasAudio && timingOk ? 'MODERATE_UNCERTAINTY' : 'INSUFFICIENT_EVIDENCE',
           targetRange: first.range,
           keptRepetitionRange: second.range,
           affectedTokenIds: [first.tokenId, second.tokenId],
@@ -172,6 +283,7 @@ export class PersianSemanticRepetitionEngine {
           acousticScore: acousticEnergyRatio !== null ? 0.78 : null,
           eligibleForDeletionSuggestion: false,
           requiresHumanReview: true,
+          hasIncompleteTiming: !timingOk || segmentOnly,
           reasonFa: isIntensifier
             ? `تکرار تأکیدی عمدی قید/صفت («${first.displayText} ${second.displayText}») برای شدت معنا — حذف توصیه نمی‌شود.`
             : `تکرار همراه با افزایش تاکید صوتی (${acousticEnergyRatio}x)؛ احتمال تأکید عمدی وجود دارد.`,
@@ -182,7 +294,7 @@ export class PersianSemanticRepetitionEngine {
 
       // 3. Accidental repetition (function words like «من من», «این این», «باید باید» when flat/hesitant)
       const isFunctionWordOrShortPronoun =
-        this.STOP_WORDS.has(normA) || normA.length <= 3 || ['باید', 'می‌خوام', 'میخوام'].includes(normA);
+        this.STOP_WORDS.has(normA) || normA.length <= 3 || ['باید', 'میخوام'].includes(normA);
       const hesitationGap = gapMs >= 80 && gapMs <= 1200;
       const flatOrFalteringEnergy =
         acousticEnergyRatio !== null && acousticEnergyRatio >= 0.75 && acousticEnergyRatio <= 1.25;
@@ -191,7 +303,7 @@ export class PersianSemanticRepetitionEngine {
         acousticScore = flatOrFalteringEnergy ? 0.8 : 0.55;
       }
 
-      const sufficientAcoustic = hasAudio && acousticEnergyRatio !== null;
+      const sufficientAcoustic = timingOk && !segmentOnly && hasAudio && acousticEnergyRatio !== null;
       const accidentalConfidenceReady =
         sufficientAcoustic && (isFunctionWordOrShortPronoun || hesitationGap);
 
@@ -210,8 +322,8 @@ export class PersianSemanticRepetitionEngine {
             : 'HIGH_UNCERTAINTY'
           : 'INSUFFICIENT_EVIDENCE',
         targetRange: {
-          start: first.range.start,
-          end: second.range.start,
+          start: Number.isFinite(first.range.start) ? first.range.start : 0,
+          end: Number.isFinite(second.range.start) && timingOk ? second.range.start : (Number.isFinite(first.range.end) ? first.range.end : 0),
         },
         keptRepetitionRange: second.range,
         affectedTokenIds: [first.tokenId],
@@ -222,9 +334,14 @@ export class PersianSemanticRepetitionEngine {
         acousticScore,
         eligibleForDeletionSuggestion: accidentalConfidenceReady,
         requiresHumanReview: true,
-        reasonFa: sufficientAcoustic
-          ? `تکرار متوالی کلمه «${first.displayText}» (فاصله ${Math.round(gapMs)}ms، نسبت انرژی ${acousticEnergyRatio}x)`
-          : `تکرار کلمه «${first.displayText}» بدون شواهد آکوستیکی کافی (وضعیت نامطمئن؛ نیازمند بازبینی)`,
+        hasIncompleteTiming: !timingOk || segmentOnly,
+        reasonFa: !timingOk
+          ? `تکرار کلمه «${first.displayText}» شناسایی شد اما زمان‌بندی ناقص است (نیازمند بازبینی انسانی)`
+          : segmentOnly
+            ? `تکرار کلمه «${first.displayText}» در سطح سگمنت (زمان‌بندی کلمه‌به‌کلمه موجود نیست؛ نیازمند بازبینی)`
+            : sufficientAcoustic
+              ? `تکرار متوالی کلمه «${first.displayText}» (فاصله ${Math.round(gapMs)}ms، نسبت انرژی ${acousticEnergyRatio}x)`
+              : `تکرار کلمه «${first.displayText}» بدون شواهد آکوستیکی کافی (وضعیت نامطمئن؛ نیازمند بازبینی)`,
       });
       i++;
     }

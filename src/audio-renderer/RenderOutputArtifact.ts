@@ -506,3 +506,76 @@ export async function pipeRenderArtifactToWritable(
   }
 }
 
+/**
+ * Streams a RenderOutputArtifact into a single Uint8Array using bounded read windows
+ * (<= DEFAULT_MAX_ARTIFACT_READ_BYTES per read) so artifacts larger than 1 MiB never
+ * fail `readRange` window limits. Honors optional AbortSignal and maxBytes cap.
+ */
+export async function readRenderArtifactToUint8Array(
+  artifact: RenderOutputArtifact,
+  options?: {
+    readonly chunkSizeBytes?: number;
+    readonly maxBytes?: number;
+    readonly abortSignal?: AbortSignal;
+  },
+): Promise<Uint8Array> {
+  if (artifact.disposed) {
+    throw new ExportWriteFailureError(
+      'WRITE_IO_FAILURE',
+      `Cannot read disposed render artifact "${artifact.artifactId}".`,
+    );
+  }
+  if (options?.abortSignal?.aborted) {
+    throw new ExportWriteFailureError('WRITE_IO_FAILURE', 'CANCELLED: Artifact read aborted.');
+  }
+  if (
+    typeof options?.maxBytes === 'number' &&
+    Number.isFinite(options.maxBytes) &&
+    artifact.sizeBytes > options.maxBytes
+  ) {
+    throw new ExportWriteFailureError(
+      'OUTPUT_QUOTA_EXCEEDED',
+      `Render artifact "${artifact.artifactId}" (${artifact.sizeBytes} B) exceeds maxBytes (${options.maxBytes} B).`,
+    );
+  }
+  if (artifact.sizeBytes === 0) {
+    return new Uint8Array(0);
+  }
+
+  const out = new Uint8Array(artifact.sizeBytes);
+  const stream = artifact.openReadStream({
+    chunkSizeBytes: options?.chunkSizeBytes,
+  });
+  const reader = stream.getReader();
+  let offset = 0;
+
+  try {
+    while (true) {
+      if (options?.abortSignal?.aborted) {
+        await reader.cancel('ABORTED').catch(() => {});
+        throw new ExportWriteFailureError('WRITE_IO_FAILURE', 'CANCELLED: Artifact read aborted.');
+      }
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (value && value.byteLength > 0) {
+        if (offset + value.byteLength > out.byteLength) {
+          throw new ExportWriteFailureError(
+            'WRITE_IO_FAILURE',
+            `Artifact "${artifact.artifactId}" produced more bytes than declared size (${artifact.sizeBytes} B).`,
+          );
+        }
+        out.set(value, offset);
+        offset += value.byteLength;
+      }
+    }
+    if (offset !== artifact.sizeBytes) {
+      throw new ExportWriteFailureError(
+        'WRITE_IO_FAILURE',
+        `Incomplete artifact read: expected ${artifact.sizeBytes} B, got ${offset} B.`,
+      );
+    }
+    return out;
+  } finally {
+    reader.releaseLock();
+  }
+}

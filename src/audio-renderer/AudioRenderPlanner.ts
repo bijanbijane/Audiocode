@@ -449,14 +449,23 @@ export class AudioRenderPlanner {
     const derivedTimelineClips: TimelineClip[] = [];
 
     const rawCrossfadeMs = config.defaultCrossfadeMs ?? 10;
-    const defaultCrossfadeMs = Math.max(
-      1,
-      Math.min(50, Number.isFinite(rawCrossfadeMs) ? rawCrossfadeMs : 10),
-    );
-    const requestedCrossfadeSamples = Math.max(
-      2,
-      Math.round((defaultCrossfadeMs / 1000) * sourceSampleRate),
-    );
+    const minCfMs =
+      typeof config.minCrossfadeMs === 'number' && Number.isFinite(config.minCrossfadeMs)
+        ? Math.max(0, Math.min(50, config.minCrossfadeMs))
+        : 0;
+    const maxCfMs =
+      typeof config.maxCrossfadeMs === 'number' && Number.isFinite(config.maxCrossfadeMs)
+        ? Math.max(minCfMs, Math.min(50, config.maxCrossfadeMs))
+        : 50;
+    const normalizedCrossfadeMs = Number.isFinite(rawCrossfadeMs) ? rawCrossfadeMs : 10;
+    const defaultCrossfadeMs =
+      normalizedCrossfadeMs <= 0
+        ? 0
+        : Math.max(Math.max(1, minCfMs), Math.min(maxCfMs, normalizedCrossfadeMs));
+    const requestedCrossfadeSamples =
+      defaultCrossfadeMs === 0
+        ? 0
+        : Math.max(2, Math.round((defaultCrossfadeMs / 1000) * sourceSampleRate));
     const rawMaxAdjust =
       config.maxBoundaryAdjustmentSamples ?? Math.round(sourceSampleRate * 0.005);
     const maxAdjustmentSamples = Math.max(
@@ -724,3 +733,92 @@ export class AudioRenderPlanner {
     return { ok: true, plan, failures: [] };
   }
 }
+
+export interface SourceToOutputSampleLookup {
+  readonly mapped: boolean;
+  readonly outputSample: number | null;
+  readonly segmentIndex: number | null;
+  readonly removedByProposalId: string | null;
+}
+
+export interface OutputToSourceSampleLookup {
+  readonly mapped: boolean;
+  readonly sourceSample: number | null;
+  readonly segmentIndex: number | null;
+}
+
+/**
+ * Deterministic source-sample -> output-sample timeline coordinate mapper (pre-resample coordinates).
+ * Returns exact output sample if retained, or identifies the removing proposalId if cut.
+ */
+export function mapSourceSampleToOutputSample(
+  plan: ImmutableRenderPlan,
+  sourceSample: number,
+): SourceToOutputSampleLookup {
+  if (!Number.isInteger(sourceSample) || sourceSample < 0 || sourceSample > plan.totalSourceSamples) {
+    return { mapped: false, outputSample: null, segmentIndex: null, removedByProposalId: null };
+  }
+
+  for (const entry of plan.sourceToOutputMap) {
+    if (
+      sourceSample >= entry.sourceStartSample &&
+      (sourceSample < entry.sourceEndSample ||
+        (sourceSample === entry.sourceEndSample && sourceSample === plan.totalSourceSamples))
+    ) {
+      return {
+        mapped: true,
+        outputSample: entry.outputStartSample + (sourceSample - entry.sourceStartSample),
+        segmentIndex: entry.segmentIndex,
+        removedByProposalId: null,
+      };
+    }
+  }
+
+  for (const rem of plan.removedSegments) {
+    if (sourceSample >= rem.removedRange.startSample && sourceSample < rem.removedRange.endSample) {
+      return {
+        mapped: false,
+        outputSample: null,
+        segmentIndex: null,
+        removedByProposalId: rem.proposalId,
+      };
+    }
+  }
+
+  return { mapped: false, outputSample: null, segmentIndex: null, removedByProposalId: null };
+}
+
+/**
+ * Deterministic output-sample -> original source-sample timeline coordinate mapper.
+ * Enables exact reverse provenance lookup from rendered audio back to original source audio.
+ */
+export function mapOutputSampleToSourceSample(
+  plan: ImmutableRenderPlan,
+  outputSample: number,
+): OutputToSourceSampleLookup {
+  if (
+    !Number.isInteger(outputSample) ||
+    outputSample < 0 ||
+    outputSample > plan.expectedPreResampleOutputSamples
+  ) {
+    return { mapped: false, sourceSample: null, segmentIndex: null };
+  }
+
+  for (const entry of plan.sourceToOutputMap) {
+    if (
+      outputSample >= entry.outputStartSample &&
+      (outputSample < entry.outputEndSample ||
+        (outputSample === entry.outputEndSample &&
+          outputSample === plan.expectedPreResampleOutputSamples))
+    ) {
+      return {
+        mapped: true,
+        sourceSample: entry.sourceStartSample + (outputSample - entry.outputStartSample),
+        segmentIndex: entry.segmentIndex,
+      };
+    }
+  }
+
+  return { mapped: false, sourceSample: null, segmentIndex: null };
+}
+

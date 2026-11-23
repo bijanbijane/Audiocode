@@ -168,6 +168,8 @@ export interface SpeechEventProvenance {
   readonly modelVersion?: string | null;
   readonly analysisWindowIndex?: number;
   readonly evaluatedSampleRate?: SampleRate | number;
+  readonly timingPrecision?: 'WORD' | 'SEGMENT_ONLY' | 'PARTIAL' | 'NONE';
+  readonly hasIncompleteTimestamps?: boolean;
   readonly notes?: readonly string[];
 }
 
@@ -300,6 +302,49 @@ export const DEFAULT_SPEECH_EVENT_THRESHOLDS_V1: SpeechAnalysisThresholdConfig =
   longUninterruptedSpeechMinSec: 12.0,
   empiricalCalibration: null,
 };
+
+export type SpeechEditSensitivityPreset = 'CONSERVATIVE' | 'BALANCED' | 'SENSITIVE';
+
+export function createSpeechAnalysisThresholdConfig(options?: {
+  readonly preset?: SpeechEditSensitivityPreset;
+  readonly overrides?: Partial<Omit<SpeechAnalysisThresholdConfig, 'version'>>;
+}): SpeechAnalysisThresholdConfig {
+  const preset = options?.preset ?? 'BALANCED';
+  const base = DEFAULT_SPEECH_EVENT_THRESHOLDS_V1;
+  const presetOverrides: Partial<SpeechAnalysisThresholdConfig> =
+    preset === 'CONSERVATIVE'
+      ? {
+          highConfidenceDeletionThreshold: 0.88,
+          mediumConfidenceReviewThreshold: 0.65,
+          lowConfidenceInformationalCeiling: 0.64,
+          naturalShortPauseMaxMs: 550,
+          sentenceBoundaryPauseMaxMs: 1200,
+          midClauseHesitationMinMs: 650,
+          longSilenceMinMs: 1250,
+          silenceBoundaryPaddingMs: 80,
+        }
+      : preset === 'SENSITIVE'
+        ? {
+            highConfidenceDeletionThreshold: 0.76,
+            mediumConfidenceReviewThreshold: 0.50,
+            lowConfidenceInformationalCeiling: 0.49,
+            naturalShortPauseMaxMs: 320,
+            sentenceBoundaryPauseMaxMs: 750,
+            midClauseHesitationMinMs: 350,
+            longSilenceMinMs: 750,
+            silenceBoundaryPaddingMs: 45,
+          }
+        : {};
+
+  return {
+    ...base,
+    ...presetOverrides,
+    ...(options?.overrides ?? {}),
+    version: options?.overrides
+      ? `${SPEECH_EVENT_THRESHOLD_CONFIG_VERSION}:${preset.toLowerCase()}+custom`
+      : `${SPEECH_EVENT_THRESHOLD_CONFIG_VERSION}:${preset.toLowerCase()}`,
+  };
+}
 
 export interface AnnotatedSpeechEventReference {
   readonly referenceId: string;

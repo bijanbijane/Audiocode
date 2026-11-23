@@ -62,6 +62,8 @@ export class AudioRenderEngine {
   private readonly checkpointStore: RenderCheckpointStore;
   private readonly createSinkFn?: AudioRenderEngineOptions['createSink'];
   private activeRenderIds = new Set<string>();
+  private activeSourceAudioIds = new Set<string>();
+  private readonly completedOutputHashes = new Set<string>();
 
   constructor(options: AudioRenderEngineOptions = {}) {
     this.budget = options.memoryBudgetManager ?? getSharedMemoryBudgetManager();
@@ -76,6 +78,10 @@ export class AudioRenderEngine {
   public isRenderActive(renderId?: string): boolean {
     if (renderId) return this.activeRenderIds.has(renderId);
     return this.activeRenderIds.size > 0;
+  }
+
+  public isSourceRenderActive(sourceAudioId: string): boolean {
+    return this.activeSourceAudioIds.has(sourceAudioId);
   }
 
   public async render(request: AudioRenderRequest): Promise<AudioRenderResult> {
@@ -101,7 +107,11 @@ export class AudioRenderEngine {
         `${request.edl.edlId}:${request.edl.edlVersion}:${request.source.sourceAudioHash}:${request.config.encoding}:${nowMs}`,
       )}`;
 
-    if (this.activeRenderIds.has(renderId)) {
+    const sourceLockKey = request.source.sourceAudioId;
+    if (this.activeRenderIds.has(renderId) || this.activeSourceAudioIds.has(sourceLockKey)) {
+      const conflictMessage = this.activeRenderIds.has(renderId)
+        ? `Duplicate active render request detected for renderId "${renderId}".`
+        : `Concurrent conflicting render detected on sourceAudioId "${sourceLockKey}".`;
       const preValidation: RenderValidationReport = {
         phase: 'PRE_RENDER',
         passed: false,
@@ -111,8 +121,8 @@ export class AudioRenderEngine {
           {
             code: 'INVALID_SOURCE_IDENTITY',
             severity: 'ERROR',
-            message: `Duplicate active render request detected for renderId "${renderId}".`,
-            actionableFix: 'Wait for the active render to complete or cancel it first.',
+            message: conflictMessage,
+            actionableFix: 'Wait for the active render on this source audio to complete or cancel it first.',
           },
         ],
       };
@@ -129,7 +139,53 @@ export class AudioRenderEngine {
         boundaryChecks: [],
         crossfadeResults: [],
         checkpoint: null,
-        sourceDurationSec: request.source.totalSamples / request.source.sampleRate,
+        sourceDurationSec:
+          request.source.sampleRate > 0 ? request.source.totalSamples / request.source.sampleRate : 0,
+        outputDurationSec: 0,
+        removedDurationSec: 0,
+        wallClockMs: Date.now() - startWallMs,
+        realTimeFactor: null,
+        peakReservedBytes: this.budget.getSnapshot().accountedBytes,
+        sourceImmutableVerified: true,
+        edlImmutableVerified: true,
+        appliedProposalIds: [],
+        failureReason: preValidation.failures[0].message,
+      };
+    }
+
+    if (
+      request.edl.proposals.some((p) => p.status === 'APPROVED') &&
+      this.completedOutputHashes.has(request.source.sourceAudioHash)
+    ) {
+      const preValidation: RenderValidationReport = {
+        phase: 'PRE_RENDER',
+        passed: false,
+        errorCount: 1,
+        warningCount: 0,
+        failures: [
+          {
+            code: 'INVALID_SOURCE_IDENTITY',
+            severity: 'ERROR',
+            message: `Refusing to apply EDL onto already-rendered output hash "${request.source.sourceAudioHash}"; edits must always execute against the original immutable source audio.`,
+            actionableFix: 'Provide the original source audio rather than a previously rendered output artifact.',
+          },
+        ],
+      };
+      return {
+        renderId,
+        state: 'FAILED_VALIDATION',
+        ok: false,
+        plan: null,
+        output: null,
+        outputArtifact: null,
+        outputBytes: null,
+        preValidation,
+        postValidation: null,
+        boundaryChecks: [],
+        crossfadeResults: [],
+        checkpoint: null,
+        sourceDurationSec:
+          request.source.sampleRate > 0 ? request.source.totalSamples / request.source.sampleRate : 0,
         outputDurationSec: 0,
         removedDurationSec: 0,
         wallClockMs: Date.now() - startWallMs,
@@ -143,6 +199,7 @@ export class AudioRenderEngine {
     }
 
     this.activeRenderIds.add(renderId);
+    this.activeSourceAudioIds.add(sourceLockKey);
 
     const emitState = (
       state: RenderLifecycleState,
@@ -587,6 +644,14 @@ export class AudioRenderEngine {
 
       outputArtifact.markValidatedReady();
 
+      if (plan.approvedProposalIds.length > 0 && outputMetadata.outputHash) {
+        if (this.completedOutputHashes.size >= 256) {
+          const oldest = this.completedOutputHashes.values().next().value;
+          if (oldest) this.completedOutputHashes.delete(oldest);
+        }
+        this.completedOutputHashes.add(outputMetadata.outputHash);
+      }
+
       // Populate deprecated compatibility field ONLY when <= 8 MiB and budget grants an independent lease.
       const compatOutputBytes = await materializeCompatibilityOutputBytes(
         outputArtifact,
@@ -699,6 +764,7 @@ export class AudioRenderEngine {
         }
       }
       this.activeRenderIds.delete(renderId);
+      this.activeSourceAudioIds.delete(sourceLockKey);
     }
   }
 

@@ -11,13 +11,10 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import type { SampleRate } from '../contracts/timebase.contract';
-import { TimeMath } from '../contracts/timebase.contract';
 import { ingestAudioBufferToCanonical16kMono } from '../asr-core/CoreAudioIngestion';
 import { ShahabLocalAsrRuntime } from '../asr-core/ShahabModelManifest';
-import { SpeechEventEngine } from '../ai-engine/speech-events/SpeechEventEngine';
-import type { TimedPersianToken } from '../ai-engine/PersianTextNormalizer';
-import { PersianTextNormalizer } from '../ai-engine/PersianTextNormalizer';
 import { EditDecisionEngine } from '../ai-engine/edit-decision/EditDecisionEngine';
+import { analyzeShahabOutputWithEngine02 } from '../ai-engine/edit-decision/ShahabToEngine02Adapter';
 import type { EditDecisionListSnapshot } from '../ai-engine/edit-decision/EditDecisionTypes';
 import { createPlanarArrayPcmSource } from '../audio-renderer/AudioSourceReader';
 import type { AudioRenderConfig, AudioRenderResult, ChunkedPcmSource } from '../audio-renderer/AudioRenderTypes';
@@ -75,23 +72,6 @@ export interface ImportedAudioContext {
   readonly pcmSource: ChunkedPcmSource;
 }
 
-function transcriptTokensToTimedPersianTokens(
-  transcript: TranscriptDocument,
-  trackId: string,
-): TimedPersianToken[] {
-  return transcript.tokens.map((t) => ({
-    tokenId: t.tokenId,
-    trackId,
-    displayText: t.rawText,
-    normalizedText: PersianTextNormalizer.normalizeTokenText(t.normalizedText || t.rawText),
-    range: {
-      start: TimeMath.secondsToFlicks(t.startSec),
-      end: TimeMath.secondsToFlicks(t.endSec),
-    },
-    confidence: t.confidence ?? 0.9,
-  }));
-}
-
 function isAbortError(err: unknown, signal?: AbortSignal): boolean {
   if (signal?.aborted) return true;
   const msg = err instanceof Error ? err.message : String(err);
@@ -108,44 +88,34 @@ function extractErrorCode(err: unknown, fallback: string): string {
 }
 
 export class DefaultSmartEditDecisionAdapter implements SmartEditDecisionEngine {
-  public analyzeAndGenerateEdl(request: SmartEditAnalysisRequest): SmartEditAnalysisResult {
+  public async analyzeAndGenerateEdl(
+    request: SmartEditAnalysisRequest,
+  ): Promise<SmartEditAnalysisResult> {
     const trackId = request.trackId ?? 'track-main';
     const nowMs = request.nowMs ?? Date.now();
-    const timedTokens = transcriptTokensToTimedPersianTokens(request.transcript, trackId);
 
-    const speechEvents = SpeechEventEngine.analyzeRecording({
-      recordingId: request.transcript.sourceAudioId,
+    const engine02 = await analyzeShahabOutputWithEngine02({
+      projectId: request.projectId,
       trackId,
-      sampleRate: request.analysisSampleRate,
+      sourceAudioId: request.transcript.sourceAudioId,
+      sourceAudioHash: request.transcript.sourceAudioHash,
+      sampleRate: snapToSupportedSampleRate(request.transcript.sampleRate),
+      totalSourceSamples: request.transcript.totalSourceSamples,
+      channelLayout: request.channelLayout ?? 'mono',
       pcmMono: request.pcmMonoForAcousticAnalysis,
-      timedTokens,
-      transcriptVersion: request.transcript.transcriptVersion,
+      analysisSampleRate: request.analysisSampleRate,
+      transcriptDocument: request.transcript,
+      thresholdConfig: request.thresholdConfig,
+      sensitivityPreset: request.sensitivityPreset,
+      customFillerLexicon: request.customFillerLexicon,
       nowMs,
-    });
-
-    const edl = EditDecisionEngine.generateEdl({
-      context: {
-        projectId: request.projectId,
-        sourceAudioId: request.transcript.sourceAudioId,
-        sourceAudioHash: request.transcript.sourceAudioHash,
-        transcriptVersion: request.transcript.transcriptVersion,
-        alignmentVersion: `align-${request.transcript.modelVersion}`,
-        sampleRate: snapToSupportedSampleRate(request.transcript.sampleRate),
-        channelLayout: request.channelLayout ?? 'mono',
-        totalSourceSamples: request.transcript.totalSourceSamples,
-        modelVersions: {
-          shahabAsr: `${request.transcript.modelId}@${request.transcript.modelVersion}`,
-        },
-      },
-      speechEventResult: speechEvents,
-      timedTokens,
-      nowMs,
+      signal: request.signal,
     });
 
     return {
-      speechEvents,
-      edl,
-      proposalSummary: summarizeEdlProposals(edl),
+      speechEvents: engine02.speechEvents,
+      edl: engine02.edl,
+      proposalSummary: summarizeEdlProposals(engine02.edl),
     };
   }
 }
@@ -427,13 +397,13 @@ export class SmartAudioEditPipeline {
   /**
    * Stages 05 & 06: Run Engine 02 (SpeechEventEngine + EditDecisionEngine) and enter WAITING_USER_APPROVAL.
    */
-  public analyzeAndGenerateEdl(params: {
+  public async analyzeAndGenerateEdl(params: {
     readonly job: AudioEditJob;
     readonly session: SmartAudioEditSession;
     readonly audio: ImportedAudioContext;
     readonly nowMs?: number;
     readonly onJobUpdate?: (job: AudioEditJob) => void;
-  }): ManagedSmartEditState & { readonly analysis: SmartEditAnalysisResult } {
+  }): Promise<ManagedSmartEditState & { readonly analysis: SmartEditAnalysisResult }> {
     if (!params.session.transcript) {
       throw new SmartAudioEditError(
         'TRANSCRIPT_REQUIRED',
@@ -445,7 +415,7 @@ export class SmartAudioEditPipeline {
     params.onJobUpdate?.(job);
 
     const t0 = performance.now();
-    const analysis = this.decisionEngine.analyzeAndGenerateEdl({
+    const analysis = await this.decisionEngine.analyzeAndGenerateEdl({
       projectId: params.session.projectId,
       trackId: params.session.trackId,
       transcript: params.session.transcript,
@@ -456,7 +426,7 @@ export class SmartAudioEditPipeline {
     });
     const elapsedMs = Number((performance.now() - t0).toFixed(2));
 
-    if (analysis.edl.automaticApprovalEligible !== false) {
+    if (analysis.edl.proposals.some((p) => p.risk.automaticApprovalEligible !== false)) {
       throw new SmartAudioEditError(
         'SAFETY_INVARIANT_VIOLATION',
         'SAFETY_INVARIANT_VIOLATION: automaticApprovalEligible must remain false.',
@@ -465,7 +435,7 @@ export class SmartAudioEditPipeline {
 
     job = transitionAudioEditJob(job, 'GENERATING_EDL', {
       progress: 78,
-      editDecisionId: analysis.speechEvents.analysisId,
+      editDecisionId: analysis.edl.edlId,
       edlId: analysis.edl.edlId,
     });
     params.onJobUpdate?.(job);
@@ -859,10 +829,49 @@ export class SmartAudioEditPipeline {
       if (params.outputFilePath && renderResult.outputArtifact) {
         const targetDir = path.dirname(params.outputFilePath);
         fs.mkdirSync(targetDir, { recursive: true });
-        const totalBytes = renderResult.outputArtifact.sizeBytes;
-        const wavData = await renderResult.outputArtifact.readRange(0, totalBytes);
-        fs.writeFileSync(params.outputFilePath, wavData);
-        exportedFilePath = params.outputFilePath;
+        const tempPath = `${params.outputFilePath}.tmp.${process.pid}.${Date.now()}`;
+        const stream = renderResult.outputArtifact.openReadStream();
+        const streamReader = stream.getReader();
+        const fd = fs.openSync(tempPath, 'w');
+        let writtenBytes = 0;
+        try {
+          while (true) {
+            if (params.abortSignal?.aborted) {
+              await streamReader.cancel('ABORTED').catch(() => {});
+              throw new SmartAudioEditError('RENDER_CANCELLED', 'RENDER_CANCELLED');
+            }
+            const { done, value } = await streamReader.read();
+            if (done) break;
+            if (value && value.byteLength > 0) {
+              fs.writeSync(fd, value);
+              writtenBytes += value.byteLength;
+            }
+          }
+          fs.fsyncSync(fd);
+          fs.closeSync(fd);
+          if (writtenBytes !== renderResult.outputArtifact.sizeBytes) {
+            throw new SmartAudioEditError(
+              'EXPORT_WRITE_INCOMPLETE',
+              `EXPORT_WRITE_INCOMPLETE: Wrote ${writtenBytes} B of ${renderResult.outputArtifact.sizeBytes} B.`,
+            );
+          }
+          fs.renameSync(tempPath, params.outputFilePath);
+          exportedFilePath = params.outputFilePath;
+        } catch (writeErr) {
+          try {
+            fs.closeSync(fd);
+          } catch {
+            // already closed
+          }
+          try {
+            if (fs.existsSync(tempPath)) fs.unlinkSync(tempPath);
+          } catch {
+            // best-effort temp cleanup
+          }
+          throw writeErr;
+        } finally {
+          streamReader.releaseLock();
+        }
       }
       const exportMs = Number((performance.now() - tExport).toFixed(2));
 

@@ -10,4 +10,5 @@ models/**/*.onnx
 models/**/*.model
 models/**/*.wav
 dist-packages/
+.playwright-cli/
 
