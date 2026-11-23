@@ -3,7 +3,6 @@ import fs from 'node:fs';
 import crypto from 'node:crypto';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { createServer as createViteServer } from 'vite';
 import {
   ModelLifecycleStatus,
   PlatformLicenseService,
@@ -1756,6 +1755,9 @@ async function startServer() {
     // The API can run independently of the browser app. In that mode, Vite
     // owns the web origin and proxies /api and /v1 requests to this server.
     if (process.env.DISABLE_EMBEDDED_VITE !== 'true') {
+      // Load Vite only for the legacy combined dev server. API-only mode must
+      // not resolve or initialize any frontend development-server dependency.
+      const { createServer: createViteServer } = await import('vite');
       const vite = await createViteServer({
       server: {
         middlewareMode: true,
