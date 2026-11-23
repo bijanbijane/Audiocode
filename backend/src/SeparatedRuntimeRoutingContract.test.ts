@@ -20,9 +20,9 @@ test('separated web sends the new platform prefix to Fastify and leaves legacy A
   const platformLocation = nginx.slice(nginx.indexOf('location ^~ /platform-api/ {'));
   assert.ok(platformLocation.indexOf('proxy_pass http://avapardaz-platform-api:4000/;') > 0);
   const apiLocation = nginx.slice(nginx.indexOf('location ^~ /api {'));
-  assert.ok(apiLocation.includes('proxy_pass http://avapardaz-api:3000;'));
+  assert.ok(apiLocation.includes('proxy_pass http://127.0.0.1:3000;'));
   const v1Location = nginx.slice(nginx.indexOf('location ^~ /v1 {'));
-  assert.ok(v1Location.includes('proxy_pass http://avapardaz-api:3000;'));
+  assert.ok(v1Location.includes('proxy_pass http://127.0.0.1:3000;'));
 
   assert.ok(vite.includes("'/platform-api': {"));
   assert.ok(vite.includes("process.env.PLATFORM_API_PROXY_TARGET ?? 'http://127.0.0.1:4000'"));
