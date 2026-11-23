@@ -51,6 +51,34 @@ export interface BackendSignedOfflineLicenseEnvelope
   readonly decodedPreview: BackendOfflineLicenseLeasePayload;
 }
 
+export interface BackendLegacySignedEnvelope<T> {
+  readonly payloadBase64: string;
+  readonly signatureBase64: string;
+  readonly algorithm: 'Ed25519';
+  readonly keyVersion: number;
+  readonly decodedPreview: T;
+}
+
+export type BackendModelTier = 'GROUP_A' | 'GROUP_B';
+export type BackendModelLifecycleStatus = 'ACTIVE' | 'SUPPORTED' | 'DEPRECATED' | 'REVOKED';
+
+export interface BackendLegacySignedModelManifest {
+  readonly modelId: string;
+  readonly version: string;
+  readonly status: BackendModelLifecycleStatus;
+  readonly tier: BackendModelTier;
+  readonly totalBytes: number;
+  readonly chunkSizeBytes: number;
+  readonly chunks: readonly {
+    readonly index: number;
+    readonly url: string;
+    readonly byteOffset: number;
+    readonly byteLength: number;
+    readonly sha256Hex: string;
+  }[];
+  readonly issuedAtMs: number;
+}
+
 export interface PgPoolLike {
   query<TRow = Record<string, unknown>>(
     sql: string,
@@ -279,6 +307,88 @@ export class PlatformBackendServices {
       return reply.send({ models: res.rows });
     });
 
+    // Legacy browser-compatible manifest route backed by the PostgreSQL catalog.
+    fastify.get<{ Params: { modelId: string } }>(
+      '/api/v1/models/:modelId/manifest',
+      async (request, reply) => {
+        const modelId = request.params.modelId.trim();
+        if (!modelId || !/^[a-zA-Z0-9_-]{1,64}$/.test(modelId)) {
+          return reply.status(400).send({ error: 'INVALID_MODEL_ID' });
+        }
+
+        const catalogResult = await this.db.query<{
+          version: string;
+          release_status: string;
+          tier_group: string;
+          total_size_bytes: string | number;
+        }>(
+          `SELECT version, release_status, tier_group, total_size_bytes
+           FROM ai_models_catalog
+           WHERE model_id = $1
+             AND release_status IN ('ACTIVE', 'SUPPORTED', 'DEPRECATED', 'REVOKED')
+           ORDER BY created_at DESC
+           LIMIT 1`,
+          [modelId],
+        );
+
+        if (catalogResult.rows.length === 0) {
+          return reply.status(404).send({ error: 'MODEL_NOT_FOUND', modelId });
+        }
+
+        const entry = catalogResult.rows[0];
+        if (!['GROUP_A', 'GROUP_B'].includes(entry.tier_group)) {
+          return reply.status(409).send({ error: 'MODEL_TIER_UNSUPPORTED_BY_LEGACY_CLIENT', modelId });
+        }
+        if (!['ACTIVE', 'SUPPORTED', 'DEPRECATED', 'REVOKED'].includes(entry.release_status)) {
+          return reply.status(409).send({ error: 'MODEL_STATUS_UNSUPPORTED_BY_LEGACY_CLIENT', modelId });
+        }
+
+        const chunkResult = await this.db.query<{
+          chunk_index: number;
+          sha256_hex: string;
+          byte_length: number;
+        }>(
+          `SELECT chunk_index, sha256_hex, byte_length
+           FROM ai_model_chunks
+           WHERE model_id = $1 AND version = $2
+           ORDER BY chunk_index ASC`,
+          [modelId, entry.version],
+        );
+        if (chunkResult.rows.length === 0) {
+          return reply.status(404).send({
+            error: 'MODEL_MANIFEST_CHUNKS_NOT_FOUND',
+            modelId,
+            version: entry.version,
+          });
+        }
+
+        let byteOffset = 0;
+        const chunks = chunkResult.rows.map((chunk) => {
+          const offset = byteOffset;
+          byteOffset += chunk.byte_length;
+          return {
+            index: chunk.chunk_index,
+            url: `${this.config.cdnBaseUrl}/api/v1/models/${encodeURIComponent(modelId)}/${encodeURIComponent(entry.version)}/chunks/${chunk.chunk_index}`,
+            byteOffset: offset,
+            byteLength: chunk.byte_length,
+            sha256Hex: chunk.sha256_hex,
+          };
+        });
+
+        const payload: BackendLegacySignedModelManifest = {
+          modelId,
+          version: entry.version,
+          status: entry.release_status as BackendModelLifecycleStatus,
+          tier: entry.tier_group as BackendModelTier,
+          totalBytes: Number(entry.total_size_bytes),
+          chunkSizeBytes: Math.max(...chunks.map((chunk) => chunk.byteLength)),
+          chunks,
+          issuedAtMs: Date.now(),
+        };
+        return reply.send(this.signLegacyEnvelope(payload));
+      },
+    );
+
     // ۳. دریافت مانیفست امضاشده یک مدل همراه با فهرست قطعات 8MB (بخش ۴۰)
     fastify.get<{ Params: { modelId: string; version: string } }>(
       '/api/v1/models/:modelId/:version/manifest',
@@ -438,6 +548,18 @@ export class PlatformBackendServices {
       }
       return reply.status(200).send({ ready: true });
     });
+  }
+
+  public signLegacyEnvelope<T>(payload: T): BackendLegacySignedEnvelope<T> {
+    const payloadBase64 = Buffer.from(JSON.stringify(payload), 'utf8').toString('base64');
+    const signature = crypto.sign(null, Buffer.from(payloadBase64, 'utf8'), this.privateKeyObj);
+    return {
+      payloadBase64,
+      signatureBase64: signature.toString('base64'),
+      algorithm: 'Ed25519',
+      keyVersion: 1,
+      decodedPreview: payload,
+    };
   }
 
   public signOfflineLicenseLeaseEnvelope(
