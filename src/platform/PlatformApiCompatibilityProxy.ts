@@ -21,26 +21,32 @@ const MAX_LEGACY_DEVICE_FINGERPRINT_CHARS = 512;
 export function normalizeLegacyPlatformLeaseRequestBody(body: unknown): unknown {
   if (!body || typeof body !== 'object' || Array.isArray(body)) return body;
   const record = body as Record<string, unknown>;
-  if (typeof record.deviceFingerprintHash === 'string') return body;
-  if (typeof record.deviceFingerprint !== 'string') return body;
+  const normalized: Record<string, unknown> = {};
 
-  const rawFingerprint = record.deviceFingerprint.trim();
-  if (
-    rawFingerprint.length === 0 ||
-    rawFingerprint.length > MAX_LEGACY_DEVICE_FINGERPRINT_CHARS
-  ) {
-    return body;
+  // Preserve only compatibility fields that Fastify explicitly validates or consumes.
+  // Client-supplied plan/grace values and arbitrary extra properties are never forwarded.
+  if (record.userId !== undefined) normalized.userId = record.userId;
+  if (record.displayName !== undefined) normalized.displayName = record.displayName;
+  if (typeof record.deviceFingerprintHash === 'string') {
+    normalized.deviceFingerprintHash = record.deviceFingerprintHash;
+  }
+  if (typeof record.deviceFingerprint === 'string') {
+    const rawFingerprint = record.deviceFingerprint.trim();
+    if (
+      rawFingerprint.length > 0 &&
+      rawFingerprint.length <= MAX_LEGACY_DEVICE_FINGERPRINT_CHARS
+    ) {
+      normalized.deviceFingerprint = rawFingerprint;
+      if (typeof record.deviceFingerprintHash !== 'string') {
+        normalized.deviceFingerprintHash = crypto
+          .createHash('sha256')
+          .update(rawFingerprint, 'utf8')
+          .digest('hex');
+      }
+    }
   }
 
-  const deviceFingerprintHash = crypto
-    .createHash('sha256')
-    .update(rawFingerprint, 'utf8')
-    .digest('hex');
-  return {
-    ...record,
-    deviceFingerprint: rawFingerprint,
-    deviceFingerprintHash,
-  };
+  return normalized;
 }
 
 function sendProxyError(res: Response, status: number, error: string): void {
