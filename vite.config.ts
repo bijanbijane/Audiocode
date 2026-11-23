@@ -36,6 +36,13 @@ export default defineConfig(({mode}) => {
           target: process.env.API_PROXY_TARGET ?? 'http://127.0.0.1:3000',
           changeOrigin: false,
         },
+        // The Fastify/PostgreSQL platform API gets a dedicated prefix.
+        // Strip only this prefix; legacy /api and /v1 continue going to Express.
+        '/platform-api': {
+          target: process.env.PLATFORM_API_PROXY_TARGET ?? 'http://127.0.0.1:4000',
+          changeOrigin: false,
+          rewrite: (requestPath) => requestPath.replace(/^\\/platform-api/, ''),
+        },
       }
     : undefined;
 
