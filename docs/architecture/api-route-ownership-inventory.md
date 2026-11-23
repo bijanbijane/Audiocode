@@ -61,7 +61,7 @@ These route families appear platform-facing by domain, but their actual persiste
 
 **Security invariant:** retain Ed25519 signing and verification semantics; retain P-256 device-bound key handling and secure local storage; keep valid paid offline entitlement valid until the paid subscription end. Do not introduce periodic network checks as a condition for local processing.
 
-**Observed client incompatibility:** `src/security/OfflineCryptoVerifier.ts` only decodes the legacy `payloadBase64` / `signatureBase64` envelope and rejects a license when `currentWallClockMs > payload.offlineGraceExpiresAtMs`. It does not consume Fastify's `payloadCanonicalBase64` / `ed25519SignatureHex` envelope or Unix-second fields. Fastify's lease handler currently sets `offlineGraceExpiresAtUnixSec = min(subscriptionEnd, now + offlineGraceHours)`, while the database sample default is 168 hours. This is not proof of the required paid-subscription-until-end entitlement. A compatibility design must explicitly resolve both the wire format and the offline-expiry policy before the route can be migrated.
+**Compatibility work now present on the isolated Fastify routes:** the Fastify lease envelope includes both the original browser fields and the new DB-backed platform fields; the existing browser verifier is exercised directly in `PlatformBackendServices.test.ts`, including a four-day offline check against a seven-day paid subscription whose `offline_grace_hours` is only 72. Fastify's model-manifest alias also signs the old `SignedModelManifest` payload and is verified through `OfflineCryptoVerifier.verifyModelManifest()` in the same test. The Express endpoints and their existing consumers have not been redirected; the Fastify routes are reachable only through the dedicated `/platform-api/` ingress until further consumer migration.
 
 ### 2.4 Fastify/PostgreSQL route inventory
 
@@ -154,6 +154,7 @@ Observed Fastify registrations in:
 - The separated-container workflow likewise failed before runner allocation and produced no artifacts; retry attempt 2 also received no runner.
 - GitHub's job-log download currently returns an object-storage 404, so there is no command-level diagnostic log from these jobs.
 - The new Fastify executable entrypoint, package manifest, TypeScript config, standalone Dockerfile and workflow are committed, but none has been executed because GitHub has not assigned a runner.
+- Source-level tests now cover the Fastify legacy license envelope and public-key discovery against `OfflineCryptoVerifier`, paid subscription expiry, UUID lease IDs, and the legacy model-manifest response. These are added tests, not executed results.
 - No claim is made that Docker build, typecheck, Vite build, Fastify startup, PostgreSQL integration, local ASR, Companion/CEP or offline-license tests passed in this editing session.
 
 ## 6. Stop conditions (safety, not excuses)
