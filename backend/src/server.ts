@@ -88,7 +88,7 @@ export async function bootstrapBackendServer(deps?: {
 }) {
   const env = deps?.env ?? process.env;
   const port = Number(env.PORT ?? 4000);
-  const host = env.HOST ?? '0.0.0.0';
+  const host = env.HOST ?? (env.NODE_ENV === 'production' ? '0.0.0.0' : '127.0.0.1');
 
   const databaseUrl = env.DATABASE_URL;
   const ed25519PrivateKeyPem = env.ED25519_PRIVATE_KEY_PEM;
@@ -135,7 +135,9 @@ export async function bootstrapBackendServer(deps?: {
         level: env.LOG_LEVEL ?? 'info',
         redact: ['req.headers.authorization', 'req.headers["x-gateway-signature"]'],
       },
-      trustProxy: true,
+      // Trust proxy headers only when an operator explicitly places this service behind
+      // a sanitizing reverse proxy (the separated Compose Nginx edge does this).
+      trustProxy: env.TRUST_PROXY === 'true',
     });
   }
 
