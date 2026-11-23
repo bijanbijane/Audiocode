@@ -135,7 +135,12 @@ function resolveProject(projectName, configPath, entries, manifestPath, boundary
   const externalPackages = [...new Set(imports.map((item) => item.externalPackage).filter(Boolean))].sort();
   const undeclaredPackages = externalPackages.filter((name) => !declared.has(name));
   const crossBoundaryImports = imports
-    .filter((item) => item.resolved && item.resolved.startsWith('.') && boundaryCheck(item.from, item.resolved))
+    .filter((item) =>
+      item.resolved &&
+      !item.resolved.startsWith('node_modules/') &&
+      !item.resolved.startsWith('..') &&
+      boundaryCheck(item.from, item.resolved)
+    )
     .map(({ from, specifier, resolved }) => ({ from, specifier, resolved }));
 
   return {
