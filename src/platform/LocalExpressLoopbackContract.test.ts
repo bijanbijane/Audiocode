@@ -34,7 +34,10 @@ test('API-only Express boot does not load Vite and Hosted mode blocks demo lease
   assert.ok(server.includes("const { createServer: createViteServer } = await import('vite');"));
   assert.ok(server.includes("if (process.env.DISABLE_EMBEDDED_VITE !== 'true')"));
   assert.ok(server.includes("if (audioApiSecurityGuard.config.mode !== 'local')"));
-  assert.ok(server.includes("PLATFORM_API_LICENSE_REQUIRED"));
+  assert.ok(server.includes('forwardPlatformApiCompatibilityRequest'));
+  assert.ok(server.includes("path: '/api/v1/crypto/public-key'"));
+  assert.ok(server.includes("path: '/api/v1/license/lease'"));
+  assert.ok(server.includes("audioApiSecurityGuard.config.mode !== 'local'"));
 });
 
 function readServerSource(): string {
