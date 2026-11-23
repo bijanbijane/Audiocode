@@ -10,7 +10,7 @@
     "start": "node --import tsx src/main.ts",
     "dev": "tsx watch src/main.ts",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test": "find src -name '*.test.ts' -print0 | xargs -0 tsx --test"
+    "test": "find src -name '*.test.ts' -print0 | xargs -0 node --import tsx --test"
   },
   "dependencies": {
     "fastify": "5.12.8",
