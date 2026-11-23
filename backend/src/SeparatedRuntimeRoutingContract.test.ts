@@ -39,6 +39,16 @@ test('separated web sends the new platform prefix to Fastify and leaves legacy A
   assert.ok(vite.includes("'/v1': {"));
 });
 
+test('Platform API development binds to loopback and trusts forwarded IPs only by explicit opt-in', () => {
+  const server = read('backend/src/server.ts');
+  const compose = read('deploy/docker-compose.separated.yml');
+
+  assert.ok(server.includes("env.NODE_ENV === 'production' ? '0.0.0.0' : '127.0.0.1'"));
+  assert.ok(server.includes("trustProxy: env.TRUST_PROXY === 'true'"));
+  assert.ok(compose.includes('TRUST_PROXY: "true"'));
+  assert.ok(compose.includes('proxy_set_header X-Forwarded-For $remote_addr;') === false);
+});
+
 test('three-runtime compose keeps Web, Express, Fastify and PostgreSQL isolated', () => {
   const compose = read('deploy/docker-compose.separated.yml');
 
