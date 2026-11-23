@@ -137,7 +137,7 @@ test('legacy Express adapter forwards only Bearer auth and bounded JSON to the i
 });
 
 test('legacy adapter fails closed when the internal Platform API origin is absent or unsafe', async () => {
-  for (const baseUrl of [undefined, 'ftp://platform-internal:4000', 'http://user:secret@platform-internal:4000', 'http://platform-internal:4000/platform-api']) {
+  for (const baseUrl of ['', 'ftp://platform-internal:4000', 'http://user:secret@platform-internal:4000', 'http://platform-internal:4000/platform-api']) {
     const res = new FakeResponse();
     let fetchCalls = 0;
     await forwardPlatformApiCompatibilityRequest(makeRequest(), res.asResponse(), {
