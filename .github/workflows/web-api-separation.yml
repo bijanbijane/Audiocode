@@ -11,6 +11,10 @@ on:
       - 'scripts/start-api.ts'
       - 'backend/Dockerfile.api'
       - 'backend/src/SeparatedRuntimeRoutingContract.test.ts'
+      - 'backend/src/PlatformBackendServices.ts'
+      - 'backend/src/PlatformBackendServices.test.ts'
+      - 'src/platform/PlatformApiClient.ts'
+      - 'src/platform/PlatformApiClient.test.ts'
       - 'deploy/docker-compose.separated.yml'
       - 'deploy/.env.separated.example'
       - 'deploy/web/**'
@@ -36,6 +40,11 @@ jobs:
           mkdir -p ci-logs
           set -o pipefail
           bun install --frozen-lockfile 2>&1 | tee ci-logs/bun-install.log
+
+      - name: Test separated routing and Platform API client contracts
+        run: |
+          set -o pipefail
+          bun run test:separation 2>&1 | tee ci-logs/separation-contract-tests.log
 
       - name: Build independent static web image
         run: |
