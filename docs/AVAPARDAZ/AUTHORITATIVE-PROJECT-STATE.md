@@ -377,11 +377,13 @@ export interface AudioSourceHandle {
 ## ۱۴. بدهی‌های معماری تأییدشده (Verified Architectural Debt)
 
 1. **دوپارگی مسیر ASR در `App.tsx` (`[Observed Fact]`):** مسیر `ShahabLocalHttpClient` (`App.tsx:1714–1797`) خارج از `UnifiedLocalAsrRuntime` اجرا می‌شود و پیش از Resolver اصلی تصمیم می‌گیرد.
-2. **تخصیص PCM کامل در ۷ نقطهٔ `App.tsx` و در `SmartAudioEditPipeline.ts` (`[Observed Fact]`):** زیرساخت بلوکی و پنجره‌ای وجود دارد اما لایه‌های بالادستی (`resolveTrackAssetAndPcm`, `importAndNormalizeAudio`, `NativeCompanionAsrRuntimeAdapter.ts:242`) کل فایل را یکجا وارد RAM می‌کنند.
-3. **باگ Eviction و نبود بودجهٔ بایتی در `SmartAudioEditJobManager.ts` (`[Observed Fact]`):** سقف ۸ Job مبتنی بر تعداد است و در صورت فعال بودن قدیمی‌ترین Job (`activeAbort !== null`)، حلقهٔ `evictOldestIfNeeded` (`lines 356–367`) متوقف می‌شود.
-4. **نگهداری چند کپی کامل PCM در Undo History (`[Observed Fact]`):** `TimelineHistoryManager` تا `100` تراکنش را بدون سقف بایتی نگه می‌دارد (`src/engine/timeline.ts:733, 785–786`).
+2. **تخصیص PCM کامل در ۷ نقطهٔ `App.tsx` و در `SmartAudioEditPipeline.ts` (`[Observed Fact]` — مسیر Companion در Phase 1B اصلاح شد):**
+   - **اصلاح‌شده در Phase 1B (`[Observed Fact]`):** در مسیر `Adobe Audition CEP -> CompanionAudioTransfer -> LocalCompanionService`، تمام فراخوانی‌های `fs.readFileSync`، تخصیص کامل `Float32Array` و ساخت کامل WAV در RAM حذف شدند و با `CompanionAudioSource` مبتنی بر فایل، پنجره‌های `<= 256 KiB`، Backpressure واقعی (`drain`)، چرخهٔ عمر ۱۰ مرحله‌ای و پاک‌سازی فایل‌های یتیم جایگزین شدند (`docs/AVAPARDAZ/PHASE-1B-COMPANION-STREAMING-REPORT.md`).
+   - **باقی‌مانده برای Phase 1C (`[Observed Fact]`):** لایه‌های سمت وب و پایپ‌لاین ویرایش (`resolveTrackAssetAndPcm` در `App.tsx`، `importAndNormalizeAudio` در `SmartAudioEditPipeline.ts`، `NativeCompanionAsrRuntimeAdapter.ts:242`، و مصرف داخلی `ingestAudioBufferToCanonical16kMono` در `LocalSherpaNeuralEngine.ts:943`) همچنان کل فایل را در RAM بارگذاری می‌کنند.
+3. **باگ Eviction و نبود بودجهٔ بایتی در `SmartAudioEditJobManager.ts` (`[Observed Fact]` — حوزهٔ Phase 1C):** سقف ۸ Job مبتنی بر تعداد است و در صورت فعال بودن قدیمی‌ترین Job (`activeAbort !== null`)، حلقهٔ `evictOldestIfNeeded` (`lines 356–367`) متوقف می‌شود.
+4. **نگهداری چند کپی کامل PCM در Undo History (`[Observed Fact]` — حوزهٔ Phase 1C):** `TimelineHistoryManager` تا `100` تراکنش را بدون سقف بایتی نگه می‌دارد (`src/engine/timeline.ts:733, 785–786`).
 5. **عدم یکپارچگی مالکیت Job (`[Observed Fact]`):** سه مدیر وضعیت جداگانه (`App.tsx`, `SmartAudioEditJobManager`, `LocalCompanionService`) بدون Orchestrator واحد.
-6. **وابستگی Provisioning مرورگر به سرور و Companion (`[Observed Fact]`):** `BrowserPersianModelInstaller.ts` از طریق `server.ts:553–650` به `LocalSherpaNeuralEngine` متصل است.
+6. **وابستگی Provisioning مرورگر به سرور و Companion (`[Observed Fact]`):** `BrowserPersianModelInstaller.ts` از طریق `/api/v1/local-models/shenava-rizen/*` به `LocalSherpaNeuralEngine` متصل است.
 7. **عدم دقت اثبات‌شده در `endSec` کلمات (`[Observed Fact]`):** در Zipformer خروجی کلمه‌ای خالی است (`words: []`) و در `Shenava-Rizeh` پایان کلمه از توکن بعدی یا انتهای چانک تخمین زده می‌شود.
 8. **ناسازگاری Metadata معماری در `ShahabZipformerEngine.ts:2002` (`[Observed Fact]`):** گزارش `architecture: 'FASTCONFORMER_CTC'` برای مدل Zipformer-Transducer.
 
@@ -392,12 +394,11 @@ export interface AudioSourceHandle {
 هر مورد زیر در این محیط غیرقابل اثبات بوده و صراحتاً **`[Unknown]`** باقی می‌ماند:
 1. نام Branch واقعی، SHA دقیق آخرین Commit و تاریخچهٔ Git (به دلیل نبود `.git`).
 2. وضعیت واقعی Check Runها و Branch Protection در GitHub.
-3. عملکرد واقعی، Peak RSS و دمای CPU روی **macOS Apple Silicon M2 با 8GB RAM** و **Windows x64**.
+3. عملکرد واقعی، Peak RSS و دمای CPU روی **macOS Apple Silicon M2 با 8GB RAM** و **Windows x64** (`NOT_RUN` / `HARDWARE_QUALIFICATION_PENDING`).
 4. رفتار واقعی افزونهٔ **Adobe Audition CEP** روی Audition 24/25 واقعی (بارگذاری پنل، ExtendScript markers، قفل فایل و تغییر سند فعال).
 5. نتیجهٔ مقایسهٔ علمی منصفانهٔ `ShahabZipformer` در برابر `Shenava-Rizeh` روی یک دیتاست Held-out واحد شامل گفتار محاوره‌ای، تپق طبیعی و Code-Switching.
 6. دقت واقعی مرزبندی پایان کلمه (`endSec`) در فارسی نسبت به Praat TextGrid دستی.
 7. وضعیت فعلی آسیب‌پذیری‌های CVE وابستگی‌ها (به دلیل نبود `package-lock.json`).
-8. وضعیت اجرای زندهٔ امروز تست‌های `test:unit`، `vitest`، `test:quality-gates` و `vite build` (زیرا در فاز صفر فقط `tsc --noEmit` اجرا شد).
 
 ---
 
@@ -416,13 +417,11 @@ export interface AudioSourceHandle {
 تمام معیارهای پذیرش زیر عددی و قابل آزمون (Pass/Fail) تعریف شده‌اند:
 
 ### فاز ۱ — جریانی‌سازی کامل حافظه و سخت‌سازی امنیتی (Memory Streaming & Security Hardening)
-- **دامنه:**
-  1. پیاده‌سازی قرارداد `AudioSourceHandle` (`readPlanarRange`, `readRangeMono16k`, `close`) با پیاده‌سازی‌های `DiskWavAudioSourceHandle` و `OpfsAudioSourceHandle`.
-  2. بازنگری `SmartAudioEditPipeline.ts` (`importAndNormalizeAudio` با هش جریانی SHA-256 و حذف نگهداری `rawBytes`/`renderChannels`/`canonical16kMono` کامل در `ImportedAudioContext`).
-  3. اصلاح `SmartAudioEditJobManager.ts` (حذف `lastOutputWav` مقیم RAM، جایگزینی `maxRetainedJobs` با سقف بایتی `retainedBytes`/`activeBytes`، رفع باگ `break;` در `evictOldestIfNeeded`) و حذف `Buffer.from` اضافی در `SmartAudioEditHttpRouter.ts:299, 355`.
-  4. حذف فراخوانی‌های `resolveTrackAssetAndPcm` در `App.tsx` (۷ نقطه) برای فایل‌های بزرگ و جایگزینی با `AudioSourceHandle`؛ محدودسازی `NativeCompanionAsrRuntimeAdapter.ts:242` به ارسال چانکی واقعی؛ اصلاح `CompanionAudioTransfer.ts:385–405` برای حذف اوج `2.5x`.
-  5. اعمال سقف بایتی و معماری CoW/Command روی `TimelineHistoryManager` (`src/engine/timeline.ts`).
-  6. برطرف‌سازی ۴ نقص امنیتی P0/P1: محدودکردن Express به `127.0.0.1` + افزودن Loopback/Host/Origin/HMAC روی `/api/shahab/*` و `/api/v2/smart-edit/*`؛ سخت‌سازی `downloadFileWithRedirects` (Allowlist + HTTPS-only + maxBytes + timeout)؛ جایگزینی `extractTarBz2Safe` با استخراج ایمن با بررسی مسیر/Symlink/سقف فایل و حجم؛ افزودن سقف اندازه و Rate/Concurrency Limit روی Range Endpoint (`server.ts:585`).
+- **وضعیت زیرفازهای فاز ۱ تا این لحظه (`2026-11-23`):**
+  - **Phase 1A (`COMPLETED & VERIFIED`):** تفکیک صریح `Local` و `Hosted`، سخت‌سازی Loopback/Origin/Host/HMAC روی `/api/shahab/*`, `/api/v2/smart-edit/*` و `/api/v2/companion`.
+  - **Phase 1A.1 (`COMPLETED & VERIFIED`):** بستن شکاف‌های احراز هویت Hosted (`aud`/`iss`/`sub`/`exp` و حذف Shared Secret خام)، سخت‌سازی زنجیرهٔ تأمین مدل (`SafeModelSupplyChain.ts`) و سقف `1 MiB` روی Range Endpoint مدل‌ها (`LocalModelArtifactHttpRouter.ts`).
+  - **Phase 1B (`VERIFIED_IN_TESTS` / `HARDWARE_QUALIFICATION_PENDING`):** حذف کامل Materialization صوت در مسیر `Adobe Audition CEP -> CompanionAudioTransfer -> LocalCompanionService`، پیاده‌سازی `CompanionAudioSource` مبتنی بر فایل، چرخهٔ عمر ۱۰ مرحله‌ای، حسابداری ۷ دسته بافر (`<= 256 KiB` برای هر بافر و `<= 1 MiB` کل بافرهای زندهٔ هر انتقال)، Backpressure واقعی (`drain`) و بنچمارک ۱۰، ۳۰ و ۶۰ دقیقه (`docs/AVAPARDAZ/PHASE-1B-COMPANION-STREAMING-REPORT.md`).
+  - **Phase 1C (`PENDING`):** جریانی‌سازی `SmartAudioEditPipeline.ts`, `SmartAudioEditJobManager.ts` (رفع باگ `evictOldestIfNeeded` و حذف `lastOutputWav` مقیم RAM)، `TimelineHistoryManager` (سقف بایتی Undo) و ۷ نقطهٔ `resolveTrackAssetAndPcm` در `App.tsx`.
 - **معیارهای پذیرش عددی فاز ۱:**
   - پردازش پیوستهٔ فایل **۶۰ دقیقه‌ای استریو 48 kHz** در `SmartAudioEditPipeline` + `LocalCompanionService` با **`Peak Process RSS <= 512 MiB`** (بدون مدل Quality) و **`0 B`** رشد حافظهٔ باقیمانده پس از `close()`/`dispose()` در تکرار ۳ باره.
   - اجرای ۱۰ Job متوالی در `SmartAudioEditJobManager` با فعال نگه داشتن Job شماره ۱: `retainedBytes <= configuredByteCap` و تخلیهٔ ۱۰۰٪ Jobهای بیکار (رفع قطعی باگ `evictOldestIfNeeded`).
@@ -458,6 +457,12 @@ export interface AudioSourceHandle {
 
 ---
 
-## ۱۸. گواهی عدم تغییر کد در فاز صفر
+## ۱۸. خلاصهٔ وضعیت اجرای فازها (Phase Execution Ledger)
 
-در طول اجرای کامل ممیزی فاز صفر (`2026-11-23`)، **هیچ فایل اجرایی، سورس تولیدی، قرارداد API، منطق DSP، مدل صوتی، تنظیمات بسته یا تست موجودی تغییر داده نشد** (`[Observed Fact]`). تغییرات صرفاً محدود به ایجاد این سند مرجع و هم‌ترازسازی مستندات `docs/AVAPARDAZ/CURRENT-STATE.md` و `docs/AVAPARDAZ/IMPLEMENTATION-LEDGER.md` بوده است.
+| فاز | تاریخ | وضعیت | گزارش مرجع |
+| :--- | :---: | :---: | :--- |
+| **Phase 0** — Architectural & Memory Audit | `2026-11-23` | `COMPLETED` | `docs/AVAPARDAZ/AUTHORITATIVE-PROJECT-STATE.md` |
+| **Phase 1A** — Security Containment & Local API Hardening | `2026-11-23` | `VERIFIED_IN_TESTS` | `src/security/AudioApiSecurityPhase1A.test.ts` |
+| **Phase 1A.1** — Security Closure & Model Supply-Chain Hardening | `2026-11-23` | `VERIFIED_IN_TESTS` | `src/security/Phase1A1SupplyChainAndAuthClosure.test.ts` |
+| **Phase 1B** — Native Companion Streaming & Memory Foundation | `2026-11-23` | `VERIFIED_IN_TESTS` / `HARDWARE_QUALIFICATION_PENDING` | `docs/AVAPARDAZ/PHASE-1B-COMPANION-STREAMING-REPORT.md` |
+
