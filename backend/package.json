@@ -10,7 +10,7 @@
     "start": "node --import tsx src/main.ts",
     "dev": "tsx watch src/main.ts",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test": "find src -name '*.test.ts' -print0 | xargs -0 node --import tsx --test"
+    "test": "node --import tsx --test src/BackendAuthAndPaymentService.test.ts src/BackendLicenseAndModelRevocationService.test.ts src/server.test.ts src/PlatformBackendServices.smoke.test.ts"
   },
   "dependencies": {
     "fastify": "5.12.8",
