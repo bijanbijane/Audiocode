@@ -46,7 +46,10 @@ test('Platform API development binds to loopback and trusts forwarded IPs only b
   assert.ok(server.includes("env.NODE_ENV === 'production' ? '0.0.0.0' : '127.0.0.1'"));
   assert.ok(server.includes("trustProxy: env.TRUST_PROXY === 'true'"));
   assert.ok(compose.includes('TRUST_PROXY: "true"'));
-  assert.ok(compose.includes('proxy_set_header X-Forwarded-For $remote_addr;') === false);
+
+  const nginx = read('deploy/web/nginx.conf');
+  assert.ok(nginx.includes('proxy_set_header X-Forwarded-For $remote_addr;'));
+  assert.ok(!nginx.includes('$proxy_add_x_forwarded_for'));
 });
 
 test('three-runtime compose keeps Web, Express, Fastify and PostgreSQL isolated', () => {
