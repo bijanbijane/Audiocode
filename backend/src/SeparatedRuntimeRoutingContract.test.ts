@@ -8,31 +8,39 @@ const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../
 const read = (relativePath: string): string =>
   fs.readFileSync(path.join(repoRoot, relativePath), 'utf8');
 
-test('separated web routes the dedicated platform prefix to Fastify and preserves Express routes', () => {
+test('separated web sends the new platform prefix to Fastify and leaves legacy APIs on Express', () => {
   const nginx = read('deploy/web/nginx.conf');
   const vite = read('vite.config.ts');
 
-  assert.match(nginx, /location ^~ /platform-api/s*{/);
-  assert.match(nginx, /proxy_pass http://avapardaz-platform-api:4000//);
-  assert.match(nginx, /location ^~ /apis*{[sS]*?proxy_pass http://avapardaz-api:3000/);
-  assert.match(nginx, /location ^~ /v1s*{[sS]*?proxy_pass http://avapardaz-api:3000/);
+  assert.ok(nginx.includes('location ^~ /platform-api/ {'));
+  assert.ok(nginx.includes('proxy_pass http://avapardaz-platform-api:4000/;'));
+  assert.ok(nginx.includes('location ^~ /api {'));
+  assert.ok(nginx.includes('location ^~ /v1 {'));
 
-  assert.match(vite, /'/platform-api':s*{/);
-  assert.match(vite, /PLATFORM_API_PROXY_TARGET[\s\S]*?127.0.0.1:4000/);
-  assert.match(vite, /requestPath.replace(/^\\/platform-api//);
-  assert.match(vite, /'/api':s*{/);
-  assert.match(vite, /'/v1':s*{/);
+  const platformLocation = nginx.slice(nginx.indexOf('location ^~ /platform-api/ {'));
+  assert.ok(platformLocation.indexOf('proxy_pass http://avapardaz-platform-api:4000/;') > 0);
+  const apiLocation = nginx.slice(nginx.indexOf('location ^~ /api {'));
+  assert.ok(apiLocation.includes('proxy_pass http://avapardaz-api:3000;'));
+  const v1Location = nginx.slice(nginx.indexOf('location ^~ /v1 {'));
+  assert.ok(v1Location.includes('proxy_pass http://avapardaz-api:3000;'));
+
+  assert.ok(vite.includes("'/platform-api': {"));
+  assert.ok(vite.includes("process.env.PLATFORM_API_PROXY_TARGET ?? 'http://127.0.0.1:4000'"));
+  assert.ok(vite.includes("requestPath.replace(/^\\/platform-api/, '')"));
+  assert.ok(vite.includes("'/api': {"));
+  assert.ok(vite.includes("'/v1': {"));
 });
 
-test('three-runtime compose keeps Express and Platform API on separate services and keys', () => {
+test('three-runtime compose keeps Web, Express, Fastify and PostgreSQL isolated', () => {
   const compose = read('deploy/docker-compose.separated.yml');
 
-  assert.match(compose, /^  avapardaz-web:/m);
-  assert.match(compose, /^  avapardaz-api:/m);
-  assert.match(compose, /^  avapardaz-platform-api:/m);
-  assert.match(compose, /^  postgres:/m);
-  assert.match(compose, /LOCAL_ED25519_PRIVATE_KEY_PEM/);
-  assert.match(compose, /PLATFORM_ED25519_PRIVATE_KEY_PEM/);
-  assert.match(compose, /ENABLE_CLOUD_ASR: "false"/);
-  assert.match(compose, /DISABLE_WEB_HOST: "true"/);
+  assert.ok(compose.includes('  avapardaz-web:'));
+  assert.ok(compose.includes('  avapardaz-api:'));
+  assert.ok(compose.includes('  avapardaz-platform-api:'));
+  assert.ok(compose.includes('  postgres:'));
+  assert.ok(compose.includes('LOCAL_ED25519_PRIVATE_KEY_PEM'));
+  assert.ok(compose.includes('PLATFORM_ED25519_PRIVATE_KEY_PEM'));
+  assert.ok(compose.includes('ENABLE_CLOUD_ASR: "false"'));
+  assert.ok(compose.includes('DISABLE_WEB_HOST: "true"'));
+  assert.ok(compose.includes('backend/Dockerfile.platform-api'));
 });
