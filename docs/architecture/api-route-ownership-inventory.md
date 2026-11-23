@@ -53,13 +53,15 @@ These route families appear platform-facing by domain, but their actual persiste
 
 | Route | Express implementation | Fastify implementation | Status |
 |---|---|---|---|
-| `POST /api/v1/license/lease` | `PlatformLicenseService.issueOfflineLicenseLease` | `PlatformBackendServices.registerAllRoutes` | **Direct overlap.** Payload, expiry, plan mapping, device binding, signature canonicalization and client verifier parity are not proven |
-| `GET /api/v1/crypto/public-key` | `PlatformLicenseService.getPublicKeyInfo` | Fastify exposes Ed25519 key material inside its service configuration/envelopes; no matching public-key route was found in the audited route list | Contract mismatch until a dedicated parity test exists |
-| `GET /api/v1/models/:modelId/manifest` | Express `PlatformLicenseService.issueSignedModelManifestEnvelope` | Fastify uses `GET /api/v1/models/:modelId/:version/manifest` | Different route shape and data source; not equivalent |
+| `POST /api/v1/license/lease` | `PlatformLicenseService.issueOfflineLicenseLease` | `PlatformBackendServices.registerAllRoutes` | **Verified wire incompatibility.** Express returns `payloadBase64`, `signatureBase64`, `algorithm: Ed25519`, `keyVersion`, and legacy payload fields (`issuedAtMs`, `offlineGraceExpiresAtMs`, `deviceFingerprint`). Fastify returns `payload`, `payloadCanonicalBase64`, `ed25519SignatureHex`, `keyId`, and Unix-second payload fields (`issuedAtUnixSec`, `offlineGraceExpiresAtUnixSec`, `subscriptionExpiresAtUnixSec`, `planTier`). `OfflineCryptoVerifier` currently accepts only the Express envelope/payload shape. Do not move this route as-is. |
+| `GET /api/v1/crypto/public-key` | Express `PlatformLicenseService.getPublicKeyInfo` | No matching Fastify public-key route was registered by `bootstrapBackendServer` | Fastify client key-discovery contract is missing; do not cut over. |
+| `GET /api/v1/models/:modelId/manifest` | Express `PlatformLicenseService.issueSignedModelManifestEnvelope` | Fastify uses `GET /api/v1/models/:modelId/:version/manifest` | Different route shape, source and signed-envelope format; not equivalent. |
 | Device-seat and sync routes | No matching direct Express paths identified in this scan | `POST /api/v1/license/enforce-device-seat`, `POST /api/v1/license/sync-state` | Fastify-only routes; require UI/client consumer discovery |
 | Model revocation | Express model-factory/admin surfaces exist, but no exact match confirmed | `POST /api/v1/admin/models/:modelId/:version/revoke` | Do not treat similarly named admin operations as equivalent |
 
 **Security invariant:** retain Ed25519 signing and verification semantics; retain P-256 device-bound key handling and secure local storage; keep valid paid offline entitlement valid until the paid subscription end. Do not introduce periodic network checks as a condition for local processing.
+
+**Observed client incompatibility:** `src/security/OfflineCryptoVerifier.ts` only decodes the legacy `payloadBase64` / `signatureBase64` envelope and rejects a license when `currentWallClockMs > payload.offlineGraceExpiresAtMs`. It does not consume Fastify's `payloadCanonicalBase64` / `ed25519SignatureHex` envelope or Unix-second fields. Fastify's lease handler currently sets `offlineGraceExpiresAtUnixSec = min(subscriptionEnd, now + offlineGraceHours)`, while the database sample default is 168 hours. This is not proof of the required paid-subscription-until-end entitlement. A compatibility design must explicitly resolve both the wire format and the offline-expiry policy before the route can be migrated.
 
 ### 2.4 Fastify/PostgreSQL route inventory
 
@@ -69,6 +71,8 @@ Observed Fastify registrations in:
 - `backend/src/PlatformBackendServices.ts`
 - `backend/src/BackendApplicationFactory.ts`
 - `backend/src/server.ts`
+
+**Important bootstrap distinction:** the production entrypoint added in this branch (`backend/src/main.ts`) calls `bootstrapBackendServer()` from `backend/src/server.ts`. That bootstrap registers auth/payment, license/model and revocation services, plus `/healthz` and `/readyz`. It does **not** call `buildBackendApplication()` from `BackendApplicationFactory.ts`. Therefore the Factory-only modules/routes (including the enterprise-key endpoint, canary rollout service, external API proxy routes, metrics hooks and advisory-lock coordinator) are not currently part of the runnable production Fastify server, even though they exist in source. Treat them as implemented modules, not live endpoints, until the production bootstrap is unified and covered by startup/integration tests.
 
 | Routes | Service | Classification |
 |---|---|---|
@@ -87,7 +91,7 @@ Observed Fastify registrations in:
 
 1. Root `package.json` has no direct `fastify` or `pg` dependency.
 2. Root `bun.lock` is the repository CI lockfile; the audited lock does not contain Fastify or PostgreSQL's `pg` client.
-3. The repository previously had no standalone backend package. This branch now adds `backend/package.json`, `backend/tsconfig.json`, and the explicit executable `backend/src/main.ts` entrypoint. These files create a package boundary but have not yet been typechecked or run.
+3. The repository previously had no standalone backend package. This branch now adds `backend/package.json`, `backend/tsconfig.json`, and the explicit executable `backend/src/main.ts` entrypoint. These files create a package boundary but have not yet been typechecked or run. The package test script now delegates TypeScript test files to Node's native test runner via `node --import tsx --test`.
 4. A standalone image definition now exists at `backend/Dockerfile.platform-api`. The original `backend/Dockerfile` remains the legacy combined Express+Vite image, and `backend/Dockerfile.api` is the separated Express/local-runtime image.
 5. No committed `backend/package-lock.json` or `backend/bun.lock` exists yet. The new standalone Platform API workflow generates an npm lockfile in the runner and uploads it as an artifact. `backend/Dockerfile.platform-api` now requires that file and uses `npm ci`; until the artifact is committed, a direct Platform API image build from a fresh checkout correctly fails closed rather than silently resolving an unlocked dependency graph.
 6. The Fastify bootstrap requires `DATABASE_URL`, Ed25519 private/public PEM keys, and `PAYMENT_WEBHOOK_HMAC_SECRET`; these must be provisioned only in the Platform API environment, never in the Vite bundle. `ADMIN_API_SECRET_KEY` should also be provisioned for protected admin operations.
@@ -111,7 +115,8 @@ Observed Fastify registrations in:
 - Generate a machine-readable route table for every direct route and mounted router.
 - Record request/response schemas, status codes, auth policy, tenant scope, data source, idempotency, streaming/range behavior and owning runtime.
 - Add consumer inventory from browser code, tests, Audition CEP, Companion and admin surfaces.
-- Resolve the three license/model route mismatches above before proxy changes.
+- Resolve the verified license envelope/expiry mismatch and public-key discovery gap before proxy changes.
+- Unify or explicitly scope `bootstrapBackendServer` vs `buildBackendApplication`; add a real Fastify startup test that asserts the production route inventory, including any Factory-only modules intended to be live.
 
 ### Gate C — Independently runnable Platform API
 
