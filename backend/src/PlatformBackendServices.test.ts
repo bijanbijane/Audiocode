@@ -352,6 +352,14 @@ test('Section 100: PlatformBackendServices issues Ed25519-signed license leases 
   assert.equal(statusCode, 400);
   assert.equal((sentBody as { error: string }).error, 'INVALID_MODEL_ID');
 
+  statusCode = 200;
+  await getRoutes.get('/api/v1/models/:modelId/:version/chunks/:chunkIndex')!(
+    { params: { modelId: 'model-test', version: '..', chunkIndex: '0' }, query: {}, headers: {} },
+    mockReply,
+  );
+  assert.equal(statusCode, 400);
+  assert.equal((sentBody as { error: string }).error, 'INVALID_MODEL_VERSION');
+
   catalogStatus = 'ACTIVE';
 
   // Never sign a manifest whose declared catalogue size disagrees with the verified chunk set.
