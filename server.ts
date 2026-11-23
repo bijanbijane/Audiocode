@@ -94,6 +94,7 @@ import {
 } from './src/security/AudioApiSecurityGuard.ts';
 import { createLocalModelArtifactHttpRouter } from './src/lifecycle/LocalModelArtifactHttpRouter.ts';
 import { forwardPlatformApiCompatibilityRequest } from './src/platform/PlatformApiCompatibilityProxy.ts';
+import { normalizeLegacyPlatformLeaseRequestBody } from './src/platform/PlatformApiCompatibilityProxy.ts';
 
 interface SandboxStudioScope {
   readonly tenantId: string;
@@ -380,6 +381,7 @@ async function startServer() {
     if (audioApiSecurityGuard.config.mode !== 'local') {
       // Compatibility adapter: Fastify still performs the real Bearer/JWT,
       // PostgreSQL subscription, device-seat, and Ed25519 checks.
+      req.body = normalizeLegacyPlatformLeaseRequestBody(req.body);
       void forwardPlatformApiCompatibilityRequest(req, res, {
         path: '/api/v1/license/lease',
         method: 'POST',
