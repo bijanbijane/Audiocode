@@ -394,7 +394,7 @@ export class PlatformBackendServices {
           byteOffset += chunk.byte_length;
           return {
             index: chunk.chunk_index,
-            url: `${this.config.cdnBaseUrl}/api/v1/models/${encodeURIComponent(modelId)}/${encodeURIComponent(entry.version)}/chunks/${chunk.chunk_index}`,
+            url: `${this.config.cdnBaseUrl.replace(/\\/+$/, '')}/api/v1/models/${encodeURIComponent(modelId)}/${encodeURIComponent(entry.version)}/chunks/${chunk.chunk_index}`,
             byteOffset: offset,
             byteLength: chunk.byte_length,
             sha256Hex: chunk.sha256_hex,
@@ -467,7 +467,7 @@ export class PlatformBackendServices {
           totalBytes: Number(meta.total_size_bytes),
           chunks: chunksRes.rows.map((c) => ({
             index: c.chunk_index,
-            url: `${this.config.cdnBaseUrl}/api/v1/models/${modelId}/${version}/chunks/${c.chunk_index}`,
+            url: `${this.config.cdnBaseUrl.replace(/\\/+$/, '')}/api/v1/models/${modelId}/${version}/chunks/${c.chunk_index}`,
             sha256Hex: c.sha256_hex,
             byteLength: c.byte_length,
           })),
