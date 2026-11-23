@@ -53,3 +53,23 @@ test('three-runtime compose keeps Web, Express, Fastify and PostgreSQL isolated'
   assert.ok(compose.includes('DISABLE_WEB_HOST: "true"'));
   assert.ok(compose.includes('backend/Dockerfile.platform-api'));
 });
+
+test('container definitions keep the local audio runtime and Platform API reproducible', () => {
+  const localApiDockerfile = read('backend/Dockerfile.api');
+  const platformApiDockerfile = read('backend/Dockerfile.platform-api');
+
+  assert.ok(localApiDockerfile.includes('apt-get install -y --no-install-recommends'));
+  assert.ok(localApiDockerfile.includes('ca-certificates ffmpeg libgomp1'));
+  assert.ok(localApiDockerfile.includes('FFMPEG_BINARY_PATH=/usr/bin/ffmpeg'));
+
+  for (const [index, line] of localApiDockerfile.split('\n').entries()) {
+    const trailing = line.match(/\\+$/)?.[0].length ?? 0;
+    if (trailing > 0) {
+      assert.equal(trailing, 1, `Dockerfile.api line ${index + 1} has an invalid continuation`);
+    }
+  }
+
+  assert.ok(platformApiDockerfile.includes('COPY backend/package-lock.json ./package-lock.json'));
+  assert.ok(platformApiDockerfile.includes('RUN npm ci --omit=dev --no-audit --no-fund'));
+  assert.ok(!platformApiDockerfile.includes('npm install --omit=dev'));
+});
