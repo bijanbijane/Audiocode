@@ -1,0 +1,54 @@
+name: Separated Web and API Container Build
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'package.json'
+      - 'bun.lock'
+      - 'server.ts'
+      - 'vite.config.ts'
+      - 'scripts/start-api.ts'
+      - 'backend/Dockerfile.api'
+      - 'deploy/web/**'
+      - 'src/**'
+      - 'packages/**'
+
+permissions:
+  contents: read
+
+jobs:
+  build-separated-containers:
+    name: Build independent web and API images
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Validate frozen root dependency lock
+        run: |
+          mkdir -p ci-logs
+          set -o pipefail
+          bun install --frozen-lockfile 2>&1 | tee ci-logs/bun-install.log
+
+      - name: Build independent static web image
+        run: |
+          set -o pipefail
+          docker build --progress=plain -f deploy/web/Dockerfile -t avapardaz-web:ci . 2>&1 | tee ci-logs/web-image-build.log
+
+      - name: Build API/local-runtime image without web hosting
+        run: |
+          set -o pipefail
+          docker build --progress=plain -f backend/Dockerfile.api -t avapardaz-api:ci . 2>&1 | tee ci-logs/api-image-build.log
+
+      - name: Preserve diagnostics for review
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: separated-runtime-build-logs
+          path: ci-logs/
+          if-no-files-found: warn
+          retention-days: 7
