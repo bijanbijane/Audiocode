@@ -19,6 +19,11 @@ RUN mkdir -p dist \
 FROM oven/bun:1 AS api-runtime
 WORKDIR /app
 
+# The local transcription and smart-edit pipeline invokes FFmpeg at runtime.
+RUN apt-get update && apt-get install -y --no-install-recommends \\
+    ca-certificates ffmpeg libgomp1 \\
+    && rm -rf /var/lib/apt/lists/*
+
 COPY package.json ./
 COPY --from=api-build /workspace/node_modules ./node_modules
 COPY --from=api-build /workspace/dist/server.mjs ./dist/server.mjs
@@ -32,6 +37,7 @@ COPY --from=api-build /workspace/public ./public
 ENV NODE_ENV=production
 ENV DISABLE_WEB_HOST=true
 ENV ENABLE_CLOUD_ASR=false
+ENV FFMPEG_BINARY_PATH=/usr/bin/ffmpeg
 ENV PORT=3000
 
 EXPOSE 3000
