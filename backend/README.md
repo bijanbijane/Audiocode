@@ -31,7 +31,7 @@ A staging/local Compose topology is provided at `deploy/docker-compose.separated
 
 1. Copy `deploy/.env.separated.example` to `deploy/.env.separated`.
 2. Preserve the **existing Express Ed25519 key pair** in the `LOCAL_ED25519_*` values.
-3. Copy the **same currently deployed production Ed25519 key pair** into `PLATFORM_ED25519_*` during this compatibility phase. Do not rotate the key or bump `keyVersion` until a versioned client-key discovery/cache migration is complete.
+3. Copy the **same currently deployed production Ed25519 key pair** and the exact current `ED25519_KEY_ID` into the `PLATFORM_ED25519_*` / `PLATFORM_ED25519_KEY_ID` values during this compatibility phase. Do not rotate the key, change the key ID or bump `keyVersion` until a versioned client-key discovery/cache migration is complete.
 4. Set `PLATFORM_DATABASE_URL` to the Compose PostgreSQL service, with a URL-encoded password that matches `POSTGRES_PASSWORD`.
 5. Set `PUBLIC_CDN_BASE_URL` to the browser-visible `/platform-api` base, for example `http://localhost:8080/platform-api`.
 
@@ -67,7 +67,7 @@ Optional runtime settings include:
 - `PLATFORM_API_INTERNAL_ORIGIN` (required by Hosted Express compatibility facades; private service origin such as `http://avapardaz-platform-api:4000`, never client-controlled)
 - `ADMIN_API_SECRET_KEY` (required for admin revocation operations)
 - `MODEL_STORAGE_DIR` (default `/var/lib/paudio/models`)
-- `ED25519_KEY_ID` (default `ed25519_prod_key_v1`)
+- `ED25519_KEY_ID` (local code fallback `ed25519_prod_key_v1`; separated Compose requires the exact existing production value)
 - `PUBLIC_CDN_BASE_URL`
 - `ENABLE_CLOUD_ASR` (must remain `false` under the current local-only ASR product policy)
 
