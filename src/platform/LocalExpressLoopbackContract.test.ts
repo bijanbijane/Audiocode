@@ -22,3 +22,16 @@ test('hosted Express mode defaults to a non-loopback bind only when explicitly c
   assert.equal(config.mode, 'hosted');
   assert.equal(resolveServerBindHost(env, config), '0.0.0.0');
 });
+
+test('API-only Express boot does not load Vite and Hosted mode blocks demo lease issuance', () => {
+  const server = readServerSource();
+  assert.ok(!server.includes("import { createServer as createViteServer } from 'vite';"));
+  assert.ok(server.includes("const { createServer: createViteServer } = await import('vite');"));
+  assert.ok(server.includes("if (process.env.DISABLE_EMBEDDED_VITE !== 'true')"));
+  assert.ok(server.includes("if (audioApiSecurityGuard.config.mode !== 'local')"));
+  assert.ok(server.includes("PLATFORM_API_LICENSE_REQUIRED"));
+});
+
+function readServerSource(): string {
+  return fs.readFileSync(path.resolve(repoRoot, 'server.ts'), 'utf8');
+}
