@@ -7,5 +7,6 @@
 import { env } from 'node:process';
 
 env.DISABLE_EMBEDDED_VITE = 'true';
+env.DISABLE_WEB_HOST = 'true';
 
 await import('../server.ts');
