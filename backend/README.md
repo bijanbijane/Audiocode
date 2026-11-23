@@ -31,7 +31,7 @@ A staging/local Compose topology is provided at `deploy/docker-compose.separated
 
 1. Copy `deploy/.env.separated.example` to `deploy/.env.separated`.
 2. Preserve the **existing Express Ed25519 key pair** in the `LOCAL_ED25519_*` values.
-3. Generate a **different Platform API Ed25519 key pair** for `PLATFORM_ED25519_*`; do not share or rotate the existing Express key during this migration.
+3. Copy the **same currently deployed production Ed25519 key pair** into `PLATFORM_ED25519_*` during this compatibility phase. Do not rotate the key or bump `keyVersion` until a versioned client-key discovery/cache migration is complete.
 4. Set `PLATFORM_DATABASE_URL` to the Compose PostgreSQL service, with a URL-encoded password that matches `POSTGRES_PASSWORD`.
 5. Set `PUBLIC_CDN_BASE_URL` to the browser-visible `/platform-api` base, for example `http://localhost:8080/platform-api`.
 
