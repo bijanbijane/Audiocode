@@ -33,6 +33,10 @@ test('API-only Hosted Express boot does not load Vite or its legacy Local Ed2551
   assert.ok(!server.includes("import { createServer as createViteServer } from 'vite';"));
   assert.ok(server.includes("const { createServer: createViteServer } = await import('vite');"));
   assert.ok(server.includes("if (process.env.DISABLE_EMBEDDED_VITE !== 'true')"));
+  const apiEntrypoint = fs.readFileSync(path.resolve(repoRoot, 'scripts/start-api.ts'), 'utf8');
+  assert.ok(apiEntrypoint.includes("env.DISABLE_EMBEDDED_VITE = 'true';"));
+  assert.ok(apiEntrypoint.includes("env.DISABLE_WEB_HOST = 'true';"));
+  assert.ok(server.includes('webServing=${webServingEnabled}'));
   assert.ok(server.includes("audioApiSecurityGuard.config.mode === 'local'"));
   assert.ok(server.includes('new PlatformLicenseService('));
   assert.ok(server.includes('const getLocalLicenseService = (): PlatformLicenseService =>'));
