@@ -156,12 +156,6 @@ const PORT =
 async function startServer() {
   const app = express();
 
-  const licenseService = new PlatformLicenseService({
-    privateKeyPem: process.env.ED25519_PRIVATE_KEY_PEM,
-    publicKeyPem: process.env.ED25519_PUBLIC_KEY_PEM,
-    keyVersion: 1,
-  });
-
   // Fail-closed startup guard: production with ENABLE_INTELLIGENCE_SANDBOX_ROUTES=true throws immediately
   const sandboxPolicy = resolveSandboxRuntimePolicy({
     NODE_ENV: process.env.NODE_ENV,
@@ -192,6 +186,24 @@ async function startServer() {
   const localCompanionService = new LocalCompanionService();
   const shahabZipformerRuntime = new ShahabZipformerAsrRuntime();
   const audioApiSecurityGuard = new AudioApiSecurityGuard();
+
+  // The legacy Express signer belongs to Local compatibility only.
+  // Hosted mode must not require or load the Local Ed25519 private key;
+  // the Fastify Platform API is the sole Hosted signing authority.
+  const localLicenseService =
+    audioApiSecurityGuard.config.mode === 'local'
+      ? new PlatformLicenseService({
+          privateKeyPem: process.env.ED25519_PRIVATE_KEY_PEM,
+          publicKeyPem: process.env.ED25519_PUBLIC_KEY_PEM,
+          keyVersion: 1,
+        })
+      : null;
+  const getLocalLicenseService = (): PlatformLicenseService => {
+    if (!localLicenseService) {
+      throw new Error('LOCAL_LICENSE_SIGNER_UNAVAILABLE_IN_HOSTED_MODE');
+    }
+    return localLicenseService;
+  };
   const unifiedProcessingOrchestrator = new UnifiedProcessingOrchestrator({
     localAdapter: new LocalExecutionAdapter({
       coreRouter: coreAsrRouter,
@@ -371,7 +383,7 @@ async function startServer() {
       });
       return;
     }
-    res.json(licenseService.getPublicKeyInfo());
+    res.json(getLocalLicenseService().getPublicKeyInfo());
   });
 
   // Local/demo lease endpoint only. Hosted subscription issuance must use the
@@ -423,7 +435,7 @@ async function startServer() {
         ? body.graceDays
         : 14;
 
-    const envelope = licenseService.issueOfflineLicenseLease({
+    const envelope = getLocalLicenseService().issueOfflineLicenseLease({
       userId: body.userId,
       displayName: typeof body.displayName === 'string' ? body.displayName : undefined,
       deviceFingerprint: body.deviceFingerprint,
@@ -454,7 +466,7 @@ async function startServer() {
     const validOverride =
       override && allowedStatuses.includes(override) ? override : undefined;
 
-    const envelope = licenseService.issueSignedModelManifestEnvelope(modelId, validOverride);
+    const envelope = getLocalLicenseService().issueSignedModelManifestEnvelope(modelId, validOverride);
     if (!envelope) {
       res.status(404).json({ error: 'MODEL_NOT_FOUND', modelId });
       return;
