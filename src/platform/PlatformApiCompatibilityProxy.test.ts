@@ -1,7 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import crypto from 'node:crypto';
 import type { Request, Response } from 'express';
-import { forwardPlatformApiCompatibilityRequest } from './PlatformApiCompatibilityProxy';
+import {
+  forwardPlatformApiCompatibilityRequest,
+  normalizeLegacyPlatformLeaseRequestBody,
+} from './PlatformApiCompatibilityProxy';
 
 function makeRequest(params: {
   readonly body?: unknown;
@@ -74,6 +78,22 @@ class FakeResponse {
     return this as unknown as Response;
   }
 }
+
+test('legacy raw device fingerprints are hashed before entering the Platform API contract', () => {
+  const rawFingerprint = 'legacy-device-fingerprint-01';
+  const normalized = normalizeLegacyPlatformLeaseRequestBody({
+    userId: 'authenticated-user',
+    deviceFingerprint: rawFingerprint,
+    displayName: 'Editor',
+    plan: 'PRO',
+  }) as Record<string, unknown>;
+
+  const expectedHash = crypto.createHash('sha256').update(rawFingerprint, 'utf8').digest('hex');
+  assert.equal(normalized.deviceFingerprint, rawFingerprint);
+  assert.equal(normalized.deviceFingerprintHash, expectedHash);
+  assert.equal(normalized.userId, 'authenticated-user');
+  assert.equal(normalized.plan, 'PRO');
+});
 
 test('legacy Express adapter forwards only Bearer auth and bounded JSON to the internal Platform API', async () => {
   const req = makeRequest({
