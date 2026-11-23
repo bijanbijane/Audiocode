@@ -1,0 +1,164 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import type { Request, Response } from 'express';
+import { forwardPlatformApiCompatibilityRequest } from './PlatformApiCompatibilityProxy';
+
+function makeRequest(params: {
+  readonly body?: unknown;
+  readonly authorization?: string;
+} = {}): Request {
+  const listeners = new Map<string, Set<(...args: unknown[]) => void>>();
+  return {
+    body: params.body,
+    aborted: false,
+    headers: {
+      ...(params.authorization ? { authorization: params.authorization } : {}),
+    },
+    on(event: string, listener: (...args: unknown[]) => void) {
+      const set = listeners.get(event) ?? new Set();
+      set.add(listener);
+      listeners.set(event, set);
+      return this;
+    },
+    off(event: string, listener: (...args: unknown[]) => void) {
+      listeners.get(event)?.delete(listener);
+      return this;
+    },
+  } as unknown as Request;
+}
+
+class FakeResponse {
+  public statusCode = 200;
+  public body: unknown;
+  public writableEnded = false;
+  public destroyed = false;
+  public headersSent = false;
+  public readonly headers = new Map<string, string>();
+  private readonly listeners = new Map<string, Set<(...args: unknown[]) => void>>();
+
+  status(code: number): this {
+    this.statusCode = code;
+    return this;
+  }
+
+  json(value: unknown): this {
+    this.body = value;
+    this.writableEnded = true;
+    return this;
+  }
+
+  send(value: unknown): this {
+    this.body = value;
+    this.writableEnded = true;
+    return this;
+  }
+
+  set(name: string, value: string): this {
+    this.headers.set(name.toLowerCase(), value);
+    return this;
+  }
+
+  on(event: string, listener: (...args: unknown[]) => void): this {
+    const set = this.listeners.get(event) ?? new Set();
+    set.add(listener);
+    this.listeners.set(event, set);
+    return this;
+  }
+
+  off(event: string, listener: (...args: unknown[]) => void): this {
+    this.listeners.get(event)?.delete(listener);
+    return this;
+  }
+
+  asResponse(): Response {
+    return this as unknown as Response;
+  }
+}
+
+test('legacy Express adapter forwards only Bearer auth and bounded JSON to the internal Platform API', async () => {
+  const req = makeRequest({
+    authorization: 'Bearer user-jwt',
+    body: { deviceFingerprintHash: 'a'.repeat(64), displayName: 'Editor' },
+  });
+  const res = new FakeResponse();
+  let calledUrl = '';
+  let capturedInit: RequestInit | undefined;
+
+  await forwardPlatformApiCompatibilityRequest(req, res.asResponse(), {
+    baseUrl: 'http://platform-internal:4000',
+    path: '/api/v1/license/lease',
+    method: 'POST',
+    fetchImpl: async (input, init) => {
+      calledUrl = String(input);
+      capturedInit = init;
+      return new Response(JSON.stringify({ licenseId: 'uuid' }), {
+        status: 201,
+        headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' },
+      });
+    },
+  });
+
+  assert.equal(calledUrl, 'http://platform-internal:4000/api/v1/license/lease');
+  assert.equal(capturedInit?.method, 'POST');
+  assert.equal(capturedInit?.redirect, 'manual');
+  assert.equal(new Headers(capturedInit?.headers).get('authorization'), 'Bearer user-jwt');
+  assert.equal(new Headers(capturedInit?.headers).get('content-type'), 'application/json');
+  assert.deepEqual(JSON.parse(String(capturedInit?.body)), {
+    deviceFingerprintHash: 'a'.repeat(64),
+    displayName: 'Editor',
+  });
+  assert.equal(res.statusCode, 201);
+  assert.deepEqual(JSON.parse(String(res.body)), { licenseId: 'uuid' });
+  assert.equal(res.headers.get('cache-control'), 'no-store');
+});
+
+test('legacy adapter fails closed when the internal Platform API origin is absent or unsafe', async () => {
+  for (const baseUrl of [undefined, 'ftp://platform-internal:4000', 'http://user:secret@platform-internal:4000', 'http://platform-internal:4000/platform-api']) {
+    const res = new FakeResponse();
+    let fetchCalls = 0;
+    await forwardPlatformApiCompatibilityRequest(makeRequest(), res.asResponse(), {
+      baseUrl,
+      path: '/api/v1/crypto/public-key',
+      method: 'GET',
+      fetchImpl: async () => {
+        fetchCalls++;
+        return new Response('{}');
+      },
+    });
+    assert.equal(res.statusCode, 503);
+    assert.equal(fetchCalls, 0);
+  }
+});
+
+test('legacy adapter rejects external proxy paths and oversized license payloads before fetch', async () => {
+  let fetchCalls = 0;
+  for (const path of ['//attacker.example/steal', 'https://attacker.example/steal']) {
+    const res = new FakeResponse();
+    await forwardPlatformApiCompatibilityRequest(makeRequest(), res.asResponse(), {
+      baseUrl: 'http://platform-internal:4000',
+      path,
+      method: 'GET',
+      fetchImpl: async () => {
+        fetchCalls++;
+        return new Response('{}');
+      },
+    });
+    assert.equal(res.statusCode, 400);
+    assert.equal((res.body as { error: string }).error, 'PLATFORM_API_PROXY_PATH_INVALID');
+  }
+
+  const body = { displayName: 'x'.repeat(70 * 1024) };
+  const res = new FakeResponse();
+  await forwardPlatformApiCompatibilityRequest(makeRequest({ body }), res.asResponse(), {
+    baseUrl: 'http://platform-internal:4000',
+    path: '/api/v1/license/lease',
+    method: 'POST',
+    fetchImpl: async () => {
+      fetchCalls++;
+      return new Response('{}');
+    },
+  });
+  assert.equal(res.statusCode, 413);
+  assert.equal((res.body as { error: string }).error, 'PLATFORM_API_COMPATIBILITY_BODY_TOO_LARGE');
+  assert.equal(fetchCalls, 0);
+});
