@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import { isIP } from 'node:net';
 import type { Request, Response } from 'express';
 
 export interface PlatformApiCompatibilityProxyOptions {
@@ -123,6 +124,18 @@ export async function forwardPlatformApiCompatibilityRequest(
     const authorization = req.headers.authorization;
     if (typeof authorization === 'string' && authorization.length > 0) {
       headers.set('Authorization', authorization);
+    }
+
+    // Nginx overwrites X-Forwarded-For with its observed peer address. Accept
+    // only a single syntactically valid IP from that trusted edge; never pass
+    // through a caller-controlled comma-separated proxy chain.
+    const forwardedFor = req.headers['x-forwarded-for'];
+    if (
+      typeof forwardedFor === 'string' &&
+      forwardedFor.trim() === forwardedFor &&
+      isIP(forwardedFor) !== 0
+    ) {
+      headers.set('X-Forwarded-For', forwardedFor);
     }
 
     const init: RequestInit = {
