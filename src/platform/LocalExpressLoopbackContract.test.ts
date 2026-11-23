@@ -28,16 +28,25 @@ test('hosted Express mode defaults to a non-loopback bind only when explicitly c
   assert.equal(resolveServerBindHost(env, config), '0.0.0.0');
 });
 
-test('API-only Express boot does not load Vite and Hosted mode delegates legacy platform routes to Fastify', () => {
+test('API-only Hosted Express boot does not load Vite or its legacy Local Ed25519 signer', () => {
   const server = readServerSource();
   assert.ok(!server.includes("import { createServer as createViteServer } from 'vite';"));
   assert.ok(server.includes("const { createServer: createViteServer } = await import('vite');"));
   assert.ok(server.includes("if (process.env.DISABLE_EMBEDDED_VITE !== 'true')"));
-  assert.ok(server.includes("if (audioApiSecurityGuard.config.mode !== 'local')"));
+  assert.ok(server.includes("audioApiSecurityGuard.config.mode === 'local'"));
+  assert.ok(server.includes('new PlatformLicenseService('));
+  assert.ok(server.includes('const getLocalLicenseService = (): PlatformLicenseService =>'));
+  assert.ok(server.includes('LOCAL_LICENSE_SIGNER_UNAVAILABLE_IN_HOSTED_MODE'));
   assert.ok(server.includes('forwardPlatformApiCompatibilityRequest'));
   assert.ok(server.includes("path: '/api/v1/crypto/public-key'"));
   assert.ok(server.includes("path: '/api/v1/license/lease'"));
-  assert.ok(server.includes("audioApiSecurityGuard.config.mode !== 'local'"));
+
+  const startServer = server.indexOf('async function startServer()');
+  const securityGuard = server.indexOf('const audioApiSecurityGuard = new AudioApiSecurityGuard();', startServer);
+  const licenseServiceCreation = server.indexOf('new PlatformLicenseService(', startServer);
+  assert.ok(securityGuard >= 0);
+  assert.ok(licenseServiceCreation > securityGuard);
+  assert.ok(server.slice(startServer, securityGuard).includes('DISABLE_EMBEDDED_VITE') === false);
 });
 
 function readServerSource(): string {
