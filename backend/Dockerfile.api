@@ -21,7 +21,7 @@ WORKDIR /app
 
 # The local transcription and smart-edit pipeline invokes FFmpeg at runtime.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    ca-certificates ffmpeg libgomp1 \\
+    ca-certificates ffmpeg libgomp1 \
     && rm -rf /var/lib/apt/lists/*
 
 COPY package.json ./
