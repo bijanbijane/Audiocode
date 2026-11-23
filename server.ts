@@ -1743,15 +1743,20 @@ async function startServer() {
   );
 
   if (!IS_PROD) {
-    const vite = await createViteServer({
+    // The API can run independently of the browser app. In that mode, Vite
+    // owns the web origin and proxies /api and /v1 requests to this server.
+    if (process.env.DISABLE_EMBEDDED_VITE !== 'true') {
+      const vite = await createViteServer({
       server: {
         middlewareMode: true,
         hmr: process.env.DISABLE_HMR !== 'true',
       },
       appType: 'spa',
     });
-    app.use(vite.middlewares);
-  } else {
+      app.use(vite.middlewares);
+    }
+  } else if (process.env.DISABLE_WEB_HOST !== 'true') {
+    // Production API-only deployments leave static asset hosting to the web tier.
     const distDir = path.resolve(__dirname, 'dist');
     app.use(
       express.static(distDir, {
