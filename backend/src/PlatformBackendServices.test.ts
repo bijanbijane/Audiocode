@@ -168,12 +168,36 @@ test('Section 100: PlatformBackendServices issues Ed25519-signed license leases 
   );
   assert.equal(statusCode, 403);
 
-  // Succeed for authenticated user inside pinned transaction
+  // A raw legacy fingerprint must match its supplied SHA-256 digest.
   statusCode = 200;
   await postRoutes.get('/api/v1/license/lease')!(
     {
       authenticatedUserId: 'usr_100',
-      body: { deviceFingerprintHash: VALID_FP_1 },
+      body: {
+        deviceFingerprint: 'legacy-device-fingerprint-01',
+        deviceFingerprintHash: VALID_FP_1,
+      },
+      headers: {},
+    },
+    mockReply,
+  );
+  assert.equal(statusCode, 403);
+  assert.equal((sentBody as { error: string }).error, 'DEVICE_FINGERPRINT_HASH_MISMATCH');
+
+  // Succeed for authenticated user with the real hash of the legacy raw fingerprint.
+  const legacyDeviceFingerprint = 'legacy-device-fingerprint-01';
+  const legacyDeviceFingerprintHash = crypto
+    .createHash('sha256')
+    .update(legacyDeviceFingerprint, 'utf8')
+    .digest('hex');
+  statusCode = 200;
+  await postRoutes.get('/api/v1/license/lease')!(
+    {
+      authenticatedUserId: 'usr_100',
+      body: {
+        deviceFingerprint: legacyDeviceFingerprint,
+        deviceFingerprintHash: legacyDeviceFingerprintHash,
+      },
       headers: {},
     },
     mockReply,
@@ -208,7 +232,7 @@ test('Section 100: PlatformBackendServices issues Ed25519-signed license leases 
   assert.equal(env.payload.userId, 'usr_100');
   assert.equal(env.payload.planTier, 'PRO_MONTHLY');
   assert.equal(env.payload.plan, 'PRO');
-  assert.equal(env.payload.deviceFingerprint, VALID_FP_1);
+  assert.equal(env.payload.deviceFingerprint, legacyDeviceFingerprint);
   assert.match(env.payload.licenseId, /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i);
   assert.deepEqual(env.payload.allowedModelTiers, ['GROUP_A', 'GROUP_B']);
 
