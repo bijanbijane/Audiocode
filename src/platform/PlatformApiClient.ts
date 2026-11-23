@@ -25,6 +25,20 @@ export interface PlatformApiLegacySignedEnvelope<T> {
   readonly decodedPreview?: T;
 }
 
+export interface PlatformApiModelCatalogEntry {
+  readonly model_id: string;
+  readonly version: string;
+  readonly task_type: string;
+  readonly tier_group: 'GROUP_A' | 'GROUP_B' | 'GROUP_C';
+  readonly release_status: string;
+  readonly spdx_license: string;
+  readonly quantization_format: string;
+  readonly min_ram_mb: number;
+  readonly recommended_ram_mb: number;
+  readonly total_size_bytes: number | string;
+}
+
+
 export interface PlatformApiOfflineLeasePayload {
   readonly licenseId: string;
   readonly userId: string;
@@ -107,6 +121,10 @@ export class PlatformApiClient {
 
   public getPublicKeyInfo(): Promise<PlatformApiPublicKeyInfo> {
     return this.request('/api/v1/crypto/public-key');
+  }
+
+  public getModelCatalog(): Promise<{ models: readonly PlatformApiModelCatalogEntry[] }> {
+    return this.request('/api/v1/models/catalog');
   }
 
   /**
