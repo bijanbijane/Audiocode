@@ -63,7 +63,7 @@ These route families appear platform-facing by domain, but their actual persiste
 
 **Legacy Express Hosted compatibility adapter:** the old `GET /api/v1/crypto/public-key`, `POST /api/v1/license/lease`, and `GET /api/v1/models/:modelId/manifest` paths forward to the internal Fastify Platform API when `AudioApiSecurityGuard` is in Hosted mode. Local mode retains the legacy demo signer. The lease adapter hashes a legacy raw device fingerprint on the server; Fastify re-computes SHA-256 and constant-time compares it with the supplied digest before issuing a lease. The adapter strips client-supplied plan, grace period, and unknown fields. An optional legacy `userId` is forwarded only for a consistency check and Fastify rejects it unless it equals the authenticated JWT subject. The new browser client `src/platform/PlatformApiClient.ts` sends a Bearer token and a SHA-256 device fingerprint hash, never a client-supplied plan or user ID. It is not yet connected to a real user-facing login/account screen.
 
-**Compatibility work now present:** in Hosted mode the legacy Express public-key, lease and model-manifest URLs forward to Fastify; Local mode retains the local compatibility signer. The adapter hashes a legacy raw device fingerprint, strips plan/grace overrides, and Fastify independently re-hashes and constant-time verifies any raw/hash pair before issuing a lease. The PostgreSQL lease UUID and paid-period expiry are covered by source tests using the current browser verifier. The Fastify manifest alias signs the legacy manifest shape. Chunk delivery now requires a registered PostgreSQL chunk row, checks realpath confinement, exact byte length (maximum 16 MiB), and SHA-256 before returning full or ranged bytes; revoked models return 410. These tests are committed source, not proof of an executed CI run. The user-facing login/account UI is not wired to `PlatformApiClient`; full production PostgreSQL integration and successful build/test execution remain unverified.
+**Compatibility work now present:** in Hosted mode the legacy Express public-key, lease and model-manifest URLs forward to Fastify; Local mode retains the local compatibility signer. The adapter hashes a legacy raw device fingerprint, strips plan/grace overrides, and Fastify independently re-hashes and constant-time verifies any raw/hash pair before issuing a lease. The existing Ed25519 key pair and `keyVersion` remain unchanged until a versioned client key-discovery/cache rollout. The PostgreSQL lease UUID and paid-period expiry are covered by source tests using the current browser verifier. The Fastify manifest alias signs the legacy manifest shape. Chunk delivery requires a registered PostgreSQL chunk row, enforces model-root realpath confinement, a 16 MiB size ceiling, exact byte length and SHA-256 before returning full or ranged bytes; revoked models return 410. These tests are committed source, not proof of an executed CI run. The user-facing login/account UI is not wired to `PlatformApiClient`; full production PostgreSQL integration and successful build/test execution remain unverified.
 
 ### 2.4 Fastify/PostgreSQL route inventory
 
@@ -119,6 +119,7 @@ Observed Fastify registrations in:
 - Add consumer inventory from browser code, tests, Audition CEP, Companion and admin surfaces.
 - Compatibility implementations now cover the legacy license envelope/paid expiry, public-key discovery, and model-manifest payload. Keep the Hosted Express facade forwarding to Fastify while full auth, model delivery, and deployment parity are validated.
 - Unify or explicitly scope `bootstrapBackendServer` vs `buildBackendApplication`; add a real Fastify startup test that asserts the production route inventory, including any Factory-only modules intended to be live.
+- The three Hosted legacy Express URL facades already forward to Fastify; keep the remaining local/control-plane route families on Express until their consumers, auth, persistence and local-vs-cloud data policies are proven.
 
 ### Gate C — Independently runnable Platform API
 
@@ -129,7 +130,7 @@ Observed Fastify registrations in:
 - Keep its environment secrets isolated; fail closed when required values are missing.
 - Treat the Express Local Audio Runtime package/lockfile split as a separate follow-on gate; do not claim its dependency graph is independent merely because it has its own container.
 - Run PostgreSQL migrations and integration tests in a disposable test database.
-- Do not proxy overlapping license/model endpoints until signature and response parity tests pass.
+- Keep the three legacy Hosted facades forwarding to Fastify; do not move additional license/admin/model consumers until signature, auth, storage and response parity tests pass.
 
 ### Gate D — Move platform domains incrementally
 
