@@ -27,6 +27,12 @@ export interface BackendOfflineLicenseLeasePayload {
   readonly offlineGraceExpiresAtUnixSec: number;
   readonly subscriptionExpiresAtUnixSec: number;
   readonly allowedModelTiers: readonly ('GROUP_A' | 'GROUP_B')[];
+  // Compatibility fields consumed by src/security/OfflineCryptoVerifier.ts.
+  readonly displayName: string;
+  readonly plan: 'FREE' | 'PRO' | 'ENTERPRISE';
+  readonly issuedAtMs: number;
+  readonly offlineGraceExpiresAtMs: number;
+  readonly deviceFingerprint: string;
 }
 
 export interface BackendSignedEnvelope<T> {
@@ -34,6 +40,15 @@ export interface BackendSignedEnvelope<T> {
   readonly payloadCanonicalBase64: string;
   readonly ed25519SignatureHex: string;
   readonly keyId: string;
+}
+
+export interface BackendSignedOfflineLicenseEnvelope
+  extends BackendSignedEnvelope<BackendOfflineLicenseLeasePayload> {
+  readonly payloadBase64: string;
+  readonly signatureBase64: string;
+  readonly algorithm: 'Ed25519';
+  readonly keyVersion: number;
+  readonly decodedPreview: BackendOfflineLicenseLeasePayload;
 }
 
 export interface PgPoolLike {
@@ -108,21 +123,44 @@ export interface FastifyInstanceLike {
 
 export class PlatformBackendServices {
   private readonly privateKeyObj: crypto.KeyObject;
+  private readonly publicKeySpkiBase64: string;
 
   constructor(
     private readonly db: PgPoolLike,
     private readonly config: BackendRuntimeConfig,
   ) {
     this.privateKeyObj = crypto.createPrivateKey(config.ed25519PrivateKeyPem);
+    const publicKey = crypto.createPublicKey(this.privateKeyObj);
+    this.publicKeySpkiBase64 = Buffer.from(
+      publicKey.export({ type: 'spki', format: 'der' }),
+    ).toString('base64');
+  }
+
+  public getPublicKeyInfo(): {
+    publicKeySpkiBase64: string;
+    algorithm: 'Ed25519';
+    keyVersion: number;
+    keyId: string;
+  } {
+    return {
+      publicKeySpkiBase64: this.publicKeySpkiBase64,
+      algorithm: 'Ed25519',
+      keyVersion: 1,
+      keyId: this.config.keyId,
+    };
   }
 
   /**
    * ثبت تمام مسیرهای رسمی API سرور Backend روی Fastify
    */
   public registerAllRoutes(fastify: FastifyInstanceLike): void {
+    fastify.get('/api/v1/crypto/public-key', async (_request, reply) => {
+      return reply.send(this.getPublicKeyInfo());
+    });
+
     // ۱. صدور و تمدید گواهی اجاره آفلاین (Ed25519 Offline License Lease) بر اساس هویت احراز‌شده و تراکنش اتمی
     fastify.post<{
-      Body: { deviceFingerprintHash: string; userId?: string };
+      Body: { deviceFingerprintHash: string; userId?: string; displayName?: string };
     }>('/api/v1/license/lease', async (request, reply) => {
       const authenticatedUserId =
         typeof request.authenticatedUserId === 'string' &&
@@ -140,6 +178,7 @@ export class PlatformBackendServices {
       const body = (request.body ?? {}) as {
         deviceFingerprintHash?: unknown;
         userId?: unknown;
+        displayName?: unknown;
       };
 
       if (body.userId !== undefined) {
@@ -170,8 +209,21 @@ export class PlatformBackendServices {
           const sub = seatResult.subscription;
           const nowSec = Math.floor(Date.now() / 1000);
           const subEndSec = Math.floor(sub.currentPeriodEnd.getTime() / 1000);
-          const graceEndSec = Math.min(subEndSec, nowSec + sub.offlineGraceHours * 3600);
-          const leaseId = `lic_${crypto.randomUUID()}`;
+          // A paid offline entitlement remains valid for the full paid period.
+          // offline_grace_hours is not used to truncate already-paid local access.
+          const offlineEntitlementEndSec = subEndSec;
+          // The PostgreSQL lease_id column is UUID; do not prefix the stored value.
+          const leaseId = crypto.randomUUID();
+          const legacyPlan =
+            sub.planTier === 'FREE_TRIAL'
+              ? 'FREE'
+              : sub.planTier === 'STUDIO_ENTERPRISE'
+                ? 'ENTERPRISE'
+                : 'PRO';
+          const displayName =
+            typeof body.displayName === 'string' && body.displayName.trim().length > 0
+              ? body.displayName.trim().slice(0, 128)
+              : authenticatedUserId;
 
           await txClient.query(
             `INSERT INTO offline_license_leases
@@ -183,24 +235,33 @@ export class PlatformBackendServices {
               sub.id,
               seatResult.normalizedDeviceFingerprintHash,
               this.config.keyId,
-              graceEndSec,
+              offlineEntitlementEndSec,
             ],
           );
 
+          const issuedAtMs = Date.now();
+          const offlineEntitlementEndMs = offlineEntitlementEndSec * 1000;
+          const allowedModelTiers: readonly ('GROUP_A' | 'GROUP_B')[] =
+            legacyPlan === 'FREE' ? ['GROUP_A'] : ['GROUP_A', 'GROUP_B'];
           const payload: BackendOfflineLicenseLeasePayload = {
             licenseId: leaseId,
             userId: authenticatedUserId,
             planTier: sub.planTier,
             issuedAtUnixSec: nowSec,
-            offlineGraceExpiresAtUnixSec: graceEndSec,
+            offlineGraceExpiresAtUnixSec: offlineEntitlementEndSec,
             subscriptionExpiresAtUnixSec: subEndSec,
-            allowedModelTiers: ['GROUP_A', 'GROUP_B'],
+            allowedModelTiers,
+            displayName,
+            plan: legacyPlan,
+            issuedAtMs,
+            offlineGraceExpiresAtMs: offlineEntitlementEndMs,
+            deviceFingerprint: seatResult.normalizedDeviceFingerprintHash,
           };
           return payload;
         });
 
         // Ed25519 envelope signing runs strictly after COMMIT succeeds.
-        return reply.send(this.signEnvelope(leasePayload));
+        return reply.send(this.signOfflineLicenseLeaseEnvelope(leasePayload));
       } catch (err) {
         return sendClassifiedLicenseError(reply, err);
       }
@@ -377,6 +438,29 @@ export class PlatformBackendServices {
       }
       return reply.status(200).send({ ready: true });
     });
+  }
+
+  public signOfflineLicenseLeaseEnvelope(
+    payload: BackendOfflineLicenseLeasePayload,
+  ): BackendSignedOfflineLicenseEnvelope {
+    const payloadBase64 = Buffer.from(JSON.stringify(payload), 'utf8').toString('base64');
+    const signature = crypto.sign(
+      null,
+      Buffer.from(payloadBase64, 'utf8'),
+      this.privateKeyObj,
+    );
+    return {
+      payload,
+      payloadCanonicalBase64: payloadBase64,
+      ed25519SignatureHex: signature.toString('hex'),
+      keyId: this.config.keyId,
+      // Exact envelope fields expected by the current OfflineCryptoVerifier.
+      payloadBase64,
+      signatureBase64: signature.toString('base64'),
+      algorithm: 'Ed25519',
+      keyVersion: 1,
+      decodedPreview: payload,
+    };
   }
 
   public signEnvelope<T>(payload: T): BackendSignedEnvelope<T> {
