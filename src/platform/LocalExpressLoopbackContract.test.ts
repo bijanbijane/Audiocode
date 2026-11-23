@@ -1,5 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 import { resolveAudioApiSecurityConfig, resolveServerBindHost } from '../security/AudioApiSecurityGuard';
 
 test('local Compose keeps the Express API on a real loopback bind in production mode', () => {
