@@ -26,7 +26,7 @@ function walk(directory, output = []) {
     if (
       SOURCE_EXTENSIONS.has(extension) &&
       !/\.(?:test|spec|stories)\.[^.]+$/i.test(item.name) &&
-      !item.endsWith('.d.ts')
+      !item.name.endsWith('.d.ts')
     ) {
       output.push(path.join(directory, item.name));
     }
