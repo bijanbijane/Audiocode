@@ -9,6 +9,7 @@ on:
       - 'server.ts'
       - 'vite.config.ts'
       - 'scripts/start-api.ts'
+      - 'scripts/audit-runtime-dependencies.mjs'
       - 'backend/Dockerfile.api'
       - 'backend/src/SeparatedRuntimeRoutingContract.test.ts'
       - 'backend/src/PlatformBackendServices.ts'
@@ -43,6 +44,12 @@ jobs:
           mkdir -p ci-logs
           set -o pipefail
           bun install --frozen-lockfile 2>&1 | tee ci-logs/bun-install.log
+
+      - name: Audit Web, Local Runtime and Platform API dependency boundaries
+        run: |
+          mkdir -p ci-logs
+          set -o pipefail
+          npm run audit:runtime-deps 2>&1 | tee ci-logs/runtime-dependency-inventory.json
 
       - name: Test separated routing and Platform API client contracts
         run: |
