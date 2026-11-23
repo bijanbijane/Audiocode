@@ -1,0 +1,1842 @@
+# AVP-P05-001
+# PHASE 05 — WEB APPLICATION INTEGRATION WITH THE SHARED LOCAL ASR ENGINE
+
+**PROJECT:** AVAPARDAZ  
+**EXECUTION ID:** AVP-P05-001  
+**PHASE:** 05  
+**REVISION:** 1.0  
+**PREVIOUS PHASE:** AVP-P04-001  
+**EXECUTION MODE:** AUTONOMOUS ENGINEERING  
+**PRIORITY:** CRITICAL  
+**PRODUCT:** AVAPARDAZ WEB APPLICATION  
+**PRIMARY ASR ENGINE:** APPROVED PHASE-03 LOCAL ENGINE  
+**PRIMARY EXECUTION:** LOCAL CPU INFERENCE  
+**PRIMARY HARDWARE:** APPLE SILICON M2 / 8 GB RAM  
+**NETWORK POLICY:** NO CLOUD ASR / NO AUDIO UPLOAD  
+**ARCHITECTURAL REQUIREMENT:** ONE SHARED ASR ENGINE FOR ALL CLIENTS
+
+---
+
+# SECTION 00 — MISSION
+
+You are responsible for integrating AvaPardaz's existing web application with the production-approved local ASR engine implemented in PHASE-03.
+
+You are operating as an autonomous engineering team consisting of:
+
+1. Senior React and TypeScript Engineer.
+2. Web Audio API Engineer.
+3. Browser Runtime Engineer.
+4. Local Service Integration Engineer.
+5. ASR Integration Engineer.
+6. Audio Timeline Engineer.
+7. Frontend Performance Engineer.
+8. Browser Security Engineer.
+9. Persian RTL and Internationalization Engineer.
+10. QA and Automation Engineer.
+
+Your mission is to transform the existing AvaPardaz web application into a functional consumer of the shared local ASR engine.
+
+You are not authorized to build another ASR inference engine.
+
+You are not authorized to replace the approved PHASE-03 model.
+
+You are not authorized to silently introduce a cloud transcription provider.
+
+You must integrate the actual working local engine into the existing application while preserving healthy functionality.
+
+The resulting product must support a coherent local audio-editing workflow:
+
+```text
+USER OPENS AVAPARDAZ WEB APP
+             |
+             v
+LOCAL ENGINE DISCOVERY
+             |
+             v
+AUTHENTICATED ENGINE CONNECTION
+             |
+             v
+AUDIO IMPORT
+             |
+             v
+AUDIO VALIDATION
+             |
+             v
+LOCAL ASR JOB SUBMISSION
+             |
+             v
+CPU-BASED TRANSCRIPTION
+             |
+             v
+WORD-LEVEL TIMESTAMP RESULTS
+             |
+             v
+INTERACTIVE TRANSCRIPT TIMELINE
+             |
+             v
+REVIEW AND EDITING WORKFLOW
+             |
+             v
+PREVIEW
+             |
+             v
+USER-APPROVED AUDIO EXPORT
+```
+
+The final system must work with the existing product architecture.
+
+Do not build an unrelated replacement web application.
+
+---
+
+# SECTION 01 — MANDATORY ENTRY GATE
+
+Do not write production code before examining previous phase evidence.
+
+Inspect:
+
+```bash
+pwd
+git status --short --branch
+git rev-parse HEAD
+git log -5 --oneline
+find docs/phase-03 -maxdepth 3 -type f | sort
+find docs/phase-04 -maxdepth 3 -type f | sort
+```
+
+Verify:
+
+```text
+PHASE_03_STATUS == ACCEPTED
+PHASE_04_STATUS == ACCEPTED
+LOCAL_ASR_ENGINE == OPERATIONAL
+ENGINE_API == VERIFIED
+ENGINE_AUTHENTICATION == VERIFIED
+OFFLINE_INFERENCE == VERIFIED
+TRANSCRIPT_SCHEMA == STABLE
+WORD_TIMESTAMPS == VERIFIED
+```
+
+Inspect the actual evidence, not only the final status labels.
+
+Verify the following artifacts exist and work:
+
+- PHASE-03 engine implementation.
+- Approved model checkpoint.
+- Model integrity verification.
+- Local API.
+- API authentication.
+- Actual CPU inference.
+- Offline execution.
+- Job management.
+- Word-level output contract.
+- PHASE-04 integration acceptance report.
+- PHASE-04 host integration evidence.
+
+If either prerequisite phase has not genuinely been accepted, stop:
+
+```text
+EXECUTION_ID=AVP-P05-001
+ENTRY_GATE=BLOCKED
+BLOCKER=PREVIOUS_PHASE_NOT_ACCEPTED
+PRODUCTION_WEB_CHANGES=NONE
+```
+
+Do not manufacture acceptance evidence.
+
+Do not bypass a failed phase gate.
+
+---
+
+# SECTION 02 — EXISTING WEB APPLICATION DISCOVERY
+
+Before implementing anything, inspect the current web application thoroughly.
+
+Discover the actual:
+
+- Framework.
+- Framework version.
+- Language.
+- Build system.
+- Routing system.
+- State management.
+- Audio-processing architecture.
+- Existing audio player.
+- Waveform implementation.
+- Timeline representation.
+- File import mechanism.
+- Export pipeline.
+- Local persistence.
+- Existing editing operations.
+- Existing transcript components.
+- Existing backend services.
+- Authentication architecture.
+- Internationalization system.
+- RTL implementation.
+- Testing framework.
+
+Inspect all relevant source files.
+
+If the project uses React and TypeScript, work with its existing versions and conventions.
+
+Do not assume that a previously suggested architecture has actually been implemented.
+
+Do not upgrade the entire application merely to facilitate this phase.
+
+Do not replace working audio playback or waveform infrastructure.
+
+Do not rewrite healthy components for stylistic preferences.
+
+Preserve the project's existing architectural restrictions, including:
+
+```text
+MAX_SOURCE_FILE_LINES = 500
+```
+
+Do not aggressively compress healthy files just to satisfy a line-count target.
+
+Prefer small, independently testable modules.
+
+Produce:
+
+```text
+docs/phase-05/EXISTING-WEB-APPLICATION-AUDIT.md
+```
+
+This document must identify what already exists, what works, what is missing, and what must be reused.
+
+---
+
+# SECTION 03 — CRITICAL BROWSER-TO-LOCAL-ENGINE ARCHITECTURE
+
+This is the most important architectural decision in PHASE-05.
+
+The web application may be hosted remotely over HTTPS, while the ASR engine runs on the user's own computer.
+
+The browser must communicate with a local service without transmitting audio to a remote transcription server.
+
+However, browser security policies may restrict these requests.
+
+You must investigate and test the current browser security model.
+
+Do not assume that this always works:
+
+```javascript
+fetch("http://127.0.0.1:PORT/v1/health");
+```
+
+A successful request in a development environment does not prove production compatibility.
+
+## 03.1 Architecture Alternatives
+
+Evaluate:
+
+**Option A — Hosted HTTPS Web App + Local Companion Engine**
+
+```text
+HOSTED WEB APP
+      |
+      | HTTPS
+      |
+USER BROWSER
+      |
+      | Local Network Access
+      |
+127.0.0.1 / ::1
+      |
+      v
+LOCAL AVAPARDAZ ENGINE
+      |
+      v
+APPROVED CPU ASR MODEL
+```
+
+**Option B — Locally Served Web Application + Local Engine**
+
+```text
+LOCAL WEB APP
+      |
+      | Loopback communication
+      |
+LOCAL ENGINE
+      |
+      v
+CPU ASR MODEL
+```
+
+**Option C — Alternative Browser-Compatible Local Integration**
+
+Consider another architecture only if the first two cannot safely satisfy the requirements.
+
+Potential alternatives must be supported by actual technical evidence.
+
+Do not introduce a desktop wrapper or a second backend without a demonstrated need.
+
+## 03.2 Required Architecture Decision
+
+Evaluate each option against:
+
+- Browser compatibility.
+- Local network permissions.
+- HTTPS requirements.
+- Authentication.
+- CORS.
+- Installation complexity.
+- Security.
+- Offline capability.
+- macOS compatibility.
+- Future Windows compatibility.
+- Maintenance cost.
+- User experience.
+
+Produce:
+
+```text
+docs/phase-05/LOCAL-CONNECTIVITY-ARCHITECTURE.md
+```
+
+Select one primary architecture and document any supported fallback.
+
+If the hosted browser architecture is not securely supported in a particular browser, identify that browser as unsupported rather than pretending compatibility.
+
+---
+
+# SECTION 04 — BROWSER LOCAL NETWORK ACCESS AND SECURITY
+
+Research current official browser documentation before implementing local connectivity.
+
+Required references:
+
+```text
+https://developer.chrome.com/blog/local-network-access
+
+https://developer.mozilla.org/en-US/docs/Web/Security/Defenses/Local_network_access
+
+https://developer.mozilla.org/en-US/docs/Web/Security/Defenses/Mixed_content
+
+https://developer.mozilla.org/en-US/docs/Web/Security/Defenses/Secure_Contexts
+
+https://learn.microsoft.com/en-us/deployedge/ms-edge-local-network-access
+```
+
+## 04.1 Secure Context Requirement
+
+The hosted application must use HTTPS.
+
+Check:
+
+```javascript
+window.isSecureContext
+```
+
+Do not assume an HTTP-hosted public page can request loopback permissions.
+
+Remember that localhost and loopback origins have special secure-context treatment, but this does not automatically establish permission to access every local endpoint.
+
+## 04.2 Local Network Access Permission
+
+Investigate the current implementation of:
+
+```text
+local-network
+loopback-network
+```
+
+Where supported, inspect permission status using the browser Permissions API.
+
+Do not assume that every browser implements the same permission names or behavior.
+
+Feature-detect supported APIs.
+
+Explain permission requirements to the user only when necessary.
+
+Do not create an infinite permission-request loop.
+
+A denied permission must produce a clear recovery message.
+
+## 04.3 Request Address Space
+
+Investigate current support for:
+
+```javascript
+targetAddressSpace
+```
+
+Apply current browser requirements when appropriate.
+
+Do not assume that an API property is available simply because it appears in an online example.
+
+Check actual compatibility and TypeScript type support.
+
+## 04.4 Legacy PNA Protection
+
+Do not rely on legacy Private Network Access preflight headers as a universal solution.
+
+Verify the current Local Network Access model.
+
+Do not introduce deprecated compatibility headers as a substitute for modern browser permission handling.
+
+## 04.5 Browser Compatibility Matrix
+
+Evaluate the actual supported browser releases at execution time.
+
+Minimum research targets:
+
+| Browser | Required evaluation |
+|---|---|
+| Google Chrome | Actual stable release |
+| Microsoft Edge | Actual stable release |
+| Safari | Actual supported macOS release |
+| Firefox | Actual stable release |
+
+For each browser record:
+
+- Exact version.
+- OS version.
+- Secure context status.
+- Loopback connectivity.
+- Permission behavior.
+- CORS behavior.
+- Authentication behavior.
+- Upload behavior.
+- Error handling.
+- Actual test status.
+
+Use:
+
+```text
+PASS
+FAIL
+PARTIAL
+NOT_RUN
+NOT_SUPPORTED
+```
+
+Do not claim universal browser support from a Chrome-only test.
+
+---
+
+# SECTION 05 — SECURE LOCAL ENGINE DISCOVERY
+
+Use the actual PHASE-03 API.
+
+Required endpoints, subject to verification:
+
+```text
+GET    /v1/health
+GET    /v1/capabilities
+POST   /v1/jobs
+GET    /v1/jobs/{job_id}
+GET    /v1/jobs/{job_id}/result
+DELETE /v1/jobs/{job_id}
+```
+
+Do not invent endpoints if the accepted PHASE-03 contract uses different routes.
+
+The web application must:
+
+1. Detect whether the engine is available.
+2. Authenticate.
+3. Verify engine version.
+4. Verify model readiness.
+5. Read engine capabilities.
+6. Detect unsupported configurations.
+7. Present a clear connection state.
+
+Required client states:
+
+```text
+DISCONNECTED
+CHECKING
+PERMISSION_REQUIRED
+AUTHENTICATION_REQUIRED
+PAIRING_REQUIRED
+CONNECTING
+CONNECTED
+MODEL_LOADING
+MODEL_READY
+ENGINE_BUSY
+ENGINE_ERROR
+UNSUPPORTED_BROWSER
+```
+
+## 05.1 Service Discovery
+
+Do not scan arbitrary network ports.
+
+Do not probe the entire local network.
+
+Use the exact configured service location or an authenticated discovery mechanism established in PHASE-03.
+
+The service must bind only to loopback addresses.
+
+Support IPv4 and IPv6 loopback only where the service actually provides them:
+
+```text
+127.0.0.1
+::1
+```
+
+Do not bind the ASR service to:
+
+```text
+0.0.0.0
+::
+```
+
+## 05.2 User-Controlled Pairing
+
+Inspect the existing PHASE-03 authentication architecture.
+
+If its current authentication mechanism securely supports the hosted web origin, reuse it.
+
+If it does not, design a backward-compatible, explicitly user-approved pairing extension.
+
+A recommended pairing model is:
+
+1. User selects Connect Local Engine.
+2. Local engine generates a one-time cryptographically random pairing credential.
+3. Credential expires after 120 seconds.
+4. Credential can be redeemed only once.
+5. User confirms the exact requesting application origin.
+6. Engine validates the allowed origin.
+7. Engine issues a scoped session credential.
+8. The web client retains the credential in memory only.
+9. Session expiration requires reauthentication.
+
+Suggested security parameters:
+
+```text
+PAIRING_TOKEN_ENTROPY >= 128 bits
+PAIRING_TTL_SECONDS = 120
+PAIRING_REDEMPTIONS = 1
+FAILED_PAIRING_LIMIT = 5 per 10 minutes
+SESSION_TTL_SECONDS = 28800
+```
+
+These are proposed implementation constraints; adapt them only with a documented security rationale.
+
+Never hardcode credentials.
+
+Never store bearer tokens in:
+
+- localStorage.
+- Source code.
+- URLs.
+- Analytics events.
+- Browser console logs.
+
+Do not store access credentials in persistent browser storage merely for convenience.
+
+Do not disable authentication to make the web app connect.
+
+If a secure pairing mechanism cannot be implemented safely, report the blocker.
+
+## 05.3 Origin Validation
+
+The local engine must validate:
+
+- Exact request Origin.
+- Allowed host and port.
+- Host header.
+- Request type.
+- Authentication credential.
+- Pairing state.
+
+Never use:
+
+```text
+Access-Control-Allow-Origin: *
+```
+
+for the authenticated local engine.
+
+Maintain a strict origin allowlist.
+
+Include:
+
+- Actual production AvaPardaz origin.
+- Explicit development origins only.
+
+CORS is not authentication.
+
+Reject unauthorized origins even when a request originates from localhost.
+
+Protect against DNS rebinding and malicious websites attempting to access the local engine.
+
+---
+
+# SECTION 06 — LOCAL ENGINE CLIENT IMPLEMENTATION
+
+Create a dedicated engine connector.
+
+Do not put local API networking directly inside UI components.
+
+Suggested structure:
+
+```text
+src/
+  services/
+    local-engine/
+      engine-client.ts
+      engine-discovery.ts
+      engine-auth.ts
+      engine-pairing.ts
+      engine-capabilities.ts
+      engine-errors.ts
+      engine-contracts.ts
+      engine-compatibility.ts
+```
+
+Adapt to the existing source architecture.
+
+Required interface:
+
+```typescript
+interface LocalEngineClient {
+  checkHealth(): Promise<EngineHealth>;
+
+  getCapabilities(): Promise<EngineCapabilities>;
+
+  connect(): Promise<EngineConnection>;
+
+  disconnect(): Promise<void>;
+
+  submitTranscription(
+    request: TranscriptionRequest
+  ): Promise<TranscriptionJob>;
+
+  getJobStatus(
+    jobId: string
+  ): Promise<TranscriptionJobStatus>;
+
+  getResult(
+    jobId: string
+  ): Promise<TranscriptionResult>;
+
+  cancelJob(
+    jobId: string
+  ): Promise<void>;
+}
+```
+
+These are interface requirements, not permission to invent endpoint behavior.
+
+Implement against the exact PHASE-03 API contract.
+
+Validate all responses at runtime.
+
+TypeScript types alone are not runtime validation.
+
+Use a schema validator compatible with the existing project.
+
+Reject malformed or incompatible transcript responses.
+
+---
+
+# SECTION 07 — AUDIO IMPORT AND INPUT VALIDATION
+
+Integrate with the existing audio import workflow.
+
+Do not replace a functional import system without evidence.
+
+Support the actual formats confirmed by PHASE-03:
+
+```text
+WAV
+FLAC
+MP3
+M4A / AAC
+OGG / OPUS
+```
+
+Verify each format against the actual local engine capabilities.
+
+The browser must not assume that an extension name proves the file contains valid audio.
+
+Perform:
+
+- File-size validation.
+- MIME validation.
+- Extension validation.
+- Header validation where supported.
+- Duration inspection.
+- Channel inspection.
+- Sample-rate inspection.
+- Empty-file detection.
+- Corrupt-input detection.
+
+Use the existing audio decoder where it is reliable.
+
+Do not introduce multiple conflicting decoding pipelines.
+
+Never send audio to a remote server for inspection or conversion.
+
+## 07.1 Source Integrity
+
+Keep the original selected audio immutable.
+
+Compute a source fingerprint:
+
+```text
+SOURCE_SHA256 = SHA256(original_audio_bytes)
+```
+
+Record:
+
+- Source file name.
+- Source fingerprint.
+- File size.
+- Duration.
+- Sample rate.
+- Channel count.
+- Import timestamp.
+
+Use actual measured metadata.
+
+Do not fabricate missing metadata.
+
+## 07.2 File Access
+
+Use browser-supported explicit user file selection.
+
+Do not attempt arbitrary local filesystem access.
+
+Do not assume the application can read a user's file path directly.
+
+The File System Access API may be used only when supported and explicitly authorized.
+
+Provide a compatible file-input fallback.
+
+Do not request unnecessary filesystem permissions.
+
+---
+
+# SECTION 08 — TRANSCRIPTION JOB WORKFLOW
+
+Implement a state-driven job manager.
+
+Required states:
+
+```text
+IDLE
+SOURCE_VALIDATION
+SOURCE_PREPARATION
+ENGINE_CHECK
+SUBMITTING
+QUEUED
+DECODING
+PREPROCESSING
+TRANSCRIBING
+ALIGNING
+FINALIZING
+COMPLETED
+CANCELLING
+CANCELLED
+FAILED
+```
+
+Do not create duplicate transcription jobs when the user double-clicks or refreshes the interface.
+
+Generate a unique client-side request identifier.
+
+Track the actual engine job ID.
+
+Use actual engine status values.
+
+## 08.1 Job Submission
+
+Submit the actual original or prepared audio bytes according to the PHASE-03 contract.
+
+Conceptual request:
+
+```typescript
+interface TranscriptionRequest {
+  audio: File | Blob;
+  languageHint?: string;
+  timestamps: true;
+  requestId: string;
+}
+```
+
+Do not introduce a cloud upload endpoint.
+
+Do not pass arbitrary local filesystem paths.
+
+The browser should transmit audio only to the authenticated local engine.
+
+## 08.2 Polling
+
+Initial status polling target:
+
+```text
+POLL_INTERVAL_MS = 1000
+```
+
+Implement:
+
+- Backoff after transient network errors.
+- Immediate stop on terminal states.
+- Job cancellation.
+- Timeout handling.
+- Reconnection after temporary disconnection.
+- Job recovery where supported.
+- Prevention of duplicate submissions.
+
+Do not interpret a dropped connection as a completed job.
+
+Do not fabricate progress percentages.
+
+Only display actual progress data received from the engine.
+
+## 08.3 Resource Policy
+
+Initial client policy:
+
+```text
+MAX_ACTIVE_ASR_JOBS = 1
+```
+
+This matches the conservative PHASE-03 target profile.
+
+Only permit additional concurrent jobs if actual engine capabilities and memory measurements support them.
+
+Never create unbounded queues.
+
+---
+
+# SECTION 09 — TRANSCRIPT DATA INTEGRATION
+
+Use the exact accepted PHASE-03 transcript schema.
+
+Do not invent an alternative transcript format.
+
+Required word fields:
+
+```typescript
+interface TranscriptWord {
+  text: string;
+  start_ms: number;
+  end_ms: number;
+  confidence: number | null;
+  timestamp_source:
+    | "native_model"
+    | "forced_aligner"
+    | "external_aligner"
+    | "estimated";
+}
+```
+
+Validate the following:
+
+```text
+start_ms >= 0
+end_ms > start_ms
+end_ms <= source_duration_ms
+word order is chronological
+source timeline is preserved
+```
+
+Segments must preserve:
+
+- Source time.
+- Text.
+- Word order.
+- Segment identity.
+- Language information where genuinely available.
+
+Repeated words must remain distinct events.
+
+Do not merge words based solely on identical text.
+
+Do not remove fillers.
+
+Do not autocorrect grammar.
+
+Do not paraphrase the transcript.
+
+Do not automatically remove incomplete phrases.
+
+Maintain a raw transcription representation separate from any optional display formatting.
+
+---
+
+# SECTION 10 — INTERACTIVE AUDIO TRANSCRIPT TIMELINE
+
+The primary user experience must connect the transcript to the actual audio timeline.
+
+Do not build a plain text transcription page and call it an intelligent audio editor.
+
+Implement a synchronized transcript view.
+
+Required features:
+
+1. Display transcript segments.
+2. Display individual words.
+3. Show word timestamps.
+4. Select a word.
+5. Navigate audio playback to a word.
+6. Highlight the currently playing word.
+7. Navigate previous and next words.
+8. Navigate previous and next segments.
+9. Scroll the transcript automatically where appropriate.
+10. Maintain synchronization during playback.
+11. Preserve the original source time axis.
+12. Support long recordings.
+
+## 10.1 Timeline Synchronization
+
+The browser playback timeline and transcript timestamps must use a shared, well-defined time basis.
+
+For source playback position:
+
+```typescript
+const currentMs = Math.round(
+  audioElement.currentTime * 1000
+);
+```
+
+Find the active word using actual word ranges.
+
+Do not use string searching to determine playback positions.
+
+Do not use an inaccurate segment-level timestamp as a substitute for word-level timestamps.
+
+## 10.2 Word Selection
+
+When a user selects a word:
+
+```text
+SELECT WORD
+     |
+     v
+READ START_MS
+     |
+     v
+CONVERT TO AUDIO TIME
+     |
+     v
+UPDATE PLAYBACK POSITION
+     |
+     v
+UPDATE VISUAL HIGHLIGHT
+```
+
+Use exact word intervals.
+
+Do not introduce cumulative timestamp drift.
+
+## 10.3 Long Transcript Performance
+
+Implement virtualization or another measured rendering strategy when needed.
+
+Required stress target:
+
+```text
+TRANSCRIPT_WORDS = 10000
+```
+
+For a 10,000-word transcript:
+
+- Avoid mounting thousands of unnecessary interactive DOM elements simultaneously.
+- Preserve keyboard navigation.
+- Preserve search.
+- Preserve selection state during scrolling.
+- Avoid losing timestamps during virtualization.
+- Maintain playback synchronization.
+
+Do not sacrifice correctness for rendering speed.
+
+---
+
+# SECTION 11 — WEB AUDIO AND PREVIEW INTEGRATION
+
+Reuse the current audio player and waveform where possible.
+
+Audit the existing browser audio implementation.
+
+Do not introduce a second independent playback engine unless necessary.
+
+Verify browser support for every selected Web Audio API.
+
+Potential browser technologies include:
+
+```text
+HTMLAudioElement
+AudioContext
+AudioBuffer
+AudioWorklet
+MediaSource
+WebCodecs
+```
+
+Use only capabilities supported by actual target browsers.
+
+Do not assume WebCodecs or AudioWorklet availability across all targets.
+
+The application must support:
+
+- Audio playback.
+- Seeking.
+- Pause and resume.
+- Timeline selection.
+- Region preview.
+- Playback synchronization with transcript.
+- Source restoration.
+
+The original source must remain unchanged during preview operations.
+
+Do not alter the audio buffer destructively simply to preview a proposed edit.
+
+---
+
+# SECTION 12 — INTELLIGENT EDITING WORKFLOW
+
+ASR output does not automatically prove that a word or phrase should be deleted.
+
+Do not confuse transcription with editing intelligence.
+
+Inspect the existing AvaPardaz detection components and use only validated, operational detectors.
+
+The web application may display editing candidates when evidence exists.
+
+Potential categories:
+
+```text
+FILLER_WORD
+REPEATED_WORD
+REPEATED_PHRASE
+STUTTER
+FALSE_START
+SELF_CORRECTION
+UNNECESSARY_PAUSE
+LONG_SILENCE
+```
+
+For every proposed edit, retain:
+
+- Source range.
+- Source sample positions.
+- Associated transcript words.
+- Detector identifier.
+- Evidence.
+- Reason.
+- Confidence, if calibrated and available.
+- Approval status.
+- Edit history.
+
+Suggested approval workflow:
+
+```text
+DETECTED
+   |
+   v
+REVIEW_REQUIRED
+   |
+   +------> REJECTED
+   |
+   v
+APPROVED
+   |
+   v
+PREVIEW
+   |
+   v
+APPLIED
+```
+
+Never delete spoken audio automatically without explicit user approval.
+
+Do not remove a repeated word merely because it appears twice.
+
+A repetition may be linguistically intentional.
+
+Do not invent a filler-word detector if none exists.
+
+For unavailable detection categories, display their status accurately.
+
+Do not claim that PHASE-06 model optimization has already occurred.
+
+---
+
+# SECTION 13 — NON-DESTRUCTIVE AUDIO EDITING
+
+Use the existing editing architecture.
+
+If the existing project supports non-destructive edits, preserve it.
+
+If no such architecture exists, assess the minimum necessary change.
+
+Every edit operation must preserve:
+
+- Original source audio.
+- Original source fingerprint.
+- Original timeline coordinates.
+- Undo/revert capability.
+- Edit history.
+- Explicit approval status.
+
+Use an edit-decision structure similar to:
+
+```json
+{
+  "schema_version": "1.0",
+  "edit_id": "uuid",
+  "source_sha256": "actual-source-hash",
+  "start_sample": 120000,
+  "end_sample": 137280,
+  "operation": "propose_removal",
+  "category": "review_candidate",
+  "approval": "pending",
+  "preview_required": true
+}
+```
+
+Do not treat this proposed structure as a replacement for an existing validated edit schema.
+
+Use actual sample rate when translating between milliseconds and audio samples.
+
+For sample rate `Fs`:
+
+```python
+start_sample = round(start_ms * Fs / 1000)
+end_sample = round(end_ms * Fs / 1000)
+```
+
+Reject any operation where:
+
+```text
+start_sample < 0
+end_sample <= start_sample
+end_sample > source_total_samples
+```
+
+Never silently clamp a bad edit range and proceed.
+
+---
+
+# SECTION 14 — RESULT STORAGE AND PRIVACY
+
+Audio and transcripts are sensitive user data.
+
+Default configuration:
+
+```text
+REMOTE_AUDIO_UPLOAD = false
+REMOTE_TRANSCRIPT_UPLOAD = false
+ASR_TELEMETRY = false
+PERSIST_AUDIO_BY_DEFAULT = false
+PERSIST_TRANSCRIPT_BY_DEFAULT = false
+```
+
+Do not automatically upload:
+
+- Audio files.
+- Transcripts.
+- Word timestamps.
+- Editing decisions.
+- Model output.
+- User file names.
+
+Do not include audio or transcript contents in analytics.
+
+Use local storage only when required and with documented user consent.
+
+For local persistence:
+
+- Respect browser quota.
+- Handle storage failure.
+- Support cleanup.
+- Do not leave stale jobs indefinitely.
+- Keep original audio and derived output logically separated.
+
+Do not store access tokens in persistent browser storage.
+
+Provide explicit result export as a user action.
+
+---
+
+# SECTION 15 — OFFLINE OPERATION
+
+Separate three capabilities:
+
+```text
+OFFLINE_ASR_EXECUTION
+OFFLINE_WEB_APP_SHELL
+OFFLINE_RESULT_ACCESS
+```
+
+These are not identical.
+
+The ASR engine must remain the sole inference provider and must work offline as verified in PHASE-03.
+
+The web application may initially require internet to load if it is hosted remotely.
+
+Do not claim the entire web application is offline-capable unless this is tested.
+
+Evaluate whether the existing application should support PWA-based local asset caching.
+
+Only implement PWA functionality if it fits the current application architecture and offers a measurable user benefit.
+
+Offline application-shell support must include:
+
+- Cached static assets.
+- Correct cache invalidation.
+- Versioned service-worker lifecycle.
+- Safe update handling.
+- No caching of authentication tokens.
+- No unintended caching of private audio files.
+- Explicitly defined offline result behavior.
+
+Do not use a service worker to silently intercept or redirect transcription requests.
+
+Do not invent offline transcription fallbacks.
+
+---
+
+# SECTION 16 — ERROR HANDLING AND USER EXPERIENCE
+
+Define consistent error categories:
+
+```text
+LOCAL_ENGINE_NOT_INSTALLED
+LOCAL_ENGINE_NOT_RUNNING
+LOCAL_ENGINE_UNREACHABLE
+LOCAL_NETWORK_PERMISSION_DENIED
+BROWSER_UNSUPPORTED
+SECURE_CONTEXT_REQUIRED
+PAIRING_REQUIRED
+PAIRING_EXPIRED
+AUTHENTICATION_FAILED
+ORIGIN_NOT_ALLOWED
+MODEL_NOT_READY
+ENGINE_BUSY
+INVALID_AUDIO
+UNSUPPORTED_AUDIO_FORMAT
+AUDIO_TOO_LARGE
+AUDIO_DURATION_EXCEEDED
+UPLOAD_FAILED
+JOB_SUBMISSION_FAILED
+TRANSCRIPTION_FAILED
+INVALID_TRANSCRIPT_SCHEMA
+TIMESTAMP_VALIDATION_FAILED
+JOB_CANCELLED
+STORAGE_QUOTA_EXCEEDED
+PREVIEW_FAILED
+EDIT_APPLICATION_FAILED
+```
+
+Every user-visible error must provide:
+
+- Clear explanation.
+- Stable error identifier.
+- Recovery action.
+- Retryability.
+- Appropriate technical detail without exposing secrets.
+
+Do not show raw server stack traces.
+
+Do not show API tokens.
+
+Do not silently fall back to cloud inference.
+
+If the engine is unavailable, clearly explain that local transcription cannot proceed.
+
+---
+
+# SECTION 17 — PERSIAN RTL AND MULTILINGUAL SUPPORT
+
+Persian is a primary language of AvaPardaz.
+
+The transcript UI must correctly support:
+
+- RTL layout.
+- Persian Unicode characters.
+- ZWNJ.
+- Arabic Yeh and Kaf normalization rules.
+- Persian punctuation.
+- Persian numerals where appropriate.
+- Mixed Persian-English phrases.
+- LTR timestamps.
+- Correct word selection highlighting.
+- Search over Persian transcript text.
+- Keyboard navigation.
+
+Do not modify the raw transcript to improve appearance.
+
+Keep the data representation language-independent.
+
+Preserve any existing auto-language detection and manual language-switching functionality.
+
+Do not remove existing multilingual capabilities.
+
+---
+
+# SECTION 18 — PERFORMANCE REQUIREMENTS
+
+Measure performance on actual hardware.
+
+Primary reference:
+
+```text
+APPLE_SILICON = M2
+UNIFIED_MEMORY = 8 GB
+```
+
+Do not claim M2 performance if the test runs on remote x86 hardware.
+
+Use PHASE-03 as the performance baseline.
+
+Measure:
+
+- Initial application load.
+- Engine discovery latency.
+- Pairing time.
+- Connection latency.
+- File validation time.
+- Audio preparation time.
+- Upload time to local engine.
+- Inference time.
+- Alignment time.
+- Transcript parsing time.
+- Transcript rendering time.
+- Playback synchronization error.
+- Peak browser memory.
+- Peak engine memory.
+
+Suggested UX targets:
+
+```text
+ENGINE_HEALTH_CHECK_P95 <= 1000 ms
+
+LOCAL_ENGINE_CONNECT_P95 <= 2000 ms
+excluding manual permission and user approval time
+
+TRANSCRIPT_FIRST_RENDER_P95 <= 1000 ms
+after valid result retrieval
+
+WORD_HIGHLIGHT_SYNC_ERROR_P95 <= 100 ms
+
+DUPLICATE_TRANSCRIPTION_JOBS = 0
+
+UNAUTHORIZED_REMOTE_AUDIO_UPLOADS = 0
+```
+
+These are engineering targets, not claims of achieved performance.
+
+The complete ASR execution time must be reported separately from frontend overhead.
+
+For the 10,000-word transcript stress test, verify stable rendering and selection without excessive browser memory growth.
+
+---
+
+# SECTION 19 — TESTING AND QUALITY ASSURANCE
+
+Create tests at four levels.
+
+## 19.1 Unit Tests
+
+Test:
+
+- Engine configuration.
+- API client.
+- Authentication.
+- Pairing.
+- Origin validation assumptions.
+- Response schema validation.
+- Transcript parsing.
+- Timestamp conversion.
+- Word ordering.
+- Persian text handling.
+- Edit-decision validation.
+- Job state management.
+- Error mapping.
+- Result persistence.
+
+## 19.2 Integration Tests
+
+Test:
+
+```text
+T01: Engine unavailable.
+T02: Engine available.
+T03: Engine authentication required.
+T04: User-approved pairing.
+T05: Pairing expiration.
+T06: Permission denied.
+T07: Health check.
+T08: Capability discovery.
+T09: Audio import.
+T10: Audio validation.
+T11: Valid transcription submission.
+T12: Job status polling.
+T13: Job cancellation.
+T14: Result retrieval.
+T15: Invalid transcript schema.
+T16: Transcript rendering.
+T17: Word navigation.
+T18: Playback synchronization.
+T19: Repeated-word preservation.
+T20: Offline inference.
+```
+
+## 19.3 Browser End-to-End Tests
+
+Use Playwright or the repository's existing browser automation framework.
+
+Test the actual supported browser versions.
+
+At minimum verify:
+
+- Application loading.
+- Local engine connection.
+- User pairing.
+- File import.
+- Job submission.
+- Result retrieval.
+- Transcript rendering.
+- Persian RTL.
+- Word navigation.
+- Playback synchronization.
+- Cancellation.
+- Error recovery.
+
+Mock engine responses may be used for isolated frontend unit tests.
+
+They must not count as real engine integration tests.
+
+At least one complete end-to-end test must use the actual local ASR engine.
+
+## 19.4 Security Tests
+
+Test:
+
+- Unapproved origin.
+- Missing authentication.
+- Invalid authentication.
+- Expired token.
+- Reused pairing code.
+- Host header mismatch.
+- Malformed requests.
+- Unauthorized job retrieval.
+- Unauthorized job cancellation.
+- Cross-origin attacks.
+- DNS rebinding defenses.
+- Local service exposure restrictions.
+- Remote upload prevention.
+
+## 19.5 Regression Tests
+
+Preserve all previously passing application tests.
+
+Run the existing project checks:
+
+```bash
+npm run lint
+npm run arch:check
+npm test
+npm run build
+```
+
+Only execute commands that actually exist.
+
+If the repository uses alternative command names, discover and use them.
+
+Do not disable failing tests to achieve a green report.
+
+---
+
+# SECTION 20 — REPOSITORY STRUCTURE AND IMPLEMENTATION
+
+Use existing project conventions.
+
+A possible implementation structure:
+
+```text
+src/
+  services/
+    local-engine/
+      engine-client.ts
+      engine-auth.ts
+      engine-pairing.ts
+      engine-contracts.ts
+      engine-errors.ts
+
+  features/
+    transcription/
+      components/
+      hooks/
+      services/
+      state/
+      validators/
+
+    transcript/
+      components/
+      timeline/
+      navigation/
+      synchronization/
+
+    audio-editing/
+      decisions/
+      preview/
+      history/
+      validation/
+
+  tests/
+    local-engine/
+    transcription/
+    transcript/
+    security/
+    browser/
+```
+
+Do not duplicate existing components.
+
+Do not create another audio timeline system if an adequate one already exists.
+
+Before modifying existing files, inspect their current responsibilities and dependencies.
+
+Prefer additive integration and isolated components.
+
+Keep all new dependencies justified, version-pinned where appropriate, and compatible with the current build system.
+
+Do not introduce unneeded server-side ASR dependencies.
+
+---
+
+# SECTION 21 — SELF-AUDIT AND AUTONOMOUS REPAIR
+
+After implementation, perform an independent adversarial audit.
+
+Attempt to disprove the integration's correctness.
+
+Ask:
+
+1. Does the browser actually reach the local service?
+2. Does the production HTTPS origin work?
+3. Does Chrome Local Network Access behave as expected?
+4. Does the app work when the permission is denied?
+5. Does pairing require explicit local authorization?
+6. Can a malicious website access the engine?
+7. Is CORS being incorrectly treated as authentication?
+8. Are tokens exposed in persistent storage?
+9. Does any code send audio to a remote host?
+10. Can duplicate jobs occur?
+11. Does a browser refresh create orphaned jobs?
+12. Are source audio bytes preserved?
+13. Are transcript timestamps mapped correctly?
+14. Are repeated spoken words preserved?
+15. Is the playback highlight accurate?
+16. Does RTL rendering preserve mixed-language text?
+17. Can long transcripts be rendered without severe slowdown?
+18. Does editing preserve the original source?
+19. Is offline functionality represented honestly?
+20. Are mock tests clearly separated from actual engine integration tests?
+
+Correct confirmed defects.
+
+Repeat affected tests.
+
+Keep original evidence.
+
+Never modify healthy application architecture to hide a defect.
+
+---
+
+# SECTION 22 — REQUIRED DOCUMENTATION
+
+Create:
+
+```text
+docs/phase-05/
+  EXISTING-WEB-APPLICATION-AUDIT.md
+  LOCAL-CONNECTIVITY-ARCHITECTURE.md
+  BROWSER-COMPATIBILITY-MATRIX.md
+  LOCAL-ENGINE-CLIENT.md
+  AUTHENTICATION-AND-PAIRING.md
+  BROWSER-SECURITY-REVIEW.md
+  AUDIO-IMPORT-AND-VALIDATION.md
+  TRANSCRIPTION-INTEGRATION.md
+  TRANSCRIPT-TIMELINE.md
+  PLAYBACK-SYNCHRONIZATION.md
+  EDITING-WORKFLOW-INTEGRATION.md
+  OFFLINE-CAPABILITY-REPORT.md
+  PRIVACY-AND-DATA-RETENTION.md
+  PERFORMANCE-REPORT.md
+  TEST-REPORT.md
+  PHASE-05-ACCEPTANCE.md
+```
+
+Also preserve:
+
+- Actual implementation source.
+- Test source.
+- Test execution logs.
+- Browser version inventory.
+- Engine API contract.
+- Network security test evidence.
+- Audio test manifests.
+- Performance measurements.
+- Failed test reports.
+- Build artifacts where appropriate.
+
+Documentation alone is not implementation.
+
+A frontend mockup connected to fake transcript data is not a completed integration.
+
+---
+
+# SECTION 23 — PHASE-05 ACCEPTANCE GATE
+
+PHASE-05 can be marked ACCEPTED only if every mandatory criterion passes.
+
+| ID | Acceptance requirement |
+|---|---|
+| P05-01 | PHASE-03 genuinely ACCEPTED |
+| P05-02 | PHASE-04 genuinely ACCEPTED |
+| P05-03 | Existing application audit completed |
+| P05-04 | Browser/local architecture established |
+| P05-05 | Actual browser compatibility tested |
+| P05-06 | Secure local engine discovery works |
+| P05-07 | User-approved authentication works |
+| P05-08 | Unauthorized origins are rejected |
+| P05-09 | Actual audio import works |
+| P05-10 | Audio validation works |
+| P05-11 | Local ASR job submission works |
+| P05-12 | Actual CPU transcription works |
+| P05-13 | Actual transcript results are retrieved |
+| P05-14 | Word-level timestamps are validated |
+| P05-15 | Repeated words are preserved |
+| P05-16 | Persian RTL rendering works |
+| P05-17 | Playback and transcript synchronization work |
+| P05-18 | Editing workflow preserves original audio |
+| P05-19 | No unauthorized cloud audio upload exists |
+| P05-20 | Offline inference is confirmed |
+| P05-21 | Security tests pass |
+| P05-22 | Browser end-to-end tests pass |
+| P05-23 | Performance requirements are measured |
+| P05-24 | Existing application regression tests pass |
+| P05-25 | Documentation and evidence are complete |
+
+Use only:
+
+```text
+ACCEPTED
+BLOCKED
+INCOMPLETE
+```
+
+If actual browser-to-local-engine connectivity is unavailable in the primary target browser, the phase cannot be accepted.
+
+Do not substitute a mock integration.
+
+Do not mark unsupported browsers as supported.
+
+Do not claim full offline web application functionality unless the application shell has been independently verified offline.
+
+---
+
+# SECTION 24 — STRICT PHASE BOUNDARY
+
+PHASE-05 is limited to web application integration.
+
+Do not start PHASE-06.
+
+Do not:
+
+- Train a new model.
+- Fine-tune the existing model.
+- Replace the approved ASR model.
+- Create a second ASR engine.
+- Change the PHASE-03 model execution architecture unnecessarily.
+- Implement a cloud transcription fallback.
+- Rebuild the Adobe Audition extension.
+- Rewrite the entire web application.
+- Replace healthy waveform or audio playback infrastructure.
+
+Preserve the single shared ASR architecture.
+
+If a PHASE-03 API enhancement is genuinely necessary, make only a backward-compatible, documented change with regression tests.
+
+Do not break the Adobe Audition integration.
+
+Do not claim the change is backward-compatible without testing both clients.
+
+---
+
+# SECTION 25 — FINAL EXECUTION REPORT
+
+Return the following exact report:
+
+```text
+AVAPARDAZ — PHASE 05 EXECUTION REPORT
+
+EXECUTION_ID:
+AVP-P05-001
+
+ENTRY_GATE:
+READY / BLOCKED
+
+PHASE_03_STATUS:
+ACCEPTED / NOT_ACCEPTED
+
+PHASE_04_STATUS:
+ACCEPTED / NOT_ACCEPTED
+
+WEB_FRAMEWORK:
+<actual framework and version>
+
+BUILD_SYSTEM:
+<actual system>
+
+PRIMARY_BROWSER:
+<actual browser and version>
+
+PRIMARY_OS:
+<actual OS version>
+
+LOCAL_CONNECTIVITY_ARCHITECTURE:
+<selected architecture>
+
+LOCAL_NETWORK_ACCESS:
+PASS / FAIL / PARTIAL / NOT_RUN
+
+HTTPS_SECURE_CONTEXT:
+PASS / FAIL / NOT_RUN
+
+BROWSER_COMPATIBILITY:
+<browser matrix reference>
+
+LOCAL_ENGINE_DISCOVERY:
+PASS / FAIL / NOT_RUN
+
+USER_APPROVED_PAIRING:
+PASS / FAIL / NOT_RUN
+
+AUTHENTICATION:
+PASS / FAIL / NOT_RUN
+
+ORIGIN_VALIDATION:
+PASS / FAIL / NOT_RUN
+
+AUDIO_IMPORT:
+PASS / FAIL / NOT_RUN
+
+AUDIO_VALIDATION:
+PASS / FAIL / NOT_RUN
+
+LOCAL_ASR_SUBMISSION:
+PASS / FAIL / NOT_RUN
+
+REAL_CPU_TRANSCRIPTION:
+PASS / FAIL / NOT_RUN
+
+WORD_TIMESTAMP_VALIDATION:
+PASS / FAIL / NOT_RUN
+
+PERSIAN_RTL:
+PASS / FAIL / NOT_RUN
+
+PLAYBACK_SYNCHRONIZATION:
+PASS / FAIL / NOT_RUN
+
+REPETITION_PRESERVATION:
+PASS / FAIL / NOT_RUN
+
+SAFE_EDITING:
+PASS / FAIL / NOT_RUN
+
+OFFLINE_ASR:
+PASS / FAIL / NOT_RUN
+
+OFFLINE_WEB_APP_SHELL:
+PASS / FAIL / NOT_RUN / NOT_IMPLEMENTED
+
+REMOTE_AUDIO_UPLOAD:
+NONE / DETECTED
+
+SECURITY_TESTS:
+PASS / FAIL
+
+BROWSER_E2E_TESTS:
+PASS / FAIL
+
+UNIT_TESTS:
+PASS / FAIL
+
+INTEGRATION_TESTS:
+PASS / FAIL
+
+BUILD:
+PASS / FAIL
+
+PERFORMANCE_REPORT:
+<actual path>
+
+CRITICAL_DEFECTS:
+<list>
+
+UNRESOLVED_RISKS:
+<list>
+
+FINAL_PHASE_STATUS:
+ACCEPTED / BLOCKED / INCOMPLETE
+
+PHASE_06_READINESS:
+READY / NOT_READY
+
+EVIDENCE_DIRECTORY:
+<actual path>
+
+MODIFIED_FILES:
+<actual list>
+
+GIT_COMMIT:
+<actual hash>
+```
+
+Never invent values.
+
+Report unexecuted tests as NOT_RUN.
+
+Report unsupported functionality explicitly.
+
+Report actual commands executed and their outcomes.
+
+Do not claim that changes were pushed to GitHub unless a real push occurred and was authorized.
+
+---
+
+# FINAL EXECUTION DIRECTIVE
+
+Start with SECTION 01.
+
+Verify PHASE-03 and PHASE-04 acceptance.
+
+Inspect the existing web application.
+
+Audit the browser-to-local-engine security architecture.
+
+Choose a browser-compatible and secure integration strategy.
+
+Implement the local engine connector.
+
+Implement audio import and transcription.
+
+Implement word-level transcript synchronization.
+
+Integrate the existing editing workflow without destroying healthy functionality.
+
+Execute real browser and local-engine integration tests.
+
+Perform the security audit.
+
+Correct confirmed defects.
+
+Produce the final evidence-backed acceptance report.
+
+**The objective is a fully functional AvaPardaz web application powered by the same approved local ASR engine used by the Adobe Audition plugin.**
+
+**One shared model. One authoritative inference engine. Two independent product clients. No duplicate inference implementation. No mandatory cloud transcription. No fabricated capabilities.**
+
+Execute AVP-P05-001 only after all entry conditions have been proven.

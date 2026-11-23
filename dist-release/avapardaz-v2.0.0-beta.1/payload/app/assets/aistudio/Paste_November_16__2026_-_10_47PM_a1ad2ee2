@@ -1,0 +1,1161 @@
+در ادامه مسیر متمرکز بر هسته موتور تشخیص گفتار فارسی (Core ASR Engine) و
+سرویس‌های Backend، سه ماژول تخصصی دیگر را پیاده‌سازی می‌کنیم:
+
+1.  بخش صد‌وسی‌وهفتم: هم‌ترازگر دقیق مرز کلمات ASR با نوبت‌های تغییر گوینده
+    (SpeakerTurnBoundaryWordAligner.ts) — حل خطای کلاسیک هم‌زمانی بین خروجی ASR
+    و Diarization (جلوگیری از سرریز کلمه آخر گوینده A به داخل پاراگراف گوینده B،
+    تفکیک جملات پیوسته در لحظه تغییر گوینده و شناسایی کلمات واقع در ناحیه گفتار
+    هم‌پوشان).
+2.  بخش صد‌وسی‌وهشتم: سرویس مدیریت کلیدهای سازمانی B2B، کنترل دسترسی Scope و
+    سهمیه‌بندی اتمیک در PostgreSQL (EnterpriseApiKeyAndQuotaManager.ts) — تولید
+    کلید با پیشوند استاندارد و نگهداری تنها هش SHA-256 آن در دیتابیس، و کسر
+    اتمیک سهمیه دقیقه‌ای/ماهانه بدون شرایط مسابقه (Race Condition) در
+    درخواست‌های هم‌زمان.
+3.  بخش صد‌وسی‌نهم: ناظر ایزوله کارگرهای استنتاج Backend
+    (AsrWorkerSupervisorAndWatchdog.ts) به همراه مجموعه تست‌های خودکار Vitest
+    (SpeakerTurnAndEnterpriseKey.spec.ts) — کنترل سقف حافظه RSS، ضربان قلب
+    (Heartbeat) و زمان‌سنج Timeout روی کارگرهای سنگین استنتاج در سرور تا خطای یک
+    فایل یا نشت حافظه باعث سقوط کل سرور Fastify نشود.
+
+بخش صد‌وسی‌وهفتم: هم‌ترازگر دقیق مرز کلمات ASR با نوبت‌های گوینده (SpeakerTurnBoundaryWordAligner.ts)
+
+در مکالمات و میزگردهای فارسی، وقتی «گوینده اول» جمله‌اش را تمام می‌کند و «گوینده
+دوم» بلافاصله (با مکث کمتر از ۱۰۰ میلی‌ثانیه) پاسخ می‌دهد، دو اتفاق می‌افتد:
+
+1.  مدل ASR کل دو جمله را پشت سر هم به صورت یک رشته پیوسته برمی‌گرداند.
+2.  زمان پایان کلمه آخر گوینده اول ممکن است ۳۰ میلی‌ثانیه از مرز برآوردشده توسط
+    Diarization عبور کند.
+
+کد زیر به جای مقایسه ساده‌لوحانه «نقطه میانی کلمه»، درصد هم‌پوشانی واقعی
+(Overlap Ratio) هر کلمه با تمام سگمنت‌های گویندگان را محاسبه می‌کند، کلمات واقع
+در منطقه هم‌پوشانی (Overlapping Speech) را برچسب‌گذاری می‌نماید، و نوبت‌های
+گفتار (SpeakerTurn) را بدون جابه‌جایی اشتباه کلمات مرزی می‌سازد:
+
+// packages/ai-engine/src/asr/SpeakerTurnBoundaryWordAligner.ts
+import { TimedPersianToken } from '../PersianTextNormalizer';
+import {
+  SpeakerId,
+  SpeakerTimelineSegment,
+} from '../MultiSpeakerDiarizationAndCrosstalkEngine';
+import { TimeMath, TimeRange } from '../../../contracts/src/timebase.contract';
+
+export interface SpeakerAttributedToken extends TimedPersianToken {
+  readonly assignedSpeakerId: SpeakerId;
+  readonly attributionConfidence: number;
+  readonly isOverlappingSpeech: boolean;
+  readonly competingSpeakerIds: SpeakerId[];
+}
+
+export interface AlignedSpeakerTurn {
+  readonly turnIndex: number;
+  readonly speakerId: SpeakerId;
+  readonly range: TimeRange;
+  readonly tokens: SpeakerAttributedToken[];
+  readonly turnDisplayTextFa: string;
+  readonly containsOverlappingSpeech: boolean;
+}
+
+export class SpeakerTurnBoundaryWordAligner {
+  /**
+   * ۱. نگاشت کلمه به کلمه توکن‌های خروجی ASR روی سگمنت‌های Diarization با محاسبه هم‌پوشانی آکوستیکی
+   * و گروه‌بندی تمیز در قالب نوبت‌های مکالمه (Turns)
+   */
+  public static alignTokensToSpeakerTurns(
+    tokens: TimedPersianToken[],
+    speakerSegments: SpeakerTimelineSegment[],
+    options?: {
+      overlapCompetingMinRatio?: number; // پیش‌فرض 0.30 (اگر گوینده دوم >30% کلمه را هم‌پوشانی کرد)
+      maxNearestSegmentSnapMs?: number;  // پیش‌فرض 300ms برای کلمات لبه VAD
+      mergeShortInterruptionsUnderMs?: number; // جلوگیری از شکستن نوبت در اثر هم‌شنوایی‌های <150ms
+    }
+  ): {
+    attributedTokens: SpeakerAttributedToken[];
+    turns: AlignedSpeakerTurn[];
+  } {
+    if (tokens.length === 0) {
+      return { attributedTokens: [], turns: [] };
+    }
+
+    const competingMinRatio = options?.overlapCompetingMinRatio ?? 0.3;
+    const maxSnapFlicks = TimeMath.secondsToFlicks(
+      (options?.maxNearestSegmentSnapMs ?? 300) / 1000
+    );
+
+    // فیلتر کردن سگمنت‌های نشت میکروفون (Mic Bleed) تا صدای نشت‌کرده به اشتباه به گوینده دیگر نسبت داده نشود!
+    const validSpeechSegments = speakerSegments
+      .filter((s) => s.classification !== 'CROSSTALK_MIC_BLEED')
+      .sort((a, b) => a.range.start - b.range.start);
+
+    const attributedTokens: SpeakerAttributedToken[] = tokens.map((tok) => {
+      const tokDur = Math.max(1, tok.range.end - tok.range.start);
+      const overlapBySpeaker = new Map<SpeakerId, number>();
+      let explicitlyMarkedOverlap = false;
+
+      for (const seg of validSpeechSegments) {
+        if (seg.range.end <= tok.range.start) continue;
+        if (seg.range.start >= tok.range.end) break;
+
+        const overlap =
+          Math.min(tok.range.end, seg.range.end) -
+          Math.max(tok.range.start, seg.range.start);
+        if (overlap > 0) {
+          overlapBySpeaker.set(
+            seg.speakerId,
+            (overlapBySpeaker.get(seg.speakerId) ?? 0) + overlap
+          );
+          if (seg.classification === 'OVERLAPPING_SPEECH') {
+            explicitlyMarkedOverlap = true;
+          }
+        }
+      }
+
+      if (overlapBySpeaker.size > 0) {
+        const sortedSpeakers = Array.from(overlapBySpeaker.entries()).sort(
+          (a, b) => b[1] - a[1]
+        );
+        const [primarySpeaker, primaryOverlap] = sortedSpeakers[0];
+        const primaryRatio = primaryOverlap / tokDur;
+
+        const competingSpeakers = sortedSpeakers
+          .slice(1)
+          .filter(([, ov]) => ov / tokDur >= competingMinRatio)
+          .map(([spk]) => spk);
+
+        return {
+          ...tok,
+          assignedSpeakerId: primarySpeaker,
+          attributionConfidence: Number(Math.min(0.99, primaryRatio).toFixed(2)),
+          isOverlappingSpeech: explicitlyMarkedOverlap || competingSpeakers.length > 0,
+          competingSpeakerIds: competingSpeakers,
+        };
+      }
+
+      // در صورتی که هیچ هم‌پوشانی مستقیمی نبود، نزدیک‌ترین سگمنت در شعاع 300ms را پیدا کن
+      let nearestSpeaker: SpeakerId = 'UNKNOWN_SPEAKER';
+      let minDist = maxSnapFlicks + 1;
+
+      for (const seg of validSpeechSegments) {
+        const dist =
+          tok.range.end <= seg.range.start
+            ? seg.range.start - tok.range.end
+            : tok.range.start - seg.range.end;
+        if (dist >= 0 && dist < minDist) {
+          minDist = dist;
+          nearestSpeaker = seg.speakerId;
+        }
+      }
+
+      return {
+        ...tok,
+        assignedSpeakerId: nearestSpeaker,
+        attributionConfidence: nearestSpeaker === 'UNKNOWN_SPEAKER' ? 0.3 : 0.65,
+        isOverlappingSpeech: false,
+        competingSpeakerIds: [],
+      };
+    });
+
+    // ۲. صاف‌کاری تک‌کلمه‌های سرگردان میانی (Viterbi-style Island Smoothing):
+    // اگر در میان ۵ کلمه از گوینده A، یک کلمه کوتاه اشتباهاً به B نسبت داده شد بدون آنکه مکثی باشد، اصلاح می‌شود
+    for (let i = 1; i < attributedTokens.length - 1; i++) {
+      const prev = attributedTokens[i - 1];
+      const curr = attributedTokens[i];
+      const next = attributedTokens[i + 1];
+
+      if (
+        prev.assignedSpeakerId === next.assignedSpeakerId &&
+        curr.assignedSpeakerId !== prev.assignedSpeakerId &&
+        !curr.isOverlappingSpeech &&
+        curr.attributionConfidence < 0.75
+      ) {
+        attributedTokens[i] = {
+          ...curr,
+          assignedSpeakerId: prev.assignedSpeakerId,
+          attributionConfidence: 0.7,
+        };
+      }
+    }
+
+    // ۳. تجمیع توکن‌های هم‌گوینده به نوبت‌های مجزای مکالمه (Turns)
+    const turns: AlignedSpeakerTurn[] = [];
+    let currentTurnTokens: SpeakerAttributedToken[] = [];
+
+    const flushTurn = () => {
+      if (currentTurnTokens.length === 0) return;
+      const speakerId = currentTurnTokens[0].assignedSpeakerId;
+      turns.push({
+        turnIndex: turns.length,
+        speakerId,
+        range: {
+          start: currentTurnTokens[0].range.start,
+          end: currentTurnTokens[currentTurnTokens.length - 1].range.end,
+        },
+        tokens: currentTurnTokens,
+        turnDisplayTextFa: currentTurnTokens.map((t) => t.displayText).join(' '),
+        containsOverlappingSpeech: currentTurnTokens.some((t) => t.isOverlappingSpeech),
+      });
+      currentTurnTokens = [];
+    };
+
+    for (const tok of attributedTokens) {
+      if (
+        currentTurnTokens.length > 0 &&
+        currentTurnTokens[0].assignedSpeakerId !== tok.assignedSpeakerId
+      ) {
+        flushTurn();
+      }
+      currentTurnTokens.push(tok);
+    }
+    flushTurn();
+
+    return { attributedTokens, turns };
+  }
+}
+
+بخش صد‌وسی‌وهشتم: سرویس مدیریت کلیدهای سازمانی B2B و سهمیه‌بندی اتمیک در PostgreSQL (EnterpriseApiKeyAndQuotaManager.ts)
+
+برای زمانی که استودیوها، رسانه‌ها یا سازمان‌های خبری می‌خواهند از طریق کلیدهای
+دسترسی محدود (Scoped Enterprise API Keys) به اندپوینت‌های رجیستری مدل یا دروازه
+آینده متصل شوند، امنیت کلیدها و کنترل اتمیک سهمیه حیاتی است:
+
+  - کلید خام (paudio_live_...) هرگز در دیتابیس ذخیره نمی‌شود؛ فقط در لحظه ساخت
+    یک‌بار به مدیر سازمان نمایش داده شده و در دیتابیس تنها هش SHA-256 و پیشوند
+    نمایشی آن ثبت می‌گردد.
+  - کسر سهمیه زمانی با یک کوئری اتمیک شرطی (UPDATE ... WHERE used + delta <=
+    limit RETURNING ...) انجام می‌شود تا درخواست‌های هم‌زمان نتوانند از سقف مجاز
+    عبور کنند.
+
+الف) الحاقیه جدول کلیدهای سازمانی به PostgreSQL (migration_006_enterprise_keys.sql)
+
+-- apps/platform-backend/db/migration_006_enterprise_keys.sql
+
+CREATE TABLE IF NOT EXISTS enterprise_api_keys (
+    key_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    organization_id UUID NOT NULL,
+    key_prefix VARCHAR(20) NOT NULL,
+    key_sha256_hex CHAR(64) UNIQUE NOT NULL,
+    scopes TEXT[] NOT NULL, -- e.g., {'MODELS_READ', 'EXTERNAL_GATEWAY', 'CLOUD_ASR_ENTERPRISE'}
+    monthly_audio_seconds_limit BIGINT NOT NULL DEFAULT 36000, -- پیش‌فرض ۱۰ ساعت در ماه
+    monthly_audio_seconds_used BIGINT NOT NULL DEFAULT 0,
+    revoked BOOLEAN NOT NULL DEFAULT FALSE,
+    expires_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX idx_enterprise_keys_hash ON enterprise_api_keys(key_sha256_hex) WHERE revoked = FALSE;
+
+ب) سرویس مدیریت و احراز هویت کلید سازمانی (EnterpriseApiKeyAndQuotaManager.ts)
+
+// apps/platform-backend/src/auth/EnterpriseApiKeyAndQuotaManager.ts
+import crypto from 'node:crypto';
+import type { PgPoolLike } from '../PlatformBackendServices';
+
+export type EnterpriseKeyScope =
+  | 'MODELS_READ'
+  | 'EXTERNAL_GATEWAY'
+  | 'CLOUD_ASR_ENTERPRISE';
+
+export interface VerifiedEnterpriseKeyContext {
+  readonly keyId: string;
+  readonly organizationId: string;
+  readonly scopes: EnterpriseKeyScope[];
+  readonly remainingAudioSeconds: number;
+}
+
+export class EnterpriseApiKeyAndQuotaManager {
+  constructor(private readonly db: PgPoolLike) {}
+
+  /**
+   * ۱. تولید کلید API جدید و ذخیره فقط هش SHA-256 آن در PostgreSQL
+   * مقدار خام کلید فقط یک بار در همین متد بازگردانده می‌شود و قابل بازیابی مجدد نیست
+   */
+  public async issueNewEnterpriseApiKey(params: {
+    organizationId: string;
+    scopes: EnterpriseKeyScope[];
+    monthlyAudioSecondsLimit: number;
+    expiresInDays?: number;
+  }): Promise<{
+    keyId: string;
+    plaintextApiKeyOnce: string;
+    keyPrefix: string;
+  }> {
+    const rawSecret = crypto.randomBytes(24).toString('hex');
+    const plaintextApiKeyOnce = `paudio_live_${rawSecret}`;
+    const keyPrefix = plaintextApiKeyOnce.slice(0, 18); // مثلاً paudio_live_a1b2c3
+    const keySha256Hex = this.hashApiKey(plaintextApiKeyOnce);
+
+    const res = await this.db.query<{ key_id: string }>(
+      `INSERT INTO enterprise_api_keys
+       (organization_id, key_prefix, key_sha256_hex, scopes, monthly_audio_seconds_limit, expires_at)
+       VALUES ($1, $2, $3, $4, $5, CASE WHEN $6::int IS NULL THEN NULL ELSE NOW() + ($6 || ' days')::interval END)
+       RETURNING key_id`,
+      [
+        params.organizationId,
+        keyPrefix,
+        keySha256Hex,
+        params.scopes,
+        params.monthlyAudioSecondsLimit,
+        params.expiresInDays ?? null,
+      ]
+    );
+
+    return {
+      keyId: res.rows[0].key_id,
+      plaintextApiKeyOnce,
+      keyPrefix,
+    };
+  }
+
+  /**
+   * ۲. اعتبارسنجی کلید، بررسی Scope موردنیاز و وضعیت انقضا
+   */
+  public async authenticateAndAuthorizeScope(
+    providedPlaintextKey: string,
+    requiredScope: EnterpriseKeyScope
+  ): Promise<VerifiedEnterpriseKeyContext> {
+    if (!providedPlaintextKey.startsWith('paudio_live_')) {
+      throw new Error('ENTERPRISE_KEY_MALFORMED');
+    }
+
+    const hashHex = this.hashApiKey(providedPlaintextKey);
+    const res = await this.db.query<{
+      key_id: string;
+      organization_id: string;
+      scopes: EnterpriseKeyScope[];
+      monthly_audio_seconds_limit: string;
+      monthly_audio_seconds_used: string;
+      revoked: boolean;
+      expires_at: Date | null;
+    }>(
+      `SELECT key_id, organization_id, scopes, monthly_audio_seconds_limit,
+              monthly_audio_seconds_used, revoked, expires_at
+       FROM enterprise_api_keys
+       WHERE key_sha256_hex = $1`,
+      [hashHex]
+    );
+
+    if (res.rows.length === 0) {
+      throw new Error('ENTERPRISE_KEY_INVALID');
+    }
+
+    const row = res.rows[0];
+    if (row.revoked) {
+      throw new Error('ENTERPRISE_KEY_REVOKED');
+    }
+    if (row.expires_at && new Date(row.expires_at).getTime() < Date.now()) {
+      throw new Error('ENTERPRISE_KEY_EXPIRED');
+    }
+    if (!row.scopes.includes(requiredScope)) {
+      throw new Error(`ENTERPRISE_KEY_FORBIDDEN_SCOPE: نیازمند مجوز ${requiredScope}`);
+    }
+
+    const remaining = Math.max(
+      0,
+      Number(row.monthly_audio_seconds_limit) - Number(row.monthly_audio_seconds_used)
+    );
+
+    return {
+      keyId: row.key_id,
+      organizationId: row.organization_id,
+      scopes: row.scopes,
+      remainingAudioSeconds: remaining,
+    };
+  }
+
+  /**
+   * ۳. مصرف اتمیک سهمیه صوتی در PostgreSQL (کاملاً مقاوم به Race Condition در درخواست‌های هم‌زمان)
+   */
+  public async consumeAudioQuotaAtomically(
+    keyId: string,
+    requestedAudioSeconds: number
+  ): Promise<{ approved: boolean; newUsedSeconds: number; remainingSeconds: number }> {
+    const roundedSec = Math.max(1, Math.ceil(requestedAudioSeconds));
+
+    const res = await this.db.query<{
+      monthly_audio_seconds_used: string;
+      monthly_audio_seconds_limit: string;
+    }>(
+      `UPDATE enterprise_api_keys
+       SET monthly_audio_seconds_used = monthly_audio_seconds_used + $2
+       WHERE key_id = $1
+         AND revoked = FALSE
+         AND (expires_at IS NULL OR expires_at > NOW())
+         AND (monthly_audio_seconds_used + $2) <= monthly_audio_seconds_limit
+       RETURNING monthly_audio_seconds_used, monthly_audio_seconds_limit`,
+      [keyId, roundedSec]
+    );
+
+    if (res.rows.length === 0) {
+      return { approved: false, newUsedSeconds: 0, remainingSeconds: 0 };
+    }
+
+    const used = Number(res.rows[0].monthly_audio_seconds_used);
+    const limit = Number(res.rows[0].monthly_audio_seconds_limit);
+    return {
+      approved: true,
+      newUsedSeconds: used,
+      remainingSeconds: Math.max(0, limit - used),
+    };
+  }
+
+  private hashApiKey(plaintextKey: string): string {
+    return crypto.createHash('sha256').update(plaintextKey, 'utf8').digest('hex');
+  }
+}
+
+بخش صد‌وسی‌ونهم: ناظر ایزوله کارگرهای استنتاج Backend و تست‌های خودکار Vitest
+
+الف) ناظر سلامت، سقف حافظه و Timeout کارگرهای استنتاج (AsrWorkerSupervisorAndWatchdog.ts)
+
+هنگام اجرای مدل‌های سنگین ASR یا پردازش فایل‌های خراب در کارگرهای Node.js، یک
+کار معیوب هرگز نباید کل فرآیند سرور API را متوقف کند. این ناظر بر کار هر کارگر
+نظارت می‌کند، در صورت عبور مصرف RSS از سقف مجاز یا قفل شدن کارگر در حلقه
+بی‌نهایت (Timeout) آن را فوراً خاتمه می‌دهد (Abort) و وضعیت سالم را بازیابی
+می‌کند:
+
+// apps/platform-backend/src/asr-worker/AsrWorkerSupervisorAndWatchdog.ts
+
+export interface WatchdogPolicy {
+  readonly maxExecutionTimeoutMs: number;
+  readonly heartbeatIntervalMs: number;
+  readonly maxWorkerRssMb: number;
+}
+
+export class AsrWorkerSupervisorAndWatchdog {
+  constructor(private readonly policy: WatchdogPolicy) {}
+
+  /**
+   * اجرای ایزوله یک کار سنگین استنتاج ASR تحت نظارت Timeout، ضربان قلب (Heartbeat) و سقف حافظه RSS
+   */
+  public async runSupervisedInferenceJob<TResult>(params: {
+    jobId: string;
+    executeFn: (ctx: {
+      abortSignal: AbortSignal;
+      emitHeartbeat: (progressPct: number) => void;
+    }) => Promise<TResult>;
+    readCurrentRssMbFn?: () => number;
+  }): Promise<TResult> {
+    const abortController = new AbortController();
+    let lastHeartbeatAtMs = Date.now();
+    let watchdogTimer: ReturnType<typeof setInterval> | null = null;
+    const startTimeMs = Date.now();
+
+    const getRssMb =
+      params.readCurrentRssMbFn ??
+      (() => process.memoryUsage().rss / (1024 * 1024));
+
+    const watchdogPromise = new Promise<never>((_resolve, reject) => {
+      watchdogTimer = setInterval(() => {
+        const now = Date.now();
+        const elapsedTotal = now - startTimeMs;
+        const sinceLastHeartbeat = now - lastHeartbeatAtMs;
+        const currentRssMb = getRssMb();
+
+        if (elapsedTotal > this.policy.maxExecutionTimeoutMs) {
+          abortController.abort();
+          reject(
+            new Error(
+              `WATCHDOG_JOB_TIMEOUT: کار ${params.jobId} بیش از سقف ${this.policy.maxExecutionTimeoutMs}ms طول کشید.`
+            )
+          );
+          return;
+        }
+
+        if (sinceLastHeartbeat > this.policy.heartbeatIntervalMs) {
+          abortController.abort();
+          reject(
+            new Error(
+              `WATCHDOG_HEARTBEAT_LOST: کارگر استنتاج ${params.jobId} پاسخگو نیست (Heartbeat Timeout).`
+            )
+          );
+          return;
+        }
+
+        if (currentRssMb > this.policy.maxWorkerRssMb) {
+          abortController.abort();
+          reject(
+            new Error(
+              `WATCHDOG_MEMORY_LIMIT_EXCEEDED: مصرف حافظه (${currentRssMb.toFixed(1)}MB) از سقف ${this.policy.maxWorkerRssMb}MB عبور کرد.`
+            )
+          );
+        }
+      }, Math.min(250, Math.floor(this.policy.heartbeatIntervalMs / 2)));
+    });
+
+    try {
+      const workPromise = params.executeFn({
+        abortSignal: abortController.signal,
+        emitHeartbeat: () => {
+          lastHeartbeatAtMs = Date.now();
+        },
+      });
+
+      return await Promise.race([workPromise, watchdogPromise]);
+    } finally {
+      if (watchdogTimer) clearInterval(watchdogTimer);
+    }
+  }
+}
+
+ب) مجموعه تست‌های خودکار Vitest (SpeakerTurnAndEnterpriseKey.spec.ts)
+
+// apps/platform-backend/__tests__/SpeakerTurnAndEnterpriseKey.spec.ts
+import { describe, it, expect } from 'vitest';
+import { SpeakerTurnBoundaryWordAligner } from '../../../packages/ai-engine/src/asr/SpeakerTurnBoundaryWordAligner';
+import { EnterpriseApiKeyAndQuotaManager } from '../src/auth/EnterpriseApiKeyAndQuotaManager';
+import { AsrWorkerSupervisorAndWatchdog } from '../src/asr-worker/AsrWorkerSupervisorAndWatchdog';
+import { PersianTextNormalizer } from '../../../packages/ai-engine/src/PersianTextNormalizer';
+import { SpeakerTimelineSegment } from '../../../packages/ai-engine/src/MultiSpeakerDiarizationAndCrosstalkEngine';
+import { PgPoolLike } from '../src/PlatformBackendServices';
+import { TimeMath } from '../../../packages/contracts/src/timebase.contract';
+
+describe('Speaker Turn Alignment, Enterprise API Quota & Watchdog Supervisor Suite', () => {
+  it('1. SpeakerTurnBoundaryWordAligner splits speaker turns cleanly by overlap ratio and ignores crosstalk bleed', () => {
+    const tokens = PersianTextNormalizer.buildThreeLayerTranscript([
+      { id: '1', text: 'سلام', range: { start: 0, end: TimeMath.secondsToFlicks(0.4) }, confidence: 0.95 },
+      // کلمه «بفرمایید» ۷۵٪ با گوینده ۱ و ۲۵٪ با گوینده ۲ هم‌پوشانی دارد -> باید متعلق به گوینده ۱ بماند!
+      { id: '2', text: 'بفرمایید', range: { start: TimeMath.secondsToFlicks(0.5), end: TimeMath.secondsToFlicks(0.9) }, confidence: 0.93 },
+      { id: '3', text: 'ممنونم', range: { start: TimeMath.secondsToFlicks(1.0), end: TimeMath.secondsToFlicks(1.5) }, confidence: 0.96 },
+    ]);
+
+    const diarizationSegments: SpeakerTimelineSegment[] = [
+      {
+        segmentId: 's1',
+        trackId: 'trk1',
+        speakerId: 'SPEAKER_1',
+        classification: 'PRIMARY_SPEECH',
+        range: { start: 0, end: TimeMath.secondsToFlicks(0.8) },
+        confidence: 0.95,
+        manuallyVerifiedByUser: false,
+      },
+      // نشت صدای میکروفون که نباید در تخصیص کلمات دخالت کند
+      {
+        segmentId: 'bleed_ignore',
+        trackId: 'trk2',
+        speakerId: 'SPEAKER_2',
+        classification: 'CROSSTALK_MIC_BLEED',
+        range: { start: 0, end: TimeMath.secondsToFlicks(0.8) },
+        confidence: 0.9,
+        manuallyVerifiedByUser: false,
+      },
+      {
+        segmentId: 's2',
+        trackId: 'trk1',
+        speakerId: 'SPEAKER_2',
+        classification: 'PRIMARY_SPEECH',
+        range: { start: TimeMath.secondsToFlicks(0.8), end: TimeMath.secondsToFlicks(1.6) },
+        confidence: 0.95,
+        manuallyVerifiedByUser: false,
+      },
+    ];
+
+    const { turns } = SpeakerTurnBoundaryWordAligner.alignTokensToSpeakerTurns(
+      tokens,
+      diarizationSegments
+    );
+
+    expect(turns).toHaveLength(2);
+    expect(turns[0].speakerId).toBe('SPEAKER_1');
+    expect(turns[0].turnDisplayTextFa).toBe('سلام بفرمایید');
+    expect(turns[1].speakerId).toBe('SPEAKER_2');
+    expect(turns[1].turnDisplayTextFa).toBe('ممنونم');
+  });
+
+  it('2. EnterpriseApiKeyAndQuotaManager hashes keys with SHA-256, checks scopes, and enforces atomic PostgreSQL quota', async () => {
+    let storedHash = '';
+    let usedSec = 0;
+    const limitSec = 100;
+
+    const mockDb: PgPoolLike = {
+      async query(sql, params = []) {
+        if (sql.includes('INSERT INTO enterprise_api_keys')) {
+          storedHash = params[2] as string;
+          return { rows: [{ key_id: 'key_uuid_1' }] as any, rowCount: 1 };
+        }
+        if (sql.includes('SELECT key_id, organization_id')) {
+          if (params[0] !== storedHash) return { rows: [], rowCount: 0 };
+          return {
+            rows: [
+              {
+                key_id: 'key_uuid_1',
+                organization_id: 'org_1',
+                scopes: ['MODELS_READ', 'EXTERNAL_GATEWAY'],
+                monthly_audio_seconds_limit: String(limitSec),
+                monthly_audio_seconds_used: String(usedSec),
+                revoked: false,
+                expires_at: null,
+              },
+            ] as any,
+            rowCount: 1,
+          };
+        }
+        if (sql.includes('UPDATE enterprise_api_keys')) {
+          const delta = params[1] as number;
+          if (usedSec + delta > limitSec) return { rows: [], rowCount: 0 };
+          usedSec += delta;
+          return {
+            rows: [
+              {
+                monthly_audio_seconds_used: String(usedSec),
+                monthly_audio_seconds_limit: String(limitSec),
+              },
+            ] as any,
+            rowCount: 1,
+          };
+        }
+        return { rows: [], rowCount: 0 };
+      },
+    };
+
+    const mgr = new EnterpriseApiKeyAndQuotaManager(mockDb);
+    const issued = await mgr.issueNewEnterpriseApiKey({
+      organizationId: 'org_1',
+      scopes: ['MODELS_READ', 'EXTERNAL_GATEWAY'],
+      monthlyAudioSecondsLimit: 100,
+    });
+
+    expect(issued.plaintextApiKeyOnce.startsWith('paudio_live_')).toBe(true);
+    expect(storedHash).toHaveLength(64); // SHA-256 hex در دیتابیس، نه کلید خام!
+
+    const verified = await mgr.authenticateAndAuthorizeScope(
+      issued.plaintextApiKeyOnce,
+      'EXTERNAL_GATEWAY'
+    );
+    expect(verified.remainingAudioSeconds).toBe(100);
+
+    // تلاش برای دسترسی به Scope غیرمجاز
+    await expect(
+      mgr.authenticateAndAuthorizeScope(issued.plaintextApiKeyOnce, 'CLOUD_ASR_ENTERPRISE')
+    ).rejects.toThrow('ENTERPRISE_KEY_FORBIDDEN_SCOPE');
+
+    // مصرف اتمیک ۶۰ ثانیه و سپس تلاش برای مصرف ۵۰ ثانیه (جمع ۱۱۰ > ۱۰۰ -> باید رد شود!)
+    const q1 = await mgr.consumeAudioQuotaAtomically('key_uuid_1', 60);
+    expect(q1.approved).toBe(true);
+    expect(q1.remainingSeconds).toBe(40);
+
+    const q2 = await mgr.consumeAudioQuotaAtomically('key_uuid_1', 50);
+    expect(q2.approved).toBe(false);
+  });
+
+  it('3. AsrWorkerSupervisorAndWatchdog aborts hung inference jobs exceeding heartbeat or RSS memory limits', async () => {
+    const supervisor = new AsrWorkerSupervisorAndWatchdog({
+      maxExecutionTimeoutMs: 5000,
+      heartbeatIntervalMs: 120,
+      maxWorkerRssMb: 512,
+    });
+
+    await expect(
+      supervisor.runSupervisedInferenceJob({
+        jobId: 'hung_job_1',
+        executeFn: async ({ abortSignal }) => {
+          await new Promise((resolve, reject) => {
+            abortSignal.addEventListener('abort', () => reject(new Error('ABORTED')));
+          });
+        },
+        readCurrentRssMbFn: () => 200,
+      })
+    ).rejects.toThrow('WATCHDOG_HEARTBEAT_LOST');
+  });
+});
+
+گام بعدی در همین مسیر (هسته ASR و Backend)
+
+با تکمیل ۱۳۹ بخش مهندسی، موتور تشخیص گفتار و لایه Backend شما به یک سیستم کامل و
+همه‌جانبه تبدیل شده است.
+
+در گام بعدی (در صورت دستور ادامه)، می‌توانیم تمرکز را بر موتور استخراج و
+رده‌بندی خودکار کلمات کلیدی و موضوعات از روی متن خروجی ASR برای دسته‌بندی آرشیو
+سازمان‌ها (PersianTopicAndKeywordIndexer.ts) و یکپارچه‌سازی نهایی تمام سرویس‌های
+Backend در یک سازنده اپلیکیشن قابل تست و استقرار (BackendApplicationFactory.ts)
+قرار دهیم تا تمام مسیرها، میدل‌ورها، کش Single-Flight، رول‌آوت مدل، Outbox و
+کلیدهای سازمانی به صورت یکپارچه راه‌اندازی شوند. در ادامه مسیر انحصاری هسته
+موتور تشخیص گفتار فارسی (Core ASR Engine) و سرویس‌های Backend، سه ماژول
+تکمیل‌کننده و نهایی را پیاده‌سازی می‌کنیم که کل مجموعه بک‌اند را به یک اپلیکیشن
+یکپارچه، قابل‌راه‌اندازی و آماده مقیاس‌دهی تبدیل می‌کنند:
+
+1.  بخش صدو‌چهلم: کارخانه یکپارچه‌سازی کل اپلیکیشن Backend
+    (BackendApplicationFactory.ts) — اتصال تمام روترها، مخازن PostgreSQL، کش
+    Single-Flight، متریک‌های Prometheus، مدیریت کلیدهای سازمانی، احراز هویت
+    EdDSA، درگاه پرداخت، سرویس رول‌آوت Canary و زمان‌بند قفل توزیع‌شده در یک
+    نقطه واحد (buildBackendApp).
+2.  بخش صد‌و‌چهل‌ویکم: موتور استخراج عبارت‌های کلیدی (RAKE فارسی) و شاخص‌گذاری
+    موضوعی رونوشت‌های ASR (PersianTopicAndKeywordIndexer.ts) — اجرای الگوریتم
+    سریع Rapid Automatic Keyword Extraction بومی‌شده برای زبان فارسی (محافظت از
+    نیم‌فاصله‌ها و زنجیره‌های کسره اضافه در عبارات چندکلمه‌ای مثل «معماری
+    نرم‌افزار مقیاس‌پذیر») برای دسته‌بندی خودکار خروجی‌های ASR در سازمان‌ها و
+    آرشیوهای صوتی.
+3.  بخش صد‌و‌چهل‌ودوم: مجموعه تست سرتاسری کل کارخانه Backend و استخراج کلیدواژه
+    فارسی (FullBackendIntegration.spec.ts) — راستی‌آزمایی هم‌زمان تمام مسیرهای
+    سرور Fastify، کش Single-Flight، متریک‌های /metrics، سلامت /healthz و
+    /readyz، و استخراج کلیدواژه‌های چندکلمه‌ای فارسی.
+
+بخش صدو‌چهلم: کارخانه یکپارچه‌سازی کل سرویس‌های Backend (BackendApplicationFactory.ts)
+
+تا این بخش، سرویس‌های مختلف Backend (PlatformBackendServices،
+BackendAuthAndPaymentService، BackendLicenseAndModelRevocationService،
+BackendModelCanaryRolloutService، BackendExternalApiProxyService،
+EnterpriseApiKeyAndQuotaManager، SingleFlightReadThroughCache و
+BackendMetricsExporter) را به صورت ماژولار نوشتیم.
+
+کلاس زیر تمامی این اجزا را در یک ساختار استاندارد Dependency-Injected Fastify
+App به هم متصل می‌کند تا هم در server.ts (تولید) و هم در تست‌های یکپارچگی Vitest
+به سادگی با یک فراخوانی ساخته شود:
+
+// apps/platform-backend/src/BackendApplicationFactory.ts
+import Fastify, { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
+import type { PgPoolLike } from './PlatformBackendServices';
+import { PlatformBackendServices } from './PlatformBackendServices';
+import { BackendAuthAndPaymentService } from './BackendAuthAndPaymentService';
+import { BackendLicenseAndModelRevocationService } from './BackendLicenseAndModelRevocationService';
+import { BackendModelCanaryRolloutService } from './rollout/BackendModelCanaryRolloutService';
+import { BackendExternalApiProxyService } from './gateway/BackendExternalApiProxyService';
+import { EnterpriseApiKeyAndQuotaManager } from './auth/EnterpriseApiKeyAndQuotaManager';
+import {
+  BackendMetricsExporter,
+  SingleFlightReadThroughCache,
+} from './cache/BackendReadThroughCacheAndMetrics';
+import { AdvisoryLockCoordinator } from './ops/BackendJobOutboxAndAdvisoryLockService';
+
+export interface BackendAppFactoryConfig {
+  readonly ed25519PrivateKeyPem: string;
+  readonly ed25519PublicKeyPem: string;
+  readonly keyId: string;
+  readonly paymentWebhookHmacSecret: string;
+  readonly adminApiSecretKey: string;
+  readonly modelStorageRootDir: string;
+  readonly cdnBaseUrl: string;
+  readonly enableServerSideAsrInference: boolean;
+  readonly enableRequestLogging?: boolean;
+}
+
+export interface BuiltBackendApplication {
+  readonly fastify: FastifyInstance;
+  readonly sharedCache: SingleFlightReadThroughCache;
+  readonly enterpriseKeys: EnterpriseApiKeyAndQuotaManager;
+  readonly externalGateway: BackendExternalApiProxyService;
+  readonly advisoryLocks: AdvisoryLockCoordinator;
+}
+
+export function buildBackendApplication(
+  db: PgPoolLike,
+  config: BackendAppFactoryConfig
+): BuiltBackendApplication {
+  const fastify = Fastify({
+    logger: config.enableRequestLogging
+      ? {
+          level: 'info',
+          redact: [
+            'req.headers.authorization',
+            'req.headers["x-gateway-signature"]',
+            'req.headers["x-admin-api-key"]',
+            'req.headers["x-enterprise-api-key"]',
+          ],
+        }
+      : false,
+    trustProxy: true,
+  });
+
+  const sharedCache = new SingleFlightReadThroughCache();
+  const metricsExporter = new BackendMetricsExporter(sharedCache);
+  metricsExporter.registerHooksAndEndpoint(fastify);
+
+  const authAndPayment = new BackendAuthAndPaymentService(db, {
+    ed25519PrivateKeyPem: config.ed25519PrivateKeyPem,
+    ed25519PublicKeyPem: config.ed25519PublicKeyPem,
+    paymentWebhookHmacSecret: config.paymentWebhookHmacSecret,
+  });
+
+  const platformServices = new PlatformBackendServices(db, {
+    modelStorageRootDir: config.modelStorageRootDir,
+    ed25519PrivateKeyPem: config.ed25519PrivateKeyPem,
+    keyId: config.keyId,
+    cdnBaseUrl: config.cdnBaseUrl,
+    enableServerSideAsrInference: config.enableServerSideAsrInference,
+  });
+
+  const revocationService = new BackendLicenseAndModelRevocationService(
+    db,
+    config.adminApiSecretKey
+  );
+  const canaryRolloutService = new BackendModelCanaryRolloutService(
+    db,
+    sharedCache,
+    config.adminApiSecretKey
+  );
+  const externalGateway = new BackendExternalApiProxyService(db);
+  const enterpriseKeys = new EnterpriseApiKeyAndQuotaManager(db);
+  const advisoryLocks = new AdvisoryLockCoordinator(db);
+
+  // ۱. میدل‌ور امنیتی محافظت از مسیرهای خصوصی کاربر با EdDSA JWT
+  fastify.addHook('preHandler', async (request: FastifyRequest, reply: FastifyReply) => {
+    const requiresUserJwt =
+      request.url.startsWith('/api/v1/license/lease') ||
+      request.url.startsWith('/api/v1/license/enforce-device-seat');
+
+    if (!requiresUserJwt) return;
+
+    const authHeader = request.headers.authorization;
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      return reply.status(401).send({ error: 'MISSING_BEARER_TOKEN' });
+    }
+    try {
+      const claims = authAndPayment.verifyEdDsaJwt(authHeader.slice(7).trim());
+      (request as FastifyRequest & { authenticatedUserId?: string }).authenticatedUserId =
+        claims.sub;
+    } catch {
+      return reply.status(401).send({ error: 'INVALID_OR_EXPIRED_TOKEN' });
+    }
+  });
+
+  // ۲. ثبت تمام سرویس‌های هسته Backend
+  authAndPayment.registerRoutes(fastify);
+  platformServices.registerAllRoutes(fastify);
+  revocationService.registerRoutes(fastify);
+  canaryRolloutService.registerRoutes(fastify);
+  externalGateway.registerRoutes(fastify);
+
+  // ۳. اندپوینت ساخت کلید سازمانی (Admin Only)
+  fastify.post<{
+    Headers: { 'x-admin-api-key': string };
+    Body: {
+      organizationId: string;
+      scopes: ('MODELS_READ' | 'EXTERNAL_GATEWAY' | 'CLOUD_ASR_ENTERPRISE')[];
+      monthlyAudioSecondsLimit: number;
+    };
+  }>('/api/v1/admin/enterprise-keys', async (request, reply) => {
+    if (request.headers['x-admin-api-key'] !== config.adminApiSecretKey) {
+      return reply.status(401).send({ error: 'ADMIN_UNAUTHORIZED' });
+    }
+    const created = await enterpriseKeys.issueNewEnterpriseApiKey(request.body);
+    return reply.status(201).send(created);
+  });
+
+  // ۴. اندپوینت‌های سلامت سرور برای Docker / Kubernetes
+  fastify.get('/healthz', async () => ({
+    status: 'alive',
+    uptimeSec: Math.round(process.uptime()),
+  }));
+
+  fastify.get('/readyz', async (_request, reply) => {
+    try {
+      await db.query('SELECT 1');
+      return reply.send({ status: 'ready', postgres: 'connected' });
+    } catch {
+      return reply.status(503).send({ status: 'not_ready', postgres: 'disconnected' });
+    }
+  });
+
+  return {
+    fastify,
+    sharedCache,
+    enterpriseKeys,
+    externalGateway,
+    advisoryLocks,
+  };
+}
+
+بخش صد‌و‌چهل‌ویکم: موتور استخراج عبارت‌های کلیدی فارسی (RAKE) و شاخص‌گذاری موضوعی (PersianTopicAndKeywordIndexer.ts)
+
+پس از اینکه موتور ASR متن یک سخنرانی، جلسه سازمانی یا پادکست فارسی را استخراج
+کرد، سازمان‌ها و تولیدکنندگان محتوا نیاز دارند به صورت ۱۰۰٪ محلی و بدون ارسال
+متن به مدل‌های ابری، عبارت‌های کلیدی چندکلمه‌ای (Multi-Word Keyphrases) مانند
+«امنیت زنجیره تأمین»، «پردازش محلی صوت» یا «شاخص رضایت مشتری» را از دل رونوشت
+استخراج کنند.
+
+این ماژول الگوریتم کلاسیک RAKE (Rapid Automatic Keyword Extraction) را با
+جداکننده‌های دستوری فارسی (حروف اضافه، افعال ربطی «است، بود، شد»، علائم نگارشی و
+پیوندهای مکث بلند آکوستیکی بالای ۶۰۰ میلی‌ثانیه!) تطبیق داده و با معیار
+\frac{\text{degree}(w)}{\text{freq}(w)} دقیق‌ترین عبارت‌های چندکلمه‌ای فارسی را
+امتیازدهی می‌کند:
+
+// packages/ai-engine/src/asr/PersianTopicAndKeywordIndexer.ts
+import { TimedPersianToken } from '../PersianTextNormalizer';
+import { TimeMath } from '../../../contracts/src/timebase.contract';
+
+export interface ExtractedPersianKeyphrase {
+  readonly phraseFa: string;
+  readonly rakeScore: number;
+  readonly occurrenceCount: number;
+  readonly firstAppearanceSeconds: number;
+}
+
+export class PersianTopicAndKeywordIndexer {
+  /** واژگان ایست (Stopwords) و افعال کمکی که مرز عبارت‌های کلیدی فارسی را تشکیل می‌دهند */
+  private static readonly PERSIAN_PHRASE_DELIMITERS = new Set([
+    'و', 'یا', 'در', 'به', 'از', 'با', 'برای', 'تا', 'که', 'را', 'بر', 'بی',
+    'این', 'آن', 'اینها', 'آنها', 'این‌ها', 'آن‌ها', 'هم', 'نیز', 'ولی', 'اما',
+    'چون', 'زیرا', 'اگر', 'وقتی', 'هنگامی', 'بنابراین', 'لذا', 'پس', 'حتی', 'فقط',
+    'است', 'هست', 'نیست', 'بود', 'شد', 'می‌شود', 'می‌کند', 'دارد', 'دارند', 'داریم',
+    'کرد', 'کرده', 'شده', 'باید', 'نباید', 'بتواند', 'خیلی', 'بسیار', 'یک', 'دو', 'سه',
+    'من', 'ما', 'تو', 'شما', 'او', 'ایشان', 'خود', 'همه', 'هر', 'هیچ', 'چه', 'چرا',
+  ]);
+
+  /**
+   * استخراج عبارت‌های کلیدی چندکلمه‌ای فارسی از روی توکن‌های زمان‌بندی‌شده خروجی ASR با الگوریتم RAKE
+   */
+  public static extractPersianKeyphrases(
+    tokens: TimedPersianToken[],
+    topK: number = 8,
+    maxWordsPerPhrase: number = 4
+  ): ExtractedPersianKeyphrase[] {
+    if (tokens.length === 0) return [];
+
+    // ۱. استخراج عبارت‌های نامزد (Candidate Keyphrases) بر اساس واژگان ایست، علائم نگارشی و مکث‌های آکوستیکی > 600ms
+    const candidatePhrases: { words: string[]; startSec: number }[] = [];
+    let currentWords: string[] = [];
+    let currentStartSec = 0;
+
+    const flushPhrase = () => {
+      if (currentWords.length >= 1 && currentWords.length <= maxWordsPerPhrase) {
+        candidatePhrases.push({
+          words: [...currentWords],
+          startSec: currentStartSec,
+        });
+      } else if (currentWords.length > maxWordsPerPhrase) {
+        // تقسیم عبارت‌های خیلی طولانی به پنجره‌های مجاز
+        for (let i = 0; i < currentWords.length; i += maxWordsPerPhrase) {
+          candidatePhrases.push({
+            words: currentWords.slice(i, i + maxWordsPerPhrase),
+            startSec: currentStartSec,
+          });
+        }
+      }
+      currentWords = [];
+    };
+
+    for (let i = 0; i < tokens.length; i++) {
+      const tok = tokens[i];
+      const prev = i > 0 ? tokens[i - 1] : null;
+      const gapMs = prev
+        ? TimeMath.flicksToSeconds(tok.range.start - prev.range.end) * 1000
+        : 0;
+
+      if (gapMs > 600 && currentWords.length > 0) {
+        flushPhrase();
+      }
+
+      const rawDisplay = tok.displayText;
+      const hasTrailingPunct = /[،؛.!؟:]$/.test(rawDisplay);
+      const cleanNorm = tok.normalizedText.replace(/[،؛.!؟:«»"()\-]/g, '').trim();
+
+      if (
+        cleanNorm.length < 2 ||
+        this.PERSIAN_PHRASE_DELIMITERS.has(cleanNorm)
+      ) {
+        flushPhrase();
+        continue;
+      }
+
+      if (currentWords.length === 0) {
+        currentStartSec = TimeMath.flicksToSeconds(tok.range.start);
+      }
+      currentWords.push(cleanNorm);
+
+      if (hasTrailingPunct) {
+        flushPhrase();
+      }
+    }
+    flushPhrase();
+
+    if (candidatePhrases.length === 0) return [];
+
+    // ۲. محاسبه بسامد (freq) و درجه هم‌رخدادی (degree) برای تک‌تک واژگان محتوایی در الگوریتم RAKE
+    const wordFreq = new Map<string, number>();
+    const wordDegree = new Map<string, number>();
+
+    for (const cand of candidatePhrases) {
+      const deg = cand.words.length;
+      for (const w of cand.words) {
+        wordFreq.set(w, (wordFreq.get(w) ?? 0) + 1);
+        wordDegree.set(w, (wordDegree.get(w) ?? 0) + deg);
+      }
+    }
+
+    const wordScore = new Map<string, number>();
+    for (const [w, freq] of wordFreq.entries()) {
+      const deg = wordDegree.get(w) ?? freq;
+      wordScore.set(w, deg / freq);
+    }
+
+    // ۳. تجمیع امتیاز کل هر عبارت یکتا و مرتب‌سازی نزولی
+    const phraseStats = new Map<
+      string,
+      { score: number; count: number; firstSec: number; wordLen: number }
+    >();
+
+    for (const cand of candidatePhrases) {
+      const phraseStr = cand.words.join(' ');
+      let sumScore = 0;
+      for (const w of cand.words) {
+        sumScore += wordScore.get(w) ?? 0;
+      }
+      // اولویت ملایم به عبارت‌های ۲ و ۳ کلمه‌ای نسبت به تک‌کلمه‌ها
+      const multiWordBonus = cand.words.length >= 2 ? 1.15 : 1.0;
+      const finalScore = sumScore * multiWordBonus;
+
+      const existing = phraseStats.get(phraseStr);
+      if (!existing) {
+        phraseStats.set(phraseStr, {
+          score: finalScore,
+          count: 1,
+          firstSec: cand.startSec,
+          wordLen: cand.words.length,
+        });
+      } else {
+        existing.count++;
+      }
+    }
+
+    return Array.from(phraseStats.entries())
+      .map(([phraseFa, st]) => ({
+        phraseFa,
+        rakeScore: Number((st.score * (1 + Math.log2(st.count) * 0.25)).toFixed(2)),
+        occurrenceCount: st.count,
+        firstAppearanceSeconds: Number(st.firstSec.toFixed(2)),
+      }))
+      .sort((a, b) => b.rakeScore - a.rakeScore)
+      .slice(0, topK);
+  }
+}
+
+بخش صد‌و‌چهل‌ودوم: مجموعه تست سرتاسری کل کارخانه Backend و استخراج کلیدواژه فارسی (FullBackendIntegration.spec.ts)
+
+// apps/platform-backend/__tests__/FullBackendIntegration.spec.ts
+import { describe, it, expect } from 'vitest';
+import crypto from 'node:crypto';
+import os from 'node:os';
+import { buildBackendApplication } from '../src/BackendApplicationFactory';
+import { PgPoolLike } from '../src/PlatformBackendServices';
+import { PersianTopicAndKeywordIndexer } from '../../../packages/ai-engine/src/asr/PersianTopicAndKeywordIndexer';
+import { PersianTextNormalizer } from '../../../packages/ai-engine/src/PersianTextNormalizer';
+import { TimeMath } from '../../../packages/contracts/src/timebase.contract';
+
+describe('Full Backend Factory Integration & Persian RAKE Keyphrase Suite', () => {
+  it('1. Full BackendApplicationFactory wires Auth, JWT Guards, Enterprise Keys, Canary, Healthz & Prometheus Metrics cleanly', async () => {
+    const { publicKey, privateKey } = crypto.generateKeyPairSync('ed25519');
+    const privPem = privateKey.export({ type: 'pkcs8', format: 'pem' }).toString();
+    const pubPem = publicKey.export({ type: 'spki', format: 'pem' }).toString();
+    const adminKey = 'admin_factory_secret';
+
+    const mockDb: PgPoolLike = {
+      async query(sql) {
+        if (sql === 'SELECT 1') return { rows: [{ '?column?': 1 }] as any, rowCount: 1 };
+        if (sql.includes('INSERT INTO enterprise_api_keys')) {
+          return { rows: [{ key_id: 'ent_key_99' }] as any, rowCount: 1 };
+        }
+        if (sql.includes('FROM ai_models_catalog')) {
+          return {
+            rows: [{ model_id: 'fastconformer-fa', version: '1.2.0', release_status: 'ACTIVE' }] as any,
+            rowCount: 1,
+          };
+        }
+        return { rows: [], rowCount: 0 };
+      },
+    };
+
+    const app = buildBackendApplication(mockDb, {
+      ed25519PrivateKeyPem: privPem,
+      ed25519PublicKeyPem: pubPem,
+      keyId: 'k_prod',
+      paymentWebhookHmacSecret: 'pay_sec',
+      adminApiSecretKey: adminKey,
+      modelStorageRootDir: os.tmpdir(),
+      cdnBaseUrl: 'https://cdn.local',
+      enableServerSideAsrInference: false,
+    });
+
+    // ۱. بررسی سلامت سرور
+    const readyRes = await app.fastify.inject({ method: 'GET', url: '/readyz' });
+    expect(readyRes.statusCode).toBe(200);
+    expect(readyRes.json().postgres).toBe('connected');
+
+    // ۲. بررسی مسدود شدن درخواست بدون JWT به اندپوینت لایسنس
+    const unauthLicense = await app.fastify.inject({
+      method: 'POST',
+      url: '/api/v1/license/lease',
+      payload: { userId: 'u1', deviceFingerprintHash: 'h1' },
+    });
+    expect(unauthLicense.statusCode).toBe(401);
+
+    // ۳. بررسی صدور کلید سازمانی از مسیر ادمین
+    const keyRes = await app.fastify.inject({
+      method: 'POST',
+      url: '/api/v1/admin/enterprise-keys',
+      headers: { 'x-admin-api-key': adminKey },
+      payload: {
+        organizationId: 'org_media_1',
+        scopes: ['MODELS_READ'],
+        monthlyAudioSecondsLimit: 7200,
+      },
+    });
+    expect(keyRes.statusCode).toBe(201);
+    expect(keyRes.json().plaintextApiKeyOnce.startsWith('paudio_live_')).toBe(true);
+
+    // ۴. بررسی خروجی متریک‌های Prometheus
+    const metricsRes = await app.fastify.inject({ method: 'GET', url: '/metrics' });
+    expect(metricsRes.statusCode).toBe(200);
+    expect(metricsRes.body).toContain('paudio_backend_http_requests_total');
+  });
+
+  it('2. PersianTopicAndKeywordIndexer extracts multi-word Persian keyphrases with timestamps using RAKE', () => {
+    const words = [
+      'در', 'این', 'جلسه', 'درباره', 'پردازش', 'محلی', 'صوت', 'و', 'امنیت', 'زنجیره', 'تامین',
+      'صحبت', 'می‌کنیم', '.', 'هدف', 'ما', 'بهبود', 'پردازش', 'محلی', 'صوت', 'در', 'مرورگر', 'است', '.'
+    ];
+
+    const tokens = PersianTextNormalizer.buildThreeLayerTranscript(
+      words.map((w, idx) => ({
+        id: `tk_${idx}`,
+        text: w,
+        range: {
+          start: TimeMath.secondsToFlicks(idx * 0.35),
+          end: TimeMath.secondsToFlicks(idx * 0.35 + 0.3),
+        },
+        confidence: 0.95,
+      }))
+    );
+
+    const keyphrases = PersianTopicAndKeywordIndexer.extractPersianKeyphrases(tokens, 5);
+    const extractedStrings = keyphrases.map((k) => k.phraseFa);
+
+    expect(extractedStrings).toContain('پردازش محلی صوت');
+    expect(extractedStrings).toContain('امنیت زنجیره تامین');
+    expect(keyphrases[0].occurrenceCount).toBeGreaterThanOrEqual(1);
+  });
+});
+
+جمع‌بندی جامع کل بخش‌های Backend و موتور اصلی تشخیص گفتار (تا بخش ۱۴۲)
+
+با تکمیل بخش‌های ۹۸ تا ۱۴۲ که به صورت خالص بر هسته موتور تشخیص گفتار فارسی و
+سرویس‌های Backend متمرکز بودند، اکنون سیستم شما دارای یک موتور ASR و زیرساخت
+سروری کاملاً صنعتی، مستقل از محیط اجرا و آزمون‌پذیر است:
+
+1.  معماری سه‌گانه استنتاج عصبی روی ONNX Runtime (WebGPU / WASM / Node CPU /
+    CUDA):
+      - FastConformer-CTC (با دیکدر CTC Prefix Beam Search + مدل زبان باینری
+        فشرده PLM1 + Context-Biasing Trie + زیرکلمه‌های SentencePiece)
+      - Whisper Seq2Seq (با KV-Cache خطی، پرامپت تطبیقی v2/v3-turbo، Beam Search
+        چندپرتویی + Temperature Fallback + محافظ فشرده‌سازی LZ77)
+      - RNN-Transducer & TDT (با شبکه پیش‌بین LSTM و پرش زمانی Duration Skip)
+2.  تشخیص زنده، VAD و تفکیک گویندگان:
+      - Silero VAD v5 (تانسورهای دقیق [1, 576] و [2, 1, 128])، Causal
+        Cache-Aware Streaming FastConformer، LocalAgreement-2 + Draft Horizon،
+        پایانه‌سنج نحوی-آکوستیکی فارسی
+        (PersianSyntacticAcousticEndpointDetector)، و تفکیک گویندگان ECAPA-TDNN
+        + AHC همراه با هم‌ترازگر دقیق مرز کلمات
+        (SpeakerTurnBoundaryWordAligner).
+3.  پالایش پس‌ازتشخیص و بهینه‌سازی زبان فارسی:
+      - هم‌ترازی دوگذره Whisper + CTC Re-Alignment، کالیبراسیون احتمالات Platt
+        Scaling، تصحیح ابهام آوایی با مدل زبان دوجانبه، بازسازی کلمات مرکب و
+        نیم‌فاصله‌ها، نرمال‌سازی دوطرفه اعداد و مبالغ فارسی، فیلتر پیش‌ازASR
+        موسیقی تیتراژ و استخراج کلیدواژه با RAKE فارسی.
+4.  زیرساخت کامل سرور Backend (Node.js + Fastify + PostgreSQL):
+      - احراز هویت scrypt + EdDSA JWT، لایسنس آفلاین امضاشده با Ed25519 و کنترل
+        سقف دستگاه‌ها، توزیع تکه‌های ۸ مگابایتی با HTTP 206 Byte-Range، وب‌هوک
+        پرداخت با Idempotency، کلیدهای سازمانی B2B با مصرف اتمیک سهمیه، Canary
+        Rollout و Auto-Rollback، کش Single-Flight، قفل مشورتی توزیع‌شده، الگوی
+        Outbox تراکنشی، ناظر سلامت کارگرها (Watchdog) و خروجی متریک‌های
+        Prometheus.
+
+اگر مایل باشید در گام بعدی به بخش جدیدی (مانند یکپارچه‌سازی Docker Compose کامل
+محیط تولید شامل PostgreSQL + Fastify Backend + Nginx Model CDN + اسکریپت‌های
+اجرای Migration دیتابیس یا هر جزء دیگری از Backend/ASR) بپردازیم، بفرمایید.

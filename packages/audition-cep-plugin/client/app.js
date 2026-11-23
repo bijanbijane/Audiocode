@@ -8,14 +8,19 @@
 (function () {
   "use strict";
 
+  var MAX_CEP_TRANSFER_SLICE_BYTES = 192 * 1024; // 192 KiB raw slice (<= 256 KiB Companion network chunk limit)
+
   var state = {
     companionUrl: "http://127.0.0.1:47291/api/v2/companion",
     sessionId: null,
     sessionToken: null,
     activeJobId: null,
+    activeTransferId: null,
+    transferCancelled: false,
     activeSourceIdentity: null,
     currentAuditionSourceIdentity: null,
     pollTimer: null,
+    selectedFile: null,
     selectedFileBase64: null,
     selectedFileName: "",
     segments: [],
@@ -317,6 +322,140 @@
     });
   }
 
+  function arrayBufferToBase64(buffer) {
+    var bytes = new Uint8Array(buffer);
+    var chunkSize = 0x8000;
+    var parts = [];
+    for (var i = 0; i < bytes.length; i += chunkSize) {
+      parts.push(String.fromCharCode.apply(null, bytes.subarray(i, i + chunkSize)));
+    }
+    return btoa(parts.join(""));
+  }
+
+  function readBlobSliceAsArrayBuffer(blobSlice) {
+    if (typeof blobSlice.arrayBuffer === "function") {
+      return blobSlice.arrayBuffer();
+    }
+    return new Promise(function (resolve, reject) {
+      var reader = new FileReader();
+      reader.onload = function () {
+        resolve(reader.result);
+      };
+      reader.onerror = function () {
+        reject(new Error("Failed to read audio slice"));
+      };
+      reader.readAsArrayBuffer(blobSlice);
+    });
+  }
+
+  function parseWavHeaderQuick(arrayBuf) {
+    if (!arrayBuf || arrayBuf.byteLength < 44) return null;
+    var view = new DataView(arrayBuf);
+    var magic =
+      String.fromCharCode(view.getUint8(0)) +
+      String.fromCharCode(view.getUint8(1)) +
+      String.fromCharCode(view.getUint8(2)) +
+      String.fromCharCode(view.getUint8(3));
+    var wave =
+      String.fromCharCode(view.getUint8(8)) +
+      String.fromCharCode(view.getUint8(9)) +
+      String.fromCharCode(view.getUint8(10)) +
+      String.fromCharCode(view.getUint8(11));
+    if ((magic !== "RIFF" && magic !== "RF64") || wave !== "WAVE") return null;
+    var channels = view.getUint16(22, true);
+    var sampleRateHz = view.getUint32(24, true);
+    var bitsPerSample = view.getUint16(34, true) || 16;
+    if (channels < 1 || channels > 8 || sampleRateHz < 8000 || sampleRateHz > 192000) return null;
+    return {
+      channels: channels,
+      sampleRateHz: sampleRateHz,
+      bitsPerSample: bitsPerSample,
+    };
+  }
+
+  async function streamSelectedFileInBoundedChunks(file) {
+    var totalBytes = file.size;
+    var totalChunks = Math.max(1, Math.ceil(totalBytes / MAX_CEP_TRANSFER_SLICE_BYTES));
+    var headerSliceBuf = await readBlobSliceAsArrayBuffer(file.slice(0, Math.min(256, totalBytes)));
+    var wavMeta = parseWavHeaderQuick(headerSliceBuf);
+
+    state.transferCancelled = false;
+
+    if (wavMeta) {
+      var bytesPerFrame = Math.max(2, wavMeta.channels * (wavMeta.bitsPerSample / 8));
+      var expectedFrames = Math.max(1, Math.floor(Math.max(1, totalBytes - 44) / bytesPerFrame));
+      var initRes = await sendIpc("CAPABILITY_EXECUTE", {
+        action: "AUDIO_TRANSFER_INIT",
+        filename: file.name || "audio.wav",
+        format: "wav",
+        sampleRateHz: wavMeta.sampleRateHz,
+        channels: wavMeta.channels,
+        endianness: "little",
+        expectedBytes: totalBytes,
+        expectedFrames: expectedFrames,
+        totalChunks: totalChunks,
+      });
+      var transferId = initRes.transferId;
+      state.activeTransferId = transferId;
+
+      for (var chunkIndex = 0; chunkIndex < totalChunks; chunkIndex++) {
+        if (state.transferCancelled) {
+          await sendIpc("CAPABILITY_EXECUTE", {
+            action: "AUDIO_TRANSFER_ABORT",
+            transferId: transferId,
+          });
+          state.activeTransferId = null;
+          throw new Error("انتقال صوت توسط کاربر لغو شد.");
+        }
+        var start = chunkIndex * MAX_CEP_TRANSFER_SLICE_BYTES;
+        var end = Math.min(totalBytes, start + MAX_CEP_TRANSFER_SLICE_BYTES);
+        var sliceBuf = await readBlobSliceAsArrayBuffer(file.slice(start, end));
+        var chunkBase64 = arrayBufferToBase64(sliceBuf);
+        await sendIpc("CAPABILITY_EXECUTE", {
+          action: "AUDIO_TRANSFER_CHUNK",
+          transferId: transferId,
+          chunkIndex: chunkIndex,
+          chunkBase64: chunkBase64,
+        });
+        var pct = Math.min(95, Math.max(5, Math.round(((chunkIndex + 1) / totalChunks) * 40)));
+        $("progressFill").style.width = pct + "%";
+        $("progressLabel").textContent = "انتقال قطعه‌ای صوت (" + (chunkIndex + 1) + "/" + totalChunks + ")...";
+      }
+
+      await sendIpc("CAPABILITY_EXECUTE", {
+        action: "AUDIO_TRANSFER_FINALIZE",
+        transferId: transferId,
+      });
+      state.activeTransferId = null;
+      return { transferId: transferId };
+    }
+
+    // Non-WAV containers stream in <= 192 KiB slices via AUDIO_UPLOAD_INIT / AUDIO_UPLOAD_CHUNK
+    var upInit = await sendIpc("CAPABILITY_EXECUTE", {
+      action: "AUDIO_UPLOAD_INIT",
+      filename: file.name || "audio.bin",
+    });
+    var uploadId = upInit.uploadId;
+    for (var idx = 0; idx < totalChunks; idx++) {
+      if (state.transferCancelled) {
+        await sendIpc("CAPABILITY_EXECUTE", {
+          action: "AUDIO_UPLOAD_ABORT",
+          uploadId: uploadId,
+        });
+        throw new Error("انتقال صوت توسط کاربر لغو شد.");
+      }
+      var s = idx * MAX_CEP_TRANSFER_SLICE_BYTES;
+      var e = Math.min(totalBytes, s + MAX_CEP_TRANSFER_SLICE_BYTES);
+      var buf = await readBlobSliceAsArrayBuffer(file.slice(s, e));
+      await sendIpc("CAPABILITY_EXECUTE", {
+        action: "AUDIO_UPLOAD_CHUNK",
+        uploadId: uploadId,
+        chunkBase64: arrayBufferToBase64(buf),
+      });
+    }
+    return { uploadId: uploadId };
+  }
+
   async function startTranscription() {
     var filePath = $("manualFilePath").value.trim();
     var sourceIdentity = state.currentAuditionSourceIdentity
@@ -332,12 +471,8 @@
       numThreads: Number($("cpuThreadsInput").value) || 4,
       sourceIdentity: sourceIdentity,
     };
-    if (filePath) {
-      payload.filePath = filePath;
-    } else if (state.selectedFileBase64) {
-      payload.audioBase64 = state.selectedFileBase64;
-      payload.filename = state.selectedFileName || "audio.wav";
-    } else {
+
+    if (!filePath && !state.selectedFile && !state.selectedFileBase64) {
       showNotice("ابتدا فایل صوتی یا سند فعال Audition را انتخاب کنید.", true);
       return;
     }
@@ -349,6 +484,21 @@
     $("progressLabel").textContent = "در حال ارسال به موتور محلی...";
 
     try {
+      if (filePath) {
+        payload.filePath = filePath;
+      } else if (state.selectedFile) {
+        var streamed = await streamSelectedFileInBoundedChunks(state.selectedFile);
+        if (streamed.transferId) {
+          payload.transferId = streamed.transferId;
+        } else if (streamed.uploadId) {
+          payload.uploadId = streamed.uploadId;
+        }
+        payload.filename = state.selectedFileName || "audio.wav";
+      } else if (state.selectedFileBase64) {
+        payload.audioBase64 = state.selectedFileBase64;
+        payload.filename = state.selectedFileName || "audio.wav";
+      }
+
       var res = await sendIpc("JOB_SUBMIT", payload);
       state.activeJobId = res.job.jobId;
       state.activeSourceIdentity = sourceIdentity;
@@ -454,6 +604,17 @@
   }
 
   async function cancelActiveJob() {
+    state.transferCancelled = true;
+    if (state.activeTransferId) {
+      try {
+        var tid = state.activeTransferId;
+        state.activeTransferId = null;
+        await sendIpc("CAPABILITY_EXECUTE", {
+          action: "AUDIO_TRANSFER_ABORT",
+          transferId: tid,
+        });
+      } catch (_e) {}
+    }
     if (!state.activeJobId) return;
     try {
       await sendIpc("JOB_CANCEL", { jobId: state.activeJobId });
@@ -514,15 +675,11 @@
     $("localFileInput").addEventListener("change", function (ev) {
       var file = ev.target.files && ev.target.files[0];
       if (!file) return;
+      state.selectedFile = file;
+      state.selectedFileBase64 = null;
       state.selectedFileName = file.name;
-      $("auditionDocInfo").textContent = file.name + " (" + (file.size / 1024 / 1024).toFixed(2) + " MB)";
-      var reader = new FileReader();
-      reader.onload = function () {
-        var result = String(reader.result || "");
-        var commaIdx = result.indexOf(",");
-        state.selectedFileBase64 = commaIdx >= 0 ? result.slice(commaIdx + 1) : result;
-      };
-      reader.readAsDataURL(file);
+      $("auditionDocInfo").textContent =
+        file.name + " (" + (file.size / 1024 / 1024).toFixed(2) + " MB — آماده انتقال قطعه‌ای)";
     });
 
     $("btnUndo").addEventListener("click", function () {

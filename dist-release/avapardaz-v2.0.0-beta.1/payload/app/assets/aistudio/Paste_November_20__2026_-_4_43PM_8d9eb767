@@ -1,0 +1,1053 @@
+# **برنامه مادر پروژه آواپرداز (Avapardaz)**
+
+
+
+سند مبنای معماری
+
+نسخه پیشنهادی 2.0
+
+
+
+یک تصمیم معماری را از همین ابتدا قطعی می‌کنم:
+
+**ما دو موتور جداگانه نمی‌سازیم. یک موتور مرکزی تشخیص گفتار می‌سازیم و دو محصول مستقل از آن استفاده می‌کنند.**
+
+# **AVAPARDAZ ASR CORE**
+
+**موتور مرکزی تشخیص گفتار**
+
+Local-first · API-independent · CPU-first · Offline-capable
+
+هسته و قرارداد مشترک
+
+**محصول اول: Web App**
+
+رابط مرورگری، ضبط، بارگذاری فایل، رونویسی، ویرایش و خروجی
+
+**محصول دوم: Adobe Audition Plugin**
+
+رونویسی داخل محیط تدوین، زمان‌بندی، انتخاب گوینده و ارسال خروجی به پروژه صوتی
+
+اولویت محصولی بالاتر
+
+**Shared Local Runtime**
+
+Model Loader · CPU Inference · Audio Pipeline · Decoder · VAD · Alignment · Diarization · Language Processing · Model Manager
+
+**Local Model Assets**
+
+مدل‌های متن‌باز آماده + وزن‌های واقعی + مدل‌های Fine-tune شده اختصاصی + واژگان و تنظیمات
+
+## **تصمیم مهم درباره پلاگین Adobe Audition**
+
+پلاگین ادوبی را نباید صرفاً یک پنجره وب داخل Adobe فرض کنیم. دو مسیر فنی وجود دارد:
+
+1. **پنل یکپارچه Audition:** برای مدیریت رونویسی، متن، گوینده‌ها، تایم‌کد و فرمان‌های کاربر.
+2. **پلاگین پردازش صوت:** برای قابلیت‌هایی که باید به‌صورت افکت یا پردازش صوتی در زنجیره صوتی DAW قرار بگیرند.
+
+این دو کارکرد یکسان نیستند. برای محصول رونویسی، پنل یکپارچه همراه با یک موتور محلی مشترک، انتخاب اولیه مناسب‌تری است؛ بعداً در صورت نیاز، افکت VST3 مستقل هم می‌تواند اضافه شود.
+
+همچنین «کاملاً آفلاین» باید به معنی بی‌نیازی از اینترنت پس از نصب، دریافت مدل‌ها و فعال‌سازی اولیه باشد. بارگیری اولیه مدل و به‌روزرسانی‌ها طبیعتاً به فایل نصب یا انتقال آفلاین نیاز دارند.
+
+## **قبل از شروع: یافته‌های مهم از ZIP**
+
+چند نکته را برای جلوگیری از اشتباه معماری باید به Neon اعلام کنیم:
+
+| موضوع                   | وضعیت مشاهده‌شده                                                                                       |
+| ----------------------- | ------------------------------------------------------------------------------------------------------ |
+| `onnxruntime-web`       | در `package.json` وجود دارد؛ گزارش‌های قدیمی که نصب نبودنش را می‌گویند باید اصلاح شوند.                |
+| وزن واقعی مدل           | هیچ فایل `.onnx`، `.gguf`، `.safetensors` یا وزن مشابه در ZIP پیدا نشد.                                |
+| مسیر فعلی Local ASR     | مدل نصب‌شده مطالبه می‌شود، اما اجرای واقعی مدل عصبی از مسیر فعال رابط کاربری اثبات نشده است.           |
+| `CoreAcousticCtcEngine` | استخراج ویژگی ۱۶ بانده و تطبیق Prototype دارد؛ این مدل عصبی آموزش‌دیده ASR نیست.                       |
+| Gemini                  | اتصال ابری واقعی در `server.ts` وجود دارد و در مسیر محصول باید از وابستگی اجباری حذف شود.              |
+| Adobe Audition          | قرارداد Host Adapter و Companion IPC وجود دارد، ولی اجرای واقعی پنل در Audition دسکتاپ تأیید نشده است. |
+
+نکته ظریف: گزارش‌های موجود پروژه با یکدیگر تعارض دارند. مثلاً یک ممیزی می‌گوید ONNX Runtime نصب نیست، اما `package.json` نسخه `1.31.1` را معرفی کرده است. Neon باید سندهای قدیمی را با کد فعلی تطبیق دهد؛ نباید صرفاً گزارش‌های قبلی را تکرار کند.
+
+**یک اصلاح مهم در انتخاب مدل:** مخزن رسمی Qwen3-ASR از پشتیبانی فارسی و اجرای Offline/Streaming صحبت می‌کند، ولی Forced Aligner ارائه‌شده‌اش فقط ۱۱ زبان را فهرست می‌کند و فارسی در آن فهرست نیست. پس نباید آن را بدون آزمایش به‌عنوان هم‌ترازگر فارسی انتخاب کنیم.&#x20;
+
+[image](https://www.google.com/s2/favicons?domain=https://github.com\&sz=32)
+
+GitHub
+
+
+
+همچنین Whisper.cpp یک نامزد جدی برای نسخه Native است؛ چون اجرای CPU، کوانتیزاسیون، API زبان C و بهینه‌سازی Apple Silicon را ارائه می‌کند. اما کیفیت فارسی آن باید روی دیتاست واقعی ما سنجیده شود.&#x20;
+
+[image](https://www.google.com/s2/favicons?domain=https://github.com\&sz=32)
+
+GitHub
+
+
+
+# **نقشه راه اجرایی**
+
+این نقشه، مسیر مادر و مرجع تمام دستورهای بعدی خواهد بود.
+
+**AVAPARDAZ MASTER ROADMAP**
+
+۱۰ فاز
+
+1. **PHASE 00 — Reality Audit & Architecture Freeze**
+
+   ممیزی کامل پروژه، تعیین حقیقت فنی، معماری نهایی، شناسایی کدهای قابل‌استفاده و ثبت نقشه راه.
+
+   اولین دستور
+2. **PHASE 01 — Open-Source Model Discovery & CPU Bake-off**
+
+   کشف مخازن و مدل‌های آماده، اعتبارسنجی مجوز، دانلود وزن واقعی، اجرای تست CPU و انتخاب مدل پایه.
+3. **PHASE 02 — Central ASR Core Engineering**
+
+   تعریف قرارداد مرکزی موتور، Audio Pipeline، Model Runtime Abstraction، Transcript Schema، مدیریت حافظه و خطا.
+4. **PHASE 03 — Native Local Inference Runtime**
+
+   ساخت و اتصال Runtime محلی واقعی، بارگذاری وزن، پردازش صوت روی CPU، نصب و نگهداری مدل‌ها و حالت کاملاً آفلاین.
+5. **PHASE 04 — Adobe Audition Plugin (اولویت اصلی محصول)**
+
+   ساخت پنل CEP واقعی، اتصال به Host Bridge، دسترسی به صوت پروژه، رونویسی، نمایش متن، تایم‌کد و ارتباط با Timeline.
+6. **PHASE 05 — Web Application Integration**
+
+   اتصال وب‌اپ به همان هسته و قراردادها، اجرای مرورگری با WASM/ONNX Runtime، استفاده از CPU و ذخیره محلی مدل.
+7. **PHASE 06 — Persian/English Model Specialization**
+
+   تأمین داده، کنترل کیفیت، آموزش تکمیلی، LoRA در مدل‌های سازگار، واژه‌نامه تخصصی و ارزیابی مدل اختصاصی.
+8. **PHASE 07 — Advanced Speech Intelligence**
+
+   Streaming واقعی، Word-Level Timestamps، Speaker Diarization، Forced Alignment، Code-Switching و نویز.
+9. **PHASE 08 — Cross-Platform Performance & Reliability**
+
+   آزمون سخت‌افزارهای مختلف، مصرف RAM، سرعت CPU، تست آفلاین، تست Adobe و مرورگر، امنیت و پایداری.
+10. **PHASE 09 — Packaging, Distribution & Release**
+
+    نصب‌کننده Native، بسته پلاگین، بسته وب‌اپ، مدیریت مدل، امضای نرم‌افزار، مستندات و انتشار محصول.
+
+## **تقسیم مسئولیت فنی**
+
+این تفکیک مهم است تا Neon اشتباهاً دو موتور جدا نسازد:
+
+| بخش مرکزی         | نسخه وب             | نسخه Adobe             |
+| ----------------- | ------------------- | ---------------------- |
+| ASR Contracts     | مصرف‌کننده هسته     | مصرف‌کننده هسته        |
+| Audio Pipeline    | Browser Worker      | Native Companion       |
+| مدل و Decoder     | WASM / ONNX Runtime | Native Runtime         |
+| Normalization     | مشترک               | مشترک                  |
+| Transcript Schema | مشترک               | مشترک                  |
+| Model Registry    | مشترک               | مشترک                  |
+| مدیریت عملیات     | مرورگر              | CEP Panel              |
+| خروجی             | TXT/SRT/VTT/JSON    | خروجی تدوین و Timeline |
+
+اصل معماری این است که الگوریتم‌ها، قراردادها، منطق پردازش، نسخه مدل و ساختار خروجی مشترک باشند؛ Runtime بومی و مرورگری صرفاً آداپتورهای اجرای همان موتور باشند. نباید به‌زور یک فرمت وزن را روی هر دو پلتفرم تحمیل کنیم، مگر آنکه سازگاری و عملکردش اثبات شده باشد.
+
+## **دستور اول برای Neon 4 Gemini**
+
+این متن را بدون تغییر به Neon بده. این دستور، هم نقشه راه را در حافظه پایدار پروژه ثبت می‌کند و هم فاز صفر را اجرا می‌کند.
+
+# AVAPARDAZ — MASTER ENGINEERING DIRECTIVE
+
+## NEON 4 GEMINI — AUTONOMOUS ASR ENGINEERING PROGRAM
+
+### Master Roadmap v2.0 — PHASE 00 Execution Authorization
+
+---
+
+# 1. نقش و سطح مسئولیت
+
+تو Neon 4 Gemini هستی و مسئول ارشد معماری نرم‌افزار، مهندسی سیستم‌های صوتی، مهندسی یادگیری ماشین، توسعه ASR، مهندسی مدل‌های عصبی، بهینه‌سازی CPU، توسعه پلاگین‌های Adobe و توسعه نرم‌افزار چندسکویی پروژه Avapardaz هستی.
+
+این مأموریت یک پروژه واقعی محصولی است، نه ساخت نمونه نمایشی، شبیه‌سازی، آزمایشگاه صوری یا مجموعه‌ای از API Adapterها.
+
+باید با حداکثر استقلال فنی عمل کنی:
+
+- خودت کد را بخوان و معماری را کشف کن.
+- خودت مشکلات را پیدا کن.
+- خودت راهکار فنی را انتخاب و اجرا کن.
+- از کاربر نخواه مشکلات را برایت فهرست کند.
+- از تولید Mock به جای عملکرد واقعی خودداری کن.
+- هیچ قابلیت اجرا‌نشده‌ای را IMPLEMENTED معرفی نکن.
+- هر ادعا را با کد، تست، خروجی اجرا یا سند فنی اثبات کن.
+
+زبان گزارش‌ها می‌تواند فارسی باشد، اما نام کلاس‌ها، متغیرها، قراردادها، ساختار فایل‌ها و اسناد فنی باید استاندارد انگلیسی باشند.
+
+# 2. مأموریت نهایی محصول
+
+ساخت یک موتور اختصاصی تشخیص گفتار با نام:
+
+AVAPARDAZ ASR CORE
+
+ویژگی‌های الزامی موتور:
+
+1. Local-First.
+2. CPU-First.
+3. Offline-Capable.
+4. Zero Mandatory Third-Party ASR API.
+5. Zero Mandatory Cloud Inference.
+6. No User Audio Upload to External Services.
+7. Open-Source Pretrained Model Integration.
+8. Proprietary Model Adaptation and Engineering.
+9. Persian / English / Persian-English Code-Switching.
+10. Batch and Streaming Inference.
+11. Word-Level Timestamping.
+12. Extensible Model Backend.
+13. Cross-Platform Runtime Architecture.
+
+توضیح مهم:
+
+منظور از بدون هوش مصنوعی خارجی، حذف وابستگی به سرویس‌های ابری هوش مصنوعی است؛ خود مدل‌های تشخیص گفتار از شبکه عصبی و Machine Learning استفاده خواهند کرد. وزن مدل روی دستگاه کاربر اجرا می‌شود.
+
+هیچ تماس API خارجی نباید برای تشخیص گفتار، شرط اجرای محصول باشد.
+
+دانلود اولیه Model Assets و به‌روزرسانی مدل، عملیات توزیع فایل هستند و نباید با Inference ابری اشتباه گرفته شوند. پس از نصب مدل، عملیات تشخیص باید بدون اینترنت کار کند.
+
+# 3. اصل معماری غیرقابل مذاکره
+
+فقط یک موتور مرکزی می‌سازیم.
+
+دو محصول از همان موتور استفاده می‌کنند:
+
+PRODUCT A — Adobe Audition Plugin\
+اولویت تجاری و محصولی شماره یک.
+
+PRODUCT B — Web Application\
+اولویت محصولی شماره دو.
+
+معماری مفهومی:
+
+```
+                    AVAPARDAZ ASR CORE
+                           |
+            +--------------+--------------+
+            |                             |
+      Shared Contracts              Shared Pipeline
+            |                             |
+            +--------------+--------------+
+                           |
+                  Inference Abstraction
+                           |
+             +-------------+-------------+
+             |                           |
+       Native Runtime               Web Runtime
+       CPU / Native                CPU / WASM
+             |                           |
+     Adobe Audition Panel            Web App
+             |                           |
+     Local Companion IPC           Browser Worker
+             |                           |
+             +-------------+-------------+
+                           |
+                  Shared Model Catalog
+                           |
+             Verified Pretrained Weights
+```
+
+این معماری یک موتور منطقی و یک قرارداد اجرایی مرکزی دارد. استفاده از Runtimeهای Native و WASM مجاز است؛ اما نباید منطق ASR، قرارداد خروجی، Pipeline و منطق پردازش در دو محصول به‌صورت مستقل و ناسازگار دوباره نوشته شود.
+
+قبل از انتخاب زبان پیاده‌سازی Core، ساختار TypeScript و Rust موجود را ارزیابی کن. بازنویسی کامل پروژه از پیش مجاز نیست.
+
+# 4. معماری محصولات
+
+## A. Adobe Audition
+
+محصول اصلی ما باید به‌صورت یک پنل واقعی و یکپارچه داخل Adobe Audition ارائه شود.
+
+مسیر اولیه بررسی:
+
+- Adobe Audition CEP Extension.
+- HTML5 + JavaScript/TypeScript Panel.
+- ExtendScript Host Bridge.
+- Local Companion Process.
+- Versioned Secure Loopback IPC.
+- Native CPU Inference Runtime.
+
+مراجع رسمی:
+
+[https://developer.adobe.com/audition/](https://developer.adobe.com/audition/)
+
+[https://helpx.adobe.com/audition/desktop/applying-effects/enabling-cep-extensions.html](https://helpx.adobe.com/audition/desktop/applying-effects/enabling-cep-extensions.html)
+
+[https://github.com/Adobe-CEP](https://github.com/Adobe-CEP)
+
+وظایف مورد انتظار پلاگین:
+
+1. خواندن سند یا Session فعال در محدوده APIهای واقعی Host.
+2. دسترسی به فایل صوتی یا محدوده انتخاب‌شده.
+3. ارسال Audio Buffer به Runtime محلی.
+4. اجرای ASR روی CPU.
+5. دریافت متن و Timestamp.
+6. نمایش Transcript داخل پنل Audition.
+7. نمایش کلمات و Segmentها بر اساس زمان.
+8. امکان انتخاب گوینده.
+9. امکان اصلاح دستی متن.
+10. همگام‌سازی انتخاب متن و موقعیت پخش، در محدوده قابلیت واقعی Host.
+11. تولید خروجی TXT/SRT/VTT/JSON.
+12. بررسی امکان ساخت Marker و ارتباط با Timeline از طریق SDK واقعی.
+
+هیچ قابلیت Host را بدون آزمایش روی Adobe Audition دسکتاپ تأییدشده اعلام نکن.
+
+نکته معماری:
+
+VST3 یک نوع Audio Effect Plugin است، نه جایگزین پنل تعاملی رونویسی. بنابراین CEP را مسیر اصلی توسعه پنل قرار بده. VST3 فقط در صورت نیاز به افکت صوتی مستقل در فاز جداگانه بررسی شود.
+
+منابع:
+
+[https://helpx.adobe.com/audition/desktop/applying-effects/adding-third-party-plug-ins.html](https://helpx.adobe.com/audition/desktop/applying-effects/adding-third-party-plug-ins.html)
+
+[https://github.com/steinbergmedia/vst3sdk](https://github.com/steinbergmedia/vst3sdk)
+
+## B. Web Application
+
+وب‌اپ باید از همان Engine Contracts و Pipeline استفاده کند.
+
+فناوری‌های نامزد:
+
+- React / TypeScript موجود.
+- Web Worker.
+- ONNX Runtime Web.
+- WebAssembly SIMD.
+- OPFS / IndexedDB.
+- Service Worker.
+- PWA Offline Cache.
+
+مستندات:
+
+[https://onnxruntime.ai/docs/tutorials/web/](https://onnxruntime.ai/docs/tutorials/web/)
+
+[https://github.com/microsoft/onnxruntime](https://github.com/microsoft/onnxruntime)
+
+Inference مرورگر باید روی CPU دستگاه کاربر قابل اجرا باشد.
+
+در صورت عدم پشتیبانی مرورگر از قابلیت خاصی، Runtime باید به مسیر سازگار CPU/WASM تنزل کند؛ نه اینکه بدون اطلاع کاربر صوت را به سرور بفرستد.
+
+# 5. راهبرد مدل‌ها و مخازن متن‌باز
+
+هیچ مدل خاصی را بدون آزمایش انتخاب نهایی نکن.
+
+حداقل نامزدهای اجباری برای بررسی:
+
+### Candidate A: Qwen3-ASR
+
+[https://github.com/QwenLM/Qwen3-ASR](https://github.com/QwenLM/Qwen3-ASR)
+
+نامزدها:
+
+- Qwen3-ASR-0.6B
+- Qwen3-ASR-1.7B
+- Qwen3-ForcedAligner-0.6B
+
+بررسی:
+
+- Persian Recognition
+- English Recognition
+- Code-Switching
+- CPU Inference
+- RAM
+- Cold Start
+- Quantization
+- Streaming
+- Offline Deployment
+- ONNX Export Feasibility
+- Licensing
+
+ForcedAligner را برای فارسی بدون اثبات پشتیبانی فارسی انتخاب نکن.
+
+### Candidate B: Whisper.cpp
+
+[https://github.com/ggml-org/whisper.cpp](https://github.com/ggml-org/whisper.cpp)
+
+نامزدها:
+
+- Whisper Tiny
+- Whisper Base
+- Whisper Small
+- Whisper Medium
+- Whisper Large-v3 Turbo
+
+بررسی:
+
+- Native C/C++ API
+- Apple Silicon
+- x86_64 CPU
+- Quantized Weights
+- WASM Build Feasibility
+- Persian CER
+- English WER
+- Code-Switching
+- RAM / RTF
+
+### Candidate C: NVIDIA NeMo / FastConformer
+
+[https://github.com/NVIDIA/NeMo](https://github.com/NVIDIA/NeMo)
+
+بررسی:
+
+- تعداد پارامترها
+- Tokenizer
+- Persian Vocabulary
+- CPU Inference
+- ONNX Export
+- Streaming
+- Training and Fine-Tuning Requirements
+
+### اصول انتخاب مدل
+
+مدل منتخب باید بر اساس نتایج واقعی انتخاب شود.
+
+امتیاز انتخاب باید شامل موارد زیر باشد:
+
+```
+Persian Normalized CER
+English WER
+Code-Switching CER/WER
+RTF
+Cold Start Latency
+Peak RAM
+Model Disk Size
+CPU Compatibility
+Streaming Latency
+Timestamp Quality
+License Compatibility
+Deployment Complexity
+```
+
+GitHub Source Code، Pretrained Model Weights و Training Dataset سه موجودیت متفاوت هستند. آن‌ها را با یکدیگر اشتباه نگیر.
+
+وزن مدل، Tokenizer، Configuration، Model Card و License باید همگی ثبت شوند.
+
+# 6. سیاست توسعه مدل اختصاصی
+
+هدف، ساخت موتور اختصاصی Avapardaz است؛ نه صرفاً استفاده از یک API یا نمایش خروجی مدل دیگر.
+
+مسیر مجاز:
+
+1. انتخاب مدل پایه آماده.
+2. تهیه وزن‌های واقعی.
+3. ایجاد Baseline ثابت.
+4. اجرای Benchmark روی دیتاست واقعی.
+5. استخراج Error Taxonomy.
+6. ساخت داده آموزشی مجاز.
+7. Domain Adaptation.
+8. Fine-Tuning / LoRA در مدل‌های سازگار.
+9. Quantization.
+10. Decoder Optimization.
+11. Contextual Biasing.
+12. Post-ASR Linguistic Correction.
+13. ارزیابی روی Frozen Test Set.
+14. ثبت نسخه مدل اختصاصی.
+15. انتشار Model Package.
+
+آموزش از صفر در حال حاضر هدف نیست.
+
+استفاده از GPU برای آموزش تکمیلی در صورت نیاز مجاز است، اما Runtime محصول نهایی باید بتواند مدل تأییدشده را روی CPU دستگاه کاربر اجرا کند.
+
+هیچ دیتای تست Frozen نباید وارد Training Set شود.
+
+# 7. MASTER ROADMAP — نقشه راه رسمی
+
+تمام توسعه باید دقیقاً بر اساس شناسه‌های زیر انجام شود.
+
+| Phase ID | نام                                  | خروجی نهایی                        |
+| -------- | ------------------------------------ | ---------------------------------- |
+| PHASE-00 | Reality Audit & Architecture Freeze  | گزارش حقیقت فنی و معماری منجمد     |
+| PHASE-01 | Open-Source Discovery & CPU Bake-off | انتخاب مدل با شواهد واقعی          |
+| PHASE-02 | Central ASR Core Engineering         | قرارداد و هسته مشترک               |
+| PHASE-03 | Native Local Runtime                 | موتور Native CPU واقعی             |
+| PHASE-04 | Adobe Audition Plugin                | نسخه واقعی پلاگین Adobe            |
+| PHASE-05 | Web Application Integration          | نسخه وب متصل به Core               |
+| PHASE-06 | Model Specialization                 | مدل اختصاصی فارسی/انگلیسی          |
+| PHASE-07 | Advanced Speech Intelligence         | Streaming، Alignment و Diarization |
+| PHASE-08 | Performance & Reliability            | اثبات کیفیت و پایداری              |
+| PHASE-09 | Packaging & Release                  | محصولات قابل نصب و انتشار          |
+
+خروجی هر فاز باید پیش‌نیاز فاز بعدی را فراهم کند.
+
+# 8. قوانین حافظه پایدار پروژه
+
+این بخش بسیار مهم است.
+
+تو نباید به حافظه موقت Conversation برای نگهداری نقشه راه متکی باشی.
+
+باید حافظه مهندسی را داخل Repository ذخیره کنی.
+
+اسناد زیر را ایجاد یا به‌روزرسانی کن:
+
+```
+docs/AVAPARDAZ/
+│
+├── MASTER-ROADMAP.md
+├── EXECUTION-STATE.md
+├── TASK-LEDGER.md
+├── DECISION-LOG.md
+├── ARCHITECTURE-DECISIONS.md
+├── MODEL-REGISTRY.md
+├── MODEL-PROVENANCE.md
+├── ENGINE-INTERFACE-SPEC.md
+├── PRODUCT-INTEGRATION-STATUS.md
+├── PHASE-00-BASELINE-AUDIT.md
+└── HANDOFF-LOG.md
+```
+
+قوانین:
+
+1. MASTER-ROADMAP.md مرجع اصلی نقشه راه است.
+2. EXECUTION-STATE.md وضعیت دقیق فاز جاری را نگه می‌دارد.
+3. TASK-LEDGER.md وضعیت تک‌تک تسک‌ها را ثبت می‌کند.
+4. DECISION-LOG.md تمام تصمیم‌های معماری و دلایل آن‌ها را نگه می‌دارد.
+5. MODEL-REGISTRY.md مدل‌ها و نسخه‌های واقعی را ثبت می‌کند.
+6. MODEL-PROVENANCE.md مجوزها، Hashها، مبدأ وزن و مشخصات مدل‌ها را نگه می‌دارد.
+7. HANDOFF-LOG.md خلاصه تحویل هر مرحله را ذخیره می‌کند.
+
+برای هر Task از وضعیت‌های زیر استفاده کن:
+
+```
+NOT_STARTED
+IN_PROGRESS
+BLOCKED
+IMPLEMENTED
+VERIFIED
+ACCEPTED
+```
+
+تعریف مهم:
+
+`IMPLEMENTED` به معنی نوشته‌شدن کد است.
+
+`VERIFIED` به معنی اجرای موفق تست یا اثبات عملکرد است.
+
+`ACCEPTED` یعنی معیارهای پذیرش فاز تکمیل شده‌اند.
+
+هیچ Task را صرفاً به دلیل تولید کد، VERIFIED معرفی نکن.
+
+## قانون ضد تکرار
+
+در هر نوبت اجرای مأموریت:
+
+1. ابتدا EXECUTION-STATE.md را بخوان.
+2. سپس MASTER-ROADMAP.md را بخوان.
+3. سپس TASK-LEDGER.md را بررسی کن.
+4. تمام تسک‌های ACCEPTED را از نو اجرا یا بازنویسی نکن.
+5. اگر فاز جاری ناتمام است، از اولین Task تکمیل‌نشده ادامه بده.
+6. اگر فاز کامل است، تنها در صورت دستور «ادامه بده» به فاز بعدی برو.
+7. تست مجدد فقط برای Regression، تغییر وابستگی، تغییر قرارداد یا وجود شواهد خرابی مجاز است.
+8. هر تصمیم جدید باید در DECISION-LOG.md ثبت شود.
+9. هر تغییر در معماری مادر باید در MASTER-ROADMAP.md ثبت شود.
+10. تاریخ، شناسه فاز، Commit Hash و آخرین وضعیت را در EXECUTION-STATE.md نگه دار.
+
+اگر یک فاز کامل و تأیید شد، آن را مجدداً از ابتدا اجرا نکن.
+
+# 9. قوانین محافظت از کد موجود
+
+پروژه فعلی را کورکورانه بازنویسی نکن.
+
+ابتدا هر زیرسیستم را در یکی از این گروه‌ها قرار بده:
+
+- KEEP: سالم و قابل استفاده.
+- REPAIR: موجود ولی دارای نقص اثبات‌شده.
+- REPLACE: معماری بنیادی اشتباه و جایگزینی مستدل لازم.
+- REMOVE: کد مرده، Mock یا مسیر متعارض اثبات‌شده.
+- UNVERIFIED: هنوز اثبات نشده.
+
+قوانین:
+
+- هیچ فایل سالمی را فقط به دلیل سلیقه معماری بازنویسی نکن.
+- هیچ تابع سالمی را بدون دلیل فنی حذف نکن.
+- محدودیت ۵۰۰ خط هر فایل موجود را رعایت کن.
+- برای کاهش تعداد خطوط، کد را بی‌دلیل فشرده نکن.
+- قراردادهای مشترک را بدون Migration Plan نشکن.
+- هیچ فایل وزن مدل را بدون Hash و Provenance وارد Repository نکن.
+- APIهای تجاری نباید شرط عملکرد هسته محلی باشند.
+- Audio Data نباید بدون رضایت کاربر از دستگاه خارج شود.
+- Mock فقط در Unit Test مجاز است و باید از مسیر Production جدا باشد.
+
+# 10. معیارهای عمومی پذیرش پروژه
+
+تمام مراحل باید به سمت این معیارها حرکت کنند:
+
+1. هیچ API خارجی برای ASR ضروری نباشد.
+2. حالت Local هیچ تماس پنهان به Gemini/OpenAI/سرویس‌های مشابه نداشته باشد.
+3. مدل واقعی از فایل وزن تأییدشده بارگذاری شود.
+4. خروجی Transcript از صوت واقعی تولید شود.
+5. فایل صوتی فقط در دستگاه کاربر پردازش شود.
+6. پس از نصب مدل، قطع اینترنت مانع Inference نشود.
+7. هر دو محصول از Engine Contract مشترک استفاده کنند.
+8. توقف، لغو و آزادسازی حافظه به شکل کنترل‌شده اجرا شوند.
+9. مدل و فایل‌هایش با SHA-256 اعتبارسنجی شوند.
+10. عملکرد با CER/WER/RTF/RAM/Latency ثبت شود.
+11. نتایج Mock هیچ‌گاه به‌عنوان نتایج مدل واقعی گزارش نشوند.
+12. نصب و اجرای Adobe Plugin روی خود Audition دسکتاپ تأیید شود.
+
+برای Performance، هیچ عدد فرضی را نتیجه واقعی اعلام نکن. آستانه‌های عددی محصول باید پس از اجرای Benchmark سخت‌افزارهای هدف منجمد شوند.
+
+---
+
+# 11. مأموریت فعلی: PHASE-00
+
+## REALITY AUDIT & ARCHITECTURE FREEZE
+
+فعلاً فقط Phase 00 مجاز به اجراست.
+
+در این فاز حق نداری وارد پیاده‌سازی مدل اصلی یا بازنویسی هسته شوی.
+
+هدف این فاز، کشف کامل حقیقت پروژه و ثبت معماری نهایی است.
+
+### TASK 00.1 — Repository Baseline
+
+ابتدا:
+
+```
+pwd
+git status --short
+git rev-parse --show-toplevel
+git log -1 --oneline
+```
+
+در صورت وجود Git، وضعیت شاخه، تغییرات کاربر، Commit Hash و ساختار واقعی Repository را ثبت کن.
+
+هیچ تغییر کاربر را حذف یا Reset نکن.
+
+### TASK 00.2 — Repository Architecture Inventory
+
+این مسیرها را دقیقاً بررسی کن:
+
+```
+package.json
+README.md
+EXECUTION-ROADMAP.md
+RISKS-AND-BLOCKERS.md
+
+src/asr-core/
+src/ai-engine/asr/
+src/model-factory/
+src/engine/
+src/runtime/
+src/lifecycle/
+src/processing-engine/
+src/host-bridge/
+src/host-bridge/audition/
+src/host-bridge/companion/
+src/persian-linguistics/
+wasm-audio-core/
+python_asr_lab/
+training/
+backend/
+
+docs/AVAPARDAZ/
+ARCHITECTURE/
+MODEL-RESEARCH/
+MODEL-DEVELOPMENT/
+DATASET/
+BENCHMARK/
+PRODUCTION-READINESS/
+```
+
+فایل‌ها و مسیرهای موجود را با واقعیت Repository تطبیق بده.
+
+اگر مسیری وجود ندارد، آن را Missing ثبت کن.
+
+### TASK 00.3 — Genuine ASR Execution Trace
+
+این ممیزی مهم‌ترین بخش Phase 00 است.
+
+مسیر کامل اجرا را کشف کن:
+
+```
+User Audio Input
+    ↓
+Audio Decoder
+    ↓
+Resampler
+    ↓
+VAD / Segmentation
+    ↓
+Feature Extraction
+    ↓
+Actual Neural Model
+    ↓
+Inference Runtime
+    ↓
+Acoustic Decoder
+    ↓
+Language Processing
+    ↓
+Timestamp Alignment
+    ↓
+Speaker Attribution
+    ↓
+Transcript Output
+```
+
+برای هر مرحله ثبت کن:
+
+- Source file.
+- Class / Function.
+- ورودی.
+- خروجی.
+- نوع الگوریتم.
+- آیا واقعاً در مسیر فعال اجرا می‌شود؟
+- تست واقعی دارد یا صرفاً Mock است؟
+- وابستگی خارجی دارد یا ندارد؟
+
+به‌طور ویژه بررسی کن:
+
+```
+src/App.tsx
+src/asr-core/CoreAcousticCtcEngine.ts
+src/asr-core/CoreModelRouter.ts
+src/ai-engine/asr/WebWorkerOrtRuntimeProvider.ts
+src/host-bridge/CanonicalProjectService.ts
+src/host-bridge/audition/AuditionHostAdapter.ts
+src/host-bridge/companion/CompanionIpcBridge.ts
+server.ts
+```
+
+باید اثبات کنی کلیک روی فرمان ASR دقیقاً به کدام Runtime و تابع واقعی منتهی می‌شود.
+
+وجود کلاس، Adapter یا تست Mock به معنای وجود ASR واقعی نیست.
+
+### TASK 00.4 — Model Assets and Runtime Forensics
+
+این موارد را با جستجوی مستقیم فایل بررسی کن:
+
+```
+find . -type f \( \
+  -iname "*.onnx" -o \
+  -iname "*.gguf" -o \
+  -iname "*.safetensors" -o \
+  -iname "*.pt" -o \
+  -iname "*.pth" -o \
+  -iname "*.bin" -o \
+  -iname "*.tflite" \
+\) -print
+```
+
+همچنین:
+
+- وجود فایل‌های Tokenizer.
+- Model Config.
+- Vocab.
+- Checkpoint.
+- ONNX Runtime.
+- WASM Runtime Assets.
+- مدل‌های Quantized.
+- Manifestهای مدل.
+- Hash Verification.
+- Model Loader.
+- Runtime Initialization.
+- Model Disposal.
+
+باید مشخص کنی مدل واقعی کجاست و آیا واقعاً از صوت خروجی می‌گیرد یا خیر.
+
+تفاوت این موارد را دقیق حفظ کن:
+
+```
+Runtime Installed
+Model Manifest Exists
+Model Weights Exist
+Model Integrity Verified
+Model Loaded
+Real Inference Executed
+Real Transcription Verified
+```
+
+این هفت وضعیت یکسان نیستند.
+
+### TASK 00.5 — Cloud Dependency Audit
+
+تمام وابستگی‌های خارجی مرتبط با ASR را پیدا کن.
+
+به‌خصوص:
+
+```
+@google/genai
+GEMINI_API_KEY
+GoogleGenAI
+CloudAsrConsentRegistry
+/api/v1/asr/transcribe
+```
+
+ثبت کن:
+
+1. مسیر ابری کجاست؟
+2. آیا مسیر Local به شکل پنهان به Cloud وصل می‌شود؟
+3. آیا Cloud در محصول ضروری است؟
+4. چه فایل‌هایی باید بعداً تغییر کنند؟
+5. چه کدهایی صرفاً برای Benchmark قابل نگهداری هستند؟
+
+در معماری نهایی، Cloud API نباید وابستگی محصول ASR باشد.
+
+### TASK 00.6 — Dataset and Training Audit
+
+اسناد موجود را با فایل‌های واقعی تطبیق بده.
+
+بررسی:
+
+- تعداد فایل صوتی.
+- مجموع ساعت صوت.
+- تعداد گویندگان.
+- تعداد Transcription Pair.
+- زبان‌ها.
+- کیفیت برچسب‌ها.
+- Train / Validation / Test Split.
+- Speaker Leakage.
+- Duplicate SHA-256.
+- مجوز استفاده تجاری.
+- منابع قابل دریافت عمومی.
+
+تفاوت Dataset، Source Code و Pretrained Weights را در گزارش مشخص کن.
+
+هیچ مقدار فرضی را به‌عنوان داده موجود اعلام نکن.
+
+### TASK 00.7 — Adobe Audition Integration Audit
+
+مسیر موجود:
+
+```
+src/host-bridge/audition/
+src/host-bridge/companion/
+```
+
+را ممیزی کن.
+
+بررسی کن:
+
+- Adobe Audition CEP SDK.
+- CEP Manifest.
+- Extension Packaging.
+- ExtendScript Host Bridge.
+- Host Version Compatibility.
+- Panel Lifecycle.
+- Audio Access.
+- Selection Access.
+- Session/Project Access.
+- Marker API.
+- Timeline Synchronization.
+- Companion IPC.
+- IPC Authentication.
+- Localhost Security.
+- Native Runtime Integration.
+
+مستندات رسمی:
+
+[https://developer.adobe.com/audition/](https://developer.adobe.com/audition/)
+
+[https://helpx.adobe.com/audition/desktop/applying-effects/enabling-cep-extensions.html](https://helpx.adobe.com/audition/desktop/applying-effects/enabling-cep-extensions.html)
+
+مواردی که فقط در کانتینر Linux قابل بررسی نیستند، باید UNVERIFIED ثبت شوند.
+
+هیچ Host Capability را بر اساس حدس VERIFIED اعلام نکن.
+
+### TASK 00.8 — Shared Core Architecture Decision
+
+سه طرح را بررسی و مقایسه کن:
+
+A. TypeScript Shared Orchestration + Native Inference Adapter + WASM Inference Adapter
+
+B. Rust Shared Core + WASM Build + Native FFI
+
+C. C/C++ Inference Core + Native C API + WASM Build
+
+معیارها:
+
+- Code Reuse.
+- Model Runtime Compatibility.
+- Performance.
+- Memory Safety.
+- Adobe Integration.
+- Browser Compatibility.
+- Apple Silicon.
+- Windows x86_64.
+- Linux x86_64.
+- Maintainability.
+- Packaging.
+- Licensing.
+
+یک معماری برنده انتخاب کن و دلایل عددی، فنی و اجرایی آن را ثبت کن.
+
+پیشنهاد اولیه: ابتدا TypeScript و Rust موجود را حفظ کن؛ فقط در صورت وجود شواهد قوی به C/C++ یا بازنویسی Core مهاجرت کن.
+
+### TASK 00.9 — Test Baseline
+
+اسکریپت‌های واقعی موجود را از package.json بخوان.
+
+در صورت آماده بودن محیط:
+
+```
+npm run lint
+npm run test:quality-gates
+npm run test:unit
+npm run build
+```
+
+در صورت آماده بودن Playwright:
+
+```
+npm run test:e2e
+```
+
+در صورت وجود Cargo:
+
+```
+cargo test --manifest-path wasm-audio-core/Cargo.toml
+```
+
+توجه: اگر اسکریپت `npm test` در package.json تعریف نشده است، آن را به‌عنوان دستور معتبر فرض نکن.
+
+هر تستی که اجرا نشد باید با علت دقیق ثبت شود.
+
+### TASK 00.10 — Architecture and Product Decision
+
+در پایان باید این موارد را قطعی و مستند کنی:
+
+1. Shared ASR Core.
+2. Native Inference Architecture.
+3. Browser Inference Architecture.
+4. Adobe CEP Architecture.
+5. Local Companion Architecture.
+6. Model Asset Strategy.
+7. Offline Model Installation.
+8. Model Runtime Abstraction.
+9. Data and Training Strategy.
+10. Security and Privacy.
+11. Build and Release Strategy.
+
+برای هر تصمیم یک ADR ثبت کن.
+
+---
+
+# 12. خروجی اجباری Phase 00
+
+این فایل‌ها باید ایجاد یا تکمیل شوند:
+
+```
+docs/AVAPARDAZ/MASTER-ROADMAP.md
+docs/AVAPARDAZ/EXECUTION-STATE.md
+docs/AVAPARDAZ/TASK-LEDGER.md
+docs/AVAPARDAZ/DECISION-LOG.md
+docs/AVAPARDAZ/ARCHITECTURE-DECISIONS.md
+docs/AVAPARDAZ/ENGINE-INTERFACE-SPEC.md
+docs/AVAPARDAZ/PHASE-00-BASELINE-AUDIT.md
+docs/AVAPARDAZ/PRODUCT-INTEGRATION-STATUS.md
+docs/AVAPARDAZ/MODEL-REGISTRY.md
+docs/AVAPARDAZ/MODEL-PROVENANCE.md
+docs/AVAPARDAZ/HANDOFF-LOG.md
+```
+
+اگر فایل معتبر و به‌روز موجود است، آن را حفظ و به‌روزرسانی کن، نه اینکه صرفاً کپی دیگری بسازی.
+
+# 13. شرایط پایان Phase 00
+
+فقط زمانی Phase 00 را ACCEPTED اعلام کن که:
+
+- Repository کامل ممیزی شده باشد.
+- مسیر فعال ASR مشخص شده باشد.
+- وجود یا نبود وزن واقعی مدل اثبات شده باشد.
+- مسیر Cloud مشخص شده باشد.
+- Adobe Extension Architecture بررسی شده باشد.
+- معماری Shared Core انتخاب شده باشد.
+- تناقض اسناد قدیمی و کد فعلی ثبت شده باشد.
+- نقشه راه در Repository ذخیره شده باشد.
+- Execution State و Task Ledger ایجاد شده باشند.
+- تمام ادعاهای گزارش دارای Evidence باشند.
+
+در این فاز هیچ موتور اصلی را بازنویسی نکن.
+
+پس از تکمیل فاز صفر، به PHASE-01 وارد نشو. توقف کن و گزارش تحویل بده.
+
+# 14. قالب گزارش تحویل
+
+گزارش نهایی Phase 00 باید شامل موارد زیر باشد:
+
+```
+PHASE_ID:
+PHASE_STATUS:
+REPOSITORY_COMMIT:
+AUDIT_COMPLETENESS:
+
+1. Confirmed Facts
+2. Existing Components To Keep
+3. Components To Repair
+4. Components To Replace
+5. Components To Remove
+6. Unverified Components
+7. Actual ASR Execution Path
+8. Real Model Assets Status
+9. Cloud Dependency Findings
+10. Adobe Audition Integration Findings
+11. Selected Core Architecture
+12. Architecture Decision Records
+13. Documents Created / Updated
+14. Tests Executed
+15. Test Results
+16. Remaining Blockers
+17. Next Phase ID
+```
+
+هیچ نتیجه‌ای را بدون شاهد گزارش نکن.
+
+در پایان، `EXECUTION-STATE.md` را به‌روزرسانی کن و وضعیت دقیق را بنویس.
+
+---
+
+# 15. فرمان دائمی ادامه پروژه
+
+از این پس هر زمان فرمان زیر را دریافت کردی:
+
+`ادامه بده`
+
+باید:
+
+1. نقشه راه را بخوانی.
+2. آخرین وضعیت ذخیره‌شده را بخوانی.
+3. آخرین گزارش و Commit را بررسی کنی.
+4. فقط مرحله بعدی تکمیل‌نشده را انتخاب کنی.
+5. فقط کارهای باقی‌مانده همان مرحله را اجرا کنی.
+6. کارهای ACCEPTED را دوباره‌نویسی نکنی.
+7. پس از رسیدن به معیارهای پذیرش، وضعیت فاز را ثبت کنی.
+8. گزارش تحویل همان مرحله را بنویسی.
+9. شناسه مرحله بعدی را اعلام کنی.
+
+اگر اجرای یک فاز متوقف شد، از آخرین Task ثبت‌شده ادامه بده؛ نه از اول پروژه.
+
+این دستور، نقشه راه اصلی و سیاست اجرایی دائمی پروژه Avapardaz است.
+
+**اکنون فقط PHASE-00 را اجرا کن.**
+
+## **چند تصمیم فنی که از همین حالا باید روشن باشند**
+
+**۱. پلاگین ادوبی را در اولویت توسعه محصول قرار می‌دهیم.** ادوبی رسماً CEP Extension را برای پنل‌های تعاملی پشتیبانی می‌کند؛ توسعه پنل با HTML5 و JavaScript و ارتباط با برنامه از طریق ExtendScript انجام می‌شود. ادوبی همچنین برای Audition امکان افزودن پنل، انتقال Metadata و تحلیل فایل را توضیح داده است.&#x20;
+
+[image](https://www.google.com/s2/favicons?domain=https://helpx.adobe.com\&sz=32)
+
+Audition+1
+
+
+
+**۲. موتور وب و موتور پلاگین نباید از صفر جداگانه توسعه داده شوند.** در وب می‌توان از ONNX Runtime Web با WASM/CPU استفاده کرد؛ مستندات رسمی اجرای محلی و حتی آفلاین را شرح می‌دهند.&#x20;
+
+[image](https://www.google.com/s2/favicons?domain=https://onnxruntime.ai\&sz=32)
+
+onnxruntime+1
+
+
+
+**۳. مدل را با حدس انتخاب نمی‌کنیم.** Qwen3-ASR و Whisper.cpp دو نامزد مهم‌اند؛ عملکرد واقعی هرکدام روی CPU، حافظه و فارسی باید اثبات شود.&#x20;
+
+[image](https://www.google.com/s2/favicons?domain=https://github.com\&sz=32)
+
+GitHub+1
+
+
+
+**۴. آموزش از صفر فعلاً ممنوع است.** اول مدل آماده را می‌آوریم، روی صوت واقعی آزمایش می‌کنیم و سپس برای ساخت نسخه اختصاصی به Fine-tuning می‌رسیم.
+
+یک نکته هم درباره پروژه فعلی: گزارش دیتاست در ZIP فقط ۵۱٫۴ ثانیه صوت طلایی و ۶ نمونه را ثبت کرده است. این برای ارزیابی اولیه مفید است، ولی مبنای کافی برای ادعای آموزش یک مدل فارسی قوی نیست.
+
+## **روش ادامه کار ما**
+
+این چرخه را حفظ می‌کنیم:
+
+1. من دستور تخصصی مرحله را آماده می‌کنم.
+2. تو دستور را به Neon می‌دهی.
+3. Neon اجرا و نتیجه را در Repository ثبت می‌کند.
+4. گزارش و شواهد اجرا را برای من می‌فرستی.
+5. من مرحله بعد را با توجه به نتیجه واقعی و نقشه راه می‌نویسم.
+
+**پس فعلاً فقط دستور PHASE-00 را به Neon بده.** وقتی گزارشش را فرستادی، دستور PHASE-01 را با همان سطح جزئیات، شامل مخازن دقیق GitHub، نسخه مدل‌ها، روش نصب، دستورات Benchmark و معیار انتخاب مدل آماده می‌کنم.

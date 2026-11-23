@@ -185,9 +185,11 @@ export function validateLocalAudioFilePath(rawPath: unknown): {
 
 interface StagedAudioUpload {
   readonly uploadId: string;
+  readonly ownerId: string;
   readonly tempPath: string;
   readonly filename: string;
   readonly createdAtMs: number;
+  writeFd: number | null;
   receivedBytes: number;
 }
 
@@ -203,7 +205,34 @@ export interface CompanionRouterOptions {
 }
 
 const MAX_STAGED_UPLOAD_BYTES = 64 * 1024 * 1024; // 64 MiB safety bound
+const MAX_UPLOAD_CHUNK_BYTES = 256 * 1024; // 256 KiB per-chunk network policy
 const STAGED_UPLOAD_TTL_MS = 15 * 60 * 1000;
+
+async function readSmallFileBoundedToBase64(
+  filePath: string,
+  maxBytes = 16 * 1024 * 1024,
+): Promise<string> {
+  const stat = await fs.promises.stat(filePath);
+  if (stat.size <= 0 || stat.size > maxBytes) {
+    throw new Error(`Sample file size (${stat.size}) out of allowed bounds.`);
+  }
+  const fh = await fs.promises.open(filePath, 'r');
+  try {
+    const chunkBuf = Buffer.allocUnsafe(Math.min(256 * 1024, stat.size));
+    const parts: Buffer[] = [];
+    let offset = 0;
+    while (offset < stat.size) {
+      const toRead = Math.min(chunkBuf.byteLength, stat.size - offset);
+      const { bytesRead } = await fh.read(chunkBuf, 0, toRead, offset);
+      if (bytesRead <= 0) break;
+      parts.push(Buffer.from(chunkBuf.subarray(0, bytesRead)));
+      offset += bytesRead;
+    }
+    return Buffer.concat(parts).toString('base64');
+  } finally {
+    await fh.close().catch(() => {});
+  }
+}
 
 export class LocalCompanionService {
   public readonly ipcBridge: CompanionIpcBridge;
@@ -213,6 +242,7 @@ export class LocalCompanionService {
   public readonly audioTransfers: CompanionAudioTransferManager;
   private readonly jobs = new Map<string, InternalJobEntry>();
   private readonly stagedUploads = new Map<string, StagedAudioUpload>();
+  private readonly uploadStagingDir: string;
   private readonly handshakeTimestampsMs: number[] = [];
   private readonly maxRetainedJobs: number;
   private readonly maxConcurrentJobs: number;
@@ -224,6 +254,10 @@ export class LocalCompanionService {
     readonly bindHost?: string;
     readonly bindPort?: number;
     readonly lockFilePath?: string;
+    readonly transferStagingDir?: string;
+    readonly maxTransferBytes?: number;
+    readonly maxTotalStagingBytes?: number;
+    readonly maxConcurrentTransfers?: number;
   }) {
     this.ipcBridge = new CompanionIpcBridge();
     this.auditionAdapter = new AdobeAuditionHostAdapter();
@@ -236,10 +270,43 @@ export class LocalCompanionService {
       lockFilePath: options?.lockFilePath,
       initialState: 'STARTING',
     });
-    this.audioTransfers = new CompanionAudioTransferManager();
+    this.audioTransfers = new CompanionAudioTransferManager({
+      stagingDir: options?.transferStagingDir,
+      maxTransferBytes: options?.maxTransferBytes,
+      maxTotalStagingBytes: options?.maxTotalStagingBytes,
+      maxConcurrentTransfers: options?.maxConcurrentTransfers,
+    });
+    this.uploadStagingDir = path.resolve(
+      options?.transferStagingDir
+        ? path.join(options.transferStagingDir, 'uploads')
+        : path.join(os.tmpdir(), 'avapardaz-companion-uploads'),
+    );
+    this.cleanupOrphanedUploadsOnStartup();
     this.maxRetainedJobs = Math.max(8, Math.min(200, options?.maxRetainedJobs ?? 50));
     this.maxConcurrentJobs = Math.max(1, Math.min(16, options?.maxConcurrentJobs ?? 4));
     this.markServerBound();
+  }
+
+  private cleanupOrphanedUploadsOnStartup(): number {
+    if (!fs.existsSync(this.uploadStagingDir)) return 0;
+    let cleaned = 0;
+    try {
+      const lstat = fs.lstatSync(this.uploadStagingDir);
+      if (lstat.isSymbolicLink() || !lstat.isDirectory()) return 0;
+      for (const name of fs.readdirSync(this.uploadStagingDir)) {
+        if (/^up_[a-f0-9]{16,32}\.bin$/i.test(name)) {
+          try {
+            fs.rmSync(path.resolve(this.uploadStagingDir, name), { force: true });
+            cleaned++;
+          } catch {
+            // ignore
+          }
+        }
+      }
+    } catch {
+      // ignore
+    }
+    return cleaned;
   }
 
   public markServerBound(): void {
@@ -272,6 +339,9 @@ export class LocalCompanionService {
         entry.abortController.abort();
       }
     }
+    for (const uploadId of Array.from(this.stagedUploads.keys())) {
+      this.abortStagedUpload(uploadId);
+    }
     this.audioTransfers.cleanupAll();
     this.neuralEngine.unloadActiveModel();
     this.lifecycleManager.beginGracefulShutdown(reason);
@@ -285,6 +355,10 @@ export class LocalCompanionService {
       activeJobs,
     });
     const sampleAudio = this.neuralEngine.getBundledSampleAudioPath();
+    this.audioTransfers.memoryAccountant.setExternalMetric(
+      'nativeRuntimeMemory',
+      process.memoryUsage().rss,
+    );
     return {
       service: 'avapardaz-local-companion',
       serviceVersion: COMPANION_SERVICE_VERSION,
@@ -300,6 +374,9 @@ export class LocalCompanionService {
       sampleAudioFilename: sampleAudio?.filename ?? null,
       activeJobs,
       maxConcurrentJobs: this.maxConcurrentJobs,
+      activeTransfers: this.audioTransfers.getActiveSessionCount(),
+      reservedStagingBytes: this.audioTransfers.getTotalReservedStagingBytes(),
+      memoryAccounting: this.audioTransfers.getMemoryAccounting(),
       timestampIso: new Date().toISOString(),
     };
   }
@@ -316,11 +393,24 @@ export class LocalCompanionService {
     }
   }
 
+  private closeUploadFd(up: StagedAudioUpload): void {
+    if (up.writeFd !== null) {
+      const fd = up.writeFd;
+      up.writeFd = null;
+      try {
+        fs.closeSync(fd);
+      } catch {
+        // ignore
+      }
+    }
+  }
+
   private sweepExpiredUploads(): void {
     const now = Date.now();
     for (const [id, up] of this.stagedUploads.entries()) {
       if (now - up.createdAtMs > STAGED_UPLOAD_TTL_MS) {
         this.stagedUploads.delete(id);
+        this.closeUploadFd(up);
         try {
           fs.rmSync(up.tempPath, { force: true });
         } catch {
@@ -330,22 +420,26 @@ export class LocalCompanionService {
     }
   }
 
-  public initStagedUpload(filename?: string): { readonly ok: boolean; readonly uploadId: string; readonly filename: string } {
+  public initStagedUpload(
+    filename?: string,
+    ownerId = 'local-default',
+  ): { readonly ok: boolean; readonly uploadId: string; readonly filename: string } {
     this.sweepExpiredUploads();
-    const uploadId = `up_${crypto.randomBytes(8).toString('hex')}`;
+    const uploadId = `up_${crypto.randomBytes(16).toString('hex')}`;
     const safeName =
       typeof filename === 'string' && filename.trim().length > 0
         ? path.basename(filename.trim()).replace(/[^a-zA-Z0-9._\-\u0600-\u06FF]/g, '_')
         : 'audio.wav';
-    const uploadDir = path.join(os.tmpdir(), 'avapardaz-companion-uploads');
-    fs.mkdirSync(uploadDir, { recursive: true });
-    const tempPath = path.join(uploadDir, `${uploadId}.bin`);
-    fs.writeFileSync(tempPath, Buffer.alloc(0));
+    fs.mkdirSync(this.uploadStagingDir, { recursive: true, mode: 0o700 });
+    const tempPath = path.resolve(this.uploadStagingDir, `${uploadId}.bin`);
+    const writeFd = fs.openSync(tempPath, 'wx', 0o600);
     this.stagedUploads.set(uploadId, {
       uploadId,
+      ownerId,
       tempPath,
       filename: safeName,
       createdAtMs: Date.now(),
+      writeFd,
       receivedBytes: 0,
     });
     return { ok: true, uploadId, filename: safeName };
@@ -354,17 +448,40 @@ export class LocalCompanionService {
   public appendStagedUploadChunk(
     uploadId: string,
     chunkBase64: string,
-  ): { readonly ok: boolean; readonly statusCode: number; readonly receivedBytes?: number; readonly code?: string; readonly message?: string } {
+    ownerId?: string,
+  ): {
+    readonly ok: boolean;
+    readonly statusCode: number;
+    readonly receivedBytes?: number;
+    readonly code?: string;
+    readonly message?: string;
+  } {
     this.sweepExpiredUploads();
     const entry = this.stagedUploads.get(uploadId);
     if (!entry) {
       return { ok: false, statusCode: 404, code: 'UPLOAD_NOT_FOUND', message: 'Unknown or expired uploadId.' };
+    }
+    if (ownerId && ownerId !== entry.ownerId) {
+      return {
+        ok: false,
+        statusCode: 403,
+        code: 'UPLOAD_OWNER_MISMATCH',
+        message: 'Access denied: upload belongs to a different session.',
+      };
     }
     let bytes: Buffer;
     try {
       bytes = Buffer.from(chunkBase64, 'base64');
     } catch {
       return { ok: false, statusCode: 400, code: 'INVALID_BASE64', message: 'Invalid base64 audio chunk.' };
+    }
+    if (bytes.byteLength > MAX_UPLOAD_CHUNK_BYTES) {
+      return {
+        ok: false,
+        statusCode: 413,
+        code: 'CHUNK_SIZE_EXCEEDS_POLICY',
+        message: `Upload chunk (${bytes.byteLength} bytes) exceeds 256 KiB chunk policy.`,
+      };
     }
     if (entry.receivedBytes + bytes.byteLength > MAX_STAGED_UPLOAD_BYTES) {
       this.abortStagedUpload(uploadId);
@@ -375,15 +492,20 @@ export class LocalCompanionService {
         message: 'Staged audio upload exceeds 64 MiB limit.',
       };
     }
-    fs.appendFileSync(entry.tempPath, bytes);
+    if (entry.writeFd === null) {
+      return { ok: false, statusCode: 409, code: 'UPLOAD_CLOSED', message: 'Staged upload is already closed.' };
+    }
+    fs.writeSync(entry.writeFd, bytes, 0, bytes.byteLength, entry.receivedBytes);
     entry.receivedBytes += bytes.byteLength;
     return { ok: true, statusCode: 200, receivedBytes: entry.receivedBytes };
   }
 
-  public abortStagedUpload(uploadId: string): void {
+  public abortStagedUpload(uploadId: string, ownerId?: string): void {
     const entry = this.stagedUploads.get(uploadId);
     if (!entry) return;
+    if (ownerId && ownerId !== entry.ownerId) return;
     this.stagedUploads.delete(uploadId);
+    this.closeUploadFd(entry);
     try {
       fs.rmSync(entry.tempPath, { force: true });
     } catch {
@@ -398,12 +520,19 @@ export class LocalCompanionService {
     readonly audioBase64?: string;
     readonly uploadId?: string;
     readonly transferId?: string;
+    readonly ownerId?: string;
     readonly filename?: string;
     readonly sourceIdentity?: CompanionSourceIdentity;
     readonly maxChunkDurationSec?: number;
     readonly overlapSec?: number;
     readonly numThreads?: number;
-  }): { readonly ok: boolean; readonly statusCode: number; readonly job?: CompanionJobRecord; readonly code?: string; readonly message?: string } {
+  }): {
+    readonly ok: boolean;
+    readonly statusCode: number;
+    readonly job?: CompanionJobRecord;
+    readonly code?: string;
+    readonly message?: string;
+  } {
     if (this.lifecycleManager.getState() === 'SHUTTING_DOWN') {
       return {
         ok: false,
@@ -432,82 +561,6 @@ export class LocalCompanionService {
       };
     }
 
-    let resolvedPath: string | undefined;
-    let audioBytes: Buffer | undefined;
-    let sourceName = typeof params.filename === 'string' && params.filename.trim() ? path.basename(params.filename.trim()) : 'audio.wav';
-    let mergedSourceIdentity: CompanionSourceIdentity | undefined = params.sourceIdentity;
-
-    if (params.filePath !== undefined) {
-      const pathCheck = validateLocalAudioFilePath(params.filePath);
-      if (!pathCheck.ok || !pathCheck.resolvedPath) {
-        return {
-          ok: false,
-          statusCode: pathCheck.code === 'PATH_TRAVERSAL_REJECTED' ? 403 : 400,
-          code: pathCheck.code ?? 'INVALID_FILE_PATH',
-          message: pathCheck.message ?? 'Invalid file path.',
-        };
-      }
-      resolvedPath = pathCheck.resolvedPath;
-      sourceName = path.basename(resolvedPath);
-    } else if (typeof params.transferId === 'string' && params.transferId.trim().length > 0) {
-      const consumed = this.audioTransfers.consumeFinalizedTransferAsWav(params.transferId.trim());
-      if (!consumed.ok || !consumed.wavBytes || !consumed.transfer) {
-        return {
-          ok: false,
-          statusCode: consumed.statusCode,
-          code: consumed.code ?? 'TRANSFER_NOT_FOUND',
-          message: consumed.message ?? 'Audio transfer not found or not finalized.',
-        };
-      }
-      audioBytes = consumed.wavBytes;
-      sourceName = consumed.transfer.filename || sourceName;
-      mergedSourceIdentity = {
-        ...mergedSourceIdentity,
-        audioSha256: consumed.transfer.sha256,
-      };
-    } else if (typeof params.uploadId === 'string' && params.uploadId.trim().length > 0) {
-      this.sweepExpiredUploads();
-      const staged = this.stagedUploads.get(params.uploadId.trim());
-      if (!staged) {
-        return { ok: false, statusCode: 404, code: 'UPLOAD_NOT_FOUND', message: 'Staged uploadId not found or expired.' };
-      }
-      this.stagedUploads.delete(staged.uploadId);
-      try {
-        audioBytes = fs.readFileSync(staged.tempPath);
-        sourceName = staged.filename || sourceName;
-      } catch {
-        return { ok: false, statusCode: 500, code: 'UPLOAD_READ_FAILED', message: 'Failed to read staged audio upload.' };
-      } finally {
-        try {
-          fs.rmSync(staged.tempPath, { force: true });
-        } catch {
-          // ignore
-        }
-      }
-      if (audioBytes.byteLength === 0) {
-        return { ok: false, statusCode: 400, code: 'EMPTY_AUDIO', message: 'Staged audio upload is empty.' };
-      }
-    } else if (typeof params.audioBase64 === 'string' && params.audioBase64.trim().length > 0) {
-      try {
-        audioBytes = Buffer.from(params.audioBase64, 'base64');
-      } catch {
-        return { ok: false, statusCode: 400, code: 'INVALID_BASE64', message: 'Invalid base64 audio payload.' };
-      }
-      if (audioBytes.byteLength === 0) {
-        return { ok: false, statusCode: 400, code: 'EMPTY_AUDIO', message: 'Decoded audio payload is empty.' };
-      }
-      if (audioBytes.byteLength > MAX_STAGED_UPLOAD_BYTES) {
-        return { ok: false, statusCode: 413, code: 'PAYLOAD_TOO_LARGE', message: 'Inline base64 audio exceeds 64 MiB limit; use chunked upload or local file path.' };
-      }
-    } else {
-      return {
-        ok: false,
-        statusCode: 400,
-        code: 'MISSING_AUDIO_INPUT',
-        message: 'Either filePath, transferId, uploadId, or audioBase64 must be provided.',
-      };
-    }
-
     const languageHint =
       params.languageHint === 'fa' ||
       params.languageHint === 'en' ||
@@ -523,6 +576,105 @@ export class LocalCompanionService {
         statusCode: 503,
         code: 'LOCAL_MODEL_NOT_INSTALLED',
         message: 'No verified local ONNX model available.',
+      };
+    }
+
+    let resolvedPath: string | undefined;
+    let audioBytes: Buffer | undefined;
+    let acquiredTransferSource: import('./CompanionAudioTransfer').CompanionAudioSource | undefined;
+    let stagedTempPathToCleanOnFinish: string | undefined;
+    let sourceName =
+      typeof params.filename === 'string' && params.filename.trim()
+        ? path.basename(params.filename.trim())
+        : 'audio.wav';
+    let mergedSourceIdentity: CompanionSourceIdentity | undefined = params.sourceIdentity;
+
+    if (params.filePath !== undefined) {
+      const pathCheck = validateLocalAudioFilePath(params.filePath);
+      if (!pathCheck.ok || !pathCheck.resolvedPath) {
+        return {
+          ok: false,
+          statusCode: pathCheck.code === 'PATH_TRAVERSAL_REJECTED' ? 403 : 400,
+          code: pathCheck.code ?? 'INVALID_FILE_PATH',
+          message: pathCheck.message ?? 'Invalid file path.',
+        };
+      }
+      resolvedPath = pathCheck.resolvedPath;
+      sourceName = path.basename(resolvedPath);
+    } else if (typeof params.transferId === 'string' && params.transferId.trim().length > 0) {
+      const acquired = this.audioTransfers.acquireAudioSource(params.transferId.trim(), {
+        ownerId: params.ownerId,
+      });
+      if (!acquired.ok || !acquired.source) {
+        return {
+          ok: false,
+          statusCode: acquired.statusCode,
+          code: acquired.code ?? 'TRANSFER_NOT_FOUND',
+          message: acquired.message ?? 'Audio transfer not found or not finalized.',
+        };
+      }
+      acquiredTransferSource = acquired.source;
+      sourceName = acquired.source.filename || sourceName;
+      mergedSourceIdentity = {
+        ...mergedSourceIdentity,
+        audioSha256: acquired.source.sha256,
+      };
+    } else if (typeof params.uploadId === 'string' && params.uploadId.trim().length > 0) {
+      this.sweepExpiredUploads();
+      const staged = this.stagedUploads.get(params.uploadId.trim());
+      if (!staged) {
+        return {
+          ok: false,
+          statusCode: 404,
+          code: 'UPLOAD_NOT_FOUND',
+          message: 'Staged uploadId not found or expired.',
+        };
+      }
+      if (params.ownerId && params.ownerId !== staged.ownerId) {
+        return {
+          ok: false,
+          statusCode: 403,
+          code: 'UPLOAD_OWNER_MISMATCH',
+          message: 'Access denied: staged upload belongs to a different session.',
+        };
+      }
+      this.stagedUploads.delete(staged.uploadId);
+      this.closeUploadFd(staged);
+      if (staged.receivedBytes === 0) {
+        try {
+          fs.rmSync(staged.tempPath, { force: true });
+        } catch {
+          // ignore
+        }
+        return { ok: false, statusCode: 400, code: 'EMPTY_AUDIO', message: 'Staged audio upload is empty.' };
+      }
+      // Hand off on-disk file path instead of loading entire upload into RAM via readFileSync
+      resolvedPath = staged.tempPath;
+      stagedTempPathToCleanOnFinish = staged.tempPath;
+      sourceName = staged.filename || sourceName;
+    } else if (typeof params.audioBase64 === 'string' && params.audioBase64.trim().length > 0) {
+      try {
+        audioBytes = Buffer.from(params.audioBase64, 'base64');
+      } catch {
+        return { ok: false, statusCode: 400, code: 'INVALID_BASE64', message: 'Invalid base64 audio payload.' };
+      }
+      if (audioBytes.byteLength === 0) {
+        return { ok: false, statusCode: 400, code: 'EMPTY_AUDIO', message: 'Decoded audio payload is empty.' };
+      }
+      if (audioBytes.byteLength > MAX_STAGED_UPLOAD_BYTES) {
+        return {
+          ok: false,
+          statusCode: 413,
+          code: 'PAYLOAD_TOO_LARGE',
+          message: 'Inline base64 audio exceeds 64 MiB limit; use chunked transfer or local file path.',
+        };
+      }
+    } else {
+      return {
+        ok: false,
+        statusCode: 400,
+        code: 'MISSING_AUDIO_INPUT',
+        message: 'Either filePath, transferId, uploadId, or audioBase64 must be provided.',
       };
     }
 
@@ -555,34 +707,47 @@ export class LocalCompanionService {
     this.syncLifecycleState();
 
     const startedMs = performance.now();
-    // Execute asynchronous local CPU neural inference (zero transcript logging)
-    void this.neuralEngine
-      .transcribe({
-        modelId: selectedModel.modelId,
-        languageHint,
-        audioFilePath: resolvedPath,
-        audioBytes,
-        filename: sourceName,
-        maxChunkDurationSec: params.maxChunkDurationSec,
-        overlapSec: params.overlapSec,
-        numThreads: params.numThreads,
-        signal: abortController.signal,
-        onProgress: (prog) => {
-          if (entry.record.status === 'CANCELLED') return;
-          entry.record = {
-            ...entry.record,
-            status: 'RUNNING',
-            progressPct: prog.percent,
-            currentChunk: prog.currentChunk,
-            totalChunks: prog.totalChunks,
-            elapsedMs: prog.elapsedMs,
-            partialText: prog.partialText,
-            updatedAtIso: new Date().toISOString(),
-          };
-        },
-      })
-      .then((result) => {
-        if (entry.record.status === 'CANCELLED') return;
+
+    const runAsyncJob = async () => {
+      let finalTransferState: 'COMPLETED' | 'CANCELLED' | 'FAILED' = 'COMPLETED';
+      try {
+        let targetFilePath = resolvedPath;
+        if (acquiredTransferSource) {
+          const prepared = await acquiredTransferSource.prepareWavFileStreaming({
+            signal: abortController.signal,
+          });
+          targetFilePath = prepared.wavFilePath;
+        }
+
+        const result = await this.neuralEngine.transcribe({
+          modelId: selectedModel.modelId,
+          languageHint,
+          audioFilePath: targetFilePath,
+          audioBytes,
+          filename: sourceName,
+          maxChunkDurationSec: params.maxChunkDurationSec,
+          overlapSec: params.overlapSec,
+          numThreads: params.numThreads,
+          signal: abortController.signal,
+          onProgress: (prog) => {
+            if (entry.record.status === 'CANCELLED') return;
+            entry.record = {
+              ...entry.record,
+              status: 'RUNNING',
+              progressPct: prog.percent,
+              currentChunk: prog.currentChunk,
+              totalChunks: prog.totalChunks,
+              elapsedMs: prog.elapsedMs,
+              partialText: prog.partialText,
+              updatedAtIso: new Date().toISOString(),
+            };
+          },
+        });
+
+        if (entry.record.status === 'CANCELLED') {
+          finalTransferState = 'CANCELLED';
+          return;
+        }
         entry.record = {
           ...entry.record,
           status: 'COMPLETED',
@@ -592,10 +757,14 @@ export class LocalCompanionService {
           result,
           updatedAtIso: new Date().toISOString(),
         };
-      })
-      .catch((err) => {
+      } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
-        if (abortController.signal.aborted || msg === 'TRANSCRIPTION_CANCELLED') {
+        if (
+          abortController.signal.aborted ||
+          msg === 'TRANSCRIPTION_CANCELLED' ||
+          msg === 'TRANSFER_PROCESSING_ABORTED'
+        ) {
+          finalTransferState = 'CANCELLED';
           entry.record = {
             ...entry.record,
             status: 'CANCELLED',
@@ -606,6 +775,7 @@ export class LocalCompanionService {
           };
           return;
         }
+        finalTransferState = 'FAILED';
         const isFormat = /format|riff|wav|decode|unsupported|empty|corrupt/i.test(msg);
         entry.record = {
           ...entry.record,
@@ -615,10 +785,22 @@ export class LocalCompanionService {
           errorMessage: sanitizeDiagnosticString(msg).slice(0, 320),
           updatedAtIso: new Date().toISOString(),
         };
-      })
-      .finally(() => {
+      } finally {
+        if (acquiredTransferSource) {
+          await acquiredTransferSource.close(finalTransferState).catch(() => {});
+        }
+        if (stagedTempPathToCleanOnFinish) {
+          try {
+            fs.rmSync(stagedTempPathToCleanOnFinish, { force: true });
+          } catch {
+            // ignore
+          }
+        }
         this.syncLifecycleState();
-      });
+      }
+    };
+
+    void runAsyncJob();
 
     return { ok: true, statusCode: 202, job: initialRecord };
   }
@@ -879,6 +1061,7 @@ export class LocalCompanionService {
             audioBase64: typeof p.audioBase64 === 'string' ? p.audioBase64 : undefined,
             uploadId: typeof p.uploadId === 'string' ? p.uploadId : undefined,
             transferId: typeof p.transferId === 'string' ? p.transferId : undefined,
+            ownerId: auth.envelope.session_id,
             filename: typeof p.filename === 'string' ? p.filename : undefined,
             sourceIdentity,
             maxChunkDurationSec: typeof p.maxChunkDurationSec === 'number' ? p.maxChunkDurationSec : undefined,
@@ -928,6 +1111,7 @@ export class LocalCompanionService {
 
         case 'CAPABILITY_EXECUTE': {
           const action = typeof p.action === 'string' ? p.action : '';
+          const sessionOwnerId = auth.envelope.session_id;
           if (action === 'AUDIO_TRANSFER_INIT') {
             const initRes = this.audioTransfers.initTransfer({
               filename: typeof p.filename === 'string' ? p.filename : undefined,
@@ -939,6 +1123,7 @@ export class LocalCompanionService {
               expectedFrames: Number(p.expectedFrames),
               totalChunks: Number(p.totalChunks),
               expectedSha256: typeof p.expectedSha256 === 'string' ? p.expectedSha256 : undefined,
+              ownerId: sessionOwnerId,
             });
             res.status(initRes.statusCode).json(initRes);
             return;
@@ -949,29 +1134,39 @@ export class LocalCompanionService {
               chunkIndex: Number(p.chunkIndex),
               chunkBase64: typeof p.chunkBase64 === 'string' ? p.chunkBase64 : '',
               chunkSha256: typeof p.chunkSha256 === 'string' ? p.chunkSha256 : undefined,
+              ownerId: sessionOwnerId,
             });
             res.status(chunkRes.statusCode).json(chunkRes);
             return;
           }
           if (action === 'AUDIO_TRANSFER_FINALIZE') {
-            const finRes = this.audioTransfers.finalizeTransfer(typeof p.transferId === 'string' ? p.transferId : '');
+            const finRes = this.audioTransfers.finalizeTransfer(
+              typeof p.transferId === 'string' ? p.transferId : '',
+              { ownerId: sessionOwnerId },
+            );
             res.status(finRes.statusCode).json(finRes);
             return;
           }
           if (action === 'AUDIO_TRANSFER_ABORT') {
-            const aborted = this.audioTransfers.abortTransfer(typeof p.transferId === 'string' ? p.transferId : '');
+            const aborted = this.audioTransfers.abortTransfer(
+              typeof p.transferId === 'string' ? p.transferId : '',
+              { ownerId: sessionOwnerId },
+            );
             res.json({ ok: true, aborted });
             return;
           }
           if (action === 'AUDIO_UPLOAD_INIT') {
-            const init = this.initStagedUpload(typeof p.filename === 'string' ? p.filename : undefined);
+            const init = this.initStagedUpload(
+              typeof p.filename === 'string' ? p.filename : undefined,
+              sessionOwnerId,
+            );
             res.json(init);
             return;
           }
           if (action === 'AUDIO_UPLOAD_CHUNK') {
             const uploadId = typeof p.uploadId === 'string' ? p.uploadId : '';
             const chunkBase64 = typeof p.chunkBase64 === 'string' ? p.chunkBase64 : '';
-            const appended = this.appendStagedUploadChunk(uploadId, chunkBase64);
+            const appended = this.appendStagedUploadChunk(uploadId, chunkBase64, sessionOwnerId);
             if (!appended.ok) {
               res.status(appended.statusCode).json({
                 ok: false,
@@ -985,7 +1180,7 @@ export class LocalCompanionService {
           }
           if (action === 'AUDIO_UPLOAD_ABORT') {
             const uploadId = typeof p.uploadId === 'string' ? p.uploadId : '';
-            if (uploadId) this.abortStagedUpload(uploadId);
+            if (uploadId) this.abortStagedUpload(uploadId, sessionOwnerId);
             res.json({ ok: true });
             return;
           }
@@ -1004,13 +1199,13 @@ export class LocalCompanionService {
               return;
             }
             try {
-              const wavBytes = fs.readFileSync(sample.filePath);
+              const audioBase64 = await readSmallFileBoundedToBase64(sample.filePath);
               res.json({
                 ok: true,
                 filename: sample.filename,
                 modelId: sample.modelId,
                 mimeType: 'audio/wav',
-                audioBase64: wavBytes.toString('base64'),
+                audioBase64,
               });
             } catch (err) {
               res.status(500).json({

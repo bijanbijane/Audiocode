@@ -20,7 +20,6 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
-import { ingestAudioBufferToCanonical16kMono, float32ToPcm16Buffer } from './CoreAudioIngestion';
 import {
   ALLOWED_MODEL_DOWNLOAD_HOSTS,
   activateDirectoryAtomically,
@@ -31,9 +30,16 @@ import {
 export { ALLOWED_MODEL_DOWNLOAD_HOSTS, downloadFileWithRedirects, extractTarBz2Safe };
 import { buildAllNormalizationProfiles, detectTextLanguageTag } from './CoreNormalizationAndLanguage';
 import {
-  findBestBoundaryValleySample,
   stitchSegmentsWithOverlapDeduplication,
 } from './CoreBatchAndLongFormEngine';
+import {
+  CANONICAL_TARGET_SAMPLE_RATE_HZ,
+  NativeIngestionMemoryTracker,
+  cleanupOrphanedCanonicalIngestionFiles,
+  createStreamingCanonicalAudioSource,
+  type NativeAsrIngestionLifecycleState,
+  type NativeIngestionMemorySnapshot,
+} from './StreamingCanonicalAudioIngestion';
 import type {
   DetectedLanguageTag,
   NormalizationProfileId,
@@ -104,6 +110,9 @@ export interface LocalNeuralTranscriptionRequest {
   readonly overlapSec?: number;
   readonly numThreads?: number;
   readonly signal?: AbortSignal;
+  readonly canonicalStagingDir?: string;
+  readonly memoryTracker?: NativeIngestionMemoryTracker;
+  readonly onIngestionLifecycleState?: (state: NativeAsrIngestionLifecycleState) => void;
   readonly onProgress?: (progress: {
     readonly percent: number;
     readonly currentChunk: number;
@@ -129,6 +138,7 @@ export interface LocalNeuralTranscriptionResult {
   readonly sampleRateHz: number;
   readonly channelCount: number;
   readonly audioSha256: string;
+  readonly ingestionMemory?: NativeIngestionMemorySnapshot;
 }
 
 interface SherpaJsonOutput {
@@ -207,25 +217,6 @@ export const KNOWN_MODEL_ARTIFACT_PROVENANCE: Readonly<
 
 const artifactIntegrityCache = new Map<string, boolean>();
 
-function encodeFloat32ToWav16kMono(samples: Float32Array, sampleRate = 16_000): Buffer {
-  const pcmBuf = float32ToPcm16Buffer(samples);
-  const header = Buffer.alloc(44);
-  header.write('RIFF', 0);
-  header.writeUInt32LE(36 + pcmBuf.byteLength, 4);
-  header.write('WAVE', 8);
-  header.write('fmt ', 12);
-  header.writeUInt32LE(16, 16);
-  header.writeUInt16LE(1, 20);
-  header.writeUInt16LE(1, 22);
-  header.writeUInt32LE(sampleRate, 24);
-  header.writeUInt32LE(sampleRate * 2, 28);
-  header.writeUInt16LE(2, 32);
-  header.writeUInt16LE(16, 34);
-  header.write('data', 36);
-  header.writeUInt32LE(pcmBuf.byteLength, 40);
-  return Buffer.concat([header, pcmBuf]);
-}
-
 function fileSizeSafe(filePath: string): number {
   try {
     return fs.statSync(filePath).size;
@@ -287,7 +278,11 @@ export function verifyModelFilesIntegrity(files: readonly string[]): boolean {
 }
 
 function detectSherpaBinary(): { binaryPath: string | null; libDir: string | null } {
-  for (const candidate of DEFAULT_BINARY_CANDIDATES) {
+  const candidates = [
+    process.env.AVAPARDAZ_SHERPA_BIN,
+    ...DEFAULT_BINARY_CANDIDATES,
+  ].filter((p): p is string => Boolean(p && p.trim().length > 0));
+  for (const candidate of candidates) {
     try {
       fs.accessSync(candidate, fs.constants.X_OK);
       const binDir = path.dirname(candidate);
@@ -507,10 +502,19 @@ export class LocalSherpaNeuralEngine {
   private ensureShenavaArtifactsPromise: Promise<EnsuredShenavaModelArtifacts> | null = null;
   private installShenavaRuntimePromise: Promise<LocalNeuralRuntimeStatus> | null = null;
 
-  constructor(options?: { readonly modelSearchDirs?: readonly string[]; readonly cpuThreads?: number }) {
+  constructor(options?: {
+    readonly modelSearchDirs?: readonly string[];
+    readonly cpuThreads?: number;
+    readonly canonicalStagingDir?: string;
+  }) {
     this.modelSearchDirs = options?.modelSearchDirs ?? DEFAULT_MODEL_SEARCH_DIRS;
     const cpuCount = os.cpus()?.length || 4;
     this.defaultCpuThreads = Math.max(1, Math.min(8, options?.cpuThreads ?? Math.min(4, cpuCount)));
+    try {
+      cleanupOrphanedCanonicalIngestionFiles(options?.canonicalStagingDir);
+    } catch {
+      // ignore startup cleanup failure on non-existent dir
+    }
     this.refreshInstalledModels();
   }
 
@@ -819,6 +823,24 @@ export class LocalSherpaNeuralEngine {
     );
   }
 
+  private readLinuxProcRssBytes(pid: number | undefined): number {
+    if (!pid || process.platform !== 'linux') return 0;
+    try {
+      const fd = fs.openSync(`/proc/${pid}/status`, 'r');
+      try {
+        const buf = Buffer.allocUnsafe(2048);
+        const n = fs.readSync(fd, buf, 0, buf.byteLength, 0);
+        const text = buf.subarray(0, n).toString('utf8');
+        const m = text.match(/VmRSS:\s+(\d+)\s+kB/i);
+        return m ? Number(m[1]) * 1024 : 0;
+      } finally {
+        fs.closeSync(fd);
+      }
+    } catch {
+      return 0;
+    }
+  }
+
   private async runSherpaSingleWav(params: {
     readonly binaryPath: string;
     readonly libDir: string | null;
@@ -827,6 +849,7 @@ export class LocalSherpaNeuralEngine {
     readonly languageHint?: 'fa' | 'en' | 'fa-en' | 'auto';
     readonly numThreads: number;
     readonly signal?: AbortSignal;
+    readonly memoryTracker?: import('./StreamingCanonicalAudioIngestion').NativeIngestionMemoryTracker;
   }): Promise<SherpaJsonOutput> {
     if (params.signal?.aborted) {
       throw new Error('TRANSCRIPTION_CANCELLED');
@@ -863,6 +886,17 @@ export class LocalSherpaNeuralEngine {
       let stderr = '';
       let killedByAbort = false;
 
+      const sampleChildRss = () => {
+        if (!params.memoryTracker || !child.pid) return;
+        const childRss = this.readLinuxProcRssBytes(child.pid);
+        if (childRss > 0) {
+          params.memoryTracker.recordChildProcessRss(childRss);
+        }
+        params.memoryTracker.sampleProcessRss();
+      };
+      sampleChildRss();
+      const rssTimer = setInterval(sampleChildRss, 20);
+
       const onAbort = () => {
         killedByAbort = true;
         try {
@@ -881,18 +915,22 @@ export class LocalSherpaNeuralEngine {
       }
 
       child.stdout.on('data', (chunk: Buffer) => {
+        sampleChildRss();
         stdout += chunk.toString('utf8');
       });
       child.stderr.on('data', (chunk: Buffer) => {
+        sampleChildRss();
         stderr += chunk.toString('utf8');
       });
 
       child.on('error', (err) => {
+        clearInterval(rssTimer);
         params.signal?.removeEventListener('abort', onAbort);
         reject(err);
       });
 
       child.on('close', (code) => {
+        clearInterval(rssTimer);
         params.signal?.removeEventListener('abort', onAbort);
         if (killedByAbort || params.signal?.aborted) {
           reject(new Error('TRANSCRIPTION_CANCELLED'));
@@ -935,85 +973,109 @@ export class LocalSherpaNeuralEngine {
     // Single active neural model guard
     this.activeModelId = model.modelId;
 
-    let rawBytes: Buffer;
-    let filename = request.filename ?? 'audio.wav';
-    if (request.audioBytes && request.audioBytes.byteLength > 0) {
-      rawBytes = request.audioBytes;
-    } else if (request.audioFilePath) {
-      rawBytes = fs.readFileSync(request.audioFilePath);
-      filename = path.basename(request.audioFilePath);
-    } else {
+    const hasAudioBytes = Boolean(request.audioBytes && request.audioBytes.byteLength > 0);
+    const hasAudioFilePath = Boolean(
+      typeof request.audioFilePath === 'string' && request.audioFilePath.trim().length > 0,
+    );
+    if (!hasAudioBytes && !hasAudioFilePath) {
       throw new Error('INVALID_AUDIO_INPUT: Either audioBytes or audioFilePath is required.');
     }
 
-    const audioSha256 = crypto.createHash('sha256').update(rawBytes).digest('hex');
+    const memoryTracker =
+      request.memoryTracker ?? new NativeIngestionMemoryTracker();
+    memoryTracker.setModelRuntimeBytes(model.diskSizeBytes);
 
-    // Canonical decode & resample to 16 kHz Mono Float32 PCM (handles 8k/16k/22.05k/44.1k/48k + stereo->mono)
-    const canonical = ingestAudioBufferToCanonical16kMono({
-      filename,
-      rawBytes,
+    // Phase 1C-A: File-backed streaming canonical ingestion (zero full-file fs.readFileSync or full-file Float32Array)
+    const canonicalSource = await createStreamingCanonicalAudioSource({
+      audioFilePath: hasAudioFilePath ? request.audioFilePath : undefined,
+      audioBytes: hasAudioBytes ? request.audioBytes : undefined,
+      filename: request.filename ?? (request.audioFilePath ? path.basename(request.audioFilePath) : 'audio.wav'),
+      stagingRootDir: request.canonicalStagingDir,
+      signal: request.signal,
+      memoryTracker,
+      onLifecycleState: request.onIngestionLifecycleState,
     });
-    const pcm16k = canonical.canonicalFloat32;
-    const sampleRate = 16_000;
-    const durationSec = Number((pcm16k.length / sampleRate).toFixed(3));
+
+    const sampleRate = CANONICAL_TARGET_SAMPLE_RATE_HZ;
+    const totalSamples = canonicalSource.canonicalExactSampleCount;
+    const durationSec = canonicalSource.canonicalDurationSec;
+    const audioSha256 = canonicalSource.sourceSha256;
 
     const maxChunkSec = Math.max(5, Math.min(30, request.maxChunkDurationSec ?? 25));
     const overlapSec = Math.max(0, Math.min(3, request.overlapSec ?? 1.5));
     const maxChunkSamples = Math.round(maxChunkSec * sampleRate);
     const overlapSamples = Math.round(overlapSec * sampleRate);
 
-    // Energy-valley VAD boundary planning so chunks never slice mid-word
-    const ranges: Array<{ startSample: number; endSample: number }> = [];
-    if (pcm16k.length <= maxChunkSamples) {
-      ranges.push({ startSample: 0, endSample: pcm16k.length });
-    } else {
-      let cursor = 0;
-      while (cursor < pcm16k.length) {
-        const nominalEnd = Math.min(pcm16k.length, cursor + maxChunkSamples);
-        const endSample =
-          nominalEnd >= pcm16k.length - sampleRate
-            ? pcm16k.length
-            : findBestBoundaryValleySample(pcm16k, nominalEnd, Math.round(sampleRate * 1.5));
-        ranges.push({ startSample: cursor, endSample });
-        if (endSample >= pcm16k.length) break;
-        cursor = Math.max(cursor + sampleRate, endSample - overlapSamples);
-      }
-    }
-
+    let finalIngestionState: 'COMPLETED' | 'FAILED' | 'CANCELLED' = 'COMPLETED';
     const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'avp-asr-'));
     const numThreads = Math.max(1, Math.min(8, request.numThreads ?? this.defaultCpuThreads));
     const segments: LocalNeuralSegment[] = [];
     let hasAnyWordTimestamps = false;
 
     try {
+      // Energy-valley VAD boundary planning directly on the canonical disk file
+      // (reads only the ±1.5s neighborhood around each nominal boundary — ~96 KiB)
+      const ranges: Array<{ startSample: number; endSample: number }> = [];
+      if (totalSamples <= maxChunkSamples) {
+        ranges.push({ startSample: 0, endSample: totalSamples });
+      } else {
+        let cursor = 0;
+        while (cursor < totalSamples) {
+          if (request.signal?.aborted) {
+            throw new Error('TRANSCRIPTION_CANCELLED');
+          }
+          const nominalEnd = Math.min(totalSamples, cursor + maxChunkSamples);
+          const endSample =
+            nominalEnd >= totalSamples - sampleRate
+              ? totalSamples
+              : await canonicalSource.findBestBoundaryValleySampleOnDisk(
+                  nominalEnd,
+                  Math.round(sampleRate * 1.5),
+                  request.signal,
+                );
+          ranges.push({ startSample: cursor, endSample });
+          if (endSample >= totalSamples) break;
+          cursor = Math.max(cursor + sampleRate, endSample - overlapSamples);
+        }
+      }
+
+      canonicalSource.markInferenceStarted();
+
       for (let i = 0; i < ranges.length; i++) {
         if (request.signal?.aborted) {
           throw new Error('TRANSCRIPTION_CANCELLED');
         }
         const range = ranges[i];
-        const slice = pcm16k.subarray(range.startSample, range.endSample);
         const chunkWavPath = path.join(tempDir, `chunk_${i}.wav`);
-        const wavBuf = encodeFloat32ToWav16kMono(slice, sampleRate);
-        fs.writeFileSync(chunkWavPath, wavBuf);
+        await canonicalSource.exportCanonicalChunkWavToFile(
+          range.startSample,
+          range.endSample,
+          chunkWavPath,
+          request.signal,
+        );
 
         const chunkStartSec = Number((range.startSample / sampleRate).toFixed(3));
         const chunkEndSec = Number((range.endSample / sampleRate).toFixed(3));
 
-        const out = await this.runSherpaSingleWav({
-          binaryPath,
-          libDir,
-          model,
-          wavPath: chunkWavPath,
-          languageHint,
-          numThreads,
-          signal: request.signal,
-        });
-
-        // Clean up chunk WAV immediately to keep temp disk usage O(1) for 60-minute files
+        let out: SherpaJsonOutput;
         try {
-          fs.unlinkSync(chunkWavPath);
-        } catch {
-          // ignore
+          out = await this.runSherpaSingleWav({
+            binaryPath,
+            libDir,
+            model,
+            wavPath: chunkWavPath,
+            languageHint,
+            numThreads,
+            signal: request.signal,
+            memoryTracker,
+          });
+        } finally {
+          // Clean up chunk WAV immediately after child process terminates to keep temp disk usage O(1)
+          try {
+            fs.unlinkSync(chunkWavPath);
+          } catch {
+            // ignore
+          }
         }
 
         const segText = String(out.text ?? '').trim();
@@ -1046,12 +1108,18 @@ export class LocalSherpaNeuralEngine {
           partialText: segments.map((s) => s.text).filter(Boolean).join(' ').trim(),
         });
       }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      finalIngestionState =
+        request.signal?.aborted || msg === 'TRANSCRIPTION_CANCELLED' ? 'CANCELLED' : 'FAILED';
+      throw err;
     } finally {
       try {
         fs.rmSync(tempDir, { recursive: true, force: true });
       } catch {
         // ignore
       }
+      await canonicalSource.close(finalIngestionState).catch(() => {});
     }
 
     // Reconcile overlap boundaries using existing overlap deduplicator
@@ -1095,9 +1163,10 @@ export class LocalSherpaNeuralEngine {
       normalizedByProfile: buildAllNormalizationProfiles(stitchedRawText),
       timestampGranularity: hasAnyWordTimestamps ? 'WORD' : 'SEGMENT',
       segments,
-      sampleRateHz: canonical.originalSampleRateHz,
-      channelCount: canonical.originalChannels,
+      sampleRateHz: canonicalSource.sourceSampleRateHz,
+      channelCount: canonicalSource.sourceChannels,
       audioSha256,
+      ingestionMemory: memoryTracker.getSnapshot(),
     };
   }
 }
