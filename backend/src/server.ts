@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import {
   FastifyInstanceLike,
   FastifyReplyLike,
@@ -14,6 +15,21 @@ import {
 /**
  * In-memory Sliding-Window Rate Limiter for brute-force and CDN abuse protection
  */
+function assertMatchingEd25519KeyPair(privateKeyPem: string, publicKeyPem: string): void {
+  const privateKey = crypto.createPrivateKey(privateKeyPem);
+  const derivedPublicKey = crypto.createPublicKey(privateKey);
+  const configuredPublicKey = crypto.createPublicKey(publicKeyPem);
+  const derivedDer = Buffer.from(derivedPublicKey.export({ type: 'spki', format: 'der' }));
+  const configuredDer = Buffer.from(configuredPublicKey.export({ type: 'spki', format: 'der' }));
+
+  if (
+    derivedDer.byteLength !== configuredDer.byteLength ||
+    !crypto.timingSafeEqual(derivedDer, configuredDer)
+  ) {
+    throw new Error('BACKEND_ED25519_KEYPAIR_MISMATCH');
+  }
+}
+
 export class SlidingWindowRateLimiter {
   private readonly buckets = new Map<string, { count: number; resetAtMs: number }>();
 
@@ -82,6 +98,10 @@ export async function bootstrapBackendServer(deps?: {
       'BACKEND_ENV_MISSING: متغیرهای حیاتی DATABASE_URL، کلیدهای Ed25519 یا سکرت پرداخت تنظیم نشده‌اند.',
     );
   }
+
+  // JWT issuance/verification and offline-license signing must share one Ed25519 key pair.
+  // Fail at startup instead of issuing tokens that the configured public key cannot verify.
+  assertMatchingEd25519KeyPair(ed25519PrivateKeyPem, ed25519PublicKeyPem);
 
   let pgPool = deps?.pgPool;
   if (!pgPool) {
