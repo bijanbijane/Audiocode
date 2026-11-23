@@ -229,6 +229,16 @@ async function startServer() {
     next();
   });
 
+  // Process liveness only. Do not report local ASR readiness from this endpoint.
+  app.get('/healthz', (_req, res) => {
+    res.status(200).json({
+      status: 'LIVE',
+      service: 'avapardaz-local-audio-runtime',
+      localOnlyEnforced: true,
+      cloudAsrEnabled: false,
+    });
+  });
+
   // Mount binary-streaming public transcription route BEFORE global express.json() so raw audio streams
   // are never buffered in heap or rejected by JSON middleware.
   app.post('/v1/audio/transcriptions', async (req, res) => {
@@ -539,15 +549,35 @@ async function startServer() {
 
   app.get('/api/v1/asr/health', (_req, res) => {
     const activeCheckpoint = GLOBAL_PHASE4_CHECKPOINT_MANAGER.getActiveCheckpoint();
-    res.json({
+    const neuralRuntime = localCompanionService.neuralEngine.getStatus();
+    const verifiedModelCount = neuralRuntime.installedModels.filter((model) => model.integrityVerified).length;
+    const provisioningBlockers = [
+      ...(neuralRuntime.binaryPath ? [] : ['SHERPA_RUNTIME_BINARY_NOT_INSTALLED']),
+      ...(verifiedModelCount > 0 ? [] : ['VERIFIED_LOCAL_MODEL_NOT_INSTALLED']),
+    ];
+
+    res.status(200).json({
+      // API process liveness is separate from the native inference provisioning state.
       status: 'OK',
+      apiStatus: 'LIVE',
+      localInferenceProvisioningStatus: neuralRuntime.available ? 'PROVISIONED' : 'NOT_PROVISIONED',
+      localInferenceProvisioned: neuralRuntime.available,
+      localOnlyEnforced: true,
+      cloudGeminiAsrConfigured: false,
+      cloudAsrEnabled: false,
+      neuralRuntime: {
+        runtimeName: neuralRuntime.runtimeName,
+        binaryAvailable: Boolean(neuralRuntime.binaryPath),
+        verifiedModelCount,
+        installedModelCount: neuralRuntime.installedModels.length,
+        cpuThreads: neuralRuntime.cpuThreads,
+        offlineOnlyEnforced: neuralRuntime.offlineOnlyEnforced,
+        provisioningBlockers,
+      },
       hardwareProfile: 'G0_CPU_ONLY',
       activeCheckpointId: activeCheckpoint.checkpointId,
       globalStep: activeCheckpoint.globalStep,
       releaseStatus: 'PHASE_01_LOCAL_FOUNDATION',
-      localOnlyEnforced: true,
-      cloudGeminiAsrConfigured: false,
-      cloudAsrEnabled: false,
     });
   });
 
