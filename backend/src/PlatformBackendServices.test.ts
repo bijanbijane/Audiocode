@@ -80,7 +80,7 @@ test('Section 100: PlatformBackendServices issues Ed25519-signed license leases 
     modelStorageRootDir: '/tmp',
     ed25519PrivateKeyPem: privatePem,
     keyId: 'ed25519_prod_k1',
-    cdnBaseUrl: 'https://cdn.avapardaz.ir',
+    cdnBaseUrl: 'https://cdn.avapardaz.ir/',
     enableServerSideAsrInference: false,
   });
 
