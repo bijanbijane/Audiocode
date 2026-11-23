@@ -17,6 +17,7 @@ test('Section 100: PlatformBackendServices issues Ed25519-signed license leases 
 
   const txLog: string[] = [];
   let catalogTotalBytes = '6';
+  let catalogStatus = 'ACTIVE';
   const runQuery = async <TRow>(
     sql: string,
   ): Promise<{ rows: TRow[]; rowCount: number | null }> => {
@@ -40,11 +41,17 @@ test('Section 100: PlatformBackendServices issues Ed25519-signed license leases 
     if (sql.includes('SELECT lease_id, device_fingerprint_hash')) {
       return { rows: [], rowCount: 0 };
     }
+    if (sql.includes('SELECT release_status FROM ai_models_catalog')) {
+      return {
+        rows: [{ release_status: catalogStatus } as unknown as TRow],
+        rowCount: 1,
+      };
+    }
     if (sql.includes('FROM ai_models_catalog')) {
       return {
         rows: [{
           version: '1.0.0',
-          release_status: 'ACTIVE',
+          release_status: catalogStatus,
           tier_group: 'GROUP_B',
           total_size_bytes: catalogTotalBytes,
         } as unknown as TRow],
@@ -273,6 +280,27 @@ test('Section 100: PlatformBackendServices issues Ed25519-signed license leases 
     manifestResult.manifest?.chunks[0].url,
     'https://cdn.avapardaz.ir/api/v1/models/model-test/1.0.0/chunks/0',
   );
+
+  // Revocation is enforced at byte-delivery time, even when a client keeps an older manifest URL.
+  catalogStatus = 'REVOKED';
+  statusCode = 200;
+  await getRoutes.get('/api/v1/models/:modelId/:version/chunks/:chunkIndex')!(
+    { params: { modelId: 'model-test', version: '1.0.0', chunkIndex: '0' }, query: {}, headers: {} },
+    mockReply,
+  );
+  assert.equal(statusCode, 410);
+  assert.equal((sentBody as { error: string }).error, 'MODEL_VERSION_REVOKED');
+
+  // Strict path parameters reject encoded or malformed values before any file access.
+  statusCode = 200;
+  await getRoutes.get('/api/v1/models/:modelId/:version/chunks/:chunkIndex')!(
+    { params: { modelId: '../model-test', version: '1.0.0', chunkIndex: '0junk' }, query: {}, headers: {} },
+    mockReply,
+  );
+  assert.equal(statusCode, 400);
+  assert.equal((sentBody as { error: string }).error, 'INVALID_MODEL_ID');
+
+  catalogStatus = 'ACTIVE';
 
   // Never sign a manifest whose declared catalogue size disagrees with the verified chunk set.
   catalogTotalBytes = '7';
