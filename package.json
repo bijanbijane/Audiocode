@@ -17,7 +17,8 @@
     "verify:foundation": "npm run lint && npx vitest run && npm run test:unit && npm run build",
     "dev:api": "tsx scripts/start-api.ts",
     "dev:web": "vite --mode separate --host 0.0.0.0 --port 5173 --strictPort",
-    "preview:web": "vite preview --mode separate --host 0.0.0.0 --port 4173 --strictPort"
+    "preview:web": "vite preview --mode separate --host 0.0.0.0 --port 4173 --strictPort",
+    "test:separation": "tsx --test src/platform/PlatformApiClient.test.ts backend/src/SeparatedRuntimeRoutingContract.test.ts backend/src/PlatformBackendServices.test.ts"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",
