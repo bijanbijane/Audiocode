@@ -55,11 +55,19 @@ test('public key and model manifest use the isolated prefix and validate the mod
 test('Platform API base path rejects external and protocol-relative URLs', () => {
   assert.throws(
     () => new PlatformApiClient({ basePath: 'https://attacker.example' }),
-    /PLATFORM_API_BASE_PATH_MUST_BE_SAME_ORIGIN/,
+    /PLATFORM_API_BASE_PATH_MUST_BE_PLATFORM_PREFIX/,
   );
   assert.throws(
     () => new PlatformApiClient({ basePath: '//attacker.example' }),
-    /PLATFORM_API_BASE_PATH_MUST_BE_SAME_ORIGIN/,
+    /PLATFORM_API_BASE_PATH_MUST_BE_PLATFORM_PREFIX/,
+  );
+  assert.throws(
+    () => new PlatformApiClient({ basePath: '/platform-api/../api' }),
+    /PLATFORM_API_BASE_PATH_MUST_BE_PLATFORM_PREFIX/,
+  );
+  assert.throws(
+    () => new PlatformApiClient({ basePath: '/other-api' }),
+    /PLATFORM_API_BASE_PATH_MUST_BE_PLATFORM_PREFIX/,
   );
 });
 
