@@ -25,6 +25,10 @@ The Vite config itself is a Node build/dev tool. It imports Vite, the React and 
 
 ## 3. Local Audio Runtime dependency boundary
 
+The Local Audio Runtime includes local CPU ASR orchestration and calls platform-native Sherpa/ONNX binaries and verified models when available.
+
+The current server-side Sherpa auto-installer in `src/asr-core/LocalSherpaNeuralEngine.ts` explicitly rejects platforms other than `linux-x64`. The Docker API image does not bundle that binary or proprietary model assets. Its process health endpoint is therefore separate from ASR provisioning health; on Apple Silicon ARM64 do not infer ASR readiness from the container's liveness. The host-native Local Runtime must use a platform-compatible runtime/model, and `/api/v1/asr/health` exposes whether the binary and verified models are present.
+
 The root `server.ts` imports Express and Node built-ins, then wires several groups from root `src/`:
 - ASR research/benchmark/streaming/router registries;
 - local Core ASR and local processing orchestration;
