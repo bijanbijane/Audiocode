@@ -16,6 +16,7 @@ test('Section 100: PlatformBackendServices issues Ed25519-signed license leases 
   const privatePem = privateKey.export({ type: 'pkcs8', format: 'pem' }).toString();
 
   const txLog: string[] = [];
+  let catalogTotalBytes = '6';
   const runQuery = async <TRow>(
     sql: string,
   ): Promise<{ rows: TRow[]; rowCount: number | null }> => {
@@ -45,7 +46,7 @@ test('Section 100: PlatformBackendServices issues Ed25519-signed license leases 
           version: '1.0.0',
           release_status: 'ACTIVE',
           tier_group: 'GROUP_B',
-          total_size_bytes: '6',
+          total_size_bytes: catalogTotalBytes,
         } as unknown as TRow],
         rowCount: 1,
       };
@@ -272,6 +273,16 @@ test('Section 100: PlatformBackendServices issues Ed25519-signed license leases 
     manifestResult.manifest?.chunks[0].url,
     'https://cdn.avapardaz.ir/api/v1/models/model-test/1.0.0/chunks/0',
   );
+
+  // Never sign a manifest whose declared catalogue size disagrees with the verified chunk set.
+  catalogTotalBytes = '7';
+  statusCode = 200;
+  await getRoutes.get('/api/v1/models/:modelId/manifest')!(
+    { params: { modelId: 'model-test' }, query: {}, headers: {} },
+    mockReply,
+  );
+  assert.equal(statusCode, 409);
+  assert.equal((sentBody as { error: string }).error, 'MODEL_MANIFEST_INTEGRITY_MISMATCH');
 
   await postRoutes.get('/api/v1/asr/transcribe-chunk')!(
     { body: {}, headers: {} },
