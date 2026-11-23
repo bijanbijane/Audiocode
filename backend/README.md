@@ -55,7 +55,7 @@ Never put these values in Vite environment variables, browser code, static asset
 
 The executable entrypoint is `src/main.ts`. It calls the existing `bootstrapBackendServer` and handles SIGINT/SIGTERM graceful shutdown.
 
-The package manifest declares the currently selected Fastify and `pg` versions. The dedicated GitHub workflow generates a standalone `package-lock.json`, then installs, typechecks, tests, and builds the image. That lockfile must be committed before production deployment; until then, the Dockerfile's install step is a provisional bootstrap, not a reproducible release lock.
+The package manifest declares the selected Fastify and `pg` versions. The dedicated GitHub workflow generates a standalone `package-lock.json`, installs with `npm ci`, typechecks, tests, and builds the image. The Platform API Dockerfile now requires `backend/package-lock.json` and uses `npm ci`; therefore a direct image build from a fresh checkout is intentionally blocked until the generated lockfile artifact is committed to this branch. Do not replace this with an unlocked production install.
 
 This API has not yet taken ownership of overlapping Express routes. In particular, `POST /api/v1/license/lease` must not be switched until Ed25519 signature format, device binding, subscription expiry, offline entitlement, API response and client verification parity have all been tested.
 
