@@ -93,8 +93,8 @@ Observed Fastify registrations in:
 
 1. Root `package.json` has no direct `fastify` or `pg` dependency.
 2. Root `bun.lock` is the repository CI lockfile; the audited lock does not contain Fastify or PostgreSQL's `pg` client.
-3. The repository previously had no standalone backend package. This branch now adds `backend/package.json`, `backend/tsconfig.json`, and the explicit executable `backend/src/main.ts` entrypoint. These files create a package boundary but have not yet been typechecked or run. The package test script now delegates TypeScript test files to Node's native test runner via `node --import tsx --test`.
-4. A standalone image definition now exists at `backend/Dockerfile.platform-api`. The original `backend/Dockerfile` remains the legacy combined Express+Vite image, and `backend/Dockerfile.api` is the separated Express/local-runtime image.
+3. The repository previously had no standalone Platform API package. This branch now adds `backend/package.json`, a scoped `backend/tsconfig.json`, and `backend/src/main.ts`. The standalone typecheck/test graph is deliberately limited to the production Fastify bootstrap and directly owned auth/license/PostgreSQL modules. Browser-verifier and Nginx/Compose contract tests run from the root monorepo suite, not from the standalone package.
+4. A standalone image definition now exists at `backend/Dockerfile.platform-api`. The original `backend/Dockerfile` remains the legacy combined Express+Vite image, and `backend/Dockerfile.api` is the separate Express/local-runtime process image. The latter still uses the root Bun lock and source graph; its dependency graph has not yet been split from the Web monorepo.
 5. No committed `backend/package-lock.json` or `backend/bun.lock` exists yet. The new standalone Platform API workflow generates an npm lockfile in the runner and uploads it as an artifact. `backend/Dockerfile.platform-api` now requires that file and uses `npm ci`; until the artifact is committed, a direct Platform API image build from a fresh checkout correctly fails closed rather than silently resolving an unlocked dependency graph.
 6. The Fastify bootstrap requires `DATABASE_URL`, Ed25519 private/public PEM keys, and `PAYMENT_WEBHOOK_HMAC_SECRET`; these must be provisioned only in the Platform API environment, never in the Vite bundle. `ADMIN_API_SECRET_KEY` should also be provisioned for protected admin operations.
 7. `src/App.tsx` imports browser-local ASR/runtime, Companion client, workflow and DSP modules. Moving all of `src/` under a server package would break the product.
@@ -127,6 +127,7 @@ Observed Fastify registrations in:
 - **Still open:** commit a generated standalone `backend/package-lock.json`; change the Platform API image to `npm ci`; execute typecheck, all backend tests, Docker build, and PostgreSQL integration tests.
 - Build and run the Platform API without importing root Express/Vite entrypoints.
 - Keep its environment secrets isolated; fail closed when required values are missing.
+- Treat the Express Local Audio Runtime package/lockfile split as a separate follow-on gate; do not claim its dependency graph is independent merely because it has its own container.
 - Run PostgreSQL migrations and integration tests in a disposable test database.
 - Do not proxy overlapping license/model endpoints until signature and response parity tests pass.
 
@@ -156,7 +157,7 @@ Observed Fastify registrations in:
 - The separated-container workflow likewise failed before runner allocation and produced no artifacts; retry attempt 2 also received no runner.
 - GitHub's job-log download currently returns an object-storage 404, so there is no command-level diagnostic log from these jobs.
 - The new Fastify executable entrypoint, package manifest, TypeScript config, standalone Dockerfile and workflow are committed, but none has been executed because GitHub has not assigned a runner.
-- Source-level tests now cover the Fastify legacy license envelope and public-key discovery against `OfflineCryptoVerifier`, paid subscription expiry, UUID lease IDs, and the legacy model-manifest response. These are added tests, not executed results.
+- Source-level tests now cover the Fastify legacy license envelope and public-key discovery against `OfflineCryptoVerifier`, paid subscription expiry, UUID lease IDs, legacy model-manifest response, root proxy/Compose routing, Local-mode loopback binding, and the no-Vite API-only path. The standalone Fastify test/typecheck set is scoped to runtime-owned files. These are added tests, not executed results.
 - No claim is made that Docker build, typecheck, Vite build, Fastify startup, PostgreSQL integration, local ASR, Companion/CEP or offline-license tests passed in this editing session.
 
 ## 6. Stop conditions (safety, not excuses)
