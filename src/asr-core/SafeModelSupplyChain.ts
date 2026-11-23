@@ -408,13 +408,27 @@ export async function downloadFileWithRedirects(
           } catch {
             // ignore
           }
-          try {
-            outStream?.destroy();
-          } catch {
-            // ignore
+          const finalizeReject = () => {
+            cleanupPart();
+            reject(err);
+          };
+          if (outStream && !outStream.closed) {
+            let done = false;
+            const onStreamClosed = () => {
+              if (done) return;
+              done = true;
+              finalizeReject();
+            };
+            outStream.once('close', onStreamClosed);
+            setTimeout(onStreamClosed, 30);
+            try {
+              outStream.destroy();
+            } catch {
+              onStreamClosed();
+            }
+          } else {
+            finalizeReject();
           }
-          cleanupPart();
-          reject(err);
         };
 
         const finishOk = (

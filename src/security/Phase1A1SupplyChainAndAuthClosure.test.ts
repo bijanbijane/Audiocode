@@ -1200,8 +1200,8 @@ test('Phase 1A.1 (Public Model Artifact Router): Enforces 1 MiB Range ceiling, r
       await new Promise((r) => setTimeout(r, 40));
       return {
         modelId: 'shenava-rizen-fa-fastconformer-int8' as const,
-        upstreamModelId: 'sherpa-onnx-nemo-fast-conformer-ctc-fa',
-        modelVersion: '1.0.0',
+        upstreamModelId: 'Reza2kn/Shenava-Rizeh' as const,
+        modelVersion: '1.0.0' as const,
         architecture: 'FASTCONFORMER_CTC' as const,
         rootDir: modelDir,
         modelOnnxPath: onnxPath,
