@@ -19,6 +19,13 @@ function assertMatchingEd25519KeyPair(privateKeyPem: string, publicKeyPem: strin
   const privateKey = crypto.createPrivateKey(privateKeyPem);
   const derivedPublicKey = crypto.createPublicKey(privateKey);
   const configuredPublicKey = crypto.createPublicKey(publicKeyPem);
+  if (
+    privateKey.asymmetricKeyType !== 'ed25519' ||
+    derivedPublicKey.asymmetricKeyType !== 'ed25519' ||
+    configuredPublicKey.asymmetricKeyType !== 'ed25519'
+  ) {
+    throw new Error('BACKEND_ED25519_KEY_TYPE_INVALID');
+  }
   const derivedDer = Buffer.from(derivedPublicKey.export({ type: 'spki', format: 'der' }));
   const configuredDer = Buffer.from(configuredPublicKey.export({ type: 'spki', format: 'der' }));
 
