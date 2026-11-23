@@ -118,7 +118,9 @@ export class PlatformApiClient {
     deviceFingerprintHash: string,
     displayName?: string,
   ): Promise<PlatformApiLegacySignedEnvelope<PlatformApiOfflineLeasePayload>> {
-    if (!accessToken.trim()) throw new Error('PLATFORM_API_ACCESS_TOKEN_REQUIRED');
+    if (typeof accessToken !== 'string' || !accessToken.trim()) {
+      throw new Error('PLATFORM_API_ACCESS_TOKEN_REQUIRED');
+    }
     if (!/^[a-f0-9]{64}$/i.test(deviceFingerprintHash)) {
       throw new Error('PLATFORM_API_DEVICE_FINGERPRINT_HASH_INVALID');
     }
@@ -146,13 +148,13 @@ export class PlatformApiClient {
   }
 
   private async request<T>(path: string, init: RequestInit = {}): Promise<T> {
+    const headers = new Headers(init.headers);
+    if (!headers.has('Accept')) headers.set('Accept', 'application/json');
+
     const response = await this.fetchImpl(`${this.basePath}${path}`, {
       ...init,
       credentials: 'same-origin',
-      headers: {
-        Accept: 'application/json',
-        ...(init.headers ?? {}),
-      },
+      headers,
     });
 
     const raw = await response.text();
