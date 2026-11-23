@@ -360,6 +360,24 @@ test('Section 100: PlatformBackendServices issues Ed25519-signed license leases 
   assert.equal(statusCode, 400);
   assert.equal((sentBody as { error: string }).error, 'INVALID_MODEL_VERSION');
 
+  // Candidate/archived releases must not become public merely because a caller knows the URL.
+  catalogStatus = 'CANDIDATE';
+  statusCode = 200;
+  await getRoutes.get('/api/v1/models/:modelId/:version/manifest')!(
+    { params: { modelId: 'model-test', version: '1.0.0' }, query: {}, headers: {} },
+    mockReply,
+  );
+  assert.equal(statusCode, 404);
+  assert.equal((sentBody as { error: string }).error, 'MODEL_VERSION_NOT_AVAILABLE');
+
+  statusCode = 200;
+  await getRoutes.get('/api/v1/models/:modelId/:version/chunks/:chunkIndex')!(
+    { params: { modelId: 'model-test', version: '1.0.0', chunkIndex: '0' }, query: {}, headers: {} },
+    mockReply,
+  );
+  assert.equal(statusCode, 404);
+  assert.equal((sentBody as { error: string }).error, 'MODEL_VERSION_NOT_AVAILABLE');
+
   catalogStatus = 'ACTIVE';
 
   // Never sign a manifest whose declared catalogue size disagrees with the verified chunk set.
