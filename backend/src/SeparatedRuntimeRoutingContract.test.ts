@@ -15,6 +15,10 @@ test('separated web sends the new platform prefix to Fastify and leaves legacy A
   assert.ok(nginx.includes('location ^~ /platform-api/ {'));
   assert.ok(nginx.includes('proxy_pass http://avapardaz-platform-api:4000/;'));
   assert.ok(nginx.includes('proxy_pass http://127.0.0.1:3000;'));
+  assert.ok(nginx.includes('X-Content-Type-Options "nosniff"'));
+  assert.ok(nginx.includes('X-Frame-Options "DENY"'));
+  assert.ok(nginx.includes('Referrer-Policy "strict-origin-when-cross-origin"'));
+  assert.ok(nginx.includes('Permissions-Policy "camera=(), geolocation=(), microphone=(self)"'));
   assert.ok(nginx.includes('location ^~ /api {'));
   assert.ok(nginx.includes('location ^~ /v1 {'));
 
