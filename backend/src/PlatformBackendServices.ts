@@ -188,7 +188,7 @@ export class PlatformBackendServices {
 
     // ۱. صدور و تمدید گواهی اجاره آفلاین (Ed25519 Offline License Lease) بر اساس هویت احراز‌شده و تراکنش اتمی
     fastify.post<{
-      Body: { deviceFingerprintHash: string; userId?: string; displayName?: string };
+      Body: { deviceFingerprintHash: string; userId?: string; displayName?: string; deviceFingerprint?: string };
     }>('/api/v1/license/lease', async (request, reply) => {
       const authenticatedUserId =
         typeof request.authenticatedUserId === 'string' &&
@@ -207,6 +207,7 @@ export class PlatformBackendServices {
         deviceFingerprintHash?: unknown;
         userId?: unknown;
         displayName?: unknown;
+        deviceFingerprint?: unknown;
       };
 
       if (body.userId !== undefined) {
@@ -225,6 +226,30 @@ export class PlatformBackendServices {
         );
       } catch (err) {
         return sendClassifiedLicenseError(reply, err);
+      }
+
+      let legacyDeviceFingerprint: string | null = null;
+      if (body.deviceFingerprint !== undefined) {
+        if (
+          typeof body.deviceFingerprint !== 'string' ||
+          body.deviceFingerprint.trim().length === 0 ||
+          body.deviceFingerprint.trim().length > 512
+        ) {
+          return reply.status(400).send({ error: 'INVALID_DEVICE_FINGERPRINT' });
+        }
+        legacyDeviceFingerprint = body.deviceFingerprint.trim();
+        const derivedHash = crypto
+          .createHash('sha256')
+          .update(legacyDeviceFingerprint, 'utf8')
+          .digest('hex');
+        const expectedBytes = Buffer.from(normalizedFingerprint, 'utf8');
+        const derivedBytes = Buffer.from(derivedHash, 'utf8');
+        if (
+          expectedBytes.byteLength !== derivedBytes.byteLength ||
+          !crypto.timingSafeEqual(expectedBytes, derivedBytes)
+        ) {
+          return reply.status(403).send({ error: 'DEVICE_FINGERPRINT_HASH_MISMATCH' });
+        }
       }
 
       try {
@@ -283,7 +308,7 @@ export class PlatformBackendServices {
             plan: legacyPlan,
             issuedAtMs,
             offlineGraceExpiresAtMs: offlineEntitlementEndMs,
-            deviceFingerprint: seatResult.normalizedDeviceFingerprintHash,
+            deviceFingerprint: legacyDeviceFingerprint ?? seatResult.normalizedDeviceFingerprintHash,
           };
           return payload;
         });
