@@ -93,8 +93,10 @@ import {
   resolveServerBindHost,
 } from './src/security/AudioApiSecurityGuard.ts';
 import { createLocalModelArtifactHttpRouter } from './src/lifecycle/LocalModelArtifactHttpRouter.ts';
-import { forwardPlatformApiCompatibilityRequest } from './src/platform/PlatformApiCompatibilityProxy.ts';
-import { normalizeLegacyPlatformLeaseRequestBody } from './src/platform/PlatformApiCompatibilityProxy.ts';
+import {
+  forwardPlatformApiCompatibilityRequest,
+  normalizeLegacyPlatformLeaseRequestBody,
+} from './src/platform/PlatformApiCompatibilityProxy.ts';
 
 interface SandboxStudioScope {
   readonly tenantId: string;
