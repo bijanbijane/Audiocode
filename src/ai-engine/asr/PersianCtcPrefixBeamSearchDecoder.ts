@@ -16,6 +16,7 @@ interface CharEmissionSpan {
 
 interface BeamHypothesis {
   readonly text: string;
+  lastTokenId: number | null;
   logPBlank: number;
   logPNonBlank: number;
   logPLm: number;
@@ -24,10 +25,11 @@ interface BeamHypothesis {
 }
 
 const NEG_INF = -1e20;
+const IGNORED_SPECIAL_TOKENS = new Set(['<blk>', '<eps>', '<pad>', '<unk>', '<s>', '</s>']);
 
 export class PersianCtcPrefixBeamSearchDecoder {
   constructor(
-    /** آرایه الفبای مدل CTC که ایندکس 0 آن معمولاً توکن Blank <blk> است */
+    /** آرایه الفبای مدل CTC */
     private readonly vocabulary: readonly string[],
     private readonly blankTokenId: number = 0,
     private readonly spaceChar: string = ' ',
@@ -39,7 +41,7 @@ export class PersianCtcPrefixBeamSearchDecoder {
    */
   public decodeWithWordTimestamps(params: {
     logProbsPerFrame: Float32Array[];
-    frameDurationSec?: number; // پیش‌فرض 0.04s برای FastConformer (4x subsampling) یا 0.02s برای Wav2Vec2
+    frameDurationSec?: number; // پیش‌فرض 0.04s برای FastConformer 4x یا 0.08s برای 8x
     beamWidth?: number;
     lmAlpha?: number; // وزن مدل زبان فارسی (مثلاً 0.45)
     wordInsertionBeta?: number; // پاداش درج کلمه برای جلوگیری از چسباندن کلمات
@@ -65,6 +67,7 @@ export class PersianCtcPrefixBeamSearchDecoder {
     let activeBeams = new Map<string, BeamHypothesis>();
     activeBeams.set('', {
       text: '',
+      lastTokenId: null,
       logPBlank: 0.0,
       logPNonBlank: NEG_INF,
       logPLm: 0.0,
@@ -76,9 +79,12 @@ export class PersianCtcPrefixBeamSearchDecoder {
       const frameLogProbs = logProbsPerFrame[t];
       const nextBeams = new Map<string, BeamHypothesis>();
 
-      // استخراج topK کاراکتر محتمل در فریم جاری برای شتاب‌دهی شدید دیکدر
+      // استخراج topK توکن محتمل در فریم جاری برای شتاب‌دهی دیکدر
       const topTokenIndices = this.getTopKTokenIndices(frameLogProbs, topKPerFrame);
-      const blankLogP = frameLogProbs[this.blankTokenId];
+      const blankLogP =
+        this.blankTokenId >= 0 && this.blankTokenId < frameLogProbs.length
+          ? frameLogProbs[this.blankTokenId]
+          : NEG_INF;
 
       for (const beam of activeBeams.values()) {
         const beamTotalAcoustic = this.logAddExp(beam.logPBlank, beam.logPNonBlank);
@@ -87,6 +93,7 @@ export class PersianCtcPrefixBeamSearchDecoder {
         this.accumulateBeam(
           nextBeams,
           beam.text,
+          beam.lastTokenId,
           beamTotalAcoustic + blankLogP,
           NEG_INF,
           beam.logPLm,
@@ -97,18 +104,23 @@ export class PersianCtcPrefixBeamSearchDecoder {
         // ۲. مسیرهای گسترش با توکن‌های غیر Blank
         for (const tokId of topTokenIndices) {
           if (tokId === this.blankTokenId) continue;
-          const emittedChar = this.vocabulary[tokId];
-          if (!emittedChar) continue;
+          const rawToken = this.vocabulary[tokId];
+          if (!rawToken || IGNORED_SPECIAL_TOKENS.has(rawToken)) continue;
 
           const charLogP = frameLogProbs[tokId];
+          const textPiece = rawToken.replace(/▁/g, ' ');
           const lastChar = beam.text.length > 0 ? beam.text[beam.text.length - 1] : '';
+          const isSameToken =
+            tokId === beam.lastTokenId ||
+            (rawToken.length === 1 && textPiece === lastChar && beam.lastTokenId !== null);
 
-          if (emittedChar === lastChar) {
-            // الف) تکرار کاراکتر در فریم‌های متوالی بدون Blank میانی -> ادغام روی همان پیشوند قبلی
+          if (isSameToken) {
+            // الف) تکرار توکن در فریم‌های متوالی بدون Blank میانی -> ادغام روی همان پیشوند قبلی
             const updatedSpans = this.extendLastCharSpan(beam.charSpans, t, charLogP);
             this.accumulateBeam(
               nextBeams,
               beam.text,
+              tokId,
               NEG_INF,
               beam.logPNonBlank + charLogP,
               beam.logPLm,
@@ -116,20 +128,21 @@ export class PersianCtcPrefixBeamSearchDecoder {
               updatedSpans,
             );
 
-            // ب) تکرار واقعی یک حرف تکراری فارسی (مثل «تت» یا «مم») از مسیر Blank قبلی
-            const extendedText = beam.text + emittedChar;
-            const { deltaLm, deltaWords } = this.evaluateWordCompletionOnChar(
+            // ب) تکرار واقعی توکن از مسیر Blank قبلی
+            const extendedText = beam.text + textPiece;
+            const { deltaLm, deltaWords } = this.evaluateWordCompletionOnToken(
               beam.text,
-              emittedChar,
+              rawToken,
               lmAlpha,
             );
             const newSpans = [
               ...beam.charSpans,
-              { char: emittedChar, startFrame: t, endFrame: t + 1, logProb: charLogP },
+              { char: rawToken, startFrame: t, endFrame: t + 1, logProb: charLogP },
             ];
             this.accumulateBeam(
               nextBeams,
               extendedText,
+              tokId,
               NEG_INF,
               beam.logPBlank + charLogP,
               beam.logPLm + deltaLm,
@@ -137,20 +150,21 @@ export class PersianCtcPrefixBeamSearchDecoder {
               newSpans,
             );
           } else {
-            // ج) کاراکتر جدید متفاوت از انتهای پیشوند فعلی
-            const extendedText = beam.text + emittedChar;
-            const { deltaLm, deltaWords } = this.evaluateWordCompletionOnChar(
+            // ج) توکن جدید متفاوت از آخرین توکن پیشوند فعلی
+            const extendedText = beam.text + textPiece;
+            const { deltaLm, deltaWords } = this.evaluateWordCompletionOnToken(
               beam.text,
-              emittedChar,
+              rawToken,
               lmAlpha,
             );
             const newSpans = [
               ...beam.charSpans,
-              { char: emittedChar, startFrame: t, endFrame: t + 1, logProb: charLogP },
+              { char: rawToken, startFrame: t, endFrame: t + 1, logProb: charLogP },
             ];
             this.accumulateBeam(
               nextBeams,
               extendedText,
+              tokId,
               NEG_INF,
               beamTotalAcoustic + charLogP,
               beam.logPLm + deltaLm,
@@ -170,7 +184,7 @@ export class PersianCtcPrefixBeamSearchDecoder {
     let bestFinalScore = NEG_INF;
 
     for (const beam of activeBeams.values()) {
-      const { deltaLm, deltaWords } = this.evaluateWordCompletionOnChar(
+      const { deltaLm, deltaWords } = this.evaluateWordCompletionOnToken(
         beam.text,
         this.spaceChar,
         lmAlpha,
@@ -198,18 +212,22 @@ export class PersianCtcPrefixBeamSearchDecoder {
     );
 
     return {
-      bestTranscript: bestBeam.text.trim(),
+      bestTranscript: bestBeam.text.replace(/\s+/g, ' ').trim(),
       words,
       totalLogScore: Number(bestFinalScore.toFixed(3)),
     };
   }
 
-  private evaluateWordCompletionOnChar(
+  private evaluateWordCompletionOnToken(
     prevText: string,
-    nextChar: string,
+    nextToken: string,
     lmAlpha: number,
   ): { deltaLm: number; deltaWords: number } {
-    if (nextChar !== this.spaceChar) {
+    const startsNewWord =
+      nextToken === this.spaceChar ||
+      nextToken.startsWith('▁') ||
+      nextToken.startsWith(' ');
+    if (!startsNewWord) {
       return { deltaLm: 0, deltaWords: 0 };
     }
 
@@ -263,6 +281,12 @@ export class PersianCtcPrefixBeamSearchDecoder {
     for (const span of charSpans) {
       if (span.char === this.spaceChar || span.char === '▁') {
         flushWord();
+      } else if (span.char.startsWith('▁') || span.char.startsWith(' ')) {
+        flushWord();
+        const cleanPiece = span.char.replace(/^[\s▁]+/, '');
+        if (cleanPiece.length > 0) {
+          currentChars.push({ ...span, char: cleanPiece });
+        }
       } else {
         currentChars.push(span);
       }
@@ -275,6 +299,7 @@ export class PersianCtcPrefixBeamSearchDecoder {
   private accumulateBeam(
     map: Map<string, BeamHypothesis>,
     text: string,
+    lastTokenId: number | null,
     addLogPBlank: number,
     addLogPNonBlank: number,
     logPLm: number,
@@ -285,6 +310,7 @@ export class PersianCtcPrefixBeamSearchDecoder {
     if (!existing) {
       map.set(text, {
         text,
+        lastTokenId,
         logPBlank: addLogPBlank,
         logPNonBlank: addLogPNonBlank,
         logPLm,
@@ -300,6 +326,7 @@ export class PersianCtcPrefixBeamSearchDecoder {
 
     const newAcoustic = this.logAddExp(addLogPBlank, addLogPNonBlank);
     if (newAcoustic > prevAcoustic && charSpans.length >= existing.charSpans.length) {
+      existing.lastTokenId = lastTokenId;
       existing.logPLm = logPLm;
       existing.wordCount = wordCount;
       (existing as { charSpans: CharEmissionSpan[] }).charSpans = charSpans;
@@ -348,9 +375,36 @@ export class PersianCtcPrefixBeamSearchDecoder {
   }
 
   private getTopKTokenIndices(logProbs: Float32Array, k: number): number[] {
-    const indices = Array.from({ length: logProbs.length }, (_, i) => i);
-    indices.sort((a, b) => logProbs[b] - logProbs[a]);
-    return indices.slice(0, k);
+    const limit = Math.min(k, logProbs.length);
+    const topIndices: number[] = [];
+    for (let i = 0; i < logProbs.length; i++) {
+      const val = logProbs[i];
+      if (!Number.isFinite(val)) continue;
+      if (topIndices.length < limit) {
+        topIndices.push(i);
+        for (let j = topIndices.length - 1; j > 0; j--) {
+          if (logProbs[topIndices[j]] > logProbs[topIndices[j - 1]]) {
+            const tmp = topIndices[j];
+            topIndices[j] = topIndices[j - 1];
+            topIndices[j - 1] = tmp;
+          } else {
+            break;
+          }
+        }
+      } else if (val > logProbs[topIndices[limit - 1]]) {
+        topIndices[limit - 1] = i;
+        for (let j = limit - 1; j > 0; j--) {
+          if (logProbs[topIndices[j]] > logProbs[topIndices[j - 1]]) {
+            const tmp = topIndices[j];
+            topIndices[j] = topIndices[j - 1];
+            topIndices[j - 1] = tmp;
+          } else {
+            break;
+          }
+        }
+      }
+    }
+    return topIndices;
   }
 
   private logAddExp(a: number, b: number): number {

@@ -166,8 +166,7 @@ export class WebWorkerOrtRuntimeProvider implements OrtRuntimeProvider {
   }
 
   private async loadDynamicOrtWeb(): Promise<OrtWebBindingLike> {
-    const modName = 'onnxruntime-web';
-    const ort = (await import(/* @vite-ignore */ modName)) as OrtWebBindingLike;
+    const ort = (await import('onnxruntime-web')) as unknown as OrtWebBindingLike;
     ort.env.wasm.wasmPaths = this.wasmAssetsBasePath;
     ort.env.wasm.simd = true;
     ort.env.wasm.numThreads = this.configuredNumThreads;

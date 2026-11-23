@@ -167,6 +167,87 @@ export class OnnxPersianAsrAndVadAdapter implements AsrModelRunnerAdapter {
   }
 
   /**
+   * Computes 80-Channel NeMo Log-Mel Spectrogram [numFrames * 80] matching
+   * Shenava-Rizeh / NVIDIA NeMo FastConformer ONNX export (`normalize_type: ""`):
+   * - Pre-emphasis (coeff 0.97)
+   * - Center zero-padding (nFft/2 = 256 samples on both sides)
+   * - Periodic Hann window (400 samples @ 16kHz, hop 160 samples, nFft 512)
+   * - Slaney area-normalized 80-bin Mel filterbank (0..8000 Hz)
+   * - Natural log `ln(melEnergy + 2^-24)` with NO per-feature mean/variance normalization
+   */
+  public computeNemoLogMelSpectrogram(pcm16kMono: Float32Array): {
+    melTensor: Float32Array;
+    numFrames: number;
+    nMels: number;
+  } {
+    if (pcm16kMono.length === 0) {
+      return { melTensor: new Float32Array(0), numFrames: 0, nMels: this.nMels };
+    }
+
+    const preemph = new Float32Array(pcm16kMono.length);
+    const first = Number.isFinite(pcm16kMono[0]) ? pcm16kMono[0] : 0;
+    preemph[0] = first;
+    for (let i = 1; i < pcm16kMono.length; i++) {
+      const curr = Number.isFinite(pcm16kMono[i]) ? pcm16kMono[i] : 0;
+      const prev = Number.isFinite(pcm16kMono[i - 1]) ? pcm16kMono[i - 1] : 0;
+      preemph[i] = curr - 0.97 * prev;
+    }
+
+    const pad = this.nFft >> 1; // 256
+    const padded = new Float32Array(preemph.length + 2 * pad);
+    padded.set(preemph, pad);
+
+    const numFrames = Math.max(
+      1,
+      1 + Math.floor((padded.length - this.nFft) / this.hopLength),
+    );
+    const melTensor = new Float32Array(numFrames * this.nMels);
+    const nFreqBins = (this.nFft >> 1) + 1; // 257 bins
+    const winOffset = (this.nFft - this.winLength) >> 1; // 56 (centered window inside 512 FFT)
+    const logZeroGuard = Math.pow(2, -24);
+
+    const real = new Float32Array(this.nFft);
+    const imag = new Float32Array(this.nFft);
+    const powerSpectrum = new Float32Array(nFreqBins);
+
+    for (let f = 0; f < numFrames; f++) {
+      const start = f * this.hopLength;
+      real.fill(0);
+      imag.fill(0);
+
+      for (let i = 0; i < this.winLength; i++) {
+        const idx = start + winOffset + i;
+        const s = idx < padded.length ? padded[idx] : 0;
+        real[winOffset + i] = s * this.hannWindow[i];
+      }
+
+      this.radix2FftInPlace(real, imag);
+
+      for (let k = 0; k < nFreqBins; k++) {
+        const p = real[k] * real[k] + imag[k] * imag[k];
+        powerSpectrum[k] = Number.isFinite(p) ? p : 0;
+      }
+
+      const frameOffset = f * this.nMels;
+      for (let m = 0; m < this.nMels; m++) {
+        const filterWeights = this.melFilterbank[m];
+        let melEnergy = 0;
+        for (let k = 0; k < nFreqBins; k++) {
+          melEnergy += powerSpectrum[k] * filterWeights[k];
+        }
+        const safeEnergy = Number.isFinite(melEnergy) && melEnergy > 0 ? melEnergy : 0;
+        melTensor[frameOffset + m] = Math.log(safeEnergy + logZeroGuard);
+      }
+    }
+
+    return {
+      melTensor,
+      numFrames,
+      nMels: this.nMels,
+    };
+  }
+
+  /**
    * Estimates explicit transient JavaScript TypedArray allocations for feature extraction
    * over `sampleCount16k` samples (Log-Mel tensor + FFT real/imag + power spectrum).
    *

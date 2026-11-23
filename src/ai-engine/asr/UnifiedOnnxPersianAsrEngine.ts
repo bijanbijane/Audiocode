@@ -83,9 +83,11 @@ export class UnifiedOnnxPersianAsrEngine implements AsrModelRunnerAdapter {
     this.whisperByteEncoderMap = encoderMap;
 
     if (architecture === 'FASTCONFORMER_CTC' && config.ctcVocabulary && config.ctcVocabulary.length > 0) {
+      const detectedBlankId = config.ctcVocabulary.indexOf('<blk>');
+      const blankTokenId = detectedBlankId >= 0 ? detectedBlankId : 0;
       this.ctcDecoder = new PersianCtcPrefixBeamSearchDecoder(
         config.ctcVocabulary,
-        0,
+        blankTokenId,
         ' ',
         config.persianLmScorer,
       );
@@ -197,7 +199,9 @@ export class UnifiedOnnxPersianAsrEngine implements AsrModelRunnerAdapter {
     }
 
     const { melTensor, numFrames, nMels } =
-      this.featureExtractor.computeLogMelSpectrogram(pcm16kMono);
+      this.architecture === 'FASTCONFORMER_CTC'
+        ? this.featureExtractor.computeNemoLogMelSpectrogram(pcm16kMono)
+        : this.featureExtractor.computeLogMelSpectrogram(pcm16kMono);
     if (numFrames === 0) return [];
 
     if (this.architecture === 'FASTCONFORMER_CTC') {
@@ -253,9 +257,11 @@ export class UnifiedOnnxPersianAsrEngine implements AsrModelRunnerAdapter {
       framesArray[t] = flatData.subarray(start, start + vocabSize);
     }
 
+    const subsamplingRatio = Math.max(1, Math.round(numFrames / Math.max(1, outFrames)));
+    const frameDurationSec = subsamplingRatio * 0.01;
     const decoded = this.ctcDecoder.decodeWithWordTimestamps({
       logProbsPerFrame: framesArray,
-      frameDurationSec: 0.04, // FastConformer 4x subsampling on 10ms Mel hops = 40ms/frame
+      frameDurationSec,
       beamWidth: 16,
     });
 

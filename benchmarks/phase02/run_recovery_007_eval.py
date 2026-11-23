@@ -256,58 +256,67 @@ def _run_sherpa_batch(model_id: str, clips: List[Dict[str, Any]], threads: int) 
     else:
         raise ValueError(model_id)
 
-    # Run all WAVs in ONE sherpa-onnx-offline invocation so the model loads once,
-    # giving exact cold_start_sec ("recognizer created in X s") and true warm RTF
-    # ("Elapsed seconds: Y s") without per-clip model-load pollution.
+    # Run in small chunks (batch_size=4) with OMP_WAIT_POLICY=PASSIVE so Conformer/Whisper
+    # does not allocate huge [50, 80, T_max] padded tensors in gVisor, while still avoiding
+    # per-clip model reloads and preserving exact cold-start and warm RTF.
     import resource
 
-    wavs = [c["audio_path"] for c in clips]
-    t0 = time.perf_counter()
-    proc = subprocess.run(
-        base_args + wavs,
-        capture_output=True,
-        text=True,
-        env=env,
-        check=True,
-    )
-    wall_total = time.perf_counter() - t0
-    child_rss_mib = round(resource.getrusage(resource.RUSAGE_CHILDREN).ru_maxrss / 1024.0, 2)
+    env["OMP_WAIT_POLICY"] = "PASSIVE"
+    chunk_size = 4
+    cold_sec = 0.0
+    rows: List[Dict[str, Any]] = []
 
-    comb = (proc.stderr or "") + "\n" + (proc.stdout or "")
-    m_cold = re.search(r"recognizer created in\s+([0-9.]+)\s*s", comb)
-    cold_sec = float(m_cold.group(1)) if m_cold else 0.0
-    m_elap = re.search(r"Elapsed seconds:\s+([0-9.]+)\s*s", comb)
-    warm_elapsed_total = float(m_elap.group(1)) if m_elap else max(0.0, wall_total - cold_sec)
+    for i in range(0, len(clips), chunk_size):
+        chunk = clips[i : i + chunk_size]
+        wavs = [c["audio_path"] for c in chunk]
+        t0 = time.perf_counter()
+        proc = subprocess.run(
+            base_args + wavs,
+            capture_output=True,
+            text=True,
+            env=env,
+            check=True,
+        )
+        wall_chunk = time.perf_counter() - t0
+        comb = (proc.stderr or "") + "\n" + (proc.stdout or "")
+        m_cold = re.search(r"recognizer created in\s+([0-9.]+)\s*s", comb)
+        if i == 0 and m_cold:
+            cold_sec = float(m_cold.group(1))
+        m_elap = re.search(r"Elapsed seconds:\s+([0-9.]+)\s*s", comb)
+        warm_chunk = (
+            float(m_elap.group(1))
+            if m_elap
+            else max(0.0, wall_chunk - (float(m_cold.group(1)) if m_cold else 0.0))
+        )
 
-    # Parse ordered JSON result lines (one per input WAV)
-    hyps: List[str] = []
-    for ln in (proc.stdout or "").splitlines():
-        ln_s = ln.strip()
-        if ln_s.startswith("{") and '"text"' in ln_s:
-            try:
-                hyps.append(json.loads(ln_s).get("text", "").strip())
-            except json.JSONDecodeError:
-                pass
-    if len(hyps) != len(clips):
-        # Fallback: scan combined output
-        hyps = []
-        for ln in comb.splitlines():
+        hyps: List[str] = []
+        for ln in (proc.stdout or "").splitlines():
             ln_s = ln.strip()
             if ln_s.startswith("{") and '"text"' in ln_s:
                 try:
                     hyps.append(json.loads(ln_s).get("text", "").strip())
                 except json.JSONDecodeError:
                     pass
-    if len(hyps) != len(clips):
-        raise RuntimeError(f"Expected {len(clips)} JSON outputs from sherpa-onnx-offline, got {len(hyps)}")
+        if len(hyps) != len(chunk):
+            hyps = []
+            for ln in comb.splitlines():
+                ln_s = ln.strip()
+                if ln_s.startswith("{") and '"text"' in ln_s:
+                    try:
+                        hyps.append(json.loads(ln_s).get("text", "").strip())
+                    except json.JSONDecodeError:
+                        pass
+        if len(hyps) != len(chunk):
+            raise RuntimeError(
+                f"Expected {len(chunk)} JSON outputs from sherpa-onnx-offline, got {len(hyps)}"
+            )
 
-    tot_audio_sec = sum(float(c["duration_sec"]) for c in clips) or 1.0
-    rows = []
-    for c, hyp in zip(clips, hyps):
-        # Distribute exact batch warm inference time proportionally to clip duration
-        # (aggregate warm RTF = warm_elapsed_total / tot_audio_sec is exact)
-        est_dt = warm_elapsed_total * (float(c["duration_sec"]) / tot_audio_sec)
-        rows.append({"clip": c, "hyp": hyp, "elapsed_sec": est_dt})
+        chunk_audio = sum(float(c["duration_sec"]) for c in chunk) or 1.0
+        for c, hyp in zip(chunk, hyps):
+            est_dt = warm_chunk * (float(c["duration_sec"]) / chunk_audio)
+            rows.append({"clip": c, "hyp": hyp, "elapsed_sec": est_dt})
+
+    child_rss_mib = round(resource.getrusage(resource.RUSAGE_CHILDREN).ru_maxrss / 1024.0, 2)
     return cold_sec, child_rss_mib, rows
 
 
