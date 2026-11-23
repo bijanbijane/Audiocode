@@ -93,6 +93,7 @@ import {
   resolveServerBindHost,
 } from './src/security/AudioApiSecurityGuard.ts';
 import { createLocalModelArtifactHttpRouter } from './src/lifecycle/LocalModelArtifactHttpRouter.ts';
+import { forwardPlatformApiCompatibilityRequest } from './src/platform/PlatformApiCompatibilityProxy.ts';
 
 interface SandboxStudioScope {
   readonly tenantId: string;
@@ -359,8 +360,16 @@ async function startServer() {
 
   app.use(express.json({ limit: '16mb' }));
 
-  // Public Ed25519 SPKI key endpoint for offline client verification
-  app.get('/api/v1/crypto/public-key', (_req, res) => {
+  // In Hosted mode the Fastify Platform API is the sole key-discovery owner.
+  // Keep the local demo signer only in Local mode for backward compatibility.
+  app.get('/api/v1/crypto/public-key', (req, res) => {
+    if (audioApiSecurityGuard.config.mode !== 'local') {
+      void forwardPlatformApiCompatibilityRequest(req, res, {
+        path: '/api/v1/crypto/public-key',
+        method: 'GET',
+      });
+      return;
+    }
     res.json(licenseService.getPublicKeyInfo());
   });
 
@@ -369,9 +378,11 @@ async function startServer() {
   // on the legacy Express route in Hosted mode.
   app.post('/api/v1/license/lease', (req, res) => {
     if (audioApiSecurityGuard.config.mode !== 'local') {
-      res.status(404).json({
-        error: 'PLATFORM_API_LICENSE_REQUIRED',
-        messageFa: 'صدور مجوز حساب کاربری فقط از API احراز هویت‌شده پلتفرم انجام می‌شود.',
+      // Compatibility adapter: Fastify still performs the real Bearer/JWT,
+      // PostgreSQL subscription, device-seat, and Ed25519 checks.
+      void forwardPlatformApiCompatibilityRequest(req, res, {
+        path: '/api/v1/license/lease',
+        method: 'POST',
       });
       return;
     }
@@ -424,6 +435,13 @@ async function startServer() {
   // Signed chunked model registry manifest (supports ACTIVE, SUPPORTED, DEPRECATED, REVOKED)
   app.get('/api/v1/models/:modelId/manifest', (req, res) => {
     const { modelId } = req.params;
+    if (audioApiSecurityGuard.config.mode !== 'local') {
+      void forwardPlatformApiCompatibilityRequest(req, res, {
+        path: `/api/v1/models/${encodeURIComponent(modelId)}/manifest`,
+        method: 'GET',
+      });
+      return;
+    }
     const override = req.query.status as ModelLifecycleStatus | undefined;
     const allowedStatuses: ModelLifecycleStatus[] = [
       'ACTIVE',
