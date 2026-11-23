@@ -58,6 +58,7 @@ test('Express container healthcheck measures process liveness, while ASR health 
   const compose = read('deploy/docker-compose.separated.yml');
 
   assert.ok(server.includes("app.get('/healthz'"));
+  assert.ok(server.includes("status: neuralRuntime.available ? 'OK' : 'DEGRADED'"));
   assert.ok(server.includes("localInferenceProvisioningStatus: neuralRuntime.available ? 'PROVISIONED' : 'NOT_PROVISIONED'"));
   assert.ok(server.includes('SHERPA_RUNTIME_BINARY_NOT_INSTALLED'));
   assert.ok(dockerfile.includes("fetch('http://127.0.0.1:3000/healthz')"));
