@@ -52,6 +52,19 @@ test('Platform API development binds to loopback and trusts forwarded IPs only b
   assert.ok(!nginx.includes('$proxy_add_x_forwarded_for'));
 });
 
+test('Express container healthcheck measures process liveness, while ASR health exposes native runtime provisioning', () => {
+  const server = read('server.ts');
+  const dockerfile = read('backend/Dockerfile.api');
+  const compose = read('deploy/docker-compose.separated.yml');
+
+  assert.ok(server.includes("app.get('/healthz'"));
+  assert.ok(server.includes("localInferenceProvisioningStatus: neuralRuntime.available ? 'PROVISIONED' : 'NOT_PROVISIONED'"));
+  assert.ok(server.includes('SHERPA_RUNTIME_BINARY_NOT_INSTALLED'));
+  assert.ok(dockerfile.includes("fetch('http://127.0.0.1:3000/healthz')"));
+  assert.ok(compose.includes("fetch('http://127.0.0.1:3000/healthz')"));
+  assert.ok(!dockerfile.includes("fetch('http://127.0.0.1:3000/api/v1/asr/health')"));
+});
+
 test('three-runtime compose keeps Web, Express, Fastify and PostgreSQL isolated', () => {
   const compose = read('deploy/docker-compose.separated.yml');
 
