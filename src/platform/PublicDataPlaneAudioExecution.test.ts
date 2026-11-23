@@ -125,7 +125,7 @@ test('AVP-010: Unprovisioned runtime reports honest MODEL_NOT_INSTALLED & fails 
 
   const modelsRes = await gw.listPublicModels(key.plaintextSecretOnce);
   assert.equal(modelsRes.status, 200);
-  const models = (modelsRes.body as { data: Array<{ modelId: string; availabilityInCurrentContainer: string }> }).data;
+  const models = (modelsRes.body as unknown as { data: readonly { modelId: string; availabilityInCurrentContainer: string }[] }).data;
   const primary = models.find((m) => m.modelId === 'asr-fa-en-v1');
   assert.equal(primary?.availabilityInCurrentContainer, 'MODEL_NOT_INSTALLED');
 

@@ -14,6 +14,8 @@ import {
   MultiSpeakerDiarizationAndCrosstalkEngine,
   SpeakerTimelineSegment,
 } from '../ai-engine/MultiSpeakerDiarizationAndCrosstalkEngine';
+import type { SpeakerEmbeddingOnnxRunner } from '../ai-engine/asr/SpeakerEmbeddingOnnxRunner';
+import type { VadSpeechSegment } from '../ai-engine/asr/SileroVadOnnxRunner';
 import { PersianCtcForcedAligner } from '../ai-engine/PersianCtcForcedAligner';
 import type {
   AlignedWordItem,
@@ -84,8 +86,18 @@ export function runModularDiarizationCapability(params: {
   };
 
   const segments: DiarizationSegment[] = [];
+  let provenance: DiarizationResultPayload['provenance'] = {
+    modelId: 'none',
+    modelVersion: '1.0.0',
+    adapterKind: 'NO_MODEL_UNKNOWN_FALLBACK',
+  };
 
   if (params.tracksPcm && params.tracksPcm.length >= 2) {
+    provenance = {
+      modelId: 'avapardaz-multitrack-crosstalk-v1',
+      modelVersion: '1.0.0',
+      adapterKind: 'LOCAL_CPU_ENERGY_CROSSTALK',
+    };
     const multiSegs: SpeakerTimelineSegment[] =
       MultiSpeakerDiarizationAndCrosstalkEngine.analyzeMultiTrackCrosstalkAndOverlap(
         params.tracksPcm.map((t, i) => ({
@@ -111,23 +123,22 @@ export function runModularDiarizationCapability(params: {
       });
     }
   } else if (params.transcriptSegments && params.transcriptSegments.length > 0) {
-    const rawExpected = params.expectedSpeakerCount;
-    const maxSpeakers =
-      typeof rawExpected === 'number' && Number.isFinite(rawExpected) && rawExpected >= 1
-        ? Math.max(1, Math.min(8, Math.trunc(rawExpected)))
-        : 2;
+    const hasSpeakerHints = params.transcriptSegments.some(
+      (segment) => typeof segment.speakerHint === 'string' && segment.speakerHint.trim().length > 0,
+    );
+    provenance = {
+      modelId: hasSpeakerHints ? 'transcript-speaker-hints' : 'none',
+      modelVersion: '1.0.0',
+      adapterKind: hasSpeakerHints
+        ? 'TRANSCRIPT_SPEAKER_HINTS_ONLY'
+        : 'NO_MODEL_UNKNOWN_FALLBACK',
+    };
     let prevEnd = 0;
-    let activeSpeakerIdx = 0;
     params.transcriptSegments.forEach((seg, idx) => {
       const safeStart = Number.isFinite(seg.startSec) ? Math.max(0, seg.startSec) : prevEnd;
       const safeEnd = Number.isFinite(seg.endSec) ? Math.max(safeStart + 0.05, seg.endSec) : safeStart + 0.05;
-      const gap = safeStart - prevEnd;
-      if (!seg.speakerHint && idx > 0 && (gap >= 0.45 || idx % 2 === 1)) {
-        activeSpeakerIdx = (activeSpeakerIdx + 1) % maxSpeakers;
-      }
-      const spkId = seg.speakerHint
-        ? toAnonSpeaker(seg.speakerHint)
-        : `speaker_${activeSpeakerIdx + 1}`;
+      const speakerHint = typeof seg.speakerHint === 'string' ? seg.speakerHint.trim() : '';
+      const spkId = speakerHint ? toAnonSpeaker(speakerHint) : 'UNKNOWN_SPEAKER';
       const isOverlapping = segments.some(
         (prev) => safeStart < prev.endSec - 0.02 && safeEnd > prev.startSec + 0.02
       );
@@ -146,20 +157,20 @@ export function runModularDiarizationCapability(params: {
         startSec: Number(safeStart.toFixed(3)),
         endSec: Number(safeEnd.toFixed(3)),
         speakerId: spkId,
-        confidence: 0.88,
+        confidence: null,
         overlap: isOverlapping,
         competingSpeakerIds: [],
-        uncertain: false,
+        uncertain: !speakerHint,
       });
       prevEnd = Math.max(prevEnd, safeEnd);
     });
   } else if (Number.isFinite(params.durationSec) && params.durationSec > 0) {
-    // Unassigned acoustic fallback when neither multi-track PCM nor segment hints exist
+    // Duration alone contains no evidence for the number or identity of speakers.
     segments.push({
       segmentId: 'dseg_1',
       startSec: 0,
       endSec: Number(params.durationSec.toFixed(3)),
-      speakerId: 'speaker_1',
+      speakerId: 'UNKNOWN_SPEAKER',
       confidence: null,
       overlap: false,
       competingSpeakerIds: [],
@@ -196,13 +207,186 @@ export function runModularDiarizationCapability(params: {
     speakers: Array.from(speakerTotals.values()),
     segments,
     unassignedDurationSec: Number(unassignedDurationSec.toFixed(3)),
+    provenance,
+  };
+}
+
+/**
+ * Model-backed single-channel diarization.
+ *
+ * The caller supplies an already-loaded local ONNX runner and Silero VAD speech
+ * segments. Speaker IDs are anonymous and recording-local. Cosine similarity
+ * is used for clustering only; it is deliberately not exposed as a calibrated
+ * probability/confidence score.
+ */
+export async function runWeSpeakerDiarizationCapability(params: {
+  recordingId: string;
+  pcm16kMono: Float32Array;
+  vadSpeechSegments: VadSpeechSegment[];
+  runner: SpeakerEmbeddingOnnxRunner;
+  similarityThreshold?: number;
+  modelVersion?: string;
+  windowDurationSec?: number;
+  hopDurationSec?: number;
+}): Promise<DiarizationResultPayload> {
+  if (!params.recordingId.trim()) {
+    throw new TypeError('DIARIZATION_RECORDING_ID_REQUIRED');
+  }
+  if (!(params.pcm16kMono instanceof Float32Array) || params.pcm16kMono.length === 0) {
+    throw new TypeError('DIARIZATION_PCM16K_MONO_REQUIRED');
+  }
+  if (!Array.isArray(params.vadSpeechSegments)) {
+    throw new TypeError('DIARIZATION_VAD_SEGMENTS_MUST_BE_ARRAY');
+  }
+
+  const durationSec = params.pcm16kMono.length / 16000;
+  const embeddings = await params.runner.extractEmbeddingsForVadSegments(
+    params.pcm16kMono,
+    params.vadSpeechSegments,
+    params.windowDurationSec ?? 1.5,
+    params.hopDurationSec ?? 0.75,
+  );
+  const assigned = MultiSpeakerDiarizationAndCrosstalkEngine.assignSpeakersFromEmbeddings(
+    params.recordingId,
+    embeddings,
+    params.similarityThreshold ?? 0.72,
+  );
+
+  const segments: DiarizationSegment[] = assigned.map((segment, index) => {
+    const rawSpeakerId = String(segment.speakerId);
+    const match = /^SPEAKER_(\d+)$/i.exec(rawSpeakerId);
+    const speakerId = match
+      ? `speaker_${match[1]}`
+      : 'UNKNOWN_SPEAKER';
+    const startSec = Math.max(
+      0,
+      Math.min(durationSec, TimeMath.flicksToSeconds(segment.range.start)),
+    );
+    const endSec = Math.max(
+      startSec,
+      Math.min(durationSec, TimeMath.flicksToSeconds(segment.range.end)),
+    );
+    return {
+      segmentId: `dseg_${index + 1}`,
+      startSec: Number(startSec.toFixed(3)),
+      endSec: Number(endSec.toFixed(3)),
+      speakerId,
+      confidence: null,
+      overlap: false,
+      competingSpeakerIds: [],
+      uncertain: speakerId === 'UNKNOWN_SPEAKER',
+    };
+  }).filter((segment) => segment.endSec > segment.startSec);
+
+  segments.sort((a, b) => a.startSec - b.startSec || a.endSec - b.endSec);
+
+  // The embedding runner only emits complete windows. Preserve every portion
+  // of each VAD speech interval that those windows do not cover as UNKNOWN.
+  // This includes short turns, sub-window tails and gaps between windows.
+  for (const vadSegment of params.vadSpeechSegments) {
+    const vadStart = Math.max(0, vadSegment.startSample16k / 16000);
+    const vadEnd = Math.min(durationSec, vadSegment.endSample16k / 16000);
+    if (vadEnd <= vadStart) continue;
+
+    const covered = segments
+      .filter(
+        (segment) =>
+          segment.speakerId !== 'UNKNOWN_SPEAKER' &&
+          segment.endSec > vadStart &&
+          segment.startSec < vadEnd,
+      )
+      .map((segment) => ({
+        start: Math.max(vadStart, segment.startSec),
+        end: Math.min(vadEnd, segment.endSec),
+      }))
+      .sort((a, b) => a.start - b.start);
+
+    let cursor = vadStart;
+    for (const interval of covered) {
+      if (interval.start - cursor >= 0.02) {
+        segments.push({
+          segmentId: `dseg_uncovered_${segments.length + 1}`,
+          startSec: Number(cursor.toFixed(3)),
+          endSec: Number(interval.start.toFixed(3)),
+          speakerId: 'UNKNOWN_SPEAKER',
+          confidence: null,
+          overlap: false,
+          competingSpeakerIds: [],
+          uncertain: true,
+        });
+      }
+      cursor = Math.max(cursor, interval.end);
+    }
+    if (vadEnd - cursor >= 0.02) {
+      segments.push({
+        segmentId: `dseg_uncovered_${segments.length + 1}`,
+        startSec: Number(cursor.toFixed(3)),
+        endSec: Number(vadEnd.toFixed(3)),
+        speakerId: 'UNKNOWN_SPEAKER',
+        confidence: null,
+        overlap: false,
+        competingSpeakerIds: [],
+        uncertain: true,
+      });
+    }
+  }
+
+  segments.sort((a, b) => a.startSec - b.startSec || a.endSec - b.endSec);
+
+  // Sliding embedding windows overlap by design. Their overlap is not evidence
+  // of simultaneous speakers, so split adjacent model windows at their midpoint.
+  for (let index = 0; index < segments.length - 1; index++) {
+    const current = segments[index];
+    const next = segments[index + 1];
+    if (current.endSec <= next.startSec) continue;
+    const currentCenter = (current.startSec + current.endSec) / 2;
+    const nextCenter = (next.startSec + next.endSec) / 2;
+    const boundary = (currentCenter + nextCenter) / 2;
+    if (boundary > current.startSec && boundary < next.endSec) {
+      current.endSec = Number(boundary.toFixed(3));
+      next.startSec = Number(boundary.toFixed(3));
+    }
+  }
+
+  const speakerTotals = new Map<string, AnonymousSpeakerSummary>();
+  let unassignedDurationSec = 0;
+  for (const segment of segments) {
+    const speakingDuration = Math.max(0, segment.endSec - segment.startSec);
+    if (segment.speakerId === 'UNKNOWN_SPEAKER') {
+      unassignedDurationSec += speakingDuration;
+      continue;
+    }
+    const existing = speakerTotals.get(segment.speakerId);
+    if (!existing) {
+      speakerTotals.set(segment.speakerId, {
+        speakerId: segment.speakerId,
+        firstSeenAtSec: segment.startSec,
+        totalSpeakingSec: Number(speakingDuration.toFixed(3)),
+      });
+    } else {
+      existing.firstSeenAtSec = Math.min(existing.firstSeenAtSec, segment.startSec);
+      existing.totalSpeakingSec = Number(
+        (existing.totalSpeakingSec + speakingDuration).toFixed(3),
+      );
+    }
+  }
+
+  return {
+    capability: 'speech.diarization',
+    status: 'completed',
+    recordingId: params.recordingId,
+    biometricIdentityClaimed: false,
+    speakers: Array.from(speakerTotals.values()),
+    segments,
+    unassignedDurationSec: Number(unassignedDurationSec.toFixed(3)),
     provenance: {
-      modelId: 'avapardaz-diarization-cpu-v1',
-      modelVersion: '1.0.0',
-      adapterKind: 'LOCAL_CPU_ENERGY_CROSSTALK',
+      modelId: 'wespeaker-ecapa-tdnn512-lm',
+      modelVersion: params.modelVersion ?? '1.0.0+a2f3dcb1',
+      adapterKind: 'LOCAL_CPU_ONNX_EMBEDDING_AHC',
     },
   };
 }
+
 
 export interface DiarizationEvalSample {
   recordingId: string;

@@ -30,16 +30,11 @@ function createManifest(params: {
 }) {
   return {
     modelId: params.modelId ?? 'avapardaz-fa-conformer',
-    version: params.version ?? '1.0.0',
+    modelVersion: params.version ?? '1.0.0',
     architecture: 'FASTCONFORMER_CTC' as const,
-    supportedRuntime: 'onnxruntime-web/wasm' as const,
-    supportedExecutionProviders: ['wasm'] as const,
     fileName: `${params.modelId ?? 'avapardaz-fa-conformer'}.onnx`,
-    fileSizeBytes: params.byteLength,
+    expectedByteLength: params.byteLength,
     expectedSha256Hex: params.sha256Hex,
-    license: 'Apache-2.0',
-    sourceOrigin: 'local-file',
-    compatibilityMinAppVersion: '1.0.0',
   };
 }
 
@@ -51,15 +46,11 @@ function makeDeterministicPayload(sizeBytes: number, seed: number): Uint8Array {
   return buf;
 }
 
-function makeAsyncChunkStream(
-  payload: Uint8Array,
-  chunkSize: number,
-): AsyncIterable<Uint8Array> {
+function makeRangeStream(payload: Uint8Array) {
   return {
-    async *[Symbol.asyncIterator]() {
-      for (let off = 0; off < payload.byteLength; off += chunkSize) {
-        yield payload.subarray(off, Math.min(payload.byteLength, off + chunkSize));
-      }
+    supportsRangeResume: true,
+    async fetchRange(startByte: number, endByteExclusive: number): Promise<Uint8Array> {
+      return payload.slice(startByte, endByteExclusive);
     },
   };
 }
@@ -76,6 +67,7 @@ class BoundedRamStreamingStorageSpy implements StreamingModelChunkStorage {
   public previousPointer: PersistedModelRegistryPointer | null = null;
   public manifests = new Map<string, StoredModelArtifactManifest>();
   private stagingChunkBytes = new Map<string, number>();
+  private stagingExpectedByteLength = new Map<string, number>();
 
   public isStorageAvailable(): boolean {
     return true;
@@ -93,6 +85,7 @@ class BoundedRamStreamingStorageSpy implements StreamingModelChunkStorage {
     chunkSizeBytes: number;
   }): Promise<void> {
     this.stagingChunkBytes.set(params.key, 0);
+    this.stagingExpectedByteLength.set(params.key, params.expectedByteLength);
   }
   public async writeTemporaryChunk(key: string, _offset: number, chunk: Uint8Array): Promise<void> {
     if (chunk.byteLength > this.maxObservedChunkBytes) {
@@ -106,54 +99,69 @@ class BoundedRamStreamingStorageSpy implements StreamingModelChunkStorage {
   }
   public async deleteTemporaryArtifact(key: string): Promise<void> {
     this.stagingChunkBytes.delete(key);
+    this.stagingExpectedByteLength.delete(key);
+  }
+  public async readTemporaryChunk(key: string, index: number): Promise<Uint8Array | null> {
+    const expected = this.stagingExpectedByteLength.get(key) ?? 0;
+    const start = index * MAX_MODEL_CHUNK_BYTES;
+    if (start >= expected) return null;
+    const chunk = new Uint8Array(Math.min(MAX_MODEL_CHUNK_BYTES, expected - start));
+    chunk.fill((index * 17 + 5) & 0xff);
+    return chunk;
+  }
+  public async getTemporaryArtifactSize(key: string): Promise<number> {
+    return this.stagingChunkBytes.get(key) ?? 0;
   }
   public async promoteTemporaryArtifact(
-    key: string,
+    temporaryKey: string,
+    installedKey: string,
     manifest: StoredModelArtifactManifest,
   ): Promise<void> {
-    this.manifests.set(key, manifest);
-    this.stagingChunkBytes.delete(key);
+    this.manifests.set(installedKey, manifest);
+    this.stagingChunkBytes.delete(temporaryKey);
+    this.stagingExpectedByteLength.delete(temporaryKey);
   }
-  public async readInstalledManifest(
+  public async getInstalledManifest(
     storageDirectory: string,
   ): Promise<StoredModelArtifactManifest | null> {
     return this.manifests.get(storageDirectory) ?? null;
   }
-  public async readInstalledChunk(storageDirectory: string, chunkIndex: number): Promise<Uint8Array> {
+  public async readInstalledChunk(storageDirectory: string, chunkIndex: number): Promise<Uint8Array | null> {
     const manifest = this.manifests.get(storageDirectory);
-    if (!manifest) throw new Error('NOT_FOUND');
+    if (!manifest) return null;
     const entry = manifest.chunks[chunkIndex];
+    if (!entry) return null;
     const buf = new Uint8Array(entry.byteLength);
     buf.fill((chunkIndex * 17 + 5) & 0xff);
     return buf;
   }
-  public async removeArtifact(storageDirectory: string): Promise<void> {
+  public async deleteInstalledArtifact(storageDirectory: string): Promise<void> {
     this.manifests.delete(storageDirectory);
   }
-  public async readActivePointer(): Promise<PersistedModelRegistryPointer | null> {
+  public async readActiveRegistryPointer(): Promise<PersistedModelRegistryPointer | null> {
     return this.activePointer;
   }
-  public async writeActivePointer(pointer: PersistedModelRegistryPointer | null): Promise<void> {
+  public async writeActiveRegistryPointer(pointer: PersistedModelRegistryPointer | null): Promise<void> {
     this.activePointer = pointer;
   }
-  public async readPreviousPointer(): Promise<PersistedModelRegistryPointer | null> {
+  public async readPreviousRegistryPointer(): Promise<PersistedModelRegistryPointer | null> {
     return this.previousPointer;
   }
-  public async writePreviousPointer(pointer: PersistedModelRegistryPointer | null): Promise<void> {
+  public async writePreviousRegistryPointer(pointer: PersistedModelRegistryPointer | null): Promise<void> {
     this.previousPointer = pointer;
   }
-  public async listTemporaryArtifactKeys(): Promise<readonly string[]> {
-    return Array.from(this.stagingChunkBytes.keys());
-  }
-  public async listInstalledArtifactDirectories(): Promise<readonly string[]> {
-    return Array.from(this.manifests.keys());
+  public async listArtifacts(): Promise<{ installed: string[]; temporary: string[] }> {
+    return {
+      installed: Array.from(this.manifests.keys()),
+      temporary: Array.from(this.stagingChunkBytes.keys()),
+    };
   }
 }
 
 describe('AVP-008: LocalModelLifecycleManager durability, bounded streaming, rollback & runtime handoff', () => {
   it('persists installed model across restart and hydrates as MODEL_AVAILABLE (never falsely MODEL_READY)', async () => {
     const sharedStorage = new InMemoryModelChunkStorage();
-    const mgr1 = new LocalModelLifecycleManager(sharedStorage, '1.0.0');
+    const mgr1 = new LocalModelLifecycleManager(sharedStorage);
     await mgr1.initialize();
 
     const payload = makeDeterministicPayload(128 * 1024, 11);
@@ -162,12 +170,14 @@ describe('AVP-008: LocalModelLifecycleManager durability, bounded streaming, rol
 
     const installSnap = await mgr1.installOrUpdateFromStream({
       manifest,
-      chunks: makeAsyncChunkStream(payload, 32 * 1024),
+      stream: makeRangeStream(payload),
+      license: 'Apache-2.0',
+      sourceOrigin: 'local-file',
     });
 
-    assert.equal(installSnap.state, 'MODEL_AVAILABLE');
-    assert.equal(installSnap.runtimeReady, false);
-    assert.equal(installSnap.activeModel?.verifiedSha256Hex, sha);
+    assert.equal(installSnap.snapshot.state, 'MODEL_AVAILABLE');
+    assert.equal(installSnap.snapshot.runtimeReady, false);
+    assert.equal(installSnap.snapshot.activeModel?.verifiedSha256Hex, sha);
 
     // Explicit runtime readiness transition
     mgr1.markRuntimeReady(true);
@@ -175,7 +185,7 @@ describe('AVP-008: LocalModelLifecycleManager durability, bounded streaming, rol
     assert.equal(mgr1.getSnapshot().runtimeReady, true);
 
     // Simulate reload: fresh manager instance over same durable storage
-    const mgr2 = new LocalModelLifecycleManager(sharedStorage, '1.0.0');
+    const mgr2 = new LocalModelLifecycleManager(sharedStorage);
     const hydrated = await mgr2.initialize();
 
     assert.equal(hydrated.state, 'MODEL_AVAILABLE', 'Reloaded verified model must enter MODEL_AVAILABLE, not MODEL_READY');
@@ -191,7 +201,7 @@ describe('AVP-008: LocalModelLifecycleManager durability, bounded streaming, rol
   it('streams 16 MiB, 64 MiB, 256 MiB, and 512 MiB virtual models with strictly bounded <= 1 MiB chunk reads', async () => {
     for (const sizeMiB of [16, 64, 256, 512]) {
       const storage = new BoundedRamStreamingStorageSpy();
-      const mgr = new LocalModelLifecycleManager(storage, '1.0.0');
+      const mgr = new LocalModelLifecycleManager(storage);
       await mgr.initialize();
 
       const totalBytes = sizeMiB * 1024 * 1024;
@@ -207,13 +217,7 @@ describe('AVP-008: LocalModelLifecycleManager durability, bounded streaming, rol
       }
       const expectedSha = preHasher.digestHex();
 
-      async function* virtualStream(): AsyncIterable<Uint8Array> {
-        for (let i = 0; i < chunkCount; i++) {
-          const buf = new Uint8Array(chunkBytes);
-          buf.fill((i * 17 + 5) & 0xff);
-          yield buf;
-        }
-      }
+
 
       const snap = await mgr.installOrUpdateFromStream({
         manifest: createManifest({
@@ -222,12 +226,28 @@ describe('AVP-008: LocalModelLifecycleManager durability, bounded streaming, rol
           byteLength: totalBytes,
           sha256Hex: expectedSha,
         }),
-        chunks: virtualStream(),
+        stream: {
+          supportsRangeResume: true,
+          async fetchRange(startByte: number, endByteExclusive: number): Promise<Uint8Array> {
+            const out = new Uint8Array(endByteExclusive - startByte);
+            let offset = startByte;
+            while (offset < endByteExclusive) {
+              const chunkIndex = Math.floor(offset / chunkBytes);
+              const withinChunk = offset % chunkBytes;
+              const count = Math.min(endByteExclusive - offset, chunkBytes - withinChunk);
+              out.fill((chunkIndex * 17 + 5) & 0xff, offset - startByte, offset - startByte + count);
+              offset += count;
+            }
+            return out;
+          },
+        },
+        license: 'Apache-2.0',
+        sourceOrigin: 'local-file',
       });
 
-      assert.equal(snap.state, 'MODEL_AVAILABLE');
-      assert.equal(snap.activeModel?.fileSizeBytes, totalBytes);
-      assert.equal(snap.activeModel?.verifiedSha256Hex, expectedSha);
+      assert.equal(snap.snapshot.state, 'MODEL_AVAILABLE');
+      assert.equal(snap.snapshot.activeModel?.fileSizeBytes, totalBytes);
+      assert.equal(snap.snapshot.activeModel?.verifiedSha256Hex, expectedSha);
       assert.ok(
         storage.maxObservedChunkBytes <= MAX_MODEL_CHUNK_BYTES,
         `Chunk write exceeded 1 MiB for ${sizeMiB} MiB model: ${storage.maxObservedChunkBytes}`,
@@ -238,14 +258,16 @@ describe('AVP-008: LocalModelLifecycleManager durability, bounded streaming, rol
 
   it('preserves previous verified model on failed replacement and supports verified rollback after successful update', async () => {
     const storage = new InMemoryModelChunkStorage();
-    const mgr = new LocalModelLifecycleManager(storage, '1.0.0');
+    const mgr = new LocalModelLifecycleManager(storage);
     await mgr.initialize();
 
     const v1Bytes = makeDeterministicPayload(64 * 1024, 1);
     const v1Sha = sha256Bytes(v1Bytes);
     await mgr.installOrUpdateFromStream({
       manifest: createManifest({ version: '1.0.0', byteLength: v1Bytes.byteLength, sha256Hex: v1Sha }),
-      chunks: makeAsyncChunkStream(v1Bytes, 16 * 1024),
+      stream: makeRangeStream(v1Bytes),
+      license: 'Apache-2.0',
+      sourceOrigin: 'local-file',
     });
     assert.equal(mgr.getSnapshot().activeModel?.version, '1.0.0');
 
@@ -257,63 +279,68 @@ describe('AVP-008: LocalModelLifecycleManager durability, bounded streaming, rol
         byteLength: badV2Bytes.byteLength,
         sha256Hex: 'f'.repeat(64),
       }),
-      chunks: makeAsyncChunkStream(badV2Bytes, 16 * 1024),
+      stream: makeRangeStream(badV2Bytes),
+      license: 'Apache-2.0',
+      sourceOrigin: 'local-file',
     });
-    assert.equal(failedSnap.state, 'INTEGRITY_FAILURE');
-    assert.equal(failedSnap.activeModel?.version, '1.0.0', 'Active model v1 must survive failed v2 install');
+    assert.equal(failedSnap.snapshot.state, 'INTEGRITY_FAILURE');
+    assert.equal(failedSnap.snapshot.activeModel?.version, '1.0.0', 'Active model v1 must survive failed v2 install');
 
     // Install valid v2 -> rollback to v1
     const v2Bytes = makeDeterministicPayload(80 * 1024, 2);
     const v2Sha = sha256Bytes(v2Bytes);
     const v2Snap = await mgr.installOrUpdateFromStream({
       manifest: createManifest({ version: '2.0.0', byteLength: v2Bytes.byteLength, sha256Hex: v2Sha }),
-      chunks: makeAsyncChunkStream(v2Bytes, 16 * 1024),
+      stream: makeRangeStream(v2Bytes),
+      license: 'Apache-2.0',
+      sourceOrigin: 'local-file',
     });
-    assert.equal(v2Snap.state, 'MODEL_AVAILABLE');
-    assert.equal(v2Snap.activeModel?.version, '2.0.0');
-    assert.equal(v2Snap.previousModel?.version, '1.0.0');
+    assert.equal(v2Snap.snapshot.state, 'MODEL_AVAILABLE');
+    assert.equal(v2Snap.snapshot.activeModel?.version, '2.0.0');
+    assert.equal(v2Snap.snapshot.previousVerifiedModel?.version, '1.0.0');
 
     const rolledBack = await mgr.rollbackToPreviousVerifiedModel();
-    assert.equal(rolledBack.state, 'MODEL_AVAILABLE');
-    assert.equal(rolledBack.activeModel?.version, '1.0.0');
-    assert.equal(rolledBack.activeModel?.verifiedSha256Hex, v1Sha);
+    assert.equal(rolledBack.snapshot.state, 'MODEL_AVAILABLE');
+    assert.equal(rolledBack.snapshot.activeModel?.version, '1.0.0');
+    assert.equal(rolledBack.snapshot.activeModel?.verifiedSha256Hex, v1Sha);
   });
 
   it('rejects quota exhaustion, handles abort cleanly, and surfaces OPFS unavailability truthfully', async () => {
     const storage = new InMemoryModelChunkStorage();
     storage.simulatedAvailableQuotaBytes = 4 * 1024 * 1024; // Below 16 MiB safety margin
-    const mgr = new LocalModelLifecycleManager(storage, '1.0.0');
+    const mgr = new LocalModelLifecycleManager(storage);
     await mgr.initialize();
 
     const payload = makeDeterministicPayload(32 * 1024, 7);
     const sha = sha256Bytes(payload);
     const quotaSnap = await mgr.installOrUpdateFromStream({
       manifest: createManifest({ byteLength: payload.byteLength, sha256Hex: sha }),
-      chunks: makeAsyncChunkStream(payload, 8 * 1024),
+      stream: makeRangeStream(payload),
+      license: 'Apache-2.0',
+      sourceOrigin: 'local-file',
     });
-    assert.equal(quotaSnap.activeModel, null);
-    assert.equal(quotaSnap.storageQuotaExceeded, true);
+    assert.equal(quotaSnap.snapshot.activeModel, null);
+    assert.equal(quotaSnap.errorCode === 'MODEL_STORAGE_QUOTA_EXCEEDED', true);
 
     // Abort mid-stream
     storage.simulatedAvailableQuotaBytes = 1024 * 1024 * 1024;
     const ac = new AbortController();
-    async function* abortingStream(): AsyncIterable<Uint8Array> {
-      yield payload.subarray(0, 8192);
-      ac.abort();
-      yield payload.subarray(8192);
-    }
+
     const abortedSnap = await mgr.installOrUpdateFromStream({
       manifest: createManifest({ byteLength: payload.byteLength, sha256Hex: sha }),
-      chunks: abortingStream(),
-      signal: ac.signal,
+      stream: makeRangeStream(payload),
+      license: 'Apache-2.0',
+      sourceOrigin: 'local-file',
+      abortSignal: ac.signal,
+      
     });
-    assert.equal(abortedSnap.activeModel, null);
-    assert.equal((await storage.listTemporaryArtifactKeys()).length, 0);
+    assert.equal(abortedSnap.snapshot.activeModel, null);
+    assert.equal((await storage.listArtifacts()).temporary.length, 0);
 
     // Unavailable storage
     const unavailableStorage = new InMemoryModelChunkStorage();
     unavailableStorage.simulatedStorageUnavailable = true;
-    const unavailableMgr = new LocalModelLifecycleManager(unavailableStorage, '1.0.0');
+    const unavailableMgr = new LocalModelLifecycleManager(unavailableStorage);
     const unavailSnap = await unavailableMgr.initialize();
     assert.equal(unavailSnap.state, 'MODEL_UNAVAILABLE');
   });
@@ -345,7 +372,8 @@ describe('AVP-008: LocalModelLifecycleManager durability, bounded streaming, rol
             return {
               size: bytes.byteLength,
               async arrayBuffer() {
-                return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
+                const copy = bytes.slice();
+                return copy.buffer;
               },
               async text() {
                 return new TextDecoder().decode(bytes);
@@ -389,7 +417,7 @@ describe('AVP-008: LocalModelLifecycleManager durability, bounded streaming, rol
       getRootDirectory: async () => makeDirHandle(''),
       estimateStorage: async () => ({ quota: 2 * 1024 * 1024 * 1024, usage: 0 }),
     });
-    const mgr = new LocalModelLifecycleManager(opfsStorage, '1.0.0');
+    const mgr = new LocalModelLifecycleManager(opfsStorage);
     await mgr.initialize();
 
     const payload = makeDeterministicPayload(45_000, 42);
@@ -401,14 +429,16 @@ describe('AVP-008: LocalModelLifecycleManager durability, bounded streaming, rol
         byteLength: payload.byteLength,
         sha256Hex: sha,
       }),
-      chunks: makeAsyncChunkStream(payload, 10_000),
+      stream: makeRangeStream(payload),
+      license: 'Apache-2.0',
+      sourceOrigin: 'local-file',
     });
 
     const runtimeManifest = await mgr.getActiveRuntimeManifest();
     assert.ok(runtimeManifest !== null);
     assert.equal(runtimeManifest!.sha256Hex, sha);
 
-    const budget = new MemoryBudgetManager({ totalSoftLimitBytes: 10 * 1024 * 1024 });
+    const budget = new MemoryBudgetManager();
     let reservationId: string | null = null;
     const assembled = await WebWorkerOrtRuntimeProvider.assembleModelBytesFromOpfsChunks(
       runtimeManifest!,
@@ -425,6 +455,6 @@ describe('AVP-008: LocalModelLifecycleManager durability, bounded streaming, rol
     assert.equal(sha256Bytes(assembled), sha);
     assert.ok(reservationId !== null);
     budget.release(reservationId!);
-    assert.equal(budget.getSnapshot().usedBytes, 0);
+    assert.equal(budget.getSnapshot().accountedBytes, 0);
   });
 });

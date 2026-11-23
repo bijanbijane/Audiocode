@@ -158,22 +158,68 @@ export class MultiSpeakerDiarizationAndCrosstalkEngine {
     similarityThreshold = 0.72,
   ): SpeakerTimelineSegment[] {
     if (frames.length === 0) return [];
-    const safeThreshold =
-      Number.isFinite(similarityThreshold) ? similarityThreshold : 0.72;
+    // Preserve the engine's fail-safe behavior for corrupted non-finite input:
+    // use the conservative default. Finite but out-of-domain configuration is a caller error.
+    const safeThreshold = Number.isFinite(similarityThreshold) ? similarityThreshold : 0.72;
+    if (safeThreshold < -1 || safeThreshold > 1) {
+      throw new RangeError('DIARIZATION_SIMILARITY_THRESHOLD_MUST_BE_BETWEEN_MINUS_ONE_AND_ONE');
+    }
+
     const centroids: { speakerId: string; vector: Float32Array; count: number }[] = [];
     const segments: SpeakerTimelineSegment[] = [];
+    const appendUnknown = (frame: FrameSpeakerEmbedding, index: number) => {
+      segments.push({
+        segmentId: `diar_${trackId}_${index}`,
+        trackId,
+        speakerId: 'UNKNOWN_SPEAKER',
+        classification: 'UNKNOWN_SPEAKER',
+        range: frame.range,
+        confidence: 0.4,
+        manuallyVerifiedByUser: false,
+      });
+    };
 
     for (let i = 0; i < frames.length; i++) {
       const frame = frames[i];
       if (!Number.isFinite(frame.vadProbability) || frame.vadProbability < 0.45) continue;
-      if (!frame.embeddingVector || frame.embeddingVector.length === 0) continue;
+
+      const rawVector = frame.embeddingVector;
+      if (!(rawVector instanceof Float32Array) || rawVector.length === 0) {
+        appendUnknown(frame, i);
+        continue;
+      }
+      if (centroids.length > 0 && rawVector.length !== centroids[0].vector.length) {
+        // Never compare only the shared prefix of incompatible embedding spaces.
+        appendUnknown(frame, i);
+        continue;
+      }
+
+      let normSq = 0;
+      let validVector = true;
+      for (let d = 0; d < rawVector.length; d++) {
+        if (!Number.isFinite(rawVector[d])) {
+          validVector = false;
+          break;
+        }
+        normSq += rawVector[d] * rawVector[d];
+      }
+      if (!validVector || !Number.isFinite(normSq) || normSq <= 1e-12) {
+        appendUnknown(frame, i);
+        continue;
+      }
+
+      const inverseNorm = 1 / Math.sqrt(normSq);
+      const normalizedVector = new Float32Array(rawVector.length);
+      for (let d = 0; d < rawVector.length; d++) {
+        normalizedVector[d] = rawVector[d] * inverseNorm;
+      }
 
       let bestSpeakerId: SpeakerId = 'UNKNOWN_SPEAKER';
       let bestSim = -1;
       let bestCentroidIdx = -1;
 
       for (let c = 0; c < centroids.length; c++) {
-        const sim = this.cosineSimilarity(frame.embeddingVector, centroids[c].vector);
+        const sim = this.cosineSimilarity(normalizedVector, centroids[c].vector);
         if (sim > bestSim) {
           bestSim = sim;
           bestCentroidIdx = c;
@@ -182,25 +228,33 @@ export class MultiSpeakerDiarizationAndCrosstalkEngine {
 
       if (bestSim >= safeThreshold && bestCentroidIdx !== -1) {
         bestSpeakerId = centroids[bestCentroidIdx].speakerId;
-        const cent = centroids[bestCentroidIdx];
-        const dim = Math.min(cent.vector.length, frame.embeddingVector.length);
-        for (let d = 0; d < dim; d++) {
-          const val = frame.embeddingVector[d];
-          if (Number.isFinite(val)) {
-            cent.vector[d] = (cent.vector[d] * cent.count + val) / (cent.count + 1);
-          }
+        const centroid = centroids[bestCentroidIdx];
+        for (let d = 0; d < centroid.vector.length; d++) {
+          centroid.vector[d] =
+            (centroid.vector[d] * centroid.count + normalizedVector[d]) /
+            (centroid.count + 1);
         }
-        cent.count++;
+        centroid.count++;
+
+        let centroidNormSq = 0;
+        for (let d = 0; d < centroid.vector.length; d++) {
+          centroidNormSq += centroid.vector[d] * centroid.vector[d];
+        }
+        if (centroidNormSq > 1e-12 && Number.isFinite(centroidNormSq)) {
+          const inverseCentroidNorm = 1 / Math.sqrt(centroidNormSq);
+          for (let d = 0; d < centroid.vector.length; d++) {
+            centroid.vector[d] *= inverseCentroidNorm;
+          }
+        } else {
+          // Guard against degenerate cancellation when a caller configures an extreme threshold.
+          centroid.vector.set(normalizedVector);
+          centroid.count = 1;
+        }
       } else if (frame.vadProbability >= 0.75 && centroids.length < 8) {
         const newId = `SPEAKER_${centroids.length + 1}`;
-        const cleanVec = new Float32Array(frame.embeddingVector.length);
-        for (let d = 0; d < frame.embeddingVector.length; d++) {
-          const v = frame.embeddingVector[d];
-          cleanVec[d] = Number.isFinite(v) ? v : 0;
-        }
         centroids.push({
           speakerId: newId,
-          vector: cleanVec,
+          vector: normalizedVector,
           count: 1,
         });
         bestSpeakerId = newId;

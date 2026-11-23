@@ -234,7 +234,15 @@ export interface DiarizationResultPayload {
   speakers: AnonymousSpeakerSummary[];
   segments: DiarizationSegment[];
   unassignedDurationSec: number;
-  provenance: { modelId: string; modelVersion: string; adapterKind: 'LOCAL_CPU_ENERGY_CROSSTALK' };
+  provenance: {
+    modelId: string;
+    modelVersion: string;
+    adapterKind:
+      | 'LOCAL_CPU_ENERGY_CROSSTALK'
+      | 'TRANSCRIPT_SPEAKER_HINTS_ONLY'
+      | 'NO_MODEL_UNKNOWN_FALLBACK'
+      | 'LOCAL_CPU_ONNX_EMBEDDING_AHC';
+  };
 }
 
 export interface AlignedWordItem {

@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { TimeMath } from '../contracts/timebase.contract';
 import { PlatformControlPlaneService } from '../platform/PlatformControlPlaneEngine';
 import { PlatformDataPlaneGateway } from '../platform/PlatformDataPlaneGateway';
 import {
@@ -11,6 +12,7 @@ import {
   evaluateAlignmentBoundaryMetrics,
   evaluateDiarizationQualityPerLanguage,
   runModularDiarizationCapability,
+  runWeSpeakerDiarizationCapability,
   runModularForcedAlignmentCapability,
   validateNoBiometricOrSensitiveClaims,
 } from '../intelligence/DiarizationAlignmentEngine';
@@ -110,6 +112,159 @@ test('Phase 11A: Capability Registry, Immutable ASR Core, Granular Consent, DAG 
     }).length,
     0
   );
+});
+
+
+test('Phase 11B: single-channel diarization without speaker evidence never fabricates alternating speaker IDs', () => {
+  const fallback = runModularDiarizationCapability({
+    recordingId: 'rec_unknown',
+    durationSec: 3,
+    transcriptSegments: [
+      { segmentId: 'u1', startSec: 0, endSec: 1, text: 'سلام' },
+      { segmentId: 'u2', startSec: 1, endSec: 2, text: 'خوبی؟' },
+    ],
+  });
+
+  assert.deepEqual(fallback.segments.map((segment) => segment.speakerId), [
+    'UNKNOWN_SPEAKER',
+    'UNKNOWN_SPEAKER',
+  ]);
+  assert.equal(fallback.speakers.length, 0);
+  assert.equal(fallback.provenance.adapterKind, 'NO_MODEL_UNKNOWN_FALLBACK');
+  assert.equal(fallback.unassignedDurationSec, 2);
+
+  const durationOnly = runModularDiarizationCapability({
+    recordingId: 'rec_duration_only',
+    durationSec: 4,
+  });
+  assert.equal(durationOnly.segments[0].speakerId, 'UNKNOWN_SPEAKER');
+  assert.equal(durationOnly.unassignedDurationSec, 4);
+});
+
+
+test('Phase 11B: model-backed diarization preserves VAD speech outside embedding windows as unknown', async () => {
+  const pcm = new Float32Array(2 * 16000);
+  const vadSegment = {
+    startSample16k: 0,
+    endSample16k: pcm.length,
+    range: {
+      start: TimeMath.secondsToFlicks(0),
+      end: TimeMath.secondsToFlicks(2),
+    },
+    peakSpeechProb: 0.95,
+  };
+  const runnerStub = {
+    async extractEmbeddingsForVadSegments() {
+      return [
+        {
+          range: {
+            start: TimeMath.secondsToFlicks(0),
+            end: TimeMath.secondsToFlicks(1.5),
+          },
+          embeddingVector: new Float32Array([1, 0]),
+          vadProbability: 0.95,
+        },
+      ];
+    },
+  };
+
+  const partial = await runWeSpeakerDiarizationCapability({
+    recordingId: 'rec_partial_coverage',
+    pcm16kMono: pcm,
+    vadSpeechSegments: [vadSegment],
+    runner: runnerStub as never,
+  });
+  assert.equal(partial.segments[0].speakerId, 'speaker_1');
+  assert.ok(
+    partial.segments.some(
+      (segment) =>
+        segment.speakerId === 'UNKNOWN_SPEAKER' &&
+        segment.startSec >= 1.49 &&
+        segment.endSec <= 2.001,
+    ),
+    'speech after the last complete embedding window must remain unassigned, not disappear',
+  );
+
+  const shortRunner = {
+    async extractEmbeddingsForVadSegments() {
+      return [];
+    },
+  };
+  const shortOnly = await runWeSpeakerDiarizationCapability({
+    recordingId: 'rec_short_only',
+    pcm16kMono: new Float32Array(8000),
+    vadSpeechSegments: [
+      {
+        startSample16k: 0,
+        endSample16k: 8000,
+        range: {
+          start: TimeMath.secondsToFlicks(0),
+          end: TimeMath.secondsToFlicks(0.5),
+        },
+        peakSpeechProb: 0.9,
+      },
+    ],
+    runner: shortRunner as never,
+  });
+  assert.equal(shortOnly.segments.length, 1);
+  assert.equal(shortOnly.segments[0].speakerId, 'UNKNOWN_SPEAKER');
+  assert.equal(shortOnly.unassignedDurationSec, 0.5);
+});
+
+test('Phase 11B: model-backed WeSpeaker capability creates anonymous local clusters from real embeddings', async () => {
+  const runnerStub = {
+    async extractEmbeddingsForVadSegments() {
+      return [
+        {
+          range: { start: 0, end: TimeMath.secondsToFlicks(1.5) },
+          embeddingVector: new Float32Array([1, 0]),
+          vadProbability: 0.95,
+        },
+        {
+          range: {
+            start: TimeMath.secondsToFlicks(0.75),
+            end: TimeMath.secondsToFlicks(2.25),
+          },
+          embeddingVector: new Float32Array([0, 1]),
+          vadProbability: 0.94,
+        },
+        {
+          range: {
+            start: TimeMath.secondsToFlicks(1.5),
+            end: TimeMath.secondsToFlicks(3),
+          },
+          embeddingVector: new Float32Array([0.99, 0.1]),
+          vadProbability: 0.96,
+        },
+      ];
+    },
+  };
+
+  const result = await runWeSpeakerDiarizationCapability({
+    recordingId: 'rec_model_backed',
+    pcm16kMono: new Float32Array(3 * 16000),
+    vadSpeechSegments: [],
+    runner: runnerStub as never,
+  });
+
+  assert.deepEqual(result.speakers.map((speaker) => speaker.speakerId), [
+    'speaker_1',
+    'speaker_2',
+  ]);
+  assert.deepEqual(result.segments.map((segment) => segment.speakerId), [
+    'speaker_1',
+    'speaker_2',
+    'speaker_1',
+  ]);
+  assert.ok(result.segments.every((segment) => segment.confidence === null));
+  assert.ok(
+    result.segments.every(
+      (segment, index, all) => index === 0 || all[index - 1].endSec <= segment.startSec,
+    ),
+    'overlapping sliding windows must not be reported as simultaneous speakers',
+  );
+  assert.equal(result.provenance.modelId, 'wespeaker-ecapa-tdnn512-lm');
+  assert.equal(result.provenance.adapterKind, 'LOCAL_CPU_ONNX_EMBEDDING_AHC');
 });
 
 test('Phase 11B: Non-Biometric Anonymous Diarization, DER/JER Evaluation & Forced Alignment Boundary Metrics', () => {

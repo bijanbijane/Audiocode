@@ -1,0 +1,16 @@
+# Model attribution and license notice
+
+AvaPardaz downloads the following third-party model at CI/runtime setup; the binary weights are intentionally not committed to this repository.
+
+- Model: WeSpeaker ECAPA-TDNN512-LM (VoxCeleb ECAPA512 large-margin model)
+- Upstream project/model publisher: WeSpeaker
+- Source: https://huggingface.co/Wespeaker/wespeaker-ecapa-tdnn512-LM
+- Pinned upstream revision: a2f3dcb1c8702caccc7a55ceb57f5e8d1842112b
+- Declared upstream license: Creative Commons Attribution 4.0 International (CC BY 4.0)
+- License text: https://creativecommons.org/licenses/by/4.0/
+
+The upstream model card states that the model is trained on VoxCeleb2 Dev and points to the WeSpeaker project and its publications. This repository distributes no model weights; the CI downloader obtains the pinned upstream file directly and verifies its SHA-256 before use.
+
+AvaPardaz adds a separate Kaldi-style FBANK frontend, inference integration and L2 normalization. These are integration changes, not a claim that the model has been retrained or validated for Persian. The source model is not yet approved for production speaker diarization: Persian DER/JER and false merge/split evaluations remain required.
+
+Please retain this notice and the upstream attribution when redistributing a build that includes or downloads this model.

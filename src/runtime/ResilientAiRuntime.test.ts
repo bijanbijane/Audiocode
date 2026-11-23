@@ -75,6 +75,7 @@ test('ChunkedModelDownloader resumes from already verified chunks with zero dupl
         if (url.endsWith('c0.bin')) return c0;
         throw new Error('NETWORK_DROP');
       },
+      { retryPolicy: { maxRetries: 0 } },
     ),
   );
   assert.equal(fetchesRun1, 2);

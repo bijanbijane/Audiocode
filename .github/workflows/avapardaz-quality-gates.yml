@@ -2,7 +2,7 @@ name: AVAPARDAZ Quality & Release Gates (AVP-P0-005 / AVP-P0-006 / AVP-P0-007)
 
 on:
   push:
-    branches: [main, master]
+    branches: [main, master, codex/avapardaz-audio-engines]
   pull_request:
     branches: [main, master]
   workflow_dispatch:
@@ -19,16 +19,30 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - name: Install dependencies
-        run: npm ci || npm install
-      - name: Run linter
-        run: npm run lint
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+      - name: Install dependencies from frozen bun.lock
+        run: bun install --frozen-lockfile
+      - name: Run focused VAD & speaker embedding regression suites
+        run: |
+          bun run tsx --test \
+            src/ai-engine/asr/SileroVadOnnxRunner.test.ts \
+            src/ai-engine/asr/SpeakerEmbeddingOnnxRunner.test.ts \
+            src/ai-engine/asr/WespeakerKaldiFbank80.test.ts \
+            src/ai-engine/asr/LocalWeSpeakerDiarizationService.test.ts \
+            src/ai-engine/MultiSpeakerDiarizationAndCrosstalkEngine.test.ts
       - name: Build production web bundle
+        if: always()
         run: npm run build
       - name: Verify self-hosted ORT WASM assets exist
+        if: always()
         run: |
-          test -f public/ort/ort-wasm-simd-threaded.wasm
+          # Vite serves development assets directly from node_modules and copies
+          # the packaged runtime into dist/ort during production builds.
           test -f dist/ort/ort-wasm-simd-threaded.wasm
+      - name: Run linter
+        if: always()
+        run: npm run lint
 
   level2-unit-dsp-linguistic-security-real-ort:
     name: Level 2–4 — Real ORT Offline, DSP, Workflow, Linguistic, IPC & Security Suites
@@ -39,8 +53,24 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - name: Install dependencies
-        run: npm ci || npm install
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+      - name: Install dependencies from frozen bun.lock
+        run: bun install --frozen-lockfile
+      - name: Download and verify pinned Persian Zipformer assets
+        run: node scripts/download-persian-zipformer-assets.mjs
+      - name: Download and verify pinned Silero VAD v5 asset
+        run: node scripts/download-persian-zipformer-assets.mjs models/silero-vad/1.0.0/manifest.json
+      - name: Download and verify pinned WeSpeaker ECAPA ONNX asset
+        run: node scripts/download-persian-zipformer-assets.mjs models/speaker-embedding/1.0.0/manifest.json
+      - name: Run real WeSpeaker ECAPA ONNX/WASM CPU inference
+        run: npx --yes tsx --test src/ai-engine/asr/SpeakerEmbeddingOnnxRunner.real-model.test.ts
+      - name: Run integrated local Silero VAD + WeSpeaker diarization smoke
+        run: npx --yes tsx --test src/ai-engine/asr/LocalWeSpeakerDiarizationService.real-model.test.ts
+      - name: Run real Silero VAD v5 ONNX/WASM CPU inference
+        run: npx --yes tsx --test src/ai-engine/asr/SileroVadOnnxRunner.real-model.test.ts
+      - name: Run real SHAHAB Zipformer ONNX inference and parity suite
+        run: npx --yes tsx --test src/shahab/ShahabProgram.test.ts
       - name: Run canonical P0 automated verification suites (30 tests)
         run: |
           npx --yes tsx --test \
@@ -75,5 +105,5 @@ jobs:
           if [ -f package-lock.json ]; then
             npm audit --audit-level=high
           else
-            echo "::warning::package-lock.json absent (bun.lock present) — npm audit BLOCKED until canonical npm lockfile is generated."
+            echo "::warning::Repository uses bun.lock; npm audit cannot audit this lockfile. Add a Bun-lockfile-compatible advisory scan before release."
           fi

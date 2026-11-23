@@ -196,6 +196,29 @@ test('SHAHAB-005..007 & SHAHAB-016: Real frozen Zipformer inference, OPT-001/OPT
   }
 });
 
+test('SHAHAB-SDK: refuses model files that do not match pinned release hashes', async () => {
+  const tamperedModelDir = fs.mkdtempSync(path.join(os.tmpdir(), 'shahab-pinned-hash-test-'));
+  let sdk: ReturnType<typeof createShahabSdkEngine> | null = null;
+  try {
+    for (const fileName of ['encoder.int8.onnx', 'decoder.int8.onnx', 'joiner.int8.onnx', 'tokens.txt']) {
+      fs.copyFileSync(path.join(MODEL_DIR, fileName), path.join(tamperedModelDir, fileName));
+    }
+    fs.appendFileSync(path.join(tamperedModelDir, 'tokens.txt'), '\n# deliberate integrity-test mutation\n');
+
+    sdk = createShahabSdkEngine({ modelDir: tamperedModelDir, docsDir: DOCS_DIR });
+    await assert.rejects(
+      sdk.initialize(),
+      (error: unknown) =>
+        error instanceof Error &&
+        error.message.includes('Weight immutability check failed') &&
+        error.message.includes('tokens.txt SHA-256 mismatch'),
+    );
+  } finally {
+    if (sdk) await sdk.dispose();
+    fs.rmSync(tamperedModelDir, { recursive: true, force: true });
+  }
+});
+
 test('SHAHAB-006 & SHAHAB-008: Dual-track WER/CER, leakage detection, Persian memory & Greedy bias refusal', () => {
   const dual = evaluateDualTrackSample({
     referenceVerbatim: 'شکلات داغ بلژیکی',

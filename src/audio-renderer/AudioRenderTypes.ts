@@ -8,7 +8,7 @@ import {
   UndoRedoEditMetadata,
 } from '../ai-engine/edit-decision/EditDecisionTypes';
 import { MemoryPressureLevel } from '../runtime/memory/MemoryBudgetManager';
-import type { RenderOutputArtifact } from './RenderOutputArtifact';
+import type { RenderOutputArtifact } from './RenderOutputArtifactContracts';
 
 export const AUDIO_RENDERER_VERSION = '6.0.0-avp-p06' as const;
 

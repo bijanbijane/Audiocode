@@ -1,0 +1,80 @@
+{
+  "modelId": "wespeaker-ecapa-tdnn512-lm",
+  "version": "1.0.0",
+  "architecture": "ECAPA_TDNN_GLOB_C512_ASTP",
+  "license": "CC-BY-4.0",
+  "sampleRateHz": 16000,
+  "embeddingDimension": 192,
+  "inputContract": {
+    "tensorName": "feats",
+    "dtype": "float32",
+    "shape": [
+      "batch",
+      "frames",
+      80
+    ],
+    "frontend": "kaldi-fbank",
+    "frameLengthMs": 25,
+    "frameShiftMs": 10,
+    "window": "hamming",
+    "melBins": 80,
+    "dither": 0,
+    "useEnergy": false,
+    "snipEdges": true,
+    "waveformScale": 32768,
+    "cmn": "per-utterance-per-bin"
+  },
+  "outputContract": {
+    "tensorName": "embs",
+    "dtype": "float32",
+    "shape": [
+      "batch",
+      192
+    ],
+    "postprocess": "L2 normalization by AvaPardaz runner"
+  },
+  "upstream": {
+    "repository": "https://huggingface.co/Wespeaker/wespeaker-ecapa-tdnn512-LM",
+    "commitSha": "a2f3dcb1c8702caccc7a55ceb57f5e8d1842112b",
+    "modelCard": "https://huggingface.co/Wespeaker/wespeaker-ecapa-tdnn512-LM"
+  },
+  "files": [
+    {
+      "path": "voxceleb_ECAPA512_LM.onnx",
+      "sizeBytes": 24861931,
+      "sha256": "d71b85d9b48058ef68004f04f1b78acebefb9dfcf542e19b976a12a5ad1f10b0"
+    }
+  ],
+  "requiredAttributionFiles": [
+    "NOTICE"
+  ],
+  "evaluationStatus": "REAL_ONNX_AND_INTEGRATED_LOCAL_SERVICE_SMOKE_PASSED_SINGLE_SAMPLE",
+  "qualityStatus": "NOT_EVALUATED_ON_PERSIAN_MULTI_SPEAKER_CORPUS",
+  "runtimeEvidence": {
+    "workflowRunId": 45074800631,
+    "commitSha": "ef2a27fd047a225e0d9ae2d2e3c3e40d17e8f513",
+    "executionProvider": "wasm-cpu",
+    "sampleDurationSec": 12.12,
+    "windowDurationSec": 1.5,
+    "hopDurationSec": 0.75,
+    "inputFramesPerWindow": 150,
+    "embeddingCount": 2,
+    "embeddingDimensions": 192,
+    "inferenceElapsedMs": 339.95,
+    "inferenceRealTimeFactor": 0.1511,
+    "integratedService": {
+      "realSileroVad": true,
+      "realWeSpeakerEcapa": true,
+      "assignedAnonymousClusterCount": 4,
+      "outputSegmentCount": 4,
+      "unassignedDurationSec": 0,
+      "totalElapsedMs": 825.04,
+      "realTimeFactor": 0.0681,
+      "rtfReferenceDurationSec": 12.12
+    },
+    "verifiedAtUtc": "2026-11-22T21:56:27Z",
+    "caveat": "Single unannotated sample. Cluster count is not speaker-count accuracy; DER/JER and Persian multi-speaker quality have not been measured.",
+    "inferenceRtfReferenceDurationSec": 2.25,
+    "inferenceRtfReference": "sum of two overlapping 1.5s windows at 0.75s hop; not the whole source file"
+  }
+}

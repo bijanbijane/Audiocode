@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  isDisallowedIpAddress,
+  isPrivateOrNonPublicIp,
   validateWebhookDestinationUrl,
   validateWebhookEventSubscriptions,
   type WebhookDnsLookupFn,
@@ -39,10 +39,10 @@ describe('AVP-011 PlatformWebhookSecurity SSRF & Destination Validation', () => 
       '::ffff:10.0.0.5',
     ];
     for (const ip of forbidden) {
-      expect(isDisallowedIpAddress(ip), `Expected ${ip} to be disallowed`).toBe(true);
+      expect(isPrivateOrNonPublicIp(ip), `Expected ${ip} to be disallowed`).toBe(true);
     }
-    expect(isDisallowedIpAddress('93.184.216.34')).toBe(false);
-    expect(isDisallowedIpAddress('2606:2800:220:1:248:1893:25c8:1946')).toBe(false);
+    expect(isPrivateOrNonPublicIp('93.184.216.34')).toBe(false);
+    expect(isPrivateOrNonPublicIp('2606:2800:220:1:248:1893:25c8:1946')).toBe(false);
   });
 
   it('rejects non-HTTPS, embedded credentials, localhost, private IPs, and .local domains in production', async () => {
@@ -60,7 +60,7 @@ describe('AVP-011 PlatformWebhookSecurity SSRF & Destination Validation', () => 
     ];
     for (const url of cases) {
       const res = await validateWebhookDestinationUrl({
-        rawUrl: url,
+        url: url,
         isProduction: true,
         dnsLookup: publicDns,
       });
@@ -72,7 +72,7 @@ describe('AVP-011 PlatformWebhookSecurity SSRF & Destination Validation', () => 
     expect(
       (
         await validateWebhookDestinationUrl({
-          rawUrl: 'https://rebind.example.com/hook',
+          url: 'https://rebind.example.com/hook',
           isProduction: true,
           dnsLookup: mixedDns,
         })
@@ -82,7 +82,7 @@ describe('AVP-011 PlatformWebhookSecurity SSRF & Destination Validation', () => 
     expect(
       (
         await validateWebhookDestinationUrl({
-          rawUrl: 'https://meta.example.com/hook',
+          url: 'https://meta.example.com/hook',
           isProduction: true,
           dnsLookup: metadataDns,
         })
@@ -92,7 +92,7 @@ describe('AVP-011 PlatformWebhookSecurity SSRF & Destination Validation', () => 
     expect(
       (
         await validateWebhookDestinationUrl({
-          rawUrl: 'https://v6local.example.com/hook',
+          url: 'https://v6local.example.com/hook',
           isProduction: true,
           dnsLookup: ipv6LoopbackDns,
         })
@@ -102,7 +102,7 @@ describe('AVP-011 PlatformWebhookSecurity SSRF & Destination Validation', () => 
     expect(
       (
         await validateWebhookDestinationUrl({
-          rawUrl: 'https://unresolvable.example.com/hook',
+          url: 'https://unresolvable.example.com/hook',
           isProduction: true,
           dnsLookup: failingDns,
         })
@@ -112,14 +112,14 @@ describe('AVP-011 PlatformWebhookSecurity SSRF & Destination Validation', () => 
 
   it('accepts valid HTTPS public endpoints and explicitly allowlisted dev sandbox host in non-production', async () => {
     const okProd = await validateWebhookDestinationUrl({
-      rawUrl: 'https://hooks.example.com/asr-events',
+      url: 'https://hooks.example.com/asr-events',
       isProduction: true,
       dnsLookup: publicDns,
     });
     expect(okProd.valid).toBe(true);
 
     const okDev = await validateWebhookDestinationUrl({
-      rawUrl: 'https://sandbox.avapardaz.local/hooks/asr',
+      url: 'https://sandbox.avapardaz.local/hooks/asr',
       isProduction: false,
       dnsLookup: failingDns, // Allowlisted dev host does not require public DNS
     });

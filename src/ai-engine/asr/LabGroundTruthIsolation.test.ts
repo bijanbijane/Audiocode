@@ -173,7 +173,7 @@ describe('AVP-009: Ground-Truth Isolation, Anti-Synthetic Gates & Timeout/Cancel
         'elevenlabs-scribe-v3',
         'deepgram-nova-3',
       ],
-      config: { expectedLanguage: 'fa-en-mixed', mode: 'batch' },
+      config: { expectedLanguage: 'fa-en-mixed', mode: 'batch', keyterms: [] },
       customAdapters: new Map<AsrLabEngineId, AsrProviderAdapter>([
         ['avapardaz-local-ctc-dsp', syntheticAdapter],
         ['elevenlabs-scribe-v3', forcedAlignAdapter],
@@ -220,7 +220,7 @@ describe('AVP-009: Ground-Truth Isolation, Anti-Synthetic Gates & Timeout/Cancel
       audio: makeAudio(2),
       referenceTranscriptRaw: 'پاسخ دیرهنگام',
       selectedEngineIds: ['avapardaz-local-ctc-dsp'],
-      config: { expectedLanguage: 'fa', mode: 'batch', timeoutMs: 40 },
+      config: { expectedLanguage: 'fa', mode: 'batch', timeoutMs: 40, keyterms: [] },
       customAdapters: new Map([['avapardaz-local-ctc-dsp', slowAdapter]]),
     });
 
@@ -237,7 +237,7 @@ describe('AVP-009: Ground-Truth Isolation, Anti-Synthetic Gates & Timeout/Cancel
       audio: makeAudio(2),
       referenceTranscriptRaw: CANARY_REFERENCE,
       selectedEngineIds: ['avapardaz-local-ctc-dsp'],
-      config: { expectedLanguage: 'fa-en-mixed', mode: 'batch' },
+      config: { expectedLanguage: 'fa-en-mixed', mode: 'batch', keyterms: [] },
     });
 
     const res = exp.engineResults[0];

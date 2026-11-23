@@ -16,35 +16,18 @@ import {
   createProjectRuntimeResourceLease,
   ingestAudioFileStreaming,
   ProjectResourceLeaseSlot,
-  ProjectRuntimeResourceLease,
-  StreamingIngestOptions,
 } from './streamingIngest';
+import type { StreamingIngestOptions } from './streamingIngest';
+import type { LoadedStudioProject } from './StudioProjectContracts';
 
 export {
   createProjectRuntimeResourceLease,
   ProjectResourceLeaseSlot,
-  type ProjectRuntimeResourceLease,
 };
-
-export interface LoadedStudioProject {
-  projectName: string;
-  sampleRate: number;
-  assets: Record<string, AudioAsset>;
-  pcmSources: Record<string, Float32Array>;
-  tracks: Track[];
-  tokens: PersianWordToken[];
-  recommendations: SmartRecommendation[];
-  resamplerStats: {
-    inputSampleRate: number;
-    outputSampleRate: number;
-    cutoffHz: number;
-    filterTaps: number;
-    aliasingAttenuationDb: number;
-    downsampledLength: number;
-  };
-  /** Runtime-only memory reservation ownership handle (never serialized into persistent project documents). */
-  runtimeResourceLease?: ProjectRuntimeResourceLease;
-}
+export type {
+  LoadedStudioProject,
+  ProjectRuntimeResourceLease,
+} from './StudioProjectContracts';
 
 /** Synthesizes formant-rich pseudo-Persian speech syllable bursts */
 function writeSpeechEnvelope(

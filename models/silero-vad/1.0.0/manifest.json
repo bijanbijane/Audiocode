@@ -1,0 +1,25 @@
+{
+  "modelId": "silero-vad-v5",
+  "version": "1.0.0",
+  "architecture": "SILERO_VAD_V5",
+  "license": "MIT",
+  "sampleRateHz": 16000,
+  "windowSamples": 512,
+  "contextSamples": 64,
+  "upstream": {
+    "repository": "https://huggingface.co/skillsafe-ai/silero-vad",
+    "commitSha": "ab3ea3fe49d65c053c7d281e91d5981ff9c7a939",
+    "upstreamRepository": "https://github.com/snakers4/silero-vad",
+    "upstreamCommit": "60b7ffa243625ebdc1070275a29f18c87843786a"
+  },
+  "files": [
+    {
+      "path": "silero_vad.onnx",
+      "sizeBytes": 2327524,
+      "sha256": "1a153a22f4509e292a94e67d6f9b85e8deb25b4988682b7e174c65279d8788e3"
+    }
+  ],
+  "requiredAttributionFiles": [
+    "LICENSE"
+  ]
+}

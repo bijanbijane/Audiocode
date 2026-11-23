@@ -7,52 +7,29 @@ import {
   BoundedChunkedByteSink,
   DEFAULT_MAX_ARTIFACT_READ_BYTES,
   ExportWriteFailureError,
-  RenderArtifactReader,
-  RenderArtifactReadStreamOptions,
-  StreamingByteSink,
   validateArtifactRangeRead,
   validateArtifactStreamOptions,
 } from './AudioExportWriter';
+import type {
+  CreateCommittedRenderArtifactParams,
+  RenderArtifactLifecycleState,
+  RenderArtifactReadStreamOptions,
+  RenderOutputArtifact,
+  StreamingByteSink,
+} from './RenderOutputArtifactContracts';
+export type {
+  CreateCommittedRenderArtifactParams,
+  RenderArtifactLifecycleState,
+  RenderOutputArtifact,
+} from './RenderOutputArtifactContracts';
 
 /** Maximum output size eligible for populating the deprecated outputBytes compatibility field (8 MiB) */
 export const COMPATIBILITY_OUTPUT_BYTES_MAX_SIZE = 8 * 1024 * 1024;
 
-export type RenderArtifactLifecycleState =
-  | 'WRITING'
-  | 'FINALIZED'
-  | 'VALIDATING'
-  | 'VALIDATED_READY'
-  | 'ACTIVE_IN_WORKFLOW'
-  | 'DISPOSED';
 
-export interface RenderOutputArtifact extends RenderArtifactReader {
-  readonly artifactId: string;
-  readonly sizeBytes: number;
-  readonly contentType: 'audio/wav';
-  readonly persistedExternally: boolean;
-  readonly disposed: boolean;
-  readonly lifecycleState: RenderArtifactLifecycleState;
 
-  readRange(
-    offset: number,
-    length: number,
-  ): Promise<Uint8Array>;
 
-  openReadStream(options?: RenderArtifactReadStreamOptions): ReadableStream<Uint8Array>;
 
-  createBlob(): Promise<Blob>;
-
-  dispose(): Promise<void>;
-}
-
-export interface CreateCommittedRenderArtifactParams {
-  readonly sink: StreamingByteSink;
-  readonly artifactId: string;
-  readonly sizeBytes: number;
-  readonly memoryBudgetManager?: MemoryBudgetManager;
-  readonly contentType?: 'audio/wav';
-  readonly maxReadWindowBytes?: number;
-}
 
 /**
  * Deterministic lifecycle owner for a committed rendered audio output artifact.

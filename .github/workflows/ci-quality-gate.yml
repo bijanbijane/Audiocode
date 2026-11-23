@@ -2,7 +2,7 @@ name: Architecture Governance, Reliability & Release Quality Gate
 
 on:
   push:
-    branches: [main, release/*]
+    branches: [main, release/*, codex/avapardaz-audio-engines]
   pull_request:
     branches: [main]
 
@@ -21,10 +21,17 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: npm
 
-      - name: Install Dependencies Reproducibly
-        run: npm ci --no-audit --no-fund
+      - name: Install FFmpeg test dependency
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Install Dependencies from Frozen Bun Lockfile
+        run: bun install --frozen-lockfile
 
       - name: Audit Rust Licenses & Supply Chain (cargo-deny)
         uses: EmbarkStudios/cargo-deny-action@v2
@@ -34,8 +41,8 @@ jobs:
       - name: Verify Zero Circular TypeScript Dependencies
         run: npx madge --circular --extensions ts,tsx src/ packages/
 
-      - name: Generate CycloneDX NPM SBOM
-        run: npx @cyclonedx/cyclonedx-npm --output-file sbom-npm.cdx.json
+      - name: Generate CycloneDX SBOM from Bun lockfile
+        run: bunx --bun @cdxgen/cdxgen -t bun -o sbom-bun.cdx.json .
 
       - name: Verify TypeScript Compilation (Lint Gate)
         run: npm run lint

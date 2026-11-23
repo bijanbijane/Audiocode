@@ -83,10 +83,11 @@ export class SileroVadOnnxRunner {
     const frameWithContext = new Float32Array(
       SileroVadOnnxRunner.CONTEXT_SAMPLES + SileroVadOnnxRunner.WINDOW_SAMPLES,
     );
+    // Silero VAD ONNX declares sr as a scalar int64 tensor (rank 0), not [1].
     const srTensor = this.ortProvider.createTensor(
       'int64',
       BigInt64Array.from([BigInt(SileroVadOnnxRunner.SAMPLE_RATE)]),
-      [1],
+      [],
     );
 
     const frameProbs: { startSample: number; prob: number }[] = [];
@@ -162,6 +163,9 @@ export class SileroVadOnnxRunner {
           if (fp.prob > peakProb) peakProb = fp.prob;
           tempSilenceStart = -1; // Speech resumed before hangover expired
         }
+      } else if (isTriggered && fp.prob >= endThresh) {
+        if (fp.prob > peakProb) peakProb = fp.prob;
+        tempSilenceStart = -1; // Hysteresis: weak speech above end threshold cancels pending silence
       } else if (isTriggered && fp.prob < endThresh) {
         if (tempSilenceStart === -1) {
           tempSilenceStart = fp.startSample;

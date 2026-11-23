@@ -353,14 +353,19 @@ describe('AVP-011 PlatformControlPlaneGateway Authorization, Lifecycle & Integri
     const deliveries = (dispatchRes.body as { deliveries: Array<{ deliveryId: string; status: string }> }).deliveries;
     expect(deliveries[0].status).toBe('DEAD_LETTER');
 
-    const replayRes = gw.replayWebhook({
+    const replayRes = gw.replayWebhookDelivery({
       bearerToken: ownerA.bearer,
       deliveryId: deliveries[0].deliveryId,
+      body: {},
     });
-    expect(replayRes.status).toBe(200);
-    const replayed = replayRes.body as { status: string; httpStatus: number | null; nextRetryAtIso: string | null };
-    expect(replayed.status).toBe('RETRY_SCHEDULED');
-    expect(replayed.httpStatus).toBeNull();
-    expect(replayed.nextRetryAtIso).not.toBeNull();
+    expect(replayRes.status).toBe(202);
+    const replayed = replayRes.body as {
+      delivery: { status: string; httpStatus: number | null; nextRetryAtIso: string | null };
+      workerAvailable: boolean;
+    };
+    expect(replayed.delivery.status).toBe('RETRY_SCHEDULED');
+    expect(replayed.delivery.httpStatus).toBeNull();
+    expect(replayed.delivery.nextRetryAtIso).not.toBeNull();
+    expect(replayed.workerAvailable).toBe(false);
   });
 });
