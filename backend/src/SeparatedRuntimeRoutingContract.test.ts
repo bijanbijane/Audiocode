@@ -14,6 +14,7 @@ test('separated web sends the new platform prefix to Fastify and leaves legacy A
 
   assert.ok(nginx.includes('location ^~ /platform-api/ {'));
   assert.ok(nginx.includes('proxy_pass http://avapardaz-platform-api:4000/;'));
+  assert.ok(nginx.includes('proxy_pass http://127.0.0.1:3000;'));
   assert.ok(nginx.includes('location ^~ /api {'));
   assert.ok(nginx.includes('location ^~ /v1 {'));
 
@@ -37,6 +38,10 @@ test('three-runtime compose keeps Web, Express, Fastify and PostgreSQL isolated'
   assert.ok(compose.includes('  avapardaz-web:'));
   assert.ok(compose.includes('  avapardaz-api:'));
   assert.ok(compose.includes('  avapardaz-platform-api:'));
+  assert.ok(compose.includes('network_mode: "service:avapardaz-web"'));
+  assert.ok(compose.includes('AVAPARDAZ_DEPLOYMENT_MODE: "local"'));
+  assert.ok(compose.includes('AVAPARDAZ_BIND_HOST: "127.0.0.1"'));
+  assert.ok(compose.includes('platform_model_chunks:/var/lib/paudio/platform-models:ro'));
   assert.ok(compose.includes('  postgres:'));
   assert.ok(compose.includes('LOCAL_ED25519_PRIVATE_KEY_PEM'));
   assert.ok(compose.includes('PLATFORM_ED25519_PRIVATE_KEY_PEM'));
