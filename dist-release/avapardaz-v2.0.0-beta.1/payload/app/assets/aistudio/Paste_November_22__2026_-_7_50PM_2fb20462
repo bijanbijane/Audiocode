@@ -1,0 +1,1482 @@
+# AVP-P03-001
+# PHASE 03 — PRODUCTION-GRADE LOCAL ASR ENGINE IMPLEMENTATION
+
+**PROJECT:** AVAPARDAZ  
+**EXECUTION ID:** AVP-P03-001  
+**PREVIOUS PHASE:** AVP-P02-001  
+**PHASE:** 03  
+**REVISION:** 1.0  
+**EXECUTION MODE:** AUTONOMOUS ENGINEERING  
+**ENGINEERING PRIORITY:** CRITICAL  
+**PRIMARY TARGET:** Apple Silicon M2 / 8 GB RAM  
+**EXECUTION TARGET:** CPU-ONLY LOCAL INFERENCE  
+**NETWORK REQUIREMENT:** ZERO NETWORK DEPENDENCY DURING INFERENCE  
+**PRODUCT CONSUMERS:** Adobe Audition Plugin + Web Application  
+**ARCHITECTURAL PRINCIPLE:** ONE SHARED ASR CORE, MULTIPLE CLIENTS
+
+---
+
+# SECTION 00 — EXECUTION AUTHORITY
+
+You are authorized to implement the production-grade local ASR engine selected and validated in PHASE-02.
+
+Act as a senior team specializing in:
+
+- Local machine learning inference.
+- Speech recognition systems.
+- Audio decoding and preprocessing.
+- CPU optimization.
+- Systems programming.
+- Runtime lifecycle management.
+- Local service architecture.
+- Security engineering.
+- Test automation.
+- Cross-platform software distribution.
+
+Your task is to transform the selected ASR model into an actual, reusable, testable software engine.
+
+This is an implementation phase, not another model discovery phase.
+
+You must work autonomously, inspect the repository, implement missing components, execute tests, audit your implementation, and correct confirmed defects.
+
+Do not ask the user to manually identify missing files, errors, or architectural weaknesses.
+
+However, autonomous execution does not authorize you to bypass failed acceptance gates or invent missing technical evidence.
+
+# SECTION 01 — MANDATORY ENTRY GATE
+
+Before writing production code, inspect the actual PHASE-02 deliverables.
+
+Required files:
+
+```text
+docs/phase-02/MODEL-SELECTION-REPORT.md
+docs/phase-02/CPU-BENCHMARK-RESULTS.md
+docs/phase-02/BENCHMARK-PROTOCOL.md
+docs/phase-02/LICENSE-COMPLIANCE-REGISTER.md
+docs/phase-02/PHASE-02-ACCEPTANCE.md
+```
+
+Verify the following:
+
+```text
+PHASE_02_STATUS == ACCEPTED
+MODEL_SELECTION_STATUS == ELIGIBLE
+COMMERCIAL_LICENSE_STATUS == VERIFIED
+CPU_EXECUTION_STATUS == VERIFIED
+OFFLINE_STATUS == VERIFIED
+```
+
+These statuses must be supported by actual evidence.
+
+The selected model must have:
+
+- An exact checkpoint identifier.
+- An exact model revision.
+- A recorded artifact hash.
+- A verified runtime.
+- A verified quantization configuration.
+- A verified model-weight license.
+- A documented CPU execution path.
+- A documented offline execution path.
+
+Read the exact selected model and runtime from PHASE-02.
+
+**Do not substitute Whisper, Qwen, Parakeet, or any other model based on personal preference.**
+
+Use the exact approved model/runtime/quantization tuple from PHASE-02.
+
+If PHASE-02 has not been ACCEPTED, immediately stop and return:
+
+```text
+EXECUTION_ID=AVP-P03-001
+ENTRY_GATE=BLOCKED
+BLOCKER=PHASE_02_NOT_ACCEPTED
+PRODUCTION_CODE_CHANGES=NONE
+```
+
+Do not manufacture acceptance evidence.
+
+Do not execute PHASE-03 until the entry gate is genuinely satisfied.
+
+# SECTION 02 — PRODUCT AND ENGINE REQUIREMENTS
+
+AvaPardaz is an intelligent audio editing application.
+
+ASR is the foundational speech analysis component.
+
+The engine must accurately identify the words that were actually spoken, their positions in the audio timeline, and their relationship to surrounding speech.
+
+Its downstream consumers will use these results to identify:
+
+1. Filler words.
+2. Verbal repetitions.
+3. Stuttering.
+4. False starts.
+5. Self-corrections.
+6. Repeated phrases.
+7. Incomplete spoken phrases.
+8. Unnecessary pauses.
+9. Silence regions.
+
+The engine itself must not automatically remove or rewrite these elements.
+
+**Verbatim transcription is mandatory.**
+
+Example:
+
+Original speech:
+
+```text
+"من من فکر می‌کنم که این موضوع، موضوع مهمیه."
+```
+
+The engine must not silently output:
+
+```text
+"من فکر می‌کنم که این موضوع مهمیه."
+```
+
+The repeated words are actual audio information.
+
+Preserving these events is essential for downstream intelligent editing.
+
+# SECTION 03 — IMPLEMENTATION PRINCIPLES
+
+Implement the following architectural principles:
+
+### 03.1 Single ASR Core
+
+There must be exactly one authoritative model execution implementation.
+
+Do not duplicate model inference logic inside the Adobe Audition integration or the web application's frontend.
+
+### 03.2 Runtime Independence
+
+The core must not depend on:
+
+- React.
+- Browser DOM.
+- Adobe Audition APIs.
+- Frontend components.
+- Cloud services.
+- Remote inference endpoints.
+- User-interface state.
+
+### 03.3 Local-First Execution
+
+The inference process must run locally.
+
+Internet access may be used during an explicitly authorized installation or model acquisition operation, but never as a mandatory runtime dependency.
+
+### 03.4 Replaceable Runtime Adapter
+
+Implement a clean adapter around the exact selected runtime.
+
+Do not hardwire model-specific execution assumptions throughout the application.
+
+The architecture should allow a future model/runtime replacement without changing the public transcription contract.
+
+### 03.5 Resource Awareness
+
+The primary hardware target is an Apple M2 Mac with 8 GB unified memory.
+
+The engine must avoid loading unnecessary model copies, unbounded queues, excessive audio buffering, and uncontrolled concurrency.
+
+### 03.6 No Unnecessary Rewrites
+
+Inspect existing repository architecture before creating new packages.
+
+Reuse healthy code where appropriate.
+
+Do not rewrite unrelated production systems, application pages, pricing engines, or existing product functionality.
+
+Keep project-specific architectural constraints, including the 500-line source-file limit where applicable.
+
+# SECTION 04 — TARGET ARCHITECTURE
+
+Implement a transport-independent core with a local execution interface.
+
+Proposed architecture:
+
+```text
+                 AVAPARDAZ CLIENTS
+                         |
+            +------------+------------+
+            |                         |
+      Adobe Audition              Web Application
+       Integration                 Integration
+            |                         |
+            +------------+------------+
+                         |
+                  LOCAL INTERFACE
+                         |
+                Local API / IPC Layer
+                         |
+                ASR ENGINE SERVICE
+                         |
+       +-----------------+-----------------+
+       |                 |                 |
+ AUDIO INGESTION    JOB MANAGER      RESULT MANAGER
+       |                 |                 |
+       +-----------------+-----------------+
+                         |
+                  AUDIO PIPELINE
+                         |
+              FORMAT DECODING / RESAMPLING
+                         |
+                  MODEL ADAPTER
+                         |
+                 SELECTED ASR MODEL
+                         |
+                 WORD ALIGNMENT
+                         |
+                  RESULT VALIDATOR
+                         |
+                 STANDARD OUTPUT API
+```
+
+The engine must expose one stable public contract.
+
+Both clients must eventually consume the same engine and the same output format.
+
+Do not implement product-specific UI integrations in this phase.
+
+# SECTION 05 — REPOSITORY DISCOVERY AND IMPLEMENTATION LOCATION
+
+Inspect the actual repository first.
+
+Required commands:
+
+```bash
+pwd
+git status --short --branch
+git rev-parse HEAD
+git log -5 --oneline
+find . -maxdepth 3 -type f | sort
+```
+
+Identify:
+
+- Existing backend language.
+- Existing runtime infrastructure.
+- Existing Python or native modules.
+- Existing build scripts.
+- Existing testing framework.
+- Existing audio-processing dependencies.
+- Existing security boundaries.
+- Existing deployment assumptions.
+
+Select the implementation language based on the measured runtime and compatibility requirements.
+
+Do not force Python, Rust, C++, Node.js, or another language merely because it is familiar.
+
+The language/runtime decision must explain:
+
+1. Why the selected language is suitable.
+2. How it invokes the approved ASR implementation.
+3. How it manages model memory.
+4. How it communicates with local consumers.
+5. How it supports macOS M2.
+6. How it can be packaged for future product clients.
+
+Use this proposed directory layout only if it fits the repository:
+
+```text
+engine/
+  core/
+    contracts/
+    pipeline/
+    errors/
+    validation/
+  runtime/
+    model_adapter/
+    model_loader/
+    inference/
+  audio/
+    decoder/
+    resampler/
+    metadata/
+  alignment/
+  jobs/
+  service/
+    api/
+    security/
+  cli/
+  storage/
+  tests/
+```
+
+Do not create duplicate or conflicting engine directories.
+
+Document the final actual structure.
+
+# SECTION 06 — MODEL LOADING AND LIFECYCLE
+
+Implement a reliable model lifecycle manager.
+
+Required states:
+
+```text
+UNINITIALIZED
+INITIALIZING
+READY
+BUSY
+UNLOADING
+STOPPED
+FAILED
+```
+
+Define valid state transitions.
+
+The model loader must:
+
+1. Resolve the approved local model path.
+2. Verify the exact expected model revision.
+3. Verify required model files.
+4. Verify SHA-256 hashes where available.
+5. Validate the runtime version.
+6. Verify the CPU execution provider.
+7. Load the model.
+8. Run an initialization smoke test.
+9. Report readiness only after successful inference.
+10. Handle initialization errors without corrupting the service state.
+
+Example contract:
+
+```python
+from enum import Enum
+
+class EngineState(str, Enum):
+    UNINITIALIZED = "uninitialized"
+    INITIALIZING = "initializing"
+    READY = "ready"
+    BUSY = "busy"
+    UNLOADING = "unloading"
+    STOPPED = "stopped"
+    FAILED = "failed"
+```
+
+Adapt the code to the actual selected programming language and runtime.
+
+Do not create an unnecessary second model instance for each transcription request.
+
+Use a single managed model instance unless PHASE-02 evidence proves that another arrangement is required.
+
+## 06.1 Model Storage
+
+Model weights must not be committed to the application Git repository.
+
+Use a platform-appropriate application data directory.
+
+For example:
+
+```text
+macOS:
+~/Library/Application Support/AvaPardaz/models/
+
+Windows:
+%LOCALAPPDATA%/AvaPardaz/models/
+```
+
+Store:
+
+- Model files.
+- Model metadata.
+- Artifact hashes.
+- Runtime compatibility metadata.
+- License notices.
+
+Inference must never download model files automatically.
+
+A missing or invalid model must produce a clear, actionable error.
+
+# SECTION 07 — AUDIO INGESTION AND PREPROCESSING
+
+Build a robust audio ingestion pipeline.
+
+Minimum target input formats:
+
+- WAV.
+- FLAC.
+- MP3.
+- M4A/AAC.
+- OGG/Opus.
+
+Confirm actual decoder support and its licensing before implementation.
+
+The engine must preserve the original source.
+
+All preprocessing must operate on temporary processing copies.
+
+Record:
+
+- Original sample rate.
+- Original channels.
+- Original sample format.
+- Original duration.
+- Converted sample rate.
+- Converted channels.
+- Conversion duration.
+- Decoded audio duration.
+- Decoder version.
+
+Use the exact sample rate and input format required by the approved ASR model.
+
+Do not assume all selected models require 16 kHz mono input.
+
+Example conversion command for a model that explicitly requires this format:
+
+```bash
+ffmpeg -nostdin -v error -y \
+  -i input.m4a \
+  -vn \
+  -ac 1 \
+  -ar 16000 \
+  -c:a pcm_s16le \
+  output.wav
+```
+
+Check FFmpeg return codes.
+
+Validate the decoded output before inference.
+
+Handle:
+
+- Empty files.
+- Corrupt files.
+- Invalid audio headers.
+- Unsupported codecs.
+- Missing audio streams.
+- Extremely short audio.
+- Long audio.
+- Stereo recordings.
+- Silent recordings.
+- Decode failures.
+
+Never assume an audio file is valid because its filename has a supported extension.
+
+# SECTION 08 — AUDIO PIPELINE CONTRACT
+
+Define a deterministic pipeline:
+
+```text
+INPUT
+  |
+  v
+FILE VALIDATION
+  |
+  v
+METADATA EXTRACTION
+  |
+  v
+DECODING
+  |
+  v
+AUDIO PREPROCESSING
+  |
+  v
+OPTIONAL CHUNK GENERATION
+  |
+  v
+ASR INFERENCE
+  |
+  v
+WORD ALIGNMENT
+  |
+  v
+TIMESTAMP OFFSET RESTORATION
+  |
+  v
+RESULT MERGING
+  |
+  v
+VALIDATION
+  |
+  v
+STANDARD TRANSCRIPTION OUTPUT
+```
+
+Each stage must have explicit inputs, outputs, failure behavior, and tests.
+
+Do not allow silent failure between stages.
+
+Record stage-specific elapsed time.
+
+Do not silently normalize, improve, paraphrase, or clean the recognized text.
+
+Any optional text-normalization operation must be separate from the raw ASR output.
+
+# SECTION 09 — CHUNKED INFERENCE
+
+Long audio must be processed without requiring the complete decoded recording to remain in memory unnecessarily.
+
+Use the chunking strategy supported and validated in PHASE-02.
+
+Do not assume a universal chunk duration.
+
+Configuration must be explicit:
+
+```yaml
+inference:
+  device: cpu
+  chunking:
+    enabled: true
+    chunk_duration_ms: null
+    overlap_duration_ms: null
+    strategy: "selected-runtime-validated"
+```
+
+The actual values must come from the selected model's tested configuration.
+
+Implement:
+
+- Sequential chunk processing.
+- Configurable overlap.
+- Chunk indexing.
+- Source timeline offsets.
+- Boundary-aware result merging.
+- Duplicate-word detection at overlapping boundaries.
+- Missing-word detection where measurable.
+- Timestamp continuity checks.
+
+For a chunk beginning at source offset `O`, convert chunk-relative timestamps using:
+
+```python
+global_start_ms = chunk_start_ms + local_start_ms
+global_end_ms = chunk_start_ms + local_end_ms
+```
+
+Do not add the offset twice.
+
+Do not round timestamps prematurely.
+
+Do not deduplicate words merely because their text is identical.
+
+Only remove demonstrable overlap duplicates using time and alignment evidence.
+
+A real repeated word spoken twice must remain two separate word events.
+
+# SECTION 10 — WORD-LEVEL OUTPUT CONTRACT
+
+Define a stable, versioned output contract.
+
+All timestamps must use the original source audio timeline.
+
+Use integer milliseconds in the public output contract.
+
+A word event must contain:
+
+```json
+{
+  "text": "سلام",
+  "start_ms": 1250,
+  "end_ms": 1620,
+  "confidence": null,
+  "timestamp_source": "native_model"
+}
+```
+
+`confidence` must be null when unsupported.
+
+Allowed timestamp-source values:
+
+```text
+native_model
+forced_aligner
+external_aligner
+estimated
+```
+
+Estimated timestamps must be explicitly identified and must never be presented as equivalent to verified word-level alignment.
+
+The main transcription result should follow this structure:
+
+```json
+{
+  "schema_version": "1.0",
+  "job_id": "job-unique-id",
+  "status": "completed",
+  "audio": {
+    "duration_ms": 18720,
+    "source_sha256": "actual-sha256",
+    "sample_rate": 16000,
+    "channels": 1
+  },
+  "model": {
+    "candidate_id": "phase02-selected-candidate",
+    "checkpoint": "exact-approved-checkpoint",
+    "revision": "exact-revision",
+    "runtime": "exact-runtime",
+    "quantization": "exact-approved-format"
+  },
+  "language": {
+    "detected": "fa",
+    "confidence": null
+  },
+  "segments": [
+    {
+      "segment_id": 0,
+      "start_ms": 0,
+      "end_ms": 1620,
+      "text": "سلام دنیا",
+      "words": [
+        {
+          "text": "سلام",
+          "start_ms": 0,
+          "end_ms": 550,
+          "confidence": null,
+          "timestamp_source": "native_model"
+        },
+        {
+          "text": "دنیا",
+          "start_ms": 600,
+          "end_ms": 1620,
+          "confidence": null,
+          "timestamp_source": "native_model"
+        }
+      ]
+    }
+  ],
+  "metrics": {
+    "decode_ms": 0,
+    "preprocess_ms": 0,
+    "inference_ms": 0,
+    "alignment_ms": 0,
+    "total_ms": 0,
+    "peak_memory_bytes": 0
+  },
+  "warnings": []
+}
+```
+
+The values above are schema examples, not benchmark results.
+
+Actual production values must be calculated from the real execution.
+
+Required invariants:
+
+```text
+start_ms >= 0
+end_ms > start_ms
+end_ms <= audio.duration_ms
+segments ordered by start_ms
+words ordered by start_ms
+source timeline preserved
+schema_version explicitly declared
+```
+
+Do not invent language confidence, word confidence, speaker identification, or other unsupported model outputs.
+
+# SECTION 11 — TRANSCRIPTION FIDELITY
+
+Verbatim output is a hard requirement.
+
+The engine must preserve:
+
+- Repeated words.
+- Repeated phrases.
+- Spoken fillers.
+- Stutters.
+- False starts.
+- Self-corrections.
+- Incomplete sentences.
+
+Do not introduce a language-model rewriting stage.
+
+Do not run an automatic grammar correction step.
+
+Do not translate recognized speech.
+
+Do not automatically remove punctuation-sensitive events by deleting surrounding words.
+
+The engine may return raw model output and a separate structured representation, but raw and processed representations must not be confused.
+
+Add dedicated regression tests using the disfluency and repetition samples from PHASE-02.
+
+Compare the resulting metrics against the accepted PHASE-02 baseline.
+
+Required performance regression gate:
+
+```text
+NO_UNEXPLAINED_QUALITY_REGRESSION > 5%
+```
+
+Any regression exceeding 5% in a critical metric must be investigated and documented.
+
+Do not alter the benchmark dataset or normalization rules to hide regressions.
+
+# SECTION 12 — JOB MANAGEMENT
+
+Implement an explicit job lifecycle.
+
+Required states:
+
+```text
+QUEUED
+VALIDATING
+DECODING
+PREPROCESSING
+TRANSCRIBING
+ALIGNING
+FINALIZING
+COMPLETED
+FAILED
+CANCELLED
+```
+
+Implement:
+
+- Job creation.
+- Unique job identifiers.
+- Queue management.
+- Job status.
+- Progress reporting.
+- Cancellation.
+- Failure reporting.
+- Result retrieval.
+- Cleanup.
+- Job retention policy.
+
+On the 8 GB target profile, start with:
+
+```text
+MAX_CONCURRENT_INFERENCE_JOBS = 1
+```
+
+Only raise concurrency if measured RAM and performance data justify it.
+
+Use bounded queues.
+
+Reject new work when resource limits are exceeded instead of allowing uncontrolled memory growth.
+
+Cancellation must stop the actual execution where possible.
+
+Do not mark a cancelled job as completed.
+
+If a runtime cannot safely interrupt inference, isolate inference in a worker process so that cancellation and recovery can be implemented safely.
+
+# SECTION 13 — LOCAL API
+
+Implement a local interface that future clients can consume.
+
+Use a versioned API.
+
+Base path:
+
+```text
+/v1
+```
+
+Required endpoints:
+
+| Method | Endpoint | Purpose |
+|---|---|---|
+| GET | /v1/health | Basic service health |
+| GET | /v1/capabilities | Model and runtime capabilities |
+| POST | /v1/jobs | Submit an audio transcription job |
+| GET | /v1/jobs/{job_id} | Read job status |
+| GET | /v1/jobs/{job_id}/result | Retrieve transcription result |
+| DELETE | /v1/jobs/{job_id} | Cancel a job |
+
+### 13.1 Job Submission
+
+Example conceptual request:
+
+```http
+POST /v1/jobs
+Authorization: Bearer LOCAL_CAPABILITY_TOKEN
+Content-Type: multipart/form-data
+```
+
+Payload:
+
+```text
+audio: binary audio file
+language: optional language hint
+timestamps: true
+```
+
+Return:
+
+```http
+202 Accepted
+```
+
+Example response:
+
+```json
+{
+  "job_id": "job-unique-id",
+  "status": "queued",
+  "status_url": "/v1/jobs/job-unique-id"
+}
+```
+
+Do not implement an API that accepts arbitrary local filesystem paths from untrusted clients.
+
+Use uploaded audio bytes for API-based requests.
+
+Keep direct local file-path access restricted to the trusted CLI or internal engine interface.
+
+### 13.2 Status Response
+
+Example:
+
+```json
+{
+  "job_id": "job-unique-id",
+  "status": "transcribing",
+  "progress": {
+    "completed_chunks": 3,
+    "total_chunks": 10,
+    "percentage": 30
+  },
+  "error": null
+}
+```
+
+Progress must reflect actual completed work.
+
+Do not fabricate progress percentages.
+
+### 13.3 API Error Format
+
+Use a consistent response:
+
+```json
+{
+  "error": {
+    "code": "MODEL_NOT_READY",
+    "message": "The approved ASR model is not available.",
+    "retryable": false,
+    "details": {}
+  }
+}
+```
+
+Create documented error codes for:
+
+```text
+MODEL_NOT_FOUND
+MODEL_HASH_MISMATCH
+MODEL_LICENSE_INVALID
+RUNTIME_INCOMPATIBLE
+MODEL_NOT_READY
+INVALID_AUDIO
+UNSUPPORTED_AUDIO_FORMAT
+AUDIO_TOO_LARGE
+AUDIO_DURATION_EXCEEDED
+DECODING_FAILED
+INFERENCE_FAILED
+ALIGNMENT_FAILED
+JOB_NOT_FOUND
+JOB_CANCELLED
+QUEUE_FULL
+RESOURCE_LIMIT_EXCEEDED
+UNAUTHORIZED
+INTERNAL_ERROR
+```
+
+Never expose local filesystem paths, access tokens, stack traces, or sensitive diagnostic details in public API responses.
+
+# SECTION 14 — LOCAL SERVICE SECURITY
+
+This is a local processing service, not a public internet API.
+
+Enforce:
+
+1. Bind exclusively to loopback interfaces.
+2. Never bind to `0.0.0.0`.
+3. Never expose the service to LAN interfaces.
+4. Require an ephemeral capability token for protected endpoints.
+5. Generate cryptographically secure tokens.
+6. Do not put credentials in URLs.
+7. Do not log tokens.
+8. Reject unauthorized requests.
+9. Use restrictive CORS policies.
+10. Never use wildcard CORS for credentialed access.
+11. Validate uploaded content.
+12. Enforce payload-size limits.
+13. Protect temporary files.
+14. Prevent path traversal.
+15. Prevent arbitrary filesystem reads.
+16. Limit job counts and resource consumption.
+
+Test that the service is not accessible through external network interfaces.
+
+The browser and plugin authentication handoff may be implemented in their respective future integration phases, but the service security foundation and testable authentication interface must exist now.
+
+Do not implement insecure shortcuts to make future integration easier.
+
+# SECTION 15 — RESOURCE MANAGEMENT
+
+Create a resource-monitoring subsystem.
+
+Measure:
+
+- Model memory after loading.
+- Peak process RSS.
+- Audio decoder memory.
+- Inference memory.
+- Alignment memory.
+- Total job execution memory.
+- Memory after completed jobs.
+- Memory after cancellation.
+- Memory after failure.
+
+Required behavior:
+
+- Avoid unnecessary audio duplication.
+- Avoid unbounded queues.
+- Avoid retaining completed temporary audio files.
+- Avoid repeated model loading.
+- Release job-specific buffers.
+- Recover safely after worker crashes.
+- Report resource-limit failures explicitly.
+
+Use PHASE-02 memory results as the reference baseline.
+
+Target:
+
+```text
+MAX_PEAK_PROCESS_MEMORY = 5 GiB
+PREFERRED_PEAK_PROCESS_MEMORY = 4 GiB
+```
+
+If the implementation exceeds these limits on the actual H1 hardware, optimize before acceptance.
+
+Do not claim 8 GB compatibility based on a different hardware profile.
+
+# SECTION 16 — OFFLINE ENFORCEMENT
+
+Once the required model artifacts and runtime dependencies are installed, normal operation must be entirely offline.
+
+Separate the following operations:
+
+```text
+INSTALLATION
+MODEL_ACQUISITION
+MODEL_VERIFICATION
+MODEL_LOADING
+INFERENCE
+RESULT_EXPORT
+```
+
+Only explicitly authorized installation and acquisition operations may access the internet.
+
+Runtime inference must not:
+
+- Contact model hosting services.
+- Download files.
+- Call remote APIs.
+- Require cloud authentication.
+- Send audio telemetry.
+- Upload audio.
+- Transmit transcripts.
+
+Perform an actual network-isolated smoke test.
+
+Inspect runtime behavior and logs.
+
+A successful local run without a network-isolation test is not sufficient proof of offline compliance.
+
+# SECTION 17 — CLI IMPLEMENTATION
+
+Provide a functional command-line interface.
+
+Proposed commands:
+
+```bash
+avp-engine doctor
+
+avp-engine model verify
+
+avp-engine model info
+
+avp-engine serve
+
+avp-engine transcribe \
+  --input "/path/to/audio.wav" \
+  --output "/path/to/result.json" \
+  --timestamps
+
+avp-engine job status JOB_ID
+
+avp-engine job cancel JOB_ID
+
+avp-engine benchmark-smoke
+```
+
+Adapt the actual command names to the chosen implementation language and packaging strategy.
+
+The CLI must:
+
+- Validate arguments.
+- Report errors clearly.
+- Return meaningful process exit codes.
+- Support structured output.
+- Avoid printing sensitive credentials.
+- Distinguish errors from warnings.
+- Use the same core engine as the local service.
+
+Do not create a separate transcription implementation for the CLI.
+
+# SECTION 18 — AUTOMATED TESTING
+
+Create a complete test suite.
+
+Use the repository's existing testing conventions where practical.
+
+## 18.1 Unit Tests
+
+Test:
+
+- Configuration validation.
+- Model hash verification.
+- Model lifecycle transitions.
+- Audio metadata extraction.
+- Audio validation.
+- Timestamp offset conversion.
+- Word ordering.
+- Segment merging.
+- Duplicate overlap handling.
+- Error mapping.
+- Job state transitions.
+- Result schema validation.
+- Resource-limit handling.
+
+## 18.2 Integration Tests
+
+Test:
+
+- Model loading.
+- CPU inference.
+- WAV input.
+- MP3 input.
+- FLAC input.
+- M4A input.
+- Silent audio.
+- Short audio.
+- Long audio.
+- Persian speech.
+- English speech.
+- Mixed-language speech.
+- Repeated words.
+- Filled pauses.
+- Stutters.
+- Multiple sequential jobs.
+
+## 18.3 API Tests
+
+Test:
+
+- Health endpoint.
+- Capability endpoint.
+- Job submission.
+- Job polling.
+- Result retrieval.
+- Job cancellation.
+- Invalid requests.
+- Unauthorized requests.
+- Oversized uploads.
+- Unsupported formats.
+- Queue saturation.
+- Service restart.
+
+## 18.4 Stability Tests
+
+For the approved model:
+
+```text
+REPEATED_JOBS = 50
+CRASHES_ALLOWED = 0
+UNHANDLED_EXCEPTIONS_ALLOWED = 0
+```
+
+Test memory retention after repeated processing.
+
+Test worker recovery following a deliberately induced inference failure.
+
+## 18.5 Regression Tests
+
+Run the same locked PHASE-02 evaluation samples.
+
+Compare:
+
+- Persian CER.
+- Persian WER.
+- English WER.
+- Code-switching WER.
+- Disfluency recall.
+- Repetition preservation.
+- Timestamp coverage.
+- Timestamp P90 error.
+- CPU RTF.
+- Peak memory.
+
+No regression may be hidden by changing the data or scoring procedure.
+
+# SECTION 19 — PERFORMANCE ACCEPTANCE
+
+Use the exact reference hardware and model configuration from PHASE-02.
+
+Report both:
+
+1. Raw model inference performance.
+2. Complete end-to-end engine performance.
+
+End-to-end processing includes:
+
+```text
+DECODE
++ PREPROCESS
++ INFERENCE
++ ALIGNMENT
++ RESULT VALIDATION
+```
+
+Calculate:
+
+```text
+END_TO_END_RTF =
+total_pipeline_wall_time_seconds
+/
+original_audio_duration_seconds
+```
+
+Compare it with the PHASE-02 results.
+
+Acceptance targets:
+
+```text
+MEDIAN_END_TO_END_RTF <= 1.10
+PEAK_PROCESS_MEMORY <= 5 GiB
+REPEATED_JOB_CRASHES = 0
+```
+
+The 1.10 RTF target is an implementation overhead allowance relative to the phase's validated real-time target. Report cases where decoder or alignment cost is dominant.
+
+If PHASE-02 did not establish the required hardware baseline, do not invent one.
+
+Run the performance tests on actual hardware.
+
+A result on remote x86 hardware must not be represented as an M2 result.
+
+# SECTION 20 — TEST DATA AND PRIVACY
+
+Use authorized test audio only.
+
+Do not commit private recordings to Git.
+
+Do not upload user audio to external services.
+
+Keep benchmark data separate from production user data.
+
+Temporary files must be deleted according to a documented retention policy.
+
+Default behavior:
+
+```text
+DELETE_TEMP_AUDIO_AFTER_JOB = true
+PERSIST_TRANSCRIPTS_BY_DEFAULT = false
+NETWORK_TELEMETRY = false
+```
+
+Persisted results should only be retained when an explicit product-level workflow requires them.
+
+# SECTION 21 — BUILD, VALIDATION AND SELF-CORRECTION
+
+After implementation:
+
+1. Inspect all modified files.
+2. Run static analysis.
+3. Run formatting checks.
+4. Run unit tests.
+5. Run integration tests.
+6. Run API tests.
+7. Run offline tests.
+8. Run stability tests.
+9. Run benchmark regressions.
+10. Run the project's existing build and tests.
+
+At minimum, execute applicable existing project commands:
+
+```bash
+npm run lint
+npm run arch:check
+npm test
+npm run build
+```
+
+Also run the newly introduced engine-specific commands.
+
+Do not assume that Node.js checks validate a Python or native runtime.
+
+Run the appropriate native-language checks separately.
+
+If any check fails:
+
+- Identify the root cause.
+- Fix confirmed defects.
+- Rerun the affected tests.
+- Rerun any dependent regression tests.
+- Preserve diagnostic output.
+- Document unresolved failures.
+
+Do not disable tests, lower test coverage requirements, or remove healthy architecture to obtain a passing build.
+
+# SECTION 22 — REQUIRED DELIVERABLES
+
+Create the following phase documentation:
+
+```text
+docs/phase-03/
+  ENGINE-ARCHITECTURE.md
+  RUNTIME-IMPLEMENTATION.md
+  MODEL-LIFECYCLE.md
+  AUDIO-INGESTION.md
+  AUDIO-PIPELINE.md
+  CHUNKING-AND-TIMESTAMP.md
+  TRANSCRIPTION-CONTRACT.md
+  JOB-MANAGEMENT.md
+  LOCAL-API-SPECIFICATION.md
+  SECURITY-REVIEW.md
+  RESOURCE-MANAGEMENT.md
+  OFFLINE-VERIFICATION.md
+  PERFORMANCE-REPORT.md
+  TEST-REPORT.md
+  PHASE-03-ACCEPTANCE.md
+```
+
+Deliver functional implementation code, executable tests, actual configuration files, and raw test evidence.
+
+Documentation alone is not implementation.
+
+A CLI that only prints success is not an implementation.
+
+A mock ASR result is not a working transcription engine.
+
+A successfully imported model package is not proof of working CPU inference.
+
+# SECTION 23 — PHASE-03 ACCEPTANCE GATE
+
+All mandatory requirements must pass.
+
+| ID | Acceptance requirement |
+|---|---|
+| P03-01 | PHASE-02 verified ACCEPTED |
+| P03-02 | Exact approved checkpoint used |
+| P03-03 | Model integrity verification works |
+| P03-04 | Actual CPU inference works |
+| P03-05 | Model lifecycle manager works |
+| P03-06 | Supported audio ingestion works |
+| P03-07 | Audio preprocessing works |
+| P03-08 | Long-audio processing works |
+| P03-09 | Timestamp restoration is verified |
+| P03-10 | Repeated words are preserved |
+| P03-11 | Disfluencies are not silently removed |
+| P03-12 | Standard output contract is implemented |
+| P03-13 | Job management works |
+| P03-14 | Local service API works |
+| P03-15 | API authentication works |
+| P03-16 | Loopback-only network exposure is verified |
+| P03-17 | Offline inference is verified |
+| P03-18 | Memory limits are satisfied |
+| P03-19 | Stability tests pass |
+| P03-20 | Existing application regressions are absent |
+| P03-21 | Benchmark results are reproducible |
+| P03-22 | Security review is completed |
+| P03-23 | Documentation and execution evidence exist |
+
+Use only:
+
+```text
+ACCEPTED
+BLOCKED
+INCOMPLETE
+```
+
+If actual M2 validation cannot be performed, report that limitation and do not claim M2 production readiness.
+
+A successful smoke test is not sufficient for phase acceptance.
+
+# SECTION 24 — PHASE BOUNDARY PROTECTION
+
+This phase implements the shared local ASR engine.
+
+Do not begin:
+
+**PHASE-04 — Adobe Audition Integration**
+
+Do not implement:
+
+- Adobe Audition plugin UI.
+- Adobe Audition editing commands.
+- Timeline manipulation.
+- Host-specific plugin lifecycle.
+- Audition-specific audio interchange.
+
+**PHASE-05 — Web Application Integration**
+
+Do not implement:
+
+- Frontend transcription workflows.
+- Browser product UI.
+- User-facing job management screens.
+- Web application editing interface.
+
+These future clients must consume the already-defined stable engine interface.
+
+**PHASE-06 — Model Fine-Tuning**
+
+Do not train, fine-tune, or retrain the selected model.
+
+Any requirement for further model optimization must be documented with quantitative evidence.
+
+Do not automatically advance to another phase.
+
+# SECTION 25 — FINAL EXECUTION REPORT
+
+Return the following exact report:
+
+```text
+AVAPARDAZ — PHASE 03 EXECUTION REPORT
+
+EXECUTION_ID:
+AVP-P03-001
+
+ENTRY_GATE:
+READY / BLOCKED
+
+PHASE_02_STATUS:
+ACCEPTED / NOT_ACCEPTED
+
+SELECTED_MODEL:
+<exact checkpoint>
+
+SELECTED_RUNTIME:
+<exact runtime>
+
+MODEL_HASH_VERIFIED:
+PASS / FAIL
+
+CPU_ONLY_INFERENCE:
+PASS / FAIL
+
+ACTUAL_HARDWARE:
+<exact CPU and RAM>
+
+AUDIO_INPUT_FORMATS_TESTED:
+<list>
+
+PERSIAN_TRANSCRIPTION:
+PASS / FAIL
+
+ENGLISH_TRANSCRIPTION:
+PASS / FAIL
+
+CODE_SWITCHING:
+PASS / FAIL
+
+WORD_LEVEL_TIMESTAMPS:
+PASS / FAIL
+
+DISFLUENCY_PRESERVATION:
+PASS / FAIL
+
+LONG_AUDIO:
+PASS / FAIL
+
+END_TO_END_MEDIAN_RTF:
+<measured value>
+
+PEAK_MEMORY:
+<measured value>
+
+OFFLINE_EXECUTION:
+PASS / FAIL
+
+LOCAL_API:
+PASS / FAIL
+
+AUTHENTICATION:
+PASS / FAIL
+
+STABILITY_50_JOBS:
+PASS / FAIL
+
+SECURITY_REVIEW:
+PASS / FAIL
+
+UNIT_TESTS:
+PASS / FAIL
+
+INTEGRATION_TESTS:
+PASS / FAIL
+
+API_TESTS:
+PASS / FAIL
+
+BUILD:
+PASS / FAIL
+
+CRITICAL_DEFECTS:
+<list>
+
+UNRESOLVED_RISKS:
+<list>
+
+FINAL_PHASE_STATUS:
+ACCEPTED / BLOCKED / INCOMPLETE
+
+PHASE_04_READINESS:
+READY / NOT_READY
+
+EVIDENCE_DIRECTORY:
+<actual path>
+
+MODIFIED_FILES:
+<actual list>
+
+GIT_COMMIT:
+<actual commit hash>
+```
+
+Do not invent execution results.
+
+Report commands actually executed.
+
+Report tests actually passed.
+
+Report all failed and unexecuted tests.
+
+Do not claim GitHub synchronization unless it actually occurred and was authorized.
+
+---
+
+# FINAL EXECUTION DIRECTIVE
+
+Begin by inspecting PHASE-02 evidence.
+
+If the mandatory entry gate is satisfied, implement the complete local ASR engine described above.
+
+If it is not satisfied, stop without starting PHASE-03.
+
+Work autonomously within the authorized scope.
+
+Prefer small, testable, production-grade components.
+
+Never replace real model inference with mock output.
+
+Never sacrifice verbatim transcription fidelity for cleaner-looking text.
+
+Never introduce a mandatory cloud dependency.
+
+Never duplicate the ASR model execution logic across future clients.
+
+The final deliverable must be an actual working local engine, not an architecture proposal.
+
+**One model. One authoritative ASR engine. One stable contract. Multiple product clients. Fully local inference.**
+
+Execute AVP-P03-001 only when all entry conditions are proven.

@@ -1,0 +1,2159 @@
+در دور دهم دیباگ (ممیزی سخت‌گیرانه سطح سیستم، DSP، هم‌زمانی و زبان‌شناسی فارسی)،
+من دیگر به سراغ باگ‌های سطح اول نرفتم؛ بلکه باگ‌های مرتبه دوم (Second-Order
+Bugs) را شکار کردم: یعنی باگ‌هایی که تازه بعد از پیاده‌سازی راه‌حل‌های دور نهم،
+در مقیاس واقعی و در برخورد با قوانین فیزیکِ صوت، استانداردهای سطح پایین مرورگر
+(WHATWG/W3C) و ساختار آوایی زبان فارسی رخ می‌دهند و می‌توانند در میانه توسعه، کل
+تیم را به بن‌بست بکشانند.
+
+قبل از ارائه متن کامل و یکپارچه سند نسخه ۱.۲، در ادامه ۸ باگ عمیق و پنهانی را که
+در نسخه ۱.۱ کشف و در این نسخه جراحی و رفع شده‌اند، مرور می‌کنیم:
+
+گزارش دیباگ دور دهم (۸ اصلاحیه عمیقِ مهندسی در نسخه ۱.۲)
+
+۱. باگ انفجار فضای دیسک در OPFS (جایگزینی بمب RAM با بمب دیسک!) — [بخش ۱۵، ۱۶ و ۱۸]
+
+  - کالبدشکافی باگ: در دور نهم گفتیم برای جلوگیری از پر شدن RAM، کل فایل صوتی را
+    به صورت جریانی به بلوک‌های غیرفشرده PCM (Float32) دیکد کرده و در OPFS ذخیره
+    کنیم. اما یک محاسبه ساده ریاضی نشان می‌دهد: یک پادکست ۲ ساعته استریو (48kHz
+    Float32) پس از دیکد شدن، ۲.۷۶ گیگابایت فضای OPFS اشغال می‌کند! اگر پروژه ۳
+    ترک مجزا (سه میکروفون مهمان) داشته باشد، یک پروژه واحد ۸.۳ گیگابایت از دیسک
+    کاربر را می‌بلعد! در موبایل‌ها و لپ‌تاپ‌های با فضای کم، Quota مرورگر در همان
+    پروژه اول پر می‌شود و سرعت I/O دیسک به شدت افت می‌کند.
+  - اصلاحیه در نسخه ۱.۲ (معماری ذخیره‌سازی هیبریدی و Rolling PCM Cache):
+    1.  هرگز کل پروژه چندساعته به‌صورت دائمی با فرمت Float32 خام روی دیسک ذخیره
+        نمی‌شود.
+    2.  فایل اصلی فشرده به همراه یک جدول جستجوی دقیق نمونه (Sample-Accurate
+        Frame Seek Table) و هرم موج صوتی (Multi-Resolution Peak Pyramid) (که
+        جمعاً زیر ۵ مگابایت است) در OPFS ذخیره می‌شود.
+    3.  بلوک‌های PCM خام فقط در یک Rolling LRU Block Cache با سقف حجمی مشخص
+        (مثلاً حداکثر ۲۰۰ تا ۵۰۰ مگابایت در OPFS برای اطراف Playhead و بخش‌های
+        در حال ویرایش) نگهداری می‌شوند و موتور هوش مصنوعی نیز مستقیماً جریانی از
+        صوتِ Downsampleشده (16kHz Mono که ۶ برابر کوچک‌تر است) تغذیه می‌شود.
+
+۲. باگ بن‌بست قفل انحصاری (NoModificationAllowedError) در FileSystemSyncAccessHandle — [بخش ۱۱، ۱۸ و ۴۸]
+
+  - کالبدشکافی باگ: طبق استاندارد رسمی مرورگرها (WHATWG File System)، متد پرسرعت
+    createSyncAccessHandle() یک قفل انحصاری در سطح هر فایل ایجاد می‌کند؛ نه فقط
+    بین تب‌های مختلف، بلکه حتی بین Web Workerهای مختلف داخل یک تب واحد! یعنی اگر
+    Worker تغذیه‌کننده پخش صدا یک فایل در OPFS را با SyncAccessHandle باز کرده
+    باشد و هم‌زمان Worker هوش مصنوعی یا Worker رندر بخواهد همان فایل را بخواند،
+    مرورگر فوراً خطای NoModificationAllowedError پرتاب می‌کند و سیستم متوقف
+    می‌شود!
+  - اصلاحیه در نسخه ۱.۲ (الگوی I/O Broker Worker و Sharded Block Leases): دسترسی
+    مستقیم و هم‌زمان چند Worker به یک فایل واحد از طریق SyncAccessHandle ممنوع
+    شد. مدیریت دستگیره‌های فایل در OPFS باید یا از طریق یک Storage I/O Broker
+    Worker متمرکز (که بافرها را از طریق SharedArrayBuffer به سایر Workerها
+    می‌دهد) انجام شود، و یا با تقسیم داده‌ها به فایل‌های بلوکی مستقل (Sharded
+    Blocks) با مدیریت متمرکز Lease (اجازه دسترسی) کنترل گردد.
+
+۳. باگ رانش زمانی (Sample-Rate Drift) و Aliasing بین موتور صوت (48kHz) و موتور هوش مصنوعی (16kHz) — [بخش ۲۲، ۲۶ و ۳۵]
+
+  - کالبدشکافی باگ: موتور صوتی و تایم‌لاین روی نرخ نمونه استاندارد تولید (مثلاً
+    48,000 Hz یا 44,100 Hz فایل ورودی) کار می‌کنند، اما تقریباً تمام مدل‌های
+    گفتار (Whisper، Silero VAD، Conformer، Diarization) الزاماً ورودی 16,000 Hz
+    Mono می‌گیرند. اگر فایل ورودی 44.1kHz باشد، نسبت تبدیل به 16kHz عدد اعشاریِ
+    2.75625 است! تبدیل ساده ایندکس نمونه‌ها در یک فایل ۲ ساعته باعث خطای تجمعی
+    (Cumulative Drift) و جابه‌جایی مرز کلمات می‌شود. همچنین کاهش نرخ نمونه بدون
+    فیلتر پایین‌گذر (Anti-Aliasing Filter در فرکانس نایکوئیست 8kHz) باعث برگشت
+    فرکانس‌های بالا (Aliasing) و افت شدید دقت تشخیص حروف سایشی فارسی (س، ش، ز،
+    ف) در مدل ASR می‌شود.
+  - اصلاحیه در نسخه ۱.۲:
+    1.  تعریف یک واحد زمانی مادر و بدون خطای گرد کردن (مانند Canonical Timeline
+        Rate / Flicks با پایه 705,600,000 در ثانیه که بر تمام نرخ‌های
+        استاندارد 16k، 22.05k، 24k، 32k، 44.1k و 48k بخش‌پذیرِ صحیح است) همراه
+        با نگاشت ریاضی قطعی به Sample Index.
+    2.  الزام به استفاده از Resampler استاندارد دارای فیلتر Anti-Aliasing در
+        مسیر تغذیه موتور هوش مصنوعی.
+
+۴. باگ تله «کسره اضافه» و «واکه‌های کشیده تپق» در زبان فارسی — [بخش ۲۴، ۲۶، ۲۷ و ۳۵]
+
+  - کالبدشکافی باگ: زبان فارسی دو ویژگی منحصربه‌فرد دارد که تدوینگرهای صوتیِ
+    انگلیسی‌محور را کاملاً شکست می‌دهد:
+    1.  کسره اضافه ناپیدا در متن ولی موجود در صوت: در عبارت «پادکستِ جذاب»، کسره
+        «ـِ» در متن نوشته نمی‌شود، اما در صوت ۵۰ تا ۱۰۰ میلی‌ثانیه به انتهای
+        کلمه «پادکست» چسبیده است. اگر کاربر کلمه «جذاب» را از متن حذف کند، در
+        صوت می‌ماند: «پادکستِ [سکوت]» که کاملاً ناقص و معیوب شنیده می‌شود!
+    2.  تپق‌های چسبیده به انتهای کلمه (Co-articulated Fillers): در فارسی
+        محاوره‌ای، گوینده به‌جای اینکه بگوید «رفتیم... اممم...»، می‌گوید
+        «رفتیممممم» یا «بههههه». در اینجا بین کلمه و تپق هیچ «دره انرژی (Minimum
+        RMS)» وجود ندارد چون واکه یکسره کشیده شده است!
+  - اصلاحیه در نسخه ۱.۲ (قواعد آواشناسی و prosody فارسی): افزودن تشخیص دنباله
+    کسره اضافه (Trailing Ezafe Detection) در هنگام حذف صفت/مضاف‌الیه (برای هشدار
+    به کاربر یا اصلاح نرم انتهای کلمه قبلی) و افزودن تحلیل پایداری فرکانس پایه و
+    فورمنت (Pitch/Formant Plateau Detection) در کنار RMS، تا کشیدگی‌های غیرطبیعی
+    انتهای کلمات در فارسی محاوره‌ای بدون نیاز به سکوت میانی قابل‌برش باشند.
+
+۵. باگ به هم ریختن هم‌زمانی (Sync) و نشت صدا (Mic Bleed) در پروژه‌های چندگوینده/چندترک — [بخش ۲۴ و ۳۸]
+
+  - کالبدشکافی باگ: در یک پادکست یا مصاحبه ۲ نفره که روی ۲ ترک مجزا ضبط شده، اگر
+    هوش مصنوعی یک تپق یا مکث را روی «ترک ۱» با عملیات Ripple Delete حذف کند و
+    ترک ۱ را به عقب بکشد، کل ادامه فایل ۲ ساعته بین گوینده اول و دوم از سینک
+    خارج می‌شود! از طرفی اگر فقط ترک ۱ را با Room Tone جایگزین کند ولی صدای
+    گوینده ۱ در میکروفون گوینده ۲ نشت کرده باشد (Crosstalk/Bleed)، صدای تپقِ
+    حذف‌شده همچنان به صورت خفه از ترک ۲ شنیده می‌شود!
+  - اصلاحیه در نسخه ۱.۲ (سیاست Sync-Locked Multi-Track Editing): تفکیک صریح میان
+    Global Sync-Locked Ripple Cut (برش هم‌زمان در تمام ترک‌های همگام، فقط زمانی
+    که هیچ گوینده دیگری در آن بازه صحبت نمی‌کند) و In-Place Range Suppression
+    (خاموش‌سازی/جایگزینی درجا با Room Tone بدون تغییر طول زمان، زمانی که ترک
+    دیگر فعال است) به همراه تشخیص نشت صدا (Crosstalk Suppression) در بین ترک‌های
+    هم‌زمان.
+
+۶. باگ پرش صوتی (Transient Pop) و خطای فاز (Comb Filtering) در گراف پردازش — [بخش ۲۸، ۳۰ و ۳۳]
+
+  - کالبدشکافی باگ: وقتی کاربر دکمه Preview را برای شنیدن ۳ ثانیه اطراف یک برش
+    می‌زند، یا وقتی Render به صورت Chunked اجرا می‌شود، گره‌های پردازشیِ دارای
+    حافظه (Stateful DSP Nodes مانند Compressor، Limiter، EQ، De-Reverb) اگر
+    دقیقاً از نقطه شروع قطعه تغذیه شوند، با وضعیت داخلی صفر شروع به کار می‌کنند
+    و در ۲۰۰ میلی‌ثانیه اول صدای خروجی دچار پرش و تغییر ناگهانی گین می‌شود.
+    همچنین اگر دو شاخه موازی در گراف پردازش تأخیر (Latency) متفاوتی داشته باشند،
+    جمع شدن آن‌ها در Bus باعث تغییر فاز و صدای فلزی (Comb Filtering) می‌شود.
+  - اصلاحیه در نسخه ۱.۲ (الزام Pre-Roll Priming و PDC خودکار): الزام هر گره به
+    اعلام preRollSamples (تغذیه پنهان چندصد میلی‌ثانیه قبل از نقطه شروع برای پر
+    شدن بافر فیلترها و Envelopeها پیش از پخش یا رندر قطعه) و پیاده‌سازی Plugin
+    Delay Compensation (PDC) خودکار در کل گراف پردازش برای هم‌فاز کردن شاخه‌های
+    موازی.
+
+۷. باگ کرش درایور گرافیک (GPUDevice.lost / OS TDR) در پردازش‌های سنگین WebGPU — [بخش ۱۱، ۱۳ و ۶۴]
+
+  - کالبدشکافی باگ: سیستم‌عامل‌ها (ویندوز، مک، اندروید و iOS) یک تایمر نگهبان به
+    نام TDR دارند؛ اگر یک دستور محاسباتی WebGPU بیش از حد (معمولاً ۱ تا ۲ ثانیه)
+    کارت گرافیک را قفل کند، سیستم‌عامل کل صفحه را فریز کرده و سپس با پرتاب خطای
+    GPUDevice.lost دسترسی مرورگر به GPU را قطع می‌کند!
+  - اصلاحیه در نسخه ۱.۲: الزام به خرد کردن دستورات GPU به قطعات کوچک (Sliced
+    Command Submissions زیر ۲۰۰ میلی‌ثانیه)، کامپایل غیرهمگام شیدرها
+    (createComputePipelineAsync) و پیاده‌سازی مکانیسم بازیابی خودکار از
+    GPUDevice.lost با سوئیچ شفاف به WASM SIMD روی آخرین Checkpoint بدون شکست
+    Job.
+
+۸. باگ طوفان تراکنش و تخریب کش (Transaction & Cache Storm) هنگام تغییر پیوسته اسلایدرها — [بخش ۲۵ و ۳۲]
+
+  - کالبدشکافی باگ: وقتی کاربر دستگیره یک افکت (مثلاً Threshold در کمپرسور یا
+    مرز یک کلیپ) را با ماوس می‌گیرد و می‌کشد، در هر ثانیه ۶۰ رویداد تغییر صادر
+    می‌شود. اگر هر تغییر فوراً یک Edit Transaction در IndexedDB ثبت کند و کش
+    گراف را باطل نماید، برنامه در کسری از ثانیه قفل می‌کند.
+  - اصلاحیه در نسخه ۱.۲: تفکیک رسمی میان Ephemeral Gesture State (وضعیت گذرا در
+    RAM برای پیش‌نمایش ۶۰ فریم بر ثانیه در حین کشیدن اسلایدر/مرز کلیپ) و
+    Committed Edit Transaction (ثبت تراکنش نهایی و به‌روزرسانی کش فقط در لحظه
+    رها کردن ماوس / Commit Gesture یا با کلید ادغام تراکنش‌ها).
+
+در ادامه، متن کامل، نهایی و بی‌نقص سند معماری (نسخه ۱.۲) را که تمام اصلاحات ده
+دور دیباگ به صورت یکپارچه و استاندارد در آن تنیده شده است، در اختیار دارید:
+
+سند نهایی معماری، طراحی و نقشه راه توسعه پلتفرم تدوین و پردازش هوشمند صوت فارسی
+
+نسخه: 1.2 (نسخه نهایی پس از ده دور دیباگ عمیق سیستم، موتور مرورگر، DSP و
+آواشناسی فارسی)
+وضعیت: طرح مرجع معماری و توسعه (تثبیت‌شده برای آغاز فاز PoC)
+محصول: پلتفرم وب‌محور تدوین و پردازش هوشمند صوت
+راهبرد اصلی: Local-First، پردازش مستقل از API خارجی، معماری توسعه‌پذیر و اشتراکی
+
+بخش اول: تعریف محصول و چشم‌انداز
+
+۱. تعریف محصول
+
+هدف، ساخت یک محیط حرفه‌ای برای تدوین، تحلیل، اصلاح و پردازش فایل‌های صوتی است که
+در مرحله نخست بر گفتار فارسی تمرکز دارد و در آینده قابلیت توسعه به سایر زبان‌ها
+و حوزه‌های پردازش صوت را خواهد داشت.
+
+محصول نباید صرفاً یک ابزار تبدیل گفتار به متن باشد. هدف، ایجاد محیطی است که در
+آن متن، صوت، زمان‌بندی، تحلیل هوشمند و عملیات تدوین به‌صورت یکپارچه کار کنند.
+
+کاربر باید بتواند فایل صوتی را وارد کند، محتوای آن را تحلیل کند، ایرادهای گفتاری
+را شناسایی کند، پیشنهادهای اصلاحی دریافت کند، نتیجه را بشنود، تغییرات را تأیید
+یا رد کند و در نهایت فایل تدوین‌شده را با کیفیت مناسب خروجی بگیرد.
+
+۲. قابلیت‌های اصلی محصول
+
+۲.۱. تبدیل گفتار به متن
+
+  - تبدیل گفتار فارسی به متن
+  - پشتیبانی از گفتار رسمی و محاوره‌ای
+  - تشخیص جمله‌ها و بخش‌های گفتار
+  - زمان‌بندی کلمات و عبارات
+  - همگام‌سازی متن با موقعیت صوتی
+  - اصلاح دستی متن
+  - پشتیبانی از متن چندگوینده
+  - مدیریت کلمات نامطمئن و نامشخص
+
+۲.۲. تشخیص ایرادهای گفتاری
+
+  - تشخیص تپق (شامل تپق‌های مستقل و تپق‌های کشیده‌شده و چسبیده به انتهای کلمات)
+  - تشخیص کلمات زائد
+  - تشخیص تکرار کلمات
+  - تشخیص تکرار عبارات
+  - تشخیص تکرار جملات
+  - تشخیص مکث‌های غیرطبیعی
+  - تشخیص سکوت‌های طولانی
+  - تشخیص گفتار ناقص و دنباله‌های آوایی ناتمام (مانند کسره اضافه معلق پس از حذف
+    کلمه بعدی)
+  - شناسایی بخش‌های دارای احتمال خطای گفتاری
+  - تشخیص تکرار معنایی در مراحل توسعه پیشرفته
+
+۲.۳. تدوین هوشمند گفتار
+
+  - پیشنهاد حذف بخش‌های زائد
+  - پیشنهاد حذف مکث‌های غیرضروری
+  - اصلاح فاصله‌های زمانی (با حفظ همگام‌سازی در پروژه‌های چندترک)
+  - حذف یا کوتاه‌کردن تپق‌ها
+  - اتصال طبیعی بخش‌های صوتی (مبتنی بر تراز آکوستیکی، تحلیل فورمنت/انرژی،
+    Zero-Crossing و حفظ Room Tone)
+  - Crossfade (دستی و Micro-Crossfade خودکار)
+  - Preview قبل از اعمال تغییر (با اعمال Pre-Roll برای پایداری افکت‌ها)
+  - تأیید یا رد پیشنهادها
+  - امکان اصلاح دستی محدوده زمانی
+  - Undo و Redo
+  - حفظ نسخه اصلی فایل
+
+۲.۴. پردازش و بهبود کیفیت صوت
+
+  - Noise Reduction
+  - Noise Gate
+  - Crosstalk / Mic Bleed Suppression (در ضبط‌های چندمیکروفونی)
+  - De-Click
+  - De-Clip
+  - De-Reverb
+  - Equalization
+  - Compression
+  - Limiting
+  - Normalization
+  - Loudness Control
+  - Channel Management
+  - Mixing
+  - Mastering
+  - Audio Restoration
+
+قابلیت‌های سنگین و تخصصی در مراحل بعدی و براساس نتایج آزمون فنی توسعه می‌یابند.
+
+۲.۵. مدیریت پروژه و تدوین حرفه‌ای
+
+  - Waveform (چندسطحی / Multi-Resolution Peak Pyramid)
+  - Timeline
+  - Track Management
+  - Clip Management
+  - Multi-Track Sync-Locked Editing
+  - Bus و Routing (با جبران تأخیر خودکار - Automatic PDC)
+  - Automation
+  - History
+  - Project Versioning
+  - Non-Destructive Editing
+  - Project Recovery
+  - Export Profiles
+
+۲.۶. انواع کاربرد محصول
+
+  - تدوین پادکست (تک‌نفره و چندنفره)
+  - تدوین مصاحبه
+  - تدوین سخنرانی
+  - تدوین محتوای آموزشی
+  - تدوین کتاب صوتی
+  - تدوین گزارش‌های صوتی
+  - پاک‌سازی و اصلاح فایل‌های ضبط‌شده
+  - تولید خروجی حرفه‌ای برای انتشار
+
+بخش دوم: اصول بنیادین محصول
+
+۳. اصل پردازش محلی
+
+تصمیم بنیادی محصول این است:
+
+در نسخه اول، تمام پردازش محتوای صوتی و اجرای موتور داخلی هوش مصنوعی روی دستگاه
+کاربر انجام می‌شود.
+
+این اصل شامل موارد زیر است:
+
+  - تبدیل صوت به متن
+  - تحلیل گفتار
+  - تشخیص تپق و تکرار
+  - تحلیل مکث و سکوت
+  - پردازش صوت
+  - تدوین
+  - اجرای Processing Graph
+  - Render
+  - Export
+
+هیچ‌کدام از این عملیات نباید برای عملکرد اصلی خود به API خارجی یا پردازش ابری
+وابسته باشند.
+
+این تصمیم به معنی حذف کامل Backend نیست. خدمات حساب کاربری، اشتراک، پرداخت،
+مدیریت مجوز، کاتالوگ مدل و توزیع مدل می‌توانند از زیرساخت سروری استفاده کنند.
+
+همچنین نباید ادعا شود که تمام عملیات برنامه بدون اینترنت کار می‌کنند. قابلیت‌های
+محلی باید در صورت نصب مدل‌ها و منابع لازم، بدون اتصال اینترنت قابل اجرا باشند.
+برای جلوگیری از توقف کاربر در اولین ورود (Cold Start)، قابلیت‌های پایه تدوین و
+تحلیل‌های سبک مبتنی بر DSP باید پیش از تکمیل دانلود مدل‌های سنگین هوش مصنوعی،
+بلافاصله در دسترس قرار گیرند.
+
+۴. اصل استقلال از API خارجی
+
+APIهای خارجی فقط به‌عنوان قابلیت اختیاری ارائه می‌شوند.
+
+قواعد:
+
+1.  API خارجی به‌صورت پیش‌فرض خاموش است.
+2.  فعال‌سازی آن نیازمند انتخاب و رضایت آگاهانه کاربر است.
+3.  نوع داده ارسالی باید مشخص باشد.
+4.  ارسال فایل کامل نباید پیش‌فرض باشد.
+5.  امکان ارسال انتخابی قطعه صوتی یا متن وجود داشته باشد.
+6.  هیچ Fallback خودکاری از موتور داخلی به API خارجی مجاز نیست.
+7.  نتیجه API خارجی باید منشأ مشخص داشته باشد.
+8.  نتیجه خارجی نباید بدون اعتبارسنجی و تأیید کاربر مستقیماً تدوین نهایی را
+    تغییر دهد.
+9.  لغو رضایت باید امکان‌پذیر باشد.
+10. هزینه احتمالی پیش از اجرای عملیات نمایش داده شود.
+
+۵. اصل استقلال از Runtime
+
+منطق اصلی پردازش نباید به مرورگر، GPU، سیستم‌عامل یا یک فناوری خاص وابسته باشد.
+
+نسخه اول از Local Runtime استفاده می‌کند، اما معماری باید برای توسعه آینده
+Desktop و Cloud آماده باشد.
+
+این آمادگی به معنی ساخت زیرساخت Cloud در نسخه اول نیست.
+
+۶. اصل حفظ فایل اصلی
+
+  - فایل اصلی پس از Import نباید مستقیماً ویرایش شود.
+  - تمام تدوین‌ها باید غیرمخرب باشند.
+  - تغییرات باید در قالب عملیات تدوین ثبت شوند.
+  - خروجی نهایی باید یک Artifact مستقل باشد.
+  - امکان بازگشت به وضعیت قبلی باید حفظ شود.
+  - هیچ پردازش سنگینی نباید بدون کنترل وضعیت پروژه، فایل اصلی را بازنویسی کند.
+
+بخش سوم: معماری کلان محصول
+
+۷. ساختار هشت‌حوزه‌ای معماری
+
+معماری محصول از هشت حوزه اصلی تشکیل می‌شود.
+
+این هشت حوزه مرزهای مسئولیت هستند، نه الزام به ایجاد هشت سرویس مستقل. ساختار
+اولیه باید Modular Monolith باشد.
+
+حوزه اول: Product Interface
+
+مسئولیت:
+
+  - رابط کاربری
+  - Project Workspace
+  - Waveform
+  - Timeline
+  - Transcript Panel
+  - Processing Panel
+  - پیشنهادهای هوشمند
+  - Preview
+  - Export Interface
+  - مدیریت تعاملات کاربر (تفکیک وضعیت گذرای Gesture از تراکنش نهایی)
+  - نمایش وضعیت Jobها
+  - نمایش خطاها و هشدارها
+
+این حوزه نباید منطق اصلی پردازش صوت یا هوش مصنوعی را در خود نگهداری کند.
+
+حوزه دوم: Project & Media Core
+
+مسئولیت:
+
+  - Project
+  - Asset
+  - Asset Identity & Sample-Accurate Seek Index
+  - Track & Multi-Track Sync Groups
+  - Clip
+  - Timeline State
+  - Version
+  - Edit History
+  - Metadata
+  - Local Storage (OPFS / IndexedDB)
+  - Auto-Save
+  - Project Package
+  - Backup
+  - Recovery
+  - Missing Media Resolution
+  - Data Lifecycle & Rolling PCM Cache Eviction
+
+این حوزه مرجع اصلی وضعیت پروژه و رسانه است.
+
+حوزه سوم: Audio Engine
+
+مسئولیت:
+
+  - Streaming Audio Decode & Frame Indexing
+  - Anti-Aliased Resampling (بین نرخ نمونه فایل، تایم‌لاین و نرخ 16kHz موتور AI)
+  - Playback (مبتنی بر Ring Buffer)
+  - Rolling Audio Block Cache
+  - Sample Format
+  - Sample Rate
+  - Channel Layout
+  - Audio Clock
+  - Routing & Automatic Delay Compensation (PDC)
+  - Mixing
+  - DSP (همراه با Pre-Roll State Priming)
+  - Micro-Boundary Acoustic Analysis (Energy Valley, Formant/Pitch Plateau,
+    Zero-Crossing, Room Tone Profile)
+  - Real-Time Processing
+  - Offline Audio Processing
+  - Latency Management
+  - Audio Output Validation
+
+Audio Engine نباید مسئول مدیریت اشتراک، حساب کاربری یا تصمیم‌گیری درباره API
+خارجی باشد.
+
+حوزه چهارم: Internal AI Engine
+
+مسئولیت:
+
+  - ASR
+  - Word Alignment
+  - VAD
+  - Speech Analysis
+  - Disfluency & Co-articulated Filler Detection
+  - Trailing Ezafe & Prosodic Anomaly Detection
+  - Repetition Detection
+  - Diarization & Crosstalk Detection
+  - Model Runtime
+  - Model Registry
+  - Model Version Management
+  - Model Loading (Streaming / Zero-Copy)
+  - Model Unloading
+  - Model Compatibility & Tiering
+  - Persian Text Normalization
+
+این حوزه فقط تحلیل و اجرای مدل را انجام می‌دهد. تصمیم نهایی درباره اعمال تدوین
+با کاربر و هسته تدوین است.
+
+حوزه پنجم: Processing & Render Core
+
+مسئولیت:
+
+  - Processing Graph
+  - Processing Node
+  - Node Dependency & Latency Calculation
+  - Render Planning (با محاسبه Pre-Roll و Tail)
+  - Render Execution (Streaming)
+  - Preview
+  - Export
+  - Render Manifest
+  - Cache Invalidation
+  - Post-Edit Validation
+  - Export Validation
+
+این حوزه عملیات پردازش و تولید خروجی را مدیریت می‌کند.
+
+حوزه ششم: Execution & Runtime Infrastructure
+
+مسئولیت:
+
+  - Local Runtime
+  - Cross-Origin Isolation Verification
+  - OPFS I/O Broker & File Handle Lease Management
+  - Job Manager
+  - Scheduler
+  - Execution Router
+  - Resource Manager
+  - Capability Detection
+  - Memory & Disk Quota Management
+  - GPU Watchdog (TDR) Protection & GPUDevice.lost Fallback
+  - Wake Lock & Background Throttling Mitigation
+  - Job Queue
+  - Checkpoint
+  - Recovery
+  - Concurrency Control
+  - Runtime Compatibility
+
+این حوزه مسئول انتخاب و مدیریت محیط اجرای عملیات است، نه تصمیم‌گیری درباره
+محتوای تدوین.
+
+حوزه هفتم: Platform Services
+
+مسئولیت:
+
+  - Account
+  - Authentication
+  - Subscription
+  - Payment
+  - License Validation
+  - Model Catalog
+  - Chunked Model Delivery
+  - Download Management
+  - Customer Support
+  - API Gateway آینده
+  - Cloud Services آینده
+  - Sync آینده
+
+این حوزه نباید به اجرای محلی عملیات اصلی وابسته باشد.
+
+حوزه هشتم: Security, Governance & Quality
+
+مسئولیت:
+
+  - Privacy
+  - Consent
+  - Security Policy
+  - Data Governance
+  - Model Licensing
+  - Software Supply Chain
+  - Audit
+  - Benchmark
+  - Quality Assurance
+  - Performance Monitoring
+  - Release Validation
+  - Threat Model
+
+بخش چهارم: Runtime و محیط اجرای عملیات
+
+۸. سه محیط Runtime
+
+۸.۱. Local Runtime
+
+تنها محیط پردازش داخلی فعال در نسخه اول.
+
+اجزای آن:
+
+  - Web Workers
+  - AudioWorklet
+  - SharedArrayBuffer & Atomics (تحت سیاست Cross-Origin Isolation)
+  - WASM Runtime (مجهز به SIMD)
+  - WebGPU Runtime در صورت پشتیبانی (با محافظت در برابر Timeout و Device Loss)
+  - Local Storage Runtime (OPFS با مدیریت متمرکز قفل فایل + IndexedDB)
+  - Model Runtime
+  - Audio Runtime
+
+۸.۲. First-Party Cloud Runtime
+
+فقط برای آینده.
+
+هیچ پردازش ابری داخلی در نسخه اول ساخته یا فعال نمی‌شود.
+
+معماری باید امکان اضافه‌کردن موارد زیر را در آینده فراهم کند:
+
+  - Cloud API
+  - Cloud Job Queue
+  - CPU/GPU Worker Pool
+  - Scheduler
+  - Cloud Storage
+  - Cost Metering
+  - Job Recovery
+  - Admission Control
+  - Monitoring
+  - Security Policy Enforcement
+
+۸.۳. External API Runtime
+
+محیط مستقل برای اتصال انتخابی به Providerهای خارجی.
+
+استفاده از آن مشروط به رضایت مستقل، کنترل هزینه، کنترل نوع داده و ثبت منشأ خروجی
+است.
+
+۹. قراردادهای Runtime
+
+قراردادها در دو سطح تعریف می‌شوند.
+
+قراردادهای مستقل از Runtime
+
+  - Audio Buffer / Block Reference
+  - Sample Format
+  - Sample Rate & Canonical Time Mapping
+  - Channel Layout
+  - Processing Node (شامل Latency، Pre-Roll و Tail)
+  - Model Input
+  - Model Output
+  - Processing Parameters
+  - Error Model
+  - Output Artifact
+  - Version Metadata
+
+قراردادهای اختصاصی Runtime
+
+  - Local Execution Context
+  - Browser Capability & Isolation Status
+  - Local Resource & Disk Quota Limits
+  - Cloud Execution Context
+  - Remote Storage Reference
+  - Network Transfer Policy
+  - Remote Job Status
+  - Recovery Policy
+
+هدف، سازگاری قراردادی است؛ نه الزام به خروجی بیت‌به‌بیت یکسان میان تمام
+Runtimeها.
+
+۱۰. ترتیب اعمال سیاست اجرا
+
+ترتیب اجباری:
+
+User Policy → Consent Validation → Execution Policy Enforcement → Execution
+Router → Runtime
+
+Execution Router حق ایجاد مجوز انتقال داده ندارد.
+
+در نسخه اول فقط Local Runtime مجاز است.
+
+بخش پنجم: معماری اجرای محلی
+
+۱۱. تفکیک محیط‌های اجرایی مرورگر و الزامات زیرساختی
+
+الزام زیرساختی Cross-Origin Isolation
+
+برای فعال‌سازی SharedArrayBuffer (ضروری برای انتقال بدون کپی داده صوتی به
+AudioWorklet و اجرای چندرشته‌ای WASM)، محیط سرو برنامه باید هدرهای امنیتی
+Cross-Origin-Opener-Policy: same-origin و Cross-Origin-Embedder-Policy:
+require-corp (یا credentialless) را تضمین کند. در صورت عدم پشتیبانی محیط، سیستم
+باید یک مسیر Fallback مبتنی بر MessagePort داشته باشد.
+
+Main Thread
+
+  - رابط کاربری
+  - تعاملات کاربر
+  - مدیریت نمایش
+  - دریافت وضعیت عملیات
+
+AudioWorklet
+
+  - پردازش بلادرنگ سازگار
+  - Playback از روی Ring Buffer مشترک
+  - Live Monitoring
+  - عملیات کم‌تأخیر
+
+Web Workers
+
+  - دیکد جریانی (Streaming Decode) و ساخت جدول جستجوی فریم (Seek Table)
+  - تحلیل‌های غیرمسدودکننده
+  - عملیات محاسباتی
+  - مدیریت برخی Jobها
+
+WASM Runtime
+
+  - اجرای کدهای بومی‌سازی‌شده
+  - DSP و Resampling ضد Aliasing
+  - Decoder و Encoderهای جریانی سازگار
+  - عملیات محاسباتی سنگین
+
+WebGPU Runtime
+
+  - اجرای مدل‌ها و عملیات سازگار با GPU
+  - کامپایل غیرهمگام شیدرها (createComputePipelineAsync) برای جلوگیری از فریز
+    شدن رابط کاربری
+  - اجرای برش‌خورده دستورات (Sliced Command Submissions زیر ۲۰۰ میلی‌ثانیه) برای
+    جلوگیری از فعال شدن تایمر نگهبان سیستم‌عامل (OS TDR) و قطع شدن درایور گرافیک
+
+Local Storage Runtime & I/O Broker
+
+  - مدیریت خواندن و نوشتن در OPFS و IndexedDB
+  - جلوگیری از بن‌بست قفل انحصاری (NoModificationAllowedError): از آنجا که
+    FileSystemSyncAccessHandle در استاندارد مرورگر روی هر فایل قفل انحصاری ایجاد
+    می‌کند (حتی بین دو Worker در یک تب)، دسترسی هم‌زمان چند Worker به یک فایل
+    واحد ممنوع است. تمام عملیات SyncAccessHandle باید یا از طریق یک Storage I/O
+    Broker Worker متمرکز (با اشتراک داده در SharedArrayBuffer) انجام شود و یا از
+    طریق سیستم اجاره دستگیره فایل (File Handle Lease Manager) روی بلوک‌های
+    تفکیک‌شده (Sharded Files) مدیریت گردد.
+
+هیچ‌کدام از این محیط‌ها نباید بدون قرارداد مشخص به وضعیت داخلی دیگری وابسته
+شوند.
+
+۱۲. جداسازی Real-Time و Offline Processing
+
+دو مسیر مستقل تعریف می‌شود.
+
+Real-Time Audio Path:
+
+  - Playback (تغذیه‌شده توسط Ring Buffer از کش بلوک‌های PCM بدون بارگذاری کل
+    فایل در RAM)
+  - Monitoring
+  - Live Effects
+  - Mixing
+  - Routing
+
+Offline Processing Path:
+
+  - Streaming Import, Seek Indexing & Peak Generation
+  - Downsampling به 16kHz Mono و اجرای ASR / VAD
+  - Noise Reduction سنگین
+  - Speech Analysis
+  - Batch Processing
+  - Render
+  - Export
+
+مسیر بلادرنگ باید محدودیت زمانی مشخص داشته باشد و از عملیات سنگین، تخصیص حافظه
+غیرضروری (Garbage Collection)، دسترسی مستقیم به دیسک، انتظار شبکه و Logging
+پرهزینه دور بماند.
+
+۱۳. مدیریت منابع، حافظه و چرخه عمر مدل
+
+یک Model Resource Lifecycle Manager و یک Resource Manager مشترک برای کنترل منابع
+لازم است.
+
+وظایف:
+
+  - Memory Budget (RAM) & Disk Cache Budget (OPFS)
+  - Streaming / Zero-Copy Model Loading (تزریق قطعه به قطعه وزن‌های مدل از OPFS
+    به حافظه WASM/WebGPU برای جلوگیری از مصرف دو برابری RAM در لحظه بارگذاری)
+  - Model Unloading
+  - Model Residency
+  - سیاست Single-Active-Heavy-Model در دستگاه‌های دارای محدودیت حافظه (تخلیه
+    کامل مدل قبلی از RAM پیش از بارگذاری مدل سنگین بعدی)
+  - Model Warm-up (به‌صورت غیرهمگام و بدون مسدودسازی)
+  - Shared Model Instances
+  - Concurrent Execution Limits
+  - Resource Reservation
+  - Memory Pressure Handling
+  - GPU Availability & GPUDevice.lost Automatic Fallback (سوئیچ خودکار از WebGPU
+    به WASM SIMD روی آخرین Checkpoint در صورت از دست رفتن زمینه گرافیکی)
+  - Storage Monitoring
+  - جلوگیری از تعلیق پردازش در پس‌زمینه (استفاده از Web Locks API و Screen Wake
+    Lock API در حین اجرای Jobهای طولانی)
+
+وضعیت مدل‌ها:
+
+Installed → Loading → Loaded → Ready → Running → Unloading → Unloaded
+
+وجود فایل مدل در فضای ذخیره به معنی آماده‌بودن آن برای اجرا نیست.
+
+۱۴. Capability-Based Execution و طبقه‌بندی مدل‌ها
+
+فعال‌سازی قابلیت‌ها و انتخاب نوع مدل هوش مصنوعی براساس توان واقعی دستگاه انجام
+می‌شود، نه صرفاً نوع دستگاه.
+
+برای هر قابلیت و مدل باید ثبت شود:
+
+  - حداقل RAM و سقف ایمن تخصیص حافظه WASM (به‌ویژه محدودیت‌های سخت‌گیرانه
+    WebKit/iOS)
+  - RAM پیشنهادی
+  - CPU Requirement
+  - GPU Requirement
+  - Runtime Requirement
+  - Model Size & Quantization Level (مانند FP16، INT8، Q5، Q4)
+  - Storage Requirement
+  - محدودیت مدت فایل
+  - زمان پردازش تخمینی (Real-Time Factor)
+  - سطح کیفیت قابل‌دستیابی
+
+تمام اعداد باید از Benchmark واقعی به دست آیند.
+
+سه سطح تجربه:
+
+  - Mobile Companion (تمرکز بر بازبینی، تدوین سبک، DSP و مدل‌های فوق‌سبک؛ عدم
+    اجرای مدل‌های سنگین خارج از ظرفیت حافظه موبایل)
+  - Tablet Studio
+  - Desktop Studio
+
+این سه، محصول جداگانه نیستند؛ هسته داده و منطق مشترک دارند و قابلیت‌ها و رده
+مدل‌هایشان (Model Tier) با توان دستگاه تنظیم می‌شود.
+
+بخش ششم: مدل داده و مدیریت پروژه
+
+۱۵. ساختار رسمی پروژه
+
+مدل داده باید حداقل از موجودیت‌های زیر پشتیبانی کند:
+
+  - Project
+  - Project Version
+  - Project Schema Version
+  - Asset
+  - Asset Content Version
+  - Asset Frame Seek Table (جدول ایندکس فریم‌ها برای پرش و دیکد نقطه‌ای سریع از
+    فایل اصلی)
+  - Asset Waveform Peak Pyramid (داده Multi-Resolution LOD)
+  - Acoustic Profile (شامل Room Tone استخراج‌شده و Noise Floor)
+  - Track & Sync-Lock Group
+  - Clip
+  - Timeline
+  - Edit Operation
+  - Processing Graph
+  - Processing Node
+  - Analysis Request
+  - Analysis Result
+  - Recommendation
+  - User Decision
+  - Render Job
+  - Render Manifest
+  - Export Artifact
+  - Project Snapshot
+  - Recovery Checkpoint
+
+هر موجودیت باید شناسه پایدار داشته باشد.
+
+۱۶. هویت، سلامت و معماری ذخیره‌سازی هیبریدی Asset
+
+برای هر Asset:
+
+  - Asset ID
+  - Content Hash
+  - Partial Fingerprint
+  - File Size
+  - Container
+  - Codec
+  - Native Sample Rate
+  - Channel Layout
+  - Duration
+  - Exact Sample Count
+  - Metadata
+  - Import Timestamp
+  - Validation Status
+  - Source Reference
+
+قاعده حیاتی جلوگیری از انفجار RAM و انفجار دیسک (Hybrid Streaming Ingest):
+
+1.  ممنوعیت دیکد یکجا در RAM: استفاده از متدهایی که کل فایل فشرده را یکجا در RAM
+    باز می‌کنند (مانند AudioContext.decodeAudioData روی کل بافر فایل‌های طولانی)
+    ممنوع است.
+2.  ممنوعیت ذخیره دائمی کل پروژه به‌صورت Float32 خام روی دیسک: از آنجا که ذخیره
+    دائمی چند ساعت صوت چندترکه با فرمت Float32 PCM چندین گیگابایت از فضای OPFS
+    را پر می‌کند، سیستم باید از معماری هیبریدی استفاده کند:
+      - فایل اصلی در OPFS به همراه Sample-Accurate Frame Seek Table و Waveform
+        Peak Pyramid ذخیره می‌شود.
+      - بلوک‌های PCM دیکدشده (مثلاً قطعات ۵ تا ۱۰ ثانیه‌ای) در یک Rolling LRU
+        Block Cache با سقف حجمی مشخص در OPFS/RAM نگهداری می‌شوند تا اطراف
+        Playhead، نقاط برش و بخش‌های فعال همیشه آماده پخش فوری باشند.
+      - برای تغذیه موتور هوش مصنوعی (ASR/VAD)، صوت به‌صورت جریانی به 16kHz Mono
+        (با حجم ۶ برابر کمتر) دیکد و پس از استخراج ویژگی‌ها/متن، بافر موقت آن
+        آزاد می‌شود.
+
+تغییر نام یا مسیر فایل نباید Asset جدید ایجاد کند.
+
+تغییر محتوا باید با Content Version جدید ثبت شود.
+
+Partial Fingerprint فقط برای شناسایی اولیه است و جایگزین Full Content Hash نیست.
+
+۱۷. Missing Media Resolution
+
+چرخه بازیابی:
+
+Missing Asset → Candidate Search → Metadata Check → Hash Validation → User
+Confirmation → Relink
+
+سیستم نباید صرفاً براساس نام فایل، Asset دیگری را جایگزین کند.
+
+وضعیت‌های تطبیق:
+
+  - Not Found
+  - Candidate Found
+  - Unverified Match
+  - Hash Verified
+  - Content Changed
+
+۱۸. ذخیره‌سازی و پایداری فضا (Storage Persistence)
+
+ساختار پیشنهادی:
+
+  - OPFS برای فایل‌های رسانه، جدول Seek، فایل‌های Peak، کش چرخشی بلوک‌های PCM و
+    وزن مدل‌ها (تحت مدیریت I/O Broker)
+  - IndexedDB برای Metadata، تراکنش‌های نهایی و داده ساختاری
+  - Cache برای داده‌های قابل‌بازسازی
+  - Model Storage برای مدل‌های دانلودشده (مبتنی بر قطعات Hashشده)
+  - Project Package برای انتقال و پشتیبان‌گیری
+
+قاعده جلوگیری از پاک‌سازی خودکار مرورگر (Eviction Protection): از آنجا که
+مرورگرها فضای ذخیره‌سازی محلی را به‌طور پیش‌فرض موقت (Best-Effort) تلقی می‌کنند،
+سیستم باید در زمان ایجاد اولین پروژه یا دانلود مدل، از طریق
+navigator.storage.persist() مجوز پایداری دائمی فضا را درخواست کند و وضعیت Quota
+و Persistence را به‌طور شفاف به کاربر نمایش دهد.
+
+استفاده از هر فناوری باید در مرورگرهای هدف آزمایش شود.
+
+۱۹. چرخه عمر داده
+
+Local Data Lifecycle Manager مسئول:
+
+  - Import Validation & Streaming Ingest
+  - Asset Registration
+  - Storage Allocation & Persistence Request
+  - Auto-Save
+  - Atomic Write
+  - Checkpoint
+  - Recovery
+  - Storage Quota Monitoring
+  - Rolling PCM Cache Eviction & Orphaned Block Garbage Collection (پاک‌سازی
+    هوشمند بلوک‌های صوتیِ خارج از پنجره فعال بر اساس الگوریتم LRU و حذف فایل‌های
+    یتیم در OPFS)
+  - Missing Asset Detection
+  - Backup
+  - Export
+  - Deletion
+
+Project Recovery و Media Recovery دو مسئله مستقل هستند.
+
+۲۰. Project Package
+
+بسته پروژه باید شامل موارد زیر باشد:
+
+  - Project Document
+  - Asset References
+  - فایل‌های صوتی لازم، در صورت انتخاب بسته کامل
+  - Timeline
+  - Tracks & Sync Groups
+  - Clips
+  - Edit Operations
+  - Processing Graph
+  - تنظیمات Export
+  - Analysis Results
+  - Provenance
+  - Render Manifest
+
+مدل‌های سنگین و کش‌های موقت PCM داخل بسته پروژه قرار نمی‌گیرند.
+
+۲۱. Versioning و Migration
+
+چهار نسخه مستقل باید نگهداری شوند:
+
+  - Project Schema Version
+  - Audio Engine Version
+  - Processing Node Version
+  - Model Version
+
+مراحل Migration:
+
+Source Snapshot → Migration Plan → Temporary Migration → Validation → Commit
+
+فایل مبدأ نباید در طول Migration بازنویسی شود.
+
+وضعیت سازگاری پروژه:
+
+  - Compatible
+  - Compatible with Migration
+  - Compatible with Limitations
+  - Read-Only
+  - Unsupported
+
+بخش هفتم: Timeline و تدوین غیرمخرب
+
+۲۲. مرجع زمانی و نگاشت بدون رانش (Drift-Free Timebase)
+
+مرجع اصلی تدوین باید موقعیت دقیق و بدون خطای گرد کردن در یک Timebase صحیح
+(Integer-Based) باشد.
+
+از آنجا که نرخ نمونه فایل ورودی (مثلاً 44,100 Hz)، نرخ نمونه پروژه (48,000 Hz) و
+نرخ نمونه مدل‌های هوش مصنوعی (16,000 Hz) با یکدیگر متفاوت‌اند، سیستم باید از یک
+واحد زمانی مادرِ بخش‌پذیر (مانند Flicks برابر با 1/705,600,000 ثانیه، یا نگاشت
+گویا / Rational Sample Mapping) استفاده کند تا در تبدیل بین 16kHz، 44.1kHz و
+48kHz در فایل‌های چندساعته، خطای گرد کردن صفر (Zero Fractional Drift) تضمین شود.
+
+زمان‌ها باید از هم تفکیک شوند:
+
+  - Asset Native Sample Time
+  - AI Analysis Sample Time (16kHz Mono)
+  - Clip Time
+  - Timeline Canonical Time
+  - Processing Time
+  - Render Time
+
+بازه‌های زمانی باید قرارداد روشن داشته باشند؛ قرارداد الزامی استفاده از بازه
+نیمه‌باز [start, end) است.
+
+تمام تبدیل‌ها باید تابع‌های ریاضی قطعی، معکوس‌پذیر و آزمون‌پذیر داشته باشند.
+
+۲۳. Audio Clock Synchronization
+
+Audio Clock (AudioContext.currentTime / شمارنده فریم پردازش‌شده در AudioWorklet)
+مرجع زمان واقعی پخش است.
+
+سیستم باید:
+
+  - موقعیت Playback را از طریق متغیرهای اتمیک (Atomics) در SharedArrayBuffer یا
+    پیام‌های زمان‌بندی‌شده با Timeline هماهنگ کند.
+  - Latency خروجی (outputLatency / baseLatency) و Latency گراف پردازش (PDC) را
+    در نظر بگیرد.
+  - Seek، Pause و Resume را با بازپرکردن سریع Ring Buffer مدیریت کند.
+  - Drift را در پخش طولانی اندازه‌گیری کند.
+  - از تخمین صرفاً مبتنی بر زمان سیستم (performance.now یا setInterval) برای
+    موقعیت پخش اجتناب کند.
+
+۲۴. عملیات تدوین، همگام‌سازی چندترک و قواعد برش آکوستیکی فارسی
+
+رفتار هر عملیات باید دقیق تعریف شود:
+
+  - Split
+  - Trim
+  - Slip
+  - Move
+  - Ripple Delete (تک‌ترک و چندترک قفل‌شده)
+  - In-Place Range Suppression (جایگزینی درجا با Room Tone بدون تغییر طول زمان)
+  - Gap Delete
+  - Crossfade
+  - Replace
+  - Snap
+  - Selection
+  - Linked Clips & Sync-Lock Groups
+  - Group Editing
+
+تفاوت عملیات باید در مدل داده و رابط کاربری حفظ شود.
+
+قاعده حفظ سینک در پروژه‌های چندترک (Multi-Track Sync Protection): در پروژه‌های
+چندگوینده/چندترک که ترک‌ها در یک Sync-Lock Group قرار دارند:
+
+  - حذف زمانی (Ripple Delete / کوتاه کردن مکث) فقط زمانی مجاز به جابه‌جایی زمان
+    است که روی تمام ترک‌های همگام به‌طور یکسان اعمال شود (در بازه‌ای که هیچ‌یک
+    از گویندگان دیگر گفتار فعال ندارند).
+  - اگر در لحظه وقوع تپق، سرفه یا کلمه زائد در «ترک A»، گوینده دیگری در «ترک B»
+    در حال صحبت باشد، سیستم باید به‌طور پیش‌فرض از In-Place Range Suppression
+    (جایگزینی بازه در ترک A با Room Tone بدون تغییر طول زمانی) استفاده کند تا
+    همگام‌سازی کل پروژه به هم نخورد.
+
+قواعد برش طبیعی گفتار فارسی (Persian Acoustic & Prosodic Boundary Rules): در
+عملیات حذف یا برش مبتنی بر متن یا پیشنهاد هوشمند:
+
+1.  جستجوی دره انرژی (Minimum RMS Seeking): مرز برش پیشنهادی باید در یک پنجره
+    کوچک مجاور (۲۰± تا ۵۰± میلی‌ثانیه) اسکن شود تا نقطه کمترین انرژی صوتی (مرز
+    واقعی بین واج‌ها) پیدا شود.
+2.  تشخیص کشیدگی واکه در تپق‌های چسبیده (Formant/Pitch Plateau Detection): در
+    گفتار محاوره‌ای فارسی که تپق به انتهای کلمه می‌چسبد (مانند «رفتیمممم» یا
+    «بههههه») و دره انرژی وجود ندارد، مرز برش باید بر اساس نقطه شروع تثبیت
+    غیرطبیعی فرکانس پایه و فورمنت‌ها (تبدیل واج پایانی کلمه به واکه کشیدهٔ تپق)
+    تعیین شود.
+3.  حفاظت از دنباله کسره اضافه (Trailing Ezafe Protection): در زبان فارسی، کسره
+    اضافه («ـِ») در متن نوشته نمی‌شود اما در انتهای کلمه تلفظ می‌شود. اگر
+    کلمه‌ای پس از یک اسم یا موصوف حذف شود، سیستم باید احتمال وجود دنباله کسره
+    اضافه در انتهای کلمه قبلی را بررسی کرده، مرز اصلاح یا هشدار آوایی
+    (ProsodicTailWarning) را برای Preview کاربر فعال کند تا کلمه قبلی ناقص
+    («کتابِ...») شنیده نشود.
+4.  Zero-Crossing Snap: نقطه دقیق برش باید روی نزدیک‌ترین عبور موج از صفر (0.0)
+    قفل شود.
+5.  Auto Micro-Crossfade: برای جلوگیری از کلیک صوتی، در تمام نقاط اتصال یک
+    Crossfade کوتاه و نامحسوس (۵ تا ۱۵ میلی‌ثانیه با منحنی Equal-Power) به‌صورت
+    غیرمخرب اعمال شود.
+6.  حفظ بافت محیط (Room Tone Fill): هنگام کوتاه کردن مکث‌ها یا حذف درجا، به‌جای
+    درج سکوت مطلق دیجیتال (0.000)، باید از پروفایل نویز طبیعی محیط (Room Tone
+    استخراج‌شده از همان ترک) با تراز مناسب استفاده شود.
+
+۲۵. Edit Transaction و مدیریت تعاملات پیوسته (Gesture Coalescing)
+
+هر تغییر نهایی پروژه باید به‌عنوان یک تراکنش معتبر ثبت شود.
+
+مشخصات:
+
+  - Operation ID
+  - Transaction Coalescing Key
+  - Project Version
+  - Before State Reference
+  - After State Reference
+  - Parameters
+  - Dependencies
+  - Reversibility
+  - Commit Status
+
+تفکیک وضعیت گذرا از تراکنش نهایی (Ephemeral Gesture vs. Committed Transaction):
+هنگام تغییرات پیوسته توسط کاربر (مانند کشیدن اسلایدر افکت‌ها یا جابه‌جایی مرز
+کلیپ با ماوس در نرخ ۶۰ فریم بر ثانیه)، سیستم باید تغییرات را در یک Ephemeral
+Preview State در حافظه اعمال کند و تنها در لحظه پایان حرکت (Gesture Commit / رها
+کردن ماوس)، یک Edit Transaction واحد در IndexedDB ثبت و کش‌های وابسته را به‌روز
+نماید تا از طوفان تراکنش و قفل شدن دیتابیس جلوگیری شود.
+
+عملیات سنگین باید ابتدا Preview تولید کنند و فقط پس از تأیید کاربر Commit شوند.
+
+Undo و Redo باید بر تاریخچه تراکنش‌ها تکیه کنند.
+
+۲۶. Transcript-to-Timeline Mapping
+
+هر کلمه یا عبارت باید به محدوده زمانی مشخص متصل باشد.
+
+سیستم باید:
+
+  - متن را از صوت جدا نگه دارد.
+  - Timestamp را به منبع تحلیل متصل کند.
+  - ASR، Forced Alignment و اصلاح مرز آکوستیکی (VAD/Energy/Formant Snap) را
+    متمایز کند.
+  - اصلاح متن را معادل اصلاح صوت فرض نکند.
+  - حذف صوت را پس از تأیید کاربر انجام دهد.
+  - امکان اصلاح دستی محدوده زمانی را فراهم کند.
+
+۲۷. Persian Text Normalization
+
+سه نسخه متن:
+
+1.  Original Transcript
+2.  Normalized Transcript
+3.  Display Transcript
+
+نرمال‌سازی باید موارد زیر را پوشش دهد:
+
+  - ی و ک فارسی و عربی
+  - نیم‌فاصله (در افعال، جمع‌ها و پسوندها)
+  - فاصله‌ها
+  - اعداد فارسی و لاتین
+  - علائم نگارشی
+  - گفتار محاوره‌ای و شکسته‌نویسی
+  - کسره اضافه، ضمایر متصل (م، ت، ش، مان، تان، شان) و افعال مرکب چندبخشی
+  - واژه‌های انگلیسی
+  - نام‌های خاص
+  - شکل‌های نوشتاری متفاوت
+
+نرمال‌سازی نباید متن اصلی را مخفیانه تغییر دهد.
+
+ارتباط هر بخش از متن نرمال‌شده با متن اصلی و بازه زمانی آن باید به‌صورت دوطرفه
+قابل‌ردیابی باشد.
+
+بخش هشتم: موتور صوت و پردازش
+
+۲۸. Processing Graph، Pre-Roll و جبران تأخیر (PDC)
+
+Processing Graph باید پشتیبانی کند:
+
+  - چند ورودی و خروجی
+  - شاخه موازی
+  - Bus
+  - Routing
+  - Dependency Tracking
+  - جلوگیری از چرخه (DAG Validation)
+  - Latency & Automatic Plugin Delay Compensation (PDC)
+  - Pre-Roll & Tail Requirements
+  - Sample Rate
+  - Channel Layout
+  - Cache
+  - Node Versioning
+
+هر Node باید مشخصات ورودی، خروجی، تنظیمات، نسخه، منابع موردنیاز، latencySamples،
+preRollSamples (میزان صدای پیش‌نیاز برای پایدار شدن وضعیت داخلی
+فیلترها/کمپرسورها)، tailSamples (دنباله صوتی پس از پایان ورودی)، نوع اجرا و
+محدودیت‌های خود را اعلام کند.
+
+جبران خودکار تأخیر (Automatic PDC): در صورتی که دو یا چند شاخه موازی با Latency
+متفاوت به یک Bus مشترک وارد شوند، گراف پردازش باید اختلاف تأخیر را محاسبه کرده و
+روی شاخه‌های سریع‌تر به اندازه لازم خط تأخیر (Delay Line) قرار دهد تا از بروز
+خطای فاز (Comb Filtering) جلوگیری شود.
+
+۲۹. طبقه‌بندی عملیات
+
+  - Real-Time
+  - Offline
+  - Batch
+  - Preview
+  - Background-Capable
+
+هیچ Node نباید بدون بررسی قابلیت واقعی به Chunkهای مستقل تقسیم شود.
+
+۳۰. Chunk Processing و State Priming
+
+سه دسته:
+
+1.  Stateless Chunk Processing
+2.  Contextual / Stateful Chunk Processing
+3.  Global Processing
+
+هر Node باید مشخص کند:
+
+  - Chunk-Safe بودن
+  - Context & Pre-Roll Requirement (تغذیه پنهان بازه [chunkStart - preRoll,
+    chunkStart) پیش از شروع هر قطعه یا Preview برای جلوگیری از پرش صوتی در مرز
+    قطعات)
+  - Overlap (هم‌پوشانی و روش ادغام مانند Overlap-Add / Crossfade در مرز قطعات)
+  - Boundary Handling
+  - Parallel Execution
+  - Result Merging
+  - Cross-Chunk Validation
+  - Recovery
+
+۳۱. Job Management و پایداری اجرای پس‌زمینه
+
+هر Job باید مشخص کند:
+
+  - Idempotent
+  - Deterministic
+  - Resumable
+  - Retryable
+  - Cancellable
+  - Checkpointable
+
+انواع دسترسی:
+
+  - Read
+  - Analysis
+  - Mutation
+  - Render
+
+قواعد:
+
+  - Analysis نباید Timeline را تغییر دهد.
+  - Render باید از Snapshot معتبر استفاده کند.
+  - Mutation باید نسخه پروژه را افزایش دهد.
+  - Job قدیمی نباید نتیجه را بدون اعتبارسنجی روی پروژه جدید اعمال کند.
+  - عملیات ناسازگار باید صف‌بندی یا متوقف شوند.
+  - برای Jobهای طولانی (مانند ASR یا Render فایل‌های بلند)، Job Manager باید
+    وضعیت پیشرفت را در فواصل منظم (Checkpoint) در OPFS/IndexedDB ثبت کند تا در
+    صورت بسته شدن تب، خطای GPUDevice.lost یا Throttling مرورگر، پردازش از آخرین
+    قطعه تکمیل‌شده ادامه یابد، نه از صفر.
+
+۳۲. Cache
+
+Cache باید براساس وابستگی واقعی عملیات ساخته شود:
+
+  - Input Hash
+  - Node Version
+  - Model Version
+  - Committed Parameters (نه پارامترهای گذرای حین کشیدن اسلایدر)
+  - Sample Rate
+  - Channel Layout
+  - Runtime
+  - Output Settings
+
+تغییر نام پروژه نباید موجب اجرای مجدد تحلیل شود.
+
+تغییر ورودی مؤثر باید نتایج وابسته را نامعتبر کند.
+
+۳۳. Audio Mixing
+
+مشخصات Mixing باید شامل:
+
+  - Gain Staging
+  - Headroom
+  - Clipping Detection
+  - Peak Management
+  - True Peak
+  - Pan Law
+  - Channel Routing
+  - Bus Processing
+  - Automation
+  - Latency Compensation (PDC)
+  - Phase Alignment
+  - Master Bus
+
+۳۴. Render و Export
+
+Render باید به‌صورت جریانی (Streaming/Chunked Render با رعایت Pre-Roll گره‌ها)
+به فایل خروجی در OPFS انجام شود تا در هنگام Export فایل‌های طولانی، حافظه RAM پر
+نشود.
+
+Render Manifest باید شامل:
+
+  - Project Version
+  - Audio Engine Version
+  - AI Runtime Version
+  - Model Versions
+  - Node Versions
+  - Parameters
+  - Input Asset Hashes
+  - Render Settings
+  - Runtime Information
+
+Export Validation باید بررسی کند:
+
+  - قابلیت خواندن فایل
+  - مدت خروجی
+  - Channel Count
+  - Sample Rate
+  - Bit Depth
+  - Clipping
+  - True Peak
+  - Loudness (LUFS)
+  - Metadata
+  - سلامت ابتدا و انتهای فایل
+
+پروفایل Export باید نسخه مستقل داشته باشد.
+
+بخش نهم: هوش مصنوعی داخلی
+
+۳۵. ساختار موتور داخلی و فعال‌سازی تدریجی (Progressive Activation)
+
+موتور داخلی باید مستقل از API خارجی باشد و قابلیت‌های اصلی محصول را اجرا کند.
+کلیه ورودی‌های صوتی به موتور هوش مصنوعی باید از طریق یک Anti-Aliased Resampler
+استاندارد به نرخ نمونه موردنیاز مدل (معمولاً 16,000 Hz Mono) تبدیل شوند تا از
+افت دقت تشخیص روی واج‌های سایشی فارسی جلوگیری شود.
+
+گروه‌بندی توسعه و بارگذاری:
+
+گروه A: هسته ضروری و فوری (فعال در ثانیه صفر، بدون نیاز به دانلود مدل سنگین)
+
+  - Import جریانی، ساخت جدول Seek و نمایش فوری Waveform
+  - Playback و Editing غیرمخرب
+  - VAD فوق‌سبک (زیر ۲ مگابایت) و Silence/Pause Detection مبتنی بر DSP
+  - تشخیص اولیه مکث‌های طولانی و پیشنهاد اصلاح آن‌ها
+  - استخراج پروفایل Room Tone
+  - Level Control و تشخیص Clipping
+  - Save و Undo/Redo
+
+گروه B: قابلیت‌های اصلی هوشمند (فعال پس از دریافت بلوکی مدل‌های مربوطه)
+
+  - Persian ASR (پشتیبانی از معماری‌های چندسطحی: مدل‌های دقیق‌تر مانند Whisper و
+    مدل‌های سریع‌تر و کم‌مصرف‌تر مانند FastConformer/CTC کوانتیزه بر اساس توان
+    دستگاه)
+  - Word Alignment دقیق و تشخیص دنباله کسره اضافه
+  - Disfluency Detection (تشخیص تپق‌های مستقل و تپق‌های چسبیده به کلمات فارسی)
+  - Repetition Detection
+  - Diarization و تشخیص Crosstalk در ضبط‌های چندمیکروفونی
+  - Noise Reduction
+
+گروه C: قابلیت‌های پیشرفته
+
+  - Semantic Repetition
+  - Semantic Editing
+  - Advanced Restoration
+  - Speech Reconstruction
+  - Voice Replacement
+
+گروه C تعهد نسخه اولیه نیست.
+
+۳۶. اعتبارسنجی نتایج مدل‌ها
+
+هر Analysis Result باید شامل:
+
+  - Input Asset Version
+  - Input Range (در Timebase مادر پروژه)
+  - Model ID
+  - Model Version
+  - Runtime
+  - Parameters
+  - Timestamp
+  - Confidence
+  - Provenance
+  - Validity Status
+
+نتایج مدل‌های وابسته نباید خطای مدل قبلی را قطعی فرض کنند.
+
+Decision Validation باید تناقض نتایج، وابستگی‌ها، ریسک به هم خوردن سینک چندترک و
+پیشنهادهای نامطمئن را بررسی کند.
+
+۳۷. تاریخچه تصمیم‌های کاربر
+
+برای هر پیشنهاد ثبت شود:
+
+  - Recommendation ID
+  - Analysis Source
+  - Audio Range
+  - Recommendation Type
+  - Confidence
+  - Input Version
+  - User Decision
+  - Modification
+  - Timestamp
+  - Optional Rejection Reason
+
+وضعیت‌ها:
+
+Pending → Accepted / Rejected / Modified / Superseded / Invalidated
+
+رد پیشنهاد نباید به‌صورت خودکار به معنی آموزش مدل یا تغییر رفتار عمومی آن باشد.
+
+۳۸. Diarization، گفتار هم‌پوشان و نشت صدا (Crosstalk)
+
+مدل داده باید از موارد زیر پشتیبانی کند:
+
+  - Speaker ID
+  - Speaker Segment
+  - Overlapping Speech
+  - Crosstalk / Mic Bleed Region (تشخیص نشت صدای گوینده A در میکروفون گوینده B
+    در پروژه‌های چندترک، تا نشت صدا به‌اشتباه به‌عنوان گفتار گوینده B ثبت نشود)
+  - Unknown Speaker
+  - Speaker Confidence
+  - Speaker Timeline
+  - Manual Speaker Correction
+
+۳۹. کیفیت فارسی
+
+Persian Speech Evaluation Framework باید شامل داده‌های آزمون مجاز و متنوع باشد:
+
+  - رسمی و محاوره‌ای
+  - لهجه‌های مختلف
+  - گفتار سریع و آرام
+  - چندگوینده و چندمیکروفونه (دارای نشت صدا)
+  - نویز
+  - مکث
+  - تپق (مستقل و کشیده‌شده در انتهای کلمات)
+  - عبارات دارای زنجیره کسره اضافه
+  - مصاحبه
+  - سخنرانی
+  - پادکست
+  - آموزش
+  - فایل کوتاه و طولانی
+
+معیارها:
+
+  - WER (روی متن اصلی و متن نرمال‌شده به‌صورت تفکیک‌شده)
+  - Word Timestamp & Boundary Accuracy (دقت مرز کلمه نسبت به برش آکوستیکی و عدم
+    بریدگی کسره اضافه)
+  - Diarization Quality (DER)
+  - Precision
+  - Recall
+  - False Positive
+  - False Negative
+  - Runtime (Real-Time Factor)
+  - Peak Memory Usage & OPFS Disk Footprint
+  - Device Compatibility
+
+آستانه پذیرش باید پس از ایجاد Baseline واقعی تصویب شود.
+
+کیفیت تشخیص مدل و کیفیت تدوین نهایی (طبیعی بودن صدای خروجی پس از برش) دو معیار
+مستقل هستند.
+
+۴۰. Model Delivery System (توزیع قطعه‌قطعه و مقاوم به قطعی شبکه)
+
+اجزا:
+
+  - Model Registry
+  - Version
+  - Content-Addressable Chunk Manifest (تقسیم فایل مدل‌های بزرگ به قطعات کوچک ۸
+    تا ۱۶ مگابایتی که هر قطعه دارای Hash مستقل است)
+  - Digital Signature
+  - License
+  - File Size
+  - Compatibility & Tier Metadata
+  - Benchmark
+  - Chunked Download/Resume در پس‌زمینه (ذخیره مستقیم هر قطعه در OPFS به‌گونه‌ای
+    که در صورت قطع اینترنت یا بستن تب، دانلود دقیقاً از قطعه بعدی ادامه یابد)
+  - Cache
+  - Differential / Chunk-Level Update (به‌روزرسانی فقط قطعات تغییریافته در صورت
+    امکان)
+  - Rollback
+  - Removal
+
+چرخه انتشار:
+
+Candidate → License Review → Security Review → Benchmark → Compatibility Test →
+Limited Release → General Release
+
+وضعیت نسخه مدل:
+
+  - Active
+  - Supported
+  - Deprecated
+  - Archived
+  - Revoked
+
+بخش دهم: امنیت و حریم خصوصی
+
+۴۱. امنیت فایل و Decoder
+
+  - اعتبارسنجی Magic Bytes
+  - بررسی Container و Codec
+  - محدودیت حجم
+  - محدودیت زمان
+  - محدودیت حافظه و فضای دیسک در حین دیکد جریانی (جلوگیری از Zip Bomb /
+    Decompression Bomb صوتی)
+  - کنترل Decoder در محیط ایزوله Web Worker/WASM
+  - مدیریت فایل خراب (رد کردن فریم‌های معیوب بدون کرش کردن کل فرآیند Import)
+  - جلوگیری از مصرف بی‌نهایت منابع
+  - جداسازی شکست Decoder از کل برنامه
+
+فایل صوتی و متن استخراج‌شده باید داده غیرقابل‌اعتماد محسوب شوند.
+
+۴۲. Local Privacy Boundary
+
+اجرای محلی به‌تنهایی تضمین‌کننده محرمانگی کامل نیست.
+
+موارد زیر باید کنترل شوند:
+
+  - Crash Report
+  - Error Logging
+  - Telemetry
+  - نام فایل
+  - مسیر محلی
+  - متن استخراج‌شده
+  - Metadata پروژه
+
+محتوای صوتی و متن کامل نباید پنهانی وارد Telemetry شوند.
+
+گزارش قابل‌ارسال به پشتیبانی باید قبل از ارسال قابل‌مشاهده و قابل‌حذف باشد.
+
+۴۳. External API Governance
+
+API Gateway آینده باید شامل:
+
+  - Provider Adapter
+  - Capability Mapping
+  - Consent Validation
+  - Data Minimization
+  - Credential Management
+  - Cost Estimation
+  - Rate Limiting
+  - Timeout/Retry
+  - Result Validation
+  - Provenance
+  - Audit
+
+مدل کلید و اعتبارنامه باید پیش از پیاده‌سازی انتخاب شود:
+
+  - Platform-Owned Key
+  - User-Owned Key
+  - Provider Account Connection
+
+هیچ کلید محرمانه‌ای نباید در کد عمومی فرانت‌اند یا Local Storage ناامن قرار
+گیرد.
+
+۴۴. Software Supply Chain Security و امنیت محیط اجرا
+
+  - ثبت وابستگی‌ها
+  - بررسی آسیب‌پذیری
+  - بررسی مجوز
+  - SBOM
+  - کنترل منشأ بسته‌ها
+  - Build قابل‌ردیابی
+  - امضای خروجی و بررسی یکپارچگی فایل‌های WASM و مدل‌ها (Subresource Integrity /
+    Hash Verification)
+  - پیکربندی صحیح هدرهای CSP، COOP و COEP
+  - مدیریت آسیب‌پذیری
+  - سیاست به‌روزرسانی امنیتی
+
+بخش یازدهم: پایداری، بازیابی و نگهداری
+
+۴۵. Crash Recovery
+
+باید سناریوهای زیر آزمایش شوند:
+
+  - Crash هنگام Import جریانی
+  - Crash هنگام Save
+  - Crash هنگام Timeline Mutation
+  - Crash هنگام AI Processing یا رخداد GPUDevice.lost (و بازیابی از آخرین
+    Checkpoint قطعه پردازش‌شده)
+  - Crash هنگام Render
+  - قطع ناگهانی برنامه
+  - پرشدن فضای ذخیره یا رد شدن درخواست Persistent Storage
+  - شکست نوشتن فایل در OPFS یا برخورد قفل فایل
+  - بسته‌شدن تب
+
+معیار پذیرش باید شامل سلامت ساختار، صحت ارجاعات، میزان داده ازدست‌رفته و قابلیت
+بازیابی باشد.
+
+۴۶. Backup و Restore
+
+سه مفهوم مستقل:
+
+1.  Project Backup
+2.  Media Backup
+3.  Environment Recovery
+
+هر نوع پشتیبان باید محتویات و محدودیت‌های خود را مشخص کند.
+
+Restore باید پس از بررسی Hash، Asset References، Project Schema و Runtime
+Compatibility تأیید شود.
+
+۴۷. Update Management
+
+Release and Update Manager باید شامل:
+
+  - Application Version
+  - Runtime Version
+  - Model Compatibility
+  - Cache Management
+  - Atomic Update
+  - Rollback
+  - Migration
+  - Project Preservation
+
+نسخه جدید نباید پروژه فعال را در معرض خرابی قرار دهد.
+
+۴۸. Local Project & File Handle Concurrency
+
+برای جلوگیری از تعارض چند تب و همچنین جلوگیری از خطای قفل انحصاری
+SyncAccessHandle بین Workerهای داخلی یک تب:
+
+  - استفاده از استاندارد Web Locks API همراه با مکانیسم Fallback برای قفل سطح
+    پروژه بین تب‌ها (Project Session Lock)
+  - استفاده از Storage I/O Broker / File Lease Registry برای هماهنگی دسترسی
+    Workerها به فایل‌های OPFS در داخل تب فعال
+  - Project Session ID
+  - Active Editing Session
+  - Project Revision
+  - Last Saved Revision
+  - Stale Session Detection
+  - Conflict Warning
+  - Recovery Copy
+
+قفل‌گذاری محلی برای نسخه اول کافی است؛ Sync ابری لازم نیست.
+
+۴۹. حذف داده
+
+عملیات زیر باید مستقل باشند:
+
+  - حذف ارجاع از پروژه
+  - حذف نسخه مشتق‌شده
+  - حذف فایل اصلی، جدول Seek و بلوک‌های کش PCM متناظر در OPFS
+  - حذف Cache
+  - حذف نتیجه تحلیل
+  - حذف تاریخچه تدوین
+  - حذف مدل
+  - حذف کامل پروژه
+
+حذف Asset مشترک باید پس از بررسی وابستگی‌ها انجام شود.
+
+بخش دوازدهم: رابط کاربری و تجربه محصول
+
+۵۰. اصول رابط کاربری
+
+  - ساده و قابل‌فهم
+  - حرفه‌ای
+  - Mobile-First در طراحی، اما Desktop-Oriented در قابلیت‌های سنگین
+  - عدم نمایش هم‌زمان تعداد زیادی کنترل غیرضروری
+  - جداسازی محیط تدوین از تنظیمات پیشرفته
+  - نمایش واضح وضعیت پردازش و پیشرفت دانلود قطعه‌قطعه مدل‌ها در پس‌زمینه
+  - نمایش منشأ و میزان اطمینان پیشنهادها (همراه با هشدارهای آوایی مانند دنباله
+    کسره اضافه)
+  - امکان شنیدن نتیجه (همراه با Pre-Roll، Micro-Crossfade و Room Tone) پیش از
+    اعمال تغییر
+
+۵۱. محیط اصلی تدوین
+
+اجزای اصلی:
+
+  - Project Header (شامل نشانگر وضعیت ذخیره، مصرف فضای OPFS و وضعیت آمادگی موتور
+    AI)
+  - Media Browser
+  - Waveform
+  - Timeline (با نشانگر قفل همگام‌سازی چندترک)
+  - Transcript Panel
+  - Speaker Panel
+  - Editing Suggestions
+  - Processing Panel
+  - Preview Controls
+  - History
+  - Export Panel
+
+۵۲. رابط پیشنهادهای هوشمند
+
+هر پیشنهاد باید نمایش دهد:
+
+  - نوع ایراد (تپق، مکث، تکرار، کلمه زائد، یا هشدار دنباله آوایی)
+  - محدوده زمانی
+  - نوع عمل پیشنهادی (Ripple Cut سراسری یا جایگزینی درجا با Room Tone)
+  - متن مرتبط
+  - دلیل پیشنهاد
+  - Confidence
+  - Preview (پخش بازه کوتاه قبل و بعد از برش با اعمال Pre-Roll برای شنیدن طبیعی
+    بودن اتصال)
+  - Accept
+  - Reject
+  - Modify (امکان جابه‌جایی دستی مرز برش)
+  - Undo
+
+پیشنهادهای کم‌اطمینان نباید در سطح پیشنهادهای مطمئن نمایش داده شوند.
+
+۵۳. مقیاس‌پذیری رابط کاربری
+
+  - Virtualized Timeline
+  - Level-of-Detail (LOD) Waveform (رندر سریع از روی هرم Peak ازپیش‌محاسبه‌شده
+    در OPFS)
+  - Progressive Rendering
+  - Lazy Loading
+  - Viewport-Based Rendering
+  - Incremental Transcript Rendering (مجازی‌سازی فهرست کلمات برای فایل‌های
+    چندساعته)
+
+داده مرجع پروژه نباید برای بهینه‌سازی نمایش حذف شود.
+
+۵۴. بلوغ قابلیت‌ها
+
+هر قابلیت باید یکی از وضعیت‌های زیر را داشته باشد:
+
+  - Experimental
+  - Preview
+  - Beta
+  - Stable
+  - Deprecated
+  - Disabled
+
+قابلیت آزمایشی نباید به‌عنوان قابلیت پایدار معرفی شود.
+
+بخش سیزدهم: مدل اقتصادی
+
+۵۵. مدل درآمدی
+
+مدل اصلی درآمد، اشتراک ماهانه و سالانه است.
+
+مزیت اصلی پردازش محلی، حذف هزینه متغیر GPU و API مرکزی برای پردازش داخلی کاربران
+است.
+
+اما هزینه‌های زیر باقی می‌مانند:
+
+  - Backend
+  - Authentication
+  - Subscription
+  - Payment
+  - Model Delivery
+  - CDN
+  - Storage
+  - Monitoring
+  - Security
+  - Support
+  - Development
+  - Maintenance
+
+۵۶. سیاست مصرف نامحدود
+
+محصول می‌تواند اشتراک بدون محدودیت اعتباری پردازش داخلی ارائه کند، اما نباید
+محدودیت‌های واقعی سخت‌افزار و مرورگر را پنهان کند.
+
+موارد زیر باید شفاف باشند:
+
+  - محدودیت حافظه (RAM)
+  - توان پردازش
+  - مدت فایل
+  - محدودیت هم‌زمانی
+  - فضای ذخیره‌سازی دیسک (OPFS Quota)
+  - حجم دانلود مدل
+  - محدودیت دستگاه
+  - سیاست مصرف منصفانه
+
+اشتراک پردازش داخلی باید از اعتبار احتمالی پردازش ابری آینده جدا باشد.
+
+۵۷. هزینه توزیع مدل‌ها
+
+باید اندازه‌گیری شود:
+
+  - Model Download Size
+  - Chunk Download Failure & Resume Rate (نرخ موفقیت ادامه دانلود پس از قطعی
+    شبکه)
+  - Redownload Rate
+  - Cache Hit Rate
+  - CDN Cost
+  - Model Update Cost
+  - Storage Usage
+
+بخش چهاردهم: فناوری‌های پیشنهادی
+
+۵۸. فناوری‌های اولیه
+
+این موارد گزینه‌های پیشنهادی‌اند و تا پیش از PoC انتخاب قطعی محسوب نمی‌شوند.
+
+| بخش                                 | گزینه پیشنهادی                                                                                       |
+| :---------------------------------- | :--------------------------------------------------------------------------------------------------- |
+| **Frontend**                        | React + TypeScript + Vite                                                                            |
+| **UI**                              | Tailwind                                                                                             |
+| **Waveform**                        | رندر اختصاصی Canvas/WebGL مبتنی بر Multi-Resolution Peak Pyramid                                     |
+| **Audio Core, Decoder & Resampler** | Rust (مانند Symphonia + Rubato برای Resampling ضد Aliasing + DSP اختصاصی) یا C++ کامپایل‌شده به WASM |
+| **Browser Audio**                   | Web Audio API + AudioWorklet + SharedArrayBuffer Ring Buffer                                         |
+| **Compute**                         | Web Workers + WASM (با پشتیبانی از SIMD و در صورت امکان Threads)                                     |
+| **GPU**                             | WebGPU در صورت سازگاری (با Sliced Dispatches و Fallback خودکار)                                      |
+| **AI Runtime**                      | ONNX Runtime Web / GGML (Whisper.cpp) یا Runtime سازگار                                              |
+| **ASR & Alignment**                 | Whisper.cpp WASM / مدل‌های کوانتیزه FastConformer-CTC فارسی + Silero VAD                             |
+| **Media Container / Export**        | کدک‌های WASM سبک و سازگار با مجوز تجاری یا WebCodecs API + FFmpeg سفارشی                             |
+| **Backend**                         | Node.js + Fastify                                                                                    |
+| **Database**                        | PostgreSQL                                                                                           |
+| **Local Storage**                   | OPFS (تحت مدیریت I/O Broker با `FileSystemSyncAccessHandle`) + IndexedDB + Persistent Storage API    |
+
+۵۹. قواعد انتخاب فناوری
+
+  - فناوری باید با مجوز تجاری محصول سازگار باشد (بررسی دقیق مجوزهای GPL/LGPL در
+    کتابخانه‌های صوتی مانند FFmpeg).
+  - وابستگی اجباری به WebGPU ممنوع است.
+  - CPU Fallback (مبتنی بر WASM SIMD) باید برای عملیات سازگار ارزیابی شود.
+  - Runtime صوت و AI باید مستقل باشند.
+  - مجوز Decoderها و Encoderها باید بررسی شود.
+  - عملکرد روی دستگاه واقعی معیار انتخاب است.
+  - Microservices زودهنگام ممنوع است.
+  - SDK عمومی و پلاگین ثالث در نسخه اول ضرورت ندارد.
+
+بخش پانزدهم: محدوده نسخه اولیه
+
+۶۰. تعریف MVP
+
+نسخه اولیه باید یک گردش کار کامل و قابل‌اعتماد را ارائه کند.
+
+قابلیت‌های ضروری:
+
+1.  Import جریانی فایل صوتی، ساخت جدول Seek و مدیریت کش چرخشی PCM در OPFS (بدون
+    انفجار RAM یا پر شدن دیسک)
+2.  Playback پایدار مبتنی بر Ring Buffer
+3.  نمایش فوری Waveform چندسطحی
+4.  تدوین غیرمخرب (با پشتیبانی از حفظ سینک و جایگزینی درجا با Room Tone)
+5.  Timeline مبتنی بر Timebase بدون رانش
+6.  ذخیره و بازیابی پروژه (با حفاظت Persistent Storage و قفل هم‌زمانی)
+7.  Render جریانی (با Pre-Roll و PDC) و Export
+8.  تشخیص فوری مکث و سکوت در ثانیه صفر (گروه A)
+9.  دانلود قطعه‌قطعه و اجرای ASR فارسی محلی روی صوت Downsampleشده استاندارد
+    (گروه B)
+10. اتصال متن به زمان صوت همراه با تراز آکوستیکی و آوایی فارسی (Minimum RMS،
+    تحلیل کشیدگی واکه، حفاظت کسره اضافه، Zero-Crossing، Micro-Crossfade و Room
+    Tone)
+11. پیشنهاد حذف تپق، تکرارهای ساده و کلمات زائد
+12. Preview دقیق و تأیید کاربر
+13. Undo و Redo (با ادغام تغییرات گذرای اسلایدر/Gesture)
+14. مدیریت نسخه‌های پروژه
+15. اعتبارسنجی خروجی
+
+قابلیت‌های پیشرفته‌ای مانند تکرار معنایی، بازسازی صدا، De-Reverb حرفه‌ای،
+Mastering پیشرفته و Multi-Track پیچیده در مراحل بعدی توسعه می‌یابند.
+
+۶۱. معیار موفقیت MVP
+
+MVP زمانی آماده عرضه آزمایشی است که:
+
+  - گردش کامل Import تا Export برای فایل‌های طولانی (۱ تا ۲ ساعت) بدون API
+    خارجی، بدون سرریز RAM و بدون پر کردن غیرمنطقی فضای دیسک انجام شود.
+  - کاربر بلافاصله پس از Import (حتی پیش از اتمام دانلود مدل سنگین ASR) بتواند
+    فایل را ببیند، بشنود و مکث‌ها را تدوین کند.
+  - پروژه پس از بسته‌شدن برنامه یا قطع ناگهانی تب قابل‌بازیابی باشد.
+  - فایل اصلی بدون تغییر حفظ شود.
+  - ASR فارسی روی دستگاه‌های هدف آزموده شده باشد.
+  - برش‌های صوتی حاصل از حذف کلمات فارسی، فاقد کلیک صوتی، بریدگی انتهای کلمه،
+    کسره اضافه معلق یا سکوت مصنوعی باشند و همگام‌سازی ترک‌ها را به هم نزنند.
+  - پیشنهادهای تدوین بدون تأیید کاربر اعمال نشوند.
+  - Playback در زمان پردازش و تحلیل پس‌زمینه مختل نشود و برخورد قفل فایل در OPFS
+    رخ ندهد.
+  - خطاهای ذخیره‌سازی، WebGPU و Render قابل‌شناسایی و بازیابی باشند.
+  - نسخه‌های پروژه و مدل قابل‌ردیابی باشند.
+  - محدودیت‌های دستگاه به‌صورت شفاف نمایش داده شوند.
+
+بخش شانزدهم: آزمون و تضمین کیفیت
+
+۶۲. مجموعه آزمون‌ها
+
+1.  Functional Tests
+2.  Audio Quality, Phase Alignment (PDC) & Splice Smoothness Tests
+3.  Persian Speech & Prosodic Boundary Quality Tests (آزمون کسره اضافه، تپق‌های
+    چسبیده و محاوره)
+4.  Performance Tests
+5.  Memory & Disk Quota Footprint Tests (پایش سقف مصرف RAM و کش OPFS در فایل‌های
+    طولانی)
+6.  Long-Running Stability & GPU Watchdog Recovery Tests
+7.  Storage, File Lock Concurrency, Eviction & Recovery Tests
+8.  Security & Cross-Origin Isolation Tests
+9.  Compatibility Tests
+10. Regression Tests
+11. Export Validation Tests
+12. User Acceptance Tests
+
+۶۳. آزمون طولانی‌مدت
+
+  - پردازش پیوسته چندساعته و فایل‌های صوتی طولانی (حداقل ۲ ساعت در چند ترک)
+  - باز و بسته‌کردن مکرر پروژه
+  - بارگذاری و آزادسازی متوالی مدل‌ها (آزمون عدم نشت حافظه در WASM/WebGPU)
+  - شبیه‌سازی GPUDevice.lost در میانه پردازش و بررسی ادامه خودکار روی WASM
+  - قطع و وصل مکرر شبکه در حین دانلود قطعه‌قطعه مدل‌ها
+  - تغییر تب و رفتن مرورگر به پس‌زمینه در حین Render و ASR
+  - اجرای هم‌زمان Playback، Waveform و AI Worker برای آزمون عدم برخورد قفل
+    SyncAccessHandle در OPFS
+  - توقف و بازیابی از روی Checkpoint
+  - کمبود حافظه و کمبود فضای ذخیره دیسک
+  - تغییر وضعیت باتری
+  - افت عملکرد در طول زمان
+  - اجرای طولانی Playback و بررسی عدم Drift زمانی بین نرخ‌های نمونه مختلف
+
+۶۴. مدیریت خطا
+
+دسته‌های رسمی:
+
+  - Input Error
+  - Resource & Quota Error
+  - Runtime & GPU Device Error
+  - Model Error
+  - Processing Error
+  - Storage & File Lock Error
+  - Timeline & Sync Error
+  - Export Error
+  - Policy Error
+  - Compatibility Error
+
+هر خطا باید دارای شناسه، شدت، قابلیت Retry، امکان Recovery و پیام قابل‌فهم باشد.
+
+۶۵. Release Quality Gate
+
+هر نسخه باید از این دروازه‌ها عبور کند:
+
+  - Functional
+  - Audio Quality
+  - Persian AI & Prosodic Quality
+  - Performance
+  - Memory, Disk Footprint and Stability
+  - Storage and Recovery
+  - Security
+  - Compatibility
+  - Regression
+  - User Acceptance
+
+شکست یک آزمون بحرانی باید مانع انتشار شود.
+
+بخش هفدهم: نقشه راه توسعه
+
+۶۶. مراحل اصلی (بر اساس تقدم اثبات فنی بر نهایی‌سازی اسناد جزئی)
+
+مرحله ۱: تثبیت معماری کلان و قراردادهای اولیه (Draft Contracts)
+
+  - تصویب هشت حوزه و اصول Local-First
+  - تدوین نسخه پیش‌نویس و سبک قراردادهای ارتباطی میان Workerها، I/O Broker در
+    OPFS، Timebase، Audio Engine و AI Runtime (برای شروع PoCها)
+
+مرحله ۲: PoC یکپارچه ذخیره‌سازی هیبریدی و موتور صوتی محلی (PoC #1 & #2)
+
+  - پیاده‌سازی Streaming Decode، ساخت جدول Seek، تولید هرم Peak و مدیریت Rolling
+    PCM Cache در OPFS از طریق I/O Broker (بدون انفجار RAM یا دیسک و بدون خطای
+    قفل فایل)
+  - پیاده‌سازی Playback بدون وقفه با AudioWorklet و SharedArrayBuffer Ring
+    Buffer روی فایل ۲ ساعته
+  - آزمون پایداری حافظه، Auto-Save و Crash Recovery
+
+مرحله ۳: PoC هوش مصنوعی فارسی و تراز آکوستیکی/آوایی برش (PoC #3)
+
+  - پیاده‌سازی Anti-Aliased Downsampler به 16kHz Mono و اجرای مدل‌های ASR فارسی
+    (Whisper و جایگزین‌های سبک‌تر CTC/Conformer) در WASM/WebGPU با بارگذاری بدون
+    کپی مضاعف از OPFS
+  - پیاده‌سازی ترکیب VAD + جستجوی دره انرژی (Minimum RMS) + تشخیص کشیدگی واکه
+    (Formant/Pitch Plateau) + حفاظت کسره اضافه + Zero-Crossing + Micro-Crossfade
+    + Room Tone
+  - ارزیابی کیفیت متن فارسی، دقت Timestampها، طبیعی بودن صدای برش‌خورده و مصرف
+    منابع
+
+مرحله ۴: PoC سازگاری دستگاه‌ها، شبکه و موبایل (PoC #4)
+
+  - آزمون روی دسکتاپ، Android و iOS Safari (بررسی محدودیت‌های واقعی حافظه
+    WASM/WebKit و پایداری WebGPU)
+  - آزمون دانلود قطعه‌قطعه مدل‌ها (Chunked Delivery & Resume)
+  - آزمون رفتار پس‌زمینه (Background Behavior)، قفل صفحه و محدودیت‌های
+    باتری/حافظه
+
+مرحله ۵: تصویب فناوری‌ها و قفل‌کردن اسناد مرجع دهگانه
+
+  - تحلیل نتایج واقعی هر چهار PoC
+  - انتخاب قطعی فناوری‌ها و مدل‌ها
+  - نگارش و تثبیت نهایی ۱۰ سند مشخصات فنی (Specifications) و طراحی کامل مدل داده
+    بر اساس حقایق اثبات‌شده در PoC
+
+مرحله ۶: Vertical Slice
+
+ساخت یک مسیر کامل بر پایه اسناد تثبیت‌شده:
+
+Streaming Ingest & Indexing → Playback → Progressive VAD/DSP → Chunked Model
+Download → Persian ASR & Acoustic/Prosodic Alignment → Edit → Preview (with
+Pre-Roll) → Streaming Render → Export
+
+مرحله ۷: تکمیل Audio Engine
+
+  - Playback پیشرفته
+  - Mixing
+  - Routing & Automatic PDC
+  - DSP (همراه با State Priming)
+  - Real-Time
+  - Offline Processing
+
+مرحله ۸: تکمیل Processing Graph
+
+  - Node Management
+  - Dependency & Latency Calculation
+  - Scheduling
+  - Chunk Processing
+  - Cache
+  - Recovery
+
+مرحله ۹: تکمیل Internal AI Engine
+
+  - ASR چندسطحی
+  - Alignment & Prosodic Checks
+  - Disfluency
+  - Repetition
+  - Diarization & Crosstalk Detection
+  - Model Lifecycle & Tier Management
+
+مرحله ۱۰: تدوین هوشمند
+
+  - Recommendation (با رعایت سینک چندترک)
+  - Decision Validation
+  - Preview
+  - Commit & Gesture Coalescing
+  - Undo/Redo
+  - Post-Edit Validation
+
+مرحله ۱۱: امنیت و انتشار مدل
+
+  - Model Registry
+  - Chunked CDN Delivery & Digital Signature
+  - Licensing
+  - Compatibility
+  - Rollback
+
+مرحله ۱۲: عرضه آزمایشی (Beta)
+
+  - Benchmark واقعی
+  - آزمون پایداری طولانی‌مدت
+  - بررسی تجربه کاربری
+  - تحلیل خطا
+  - اصلاح محدودیت‌ها
+
+مرحله ۱۳: API اختیاری
+
+پس از تثبیت کامل موتور داخلی.
+
+مرحله ۱۴: توسعه Native Runtime
+
+در صورت اثبات محدودیت‌های جدی نسخه وب برای کاربران فوق‌حرفه‌ای.
+
+مرحله ۱۵: Cloud Runtime
+
+فقط در صورت توجیه فنی و اقتصادی و تصویب مستقل.
+
+بخش هجدهم: اسناد مرجع پروژه
+
+۶۷. ده سند اصلی
+
+۱. Platform Architecture Specification
+
+۲. Project & Asset Specification (شامل معماری Hybrid Seek-Indexed Storage و
+Rolling PCM Cache در OPFS)
+
+۳. Timeline & Non-Destructive Editing Specification (شامل Timebase بدون رانش،
+سینک چندترک، قواعد Acoustic/Prosodic Snapping فارسی و Room Tone)
+
+۴. Audio Runtime Specification (شامل Streaming Decode، Anti-Aliased Resampling و
+Ring Buffer Playback)
+
+۵. Processing Graph & Render Specification (شامل Pre-Roll State Priming و
+Automatic PDC)
+
+۶. Internal AI Runtime Specification (شامل Zero-Copy Loading، Model Tiering،
+Chunked Delivery و GPU Fallback)
+
+۷. Persian Speech Editing Specification (شامل قواعد محاوره، کسره اضافه و تپق‌های
+چسبیده)
+
+۸. Execution & Runtime Infrastructure Specification (شامل Cross-Origin
+Isolation، OPFS I/O Broker و Memory/Disk Budgeting)
+
+۹. External API & Privacy Governance Specification
+
+۱۰. Testing, Benchmark & Quality Specification
+
+۶۸. دو پیوست الزامی
+
+  - Technology Evaluation & PoC Report (خروجی مستقیم مراحل ۲ تا ۴ نقشه راه)
+  - Security, Data Retention & Threat Model
+
+۶۹. قواعد حاکم بر اسناد
+
+  - هر مفهوم فقط یک سند مالک دارد.
+  - اسناد دیگر به سند مالک ارجاع می‌دهند.
+  - تناقض میان اسناد باید پیش از توسعه محصول اصلی رفع شود.
+  - قانون دو مرحله‌ای اسناد: پیش از اجرای PoCها، فقط «پیش‌نویس قراردادها (Draft
+    Contracts)» نوشته می‌شود؛ نگارش نهایی و قفل‌کردن ده سند اصلی، بلافاصله پس از
+    استخراج اعداد و محدودیت‌های واقعی از ۴ عدد PoC انجام می‌گیرد تا اسناد بر
+    پایه واقعیت فنی مرورگر باشند، نه فرضیات تئوریک.
+  - هر تغییر معماری باید ثبت و نسخه‌بندی شود.
+  - تصمیم‌های قطعی از پیشنهادهای فنی جدا باشند.
+  - قابلیت اثبات‌نشده نباید به‌عنوان قابلیت آماده معرفی شود.
+  - هر الزام باید معیار پذیرش داشته باشد.
+
+بخش نوزدهم: تصمیم‌های نهایی و غیرقابل‌نقض (۳۲ قانون طلایی)
+
+۱. پردازش محتوای صوتی و اجرای موتور داخلی در نسخه اول محلی است.
+
+۲. API خارجی اختیاری و با رضایت مستقل است.
+
+۳. Cloud Runtime در نسخه اول ساخته یا فعال نمی‌شود.
+
+۴. معماری کلان هشت‌حوزه‌ای حفظ می‌شود.
+
+۵. ساختار اجرایی اولیه Modular Monolith است.
+
+۶. منطق پردازش از مرورگر و سیستم‌عامل مستقل نگه داشته می‌شود.
+
+۷. Real-Time و Offline Processing دو مسیر مستقل دارند.
+
+۸. دیکد و رندر فایل‌های صوتی طولانی باید به‌صورت جریانی (Streaming) باشد؛ نه کل
+فایل غیرفشرده یکجا در RAM نگه داشته می‌شود و نه کل پروژه چندساعته به‌صورت دائمی
+با فرمت Float32 خام فضای دیسک (OPFS) را اشغال می‌کند (استفاده از Seek Table +
+Rolling PCM Cache).
+
+۹. دسترسی به فایل‌های OPFS با SyncAccessHandle باید از طریق I/O Broker یا مدیریت
+متمرکز Lease هماهنگ شود تا هرگز خطای قفل انحصاری بین Workerها رخ ندهد.
+
+۱۰. مدیریت حافظه و منابع باید مرکزی و قابل‌کنترل باشد، از کپی مضاعف مدل‌ها در
+RAM جلوگیری کند و در برابر GPUDevice.lost دارای Fallback خودکار به WASM باشد.
+
+۱۱. Project و Asset دارای هویت و نسخه مستقل هستند و فضای ذخیره محلی باید با
+Persistent Storage در برابر پاک‌سازی خودکار مرورگر محافظت شود.
+
+۱۲. فایل اصلی هرگز مستقیماً تدوین نمی‌شود.
+
+۱۳. Timebase تدوین باید دقیق، بدون خطای گرد کردن در تبدیل بین نرخ‌های نمونه
+(16kHz، 44.1kHz، 48kHz) و مبتنی بر بازه‌های نیمه‌باز [start, end) باشد.
+
+۱۴. تبدیل نرخ نمونه برای تغذیه موتور هوش مصنوعی (16kHz Mono) باید الزاماً از
+طریق Resampler دارای فیلتر Anti-Aliasing انجام شود.
+
+۱۵. برش‌های خودکار و مبتنی بر متن نباید صرفاً به Timestamp خام مدل تکیه کنند؛
+بلکه باید با تراز آکوستیکی و آوایی فارسی (دره انرژی، تحلیل کشیدگی واکه، حفاظت
+کسره اضافه، Zero-Crossing، Micro-Crossfade و حفظ Room Tone) همراه باشند.
+
+۱۶. در پروژه‌های چندترک، حذف‌های هوشمند نباید همگام‌سازی (Sync) بین ترک‌ها را به
+هم بزنند (تفکیک Ripple Cut سراسری از جایگزینی درجا با Room Tone).
+
+۱۷. گراف پردازش باید دارای جبران تأخیر خودکار (Automatic PDC) بین شاخه‌های موازی
+و تغذیه پیش‌نیاز (Pre-Roll State Priming) برای گره‌های دارای حافظه در هنگام
+Preview و Chunk Render باشد.
+
+۱۸. تغییرات پیوسته رابط کاربری (مانند کشیدن اسلایدر) باید در وضعیت گذرا
+(Ephemeral State) اجرا شده و تنها در پایان حرکت به صورت یک Edit Transaction واحد
+ثبت شوند.
+
+۱۹. تمام عملیات تدوین باید قابل‌ردیابی و تا حد امکان قابل‌بازگشت باشند.
+
+۲۰. Analysis و Mutation دو عملیات متفاوت‌اند.
+
+۲۱. Render باید از Snapshot معتبر استفاده کند.
+
+۲۲. نتیجه قدیمی نباید بدون اعتبارسنجی وارد پروژه جدید شود.
+
+۲۳. متن اصلی، نرمال‌شده و نمایشی باید جدا باشند.
+
+۲۴. مدل‌ها باید نسخه، مجوز، منشأ معتبر و سازوکار دانلود قطعه‌قطعه (Chunked &
+Resumable) داشته باشند.
+
+۲۵. قابلیت‌های پایه و تشخیص سکوت/مکث (گروه A) باید بدون انتظار برای دانلود
+مدل‌های سنگین (گروه B) از ثانیه اول فعال باشند.
+
+۲۶. نتیجه مدل باید Provenance داشته باشد.
+
+۲۷. هیچ اصلاح هوشمندی نباید بدون کنترل کاربر به تدوین نهایی تبدیل شود.
+
+۲۸. ذخیره‌سازی، بازیابی و انتقال پروژه از قابلیت‌های بنیادی محصول‌اند.
+
+۲۹. قابلیت‌ها و رده مدل‌ها براساس توان واقعی دستگاه فعال می‌شوند.
+
+۳۰. سازگاری و عملکرد باید روی دستگاه واقعی اثبات شوند.
+
+۳۱. کیفیت مدل و کیفیت تدوین نهایی جداگانه سنجیده می‌شوند.
+
+۳۲. انتشار هر نسخه مشروط به عبور از Quality Gate است و توسعه قابلیت‌های پیشرفته
+نباید پایداری هسته محصول را قربانی کند.
+
+بخش بیستم: حکم نهایی و وضعیت اجرایی
+
+این سند (نسخه ۱.۲)، معماری مرجع محصول را پس از ده دور دیباگ و رفع گلوگاه‌های سطح
+اول و دوم در حافظه، دیسک، هم‌زمانی Workerها، مهندسی DSP، شبکه و آواشناسی زبان
+فارسی تثبیت می‌کند.
+
+پیش از توسعه کامل محصول باید چهار مسئله با PoC واقعی اثبات شوند:
+
+۱. امکان Ingest جریانی، ساخت Seek Table، مدیریت Rolling PCM Cache در OPFS (تحت
+I/O Broker) و اجرای هم‌زمان Playback (با Ring Buffer) روی فایل‌های صوتی بزرگ (۱
+تا ۲ ساعت) بدون سرریز RAM، بدون انفجار فضای دیسک و بدون برخورد قفل فایل.
+
+۲. امکان اجرای ASR فارسی در مرورگر (روی صوت 16kHz حاصل از Anti-Aliased Resampler
+و بارگذاری بدون کپی مضاعف) و ترکیب آن با خط لوله تراز آکوستیکی و آوایی فارسی
+(VAD + Energy Valley + Formant/Pitch Plateau + حفاظت کسره اضافه + Zero-Crossing
++ Room Tone) برای تولید برش‌های صوتی کاملاً طبیعی.
+
+۳. امکان اجرای هم‌زمان Playback، Timeline، گراف پردازش (با Pre-Roll و PDC)،
+تحلیل پس‌زمینه (با Checkpoint) و دانلود قطعه‌قطعه مدل بدون اختلال در رابط کاربری
+یا AudioWorklet.
+
+۴. امکان ارائه تجربه قابل‌قبول روی دسکتاپ، تبلت و موبایل (به‌ویژه بررسی سقف
+حافظه iOS Safari و بازیابی از GPUDevice.lost) با اعمال محدودیت‌های واقعی هر
+دستگاه.
+
+نتیجه نهایی:
+
+محصول باید به‌عنوان یک محیط حرفه‌ای تدوین صوت با هسته محلی، موتور داخلی مستقل،
+مدل داده پایدار، پردازش غیرمخرب و معماری قابل‌گسترش ساخته شود.
+
+مزیت رقابتی اصلی آن صرفاً استفاده از هوش مصنوعی نیست؛ بلکه ترکیب چهار ویژگی است:
+
+  - استقلال پردازش از APIهای خارجی و حذف هزینه متغیر سرور
+  - تدوین واقعی، طبیعی و دقیقِ متصل به ویژگی‌های آوایی زبان فارسی (بدون پریدگی،
+    بدون قطع شدن کسره اضافه و بدون برهم خوردن سینک چندترک)
+  - اجرای محلی، شروع فوری کار بدون انتظار، و کنترل داده توسط کاربر
+  - پایداری پروژه روی فایل‌های طولانی (در هر دو بعد RAM و دیسک) و امکان توسعه
+    حرفه‌ای در بلندمدت
+
+جمع‌بندی اجرایی (نقشه حرکت از امروز)
+
+چهار دستاورد کلیدی در نسخه ۱.۲ قفل شده‌اند:
+
+1.  تعادل کامل بین RAM و دیسک: با معماری هیبریدی (فایل اصلی + Seek Table +
+    Rolling PCM Cache در OPFS) و Downsampling استاندارد به 16kHz برای موتور AI،
+    نه RAM مرورگر کرش می‌کند و نه دیسک کاربر پر می‌شود.
+2.  حذف بن‌بست‌های هم‌زمانی و سخت‌افزاری مرورگر: مدیریت متمرکز SyncAccessHandle
+    از طریق I/O Broker، टाइम‌بیس بدون رانش (Flicks/Rational Mapping)، و محافظت
+    در برابر GPUDevice.lost، پایداری سطح صنعتی را تضمین می‌کنند.
+3.  بومی‌سازی عمیق آوایی برای زبان فارسی: سیستم به جای برش کورکورانه روی
+    Timestamp، مسائلی چون کسره اضافه، تپق‌های کشیده‌شده در انتهای کلمات
+    محاوره‌ای، دره انرژی و Room Tone را درک می‌کند.
+4.  مسیر اجرایی چابک و مبتنی بر شواهد: ابتدا پیش‌نویس سبک قراردادها (Draft
+    Contracts) نوشته می‌شود، بلافاصله ۴ عدد PoC حیاتی ساخته می‌شوند، و سپس ۱۰
+    سند مرجع نهایی بر اساس اعداد واقعیِ استخراج‌شده قفل می‌گردند.
+
+وضعیت فعلی: آماده ورود به فاز اجرا
+
+این سند اکنون از نظر معماری در بالاترین سطح استاندارد مهندسی (تراز نرم‌افزارهای
+مدرن Web DAW) قرار دارد و هیچ نقطه کوری در آن باقی نمانده است. هر زمان که آماده
+باشید، می‌توانیم گام اول اجرایی یعنی تدوین پیش‌نویس قراردادهای فنی (Draft
+Contracts) و طراحی کد PoC شماره ۱ را آغاز کنیم.
