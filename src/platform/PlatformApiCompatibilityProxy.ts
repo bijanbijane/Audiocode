@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import type { Request, Response } from 'express';
 
 export interface PlatformApiCompatibilityProxyOptions {
@@ -10,6 +11,37 @@ export interface PlatformApiCompatibilityProxyOptions {
 
 const MAX_COMPATIBILITY_BODY_BYTES = 64 * 1024;
 const DEFAULT_PROXY_TIMEOUT_MS = 15_000;
+const MAX_LEGACY_DEVICE_FINGERPRINT_CHARS = 512;
+
+/**
+ * Convert the legacy raw device fingerprint into the SHA-256 value stored by
+ * Platform API device-seat enforcement. The raw value is retained only in the
+ * signed compatibility payload when the authenticated lease is issued.
+ */
+export function normalizeLegacyPlatformLeaseRequestBody(body: unknown): unknown {
+  if (!body || typeof body !== 'object' || Array.isArray(body)) return body;
+  const record = body as Record<string, unknown>;
+  if (typeof record.deviceFingerprintHash === 'string') return body;
+  if (typeof record.deviceFingerprint !== 'string') return body;
+
+  const rawFingerprint = record.deviceFingerprint.trim();
+  if (
+    rawFingerprint.length === 0 ||
+    rawFingerprint.length > MAX_LEGACY_DEVICE_FINGERPRINT_CHARS
+  ) {
+    return body;
+  }
+
+  const deviceFingerprintHash = crypto
+    .createHash('sha256')
+    .update(rawFingerprint, 'utf8')
+    .digest('hex');
+  return {
+    ...record,
+    deviceFingerprint: rawFingerprint,
+    deviceFingerprintHash,
+  };
+}
 
 function sendProxyError(res: Response, status: number, error: string): void {
   if (res.headersSent || res.writableEnded) return;
