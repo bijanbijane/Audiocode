@@ -59,6 +59,7 @@ docker build -f deploy/web/Dockerfile -t avapardaz-web .
 - The Nginx static tier emits COOP, COEP, and CORP headers required by the browser audio/WASM environment, including cache-controlled HTML and asset locations.
 - The Fastify model chunk volume is separate and read-only to the Platform API; it is not shared with the Local Audio Runtime's model storage.
 - The Fastify chunk endpoint re-checks the live release state, requires a PostgreSQL chunk registration, confines the resolved path under the model root, caps chunk sizes at 16 MiB, checks exact file length, and verifies SHA-256 before returning either a full chunk or a range.
+- The Express container healthcheck uses `/healthz` for process liveness only. `/api/v1/asr/health` reports the actual Sherpa executable/model provisioning state and returns `DEGRADED` when either is missing. The automatic installer in the current `LocalSherpaNeuralEngine` is explicitly Linux-x64-only; an ARM64 container on Apple Silicon is not assumed to have working local ASR. Container health is not proof of inference readiness.
 - Nginx permits up to the current 100 MiB public-audio ingress ceiling, while Express applies its own narrower route-level limits (for example, 64 MiB for Smart Audio Edit). Proxy timeouts are set to 240 seconds to cover the existing three-minute edit operation timeout.
 
 The existing `backend/Dockerfile` is intentionally not overwritten. It remains the legacy combined image until the separated deployment has passed parity checks.
