@@ -126,3 +126,36 @@ describe('Section 106: Production Backend Server Bootstrap (Rate Limiter, JWT Ho
     assert.equal(poolEnded, true);
   });
 });
+
+
+describe('Platform API signing key startup guard', () => {
+  it('fails closed when the configured Ed25519 public key does not match the private signer', async () => {
+    const signer = crypto.generateKeyPairSync('ed25519');
+    const unrelated = crypto.generateKeyPairSync('ed25519');
+    const privatePem = signer.privateKey.export({ type: 'pkcs8', format: 'pem' }).toString();
+    const mismatchedPublicPem = unrelated.publicKey.export({ type: 'spki', format: 'pem' }).toString();
+
+    const mockPool: ProductionPgPoolLike = {
+      async query<TRow>() {
+        return { rows: [] as TRow[], rowCount: 0 };
+      },
+      async end() {},
+    };
+    const mockFastify = {} as unknown as ProductionServerAppLike;
+
+    await assert.rejects(
+      () =>
+        bootstrapBackendServer({
+          pgPool: mockPool,
+          fastifyApp: mockFastify,
+          env: {
+            DATABASE_URL: 'postgres://localhost:5432/paudio',
+            ED25519_PRIVATE_KEY_PEM: privatePem,
+            ED25519_PUBLIC_KEY_PEM: mismatchedPublicPem,
+            PAYMENT_WEBHOOK_HMAC_SECRET: 'hmac_secret_test_32_chars_minimum',
+          },
+        }),
+      /BACKEND_ED25519_KEYPAIR_MISMATCH/,
+    );
+  });
+});
