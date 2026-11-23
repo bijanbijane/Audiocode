@@ -1833,9 +1833,12 @@ async function startServer() {
   }
 
   const bindHost = resolveServerBindHost(process.env, audioApiSecurityGuard.config);
+  const webServingEnabled = IS_PROD
+    ? process.env.DISABLE_WEB_HOST !== 'true'
+    : process.env.DISABLE_EMBEDDED_VITE !== 'true';
   app.listen(PORT, bindHost, () => {
     console.log(
-      `Avapardaz Express+Vite server listening on http://${bindHost}:${PORT} (mode=${audioApiSecurityGuard.config.mode})`,
+      `Avapardaz Express API listening on http://${bindHost}:${PORT} (mode=${audioApiSecurityGuard.config.mode}, webServing=${webServingEnabled})`,
     );
   });
 }
