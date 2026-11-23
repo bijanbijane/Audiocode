@@ -27,6 +27,7 @@ COPY --from=api-build /workspace/packages ./packages
 COPY --from=api-build /workspace/backend ./backend
 COPY --from=api-build /workspace/platform/migrations ./platform/migrations
 COPY --from=api-build /workspace/docs ./docs
+COPY --from=api-build /workspace/public ./public
 
 ENV NODE_ENV=production
 ENV DISABLE_WEB_HOST=true
