@@ -14,7 +14,7 @@ This slice creates a deployable boundary between the **web presentation tier** a
 | HTTP API and local runtime | Root `server.ts` (Express) | Hosts the existing `/api/*` and `/v1/*` routes, local ASR/DSP orchestration, Shahab routes, and Companion integration |
 | Browser-local runtime | `src/asr-core/`, `src/processing-engine/`, `src/workflow/`, `src/lifecycle/` | Includes browser ONNX/OPFS paths; these are not server-only modules |
 | Host integration | `src/host-bridge/`, `packages/audition-cep-plugin/` | CEP/Companion behavior must remain intact |
-| Platform backend implementation | `backend/src/` | Contains Fastify/PostgreSQL services and a second bootstrap, but is not the runtime selected by the existing `backend/Dockerfile` |
+| Platform backend implementation | `backend/src/main.ts` → `backend/src/server.ts` | Now has a standalone executable entrypoint, package manifest, TypeScript config and `backend/Dockerfile.platform-api`; it is not yet the canonical owner of existing Express routes |
 | Existing combined container | `backend/Dockerfile` | Explicitly builds root `server.ts` (Express + Vite); retained for backward compatibility during migration |
 
 The root Express server currently has 90+ literal route registrations, plus mounted routers. The API surface includes local session/Companion/ASR and processing routes, platform model/catalog routes, data/model/security factory routes, and Shahab operations. The browser UI must not be treated as a thin frontend: it also owns browser-local audio, timeline, project, model, and host-client workflows.
@@ -54,7 +54,8 @@ docker build -f deploy/web/Dockerfile -t avapardaz-web .
 - `avapardaz-web` serves only the Vite build through Nginx on port 8080.
 - Put both containers on the same Docker network and make the API container resolvable as `avapardaz-api`, or change the upstream in `deploy/web/nginx.conf`.
 - Nginx forwards `/api` and `/v1` without rewriting the paths. Request buffering is disabled for these routes so streaming audio requests are not unnecessarily buffered at the web tier.
-- The Nginx static tier emits COOP, COEP, and CORP headers required by the browser audio/WASM environment.
+- The Nginx static tier emits COOP, COEP, and CORP headers required by the browser audio/WASM environment, including cache-controlled HTML and asset locations.
+- Nginx permits up to the current 100 MiB public-audio ingress ceiling, while Express applies its own narrower route-level limits (for example, 64 MiB for Smart Audio Edit). Proxy timeouts are set to 240 seconds to cover the existing three-minute edit operation timeout.
 
 The existing `backend/Dockerfile` is intentionally not overwritten. It remains the legacy combined image until the separated deployment has passed parity checks.
 
@@ -70,19 +71,21 @@ The web tier is static-only. It does not receive private keys, database credenti
 
 ## Explicitly not complete yet
 
-This is a real web/API **process and container split**, not the final three-runtime decomposition.
+This is a real web/API **process and container split** plus a separately packaged Platform API scaffold; it is not the completed route migration.
 
-The current Express `server.ts` still combines local-audio APIs and several platform-facing routes. The Fastify/PostgreSQL implementation under `backend/src/` is still a separate implementation and is not yet the canonical production API. Inspection found that the existing root `package.json`/Bun lock do not declare Fastify or `pg`; no independent backend package manifest/lockfile or full Express↔Fastify route-parity proof exists yet.
+The current Express `server.ts` still combines local-audio APIs and several platform-facing routes. Fastify/PostgreSQL now has its own `backend/package.json`, `backend/tsconfig.json`, `backend/src/main.ts`, and `backend/Dockerfile.platform-api`, but it is not yet the canonical production API. The standalone npm lockfile has not yet been generated and committed, and no full Express↔Fastify route-parity proof exists.
 
 Do not delete Express, merge the duplicate license paths, or move local runtime modules until the next migration stage has:
 1. a complete route and environment-variable ownership matrix;
-2. a separately locked and runnable Platform API package;
-3. route-level response/authentication parity tests;
-4. explicit ownership for overlapping Ed25519/license/model routes;
-5. passing web build, API tests, local-ASR tests, Companion/CEP tests, and security/offline-entitlement tests.
+2. a generated and committed `backend/package-lock.json`, with the image switched to `npm ci`;
+3. successful Platform API typecheck, backend tests, Docker build and PostgreSQL integration tests;
+4. route-level response/authentication/signature parity tests;
+5. explicit ownership for overlapping Ed25519/license/model routes;
+6. passing web build, local-ASR tests, Companion/CEP tests, and security/offline-entitlement tests.
 
 ## Validation status for this slice
 
 - GitHub source changes are committed on `refactor/separate-web-platform-local-runtime`.
 - The existing PR quality workflows currently report failure on the earlier documentation-only commit. The GitHub connector did not return their job logs (the log-download endpoint returned a storage 404), so the failure cause is not yet established.
-- No local Docker build, Vite build, TypeScript check, or runtime test has been executed through the GitHub connector. The new CI run must be inspected before this slice is called validated.
+- A separate Fastify package, executable entrypoint and Dockerfile are committed, but the standalone lockfile generation/build workflow is currently blocked before runner allocation.
+- No local Docker build, Vite build, TypeScript check, Fastify startup or runtime test has been executed through the GitHub connector. The new CI run must be inspected before this slice is called validated.
