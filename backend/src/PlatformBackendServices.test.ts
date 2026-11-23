@@ -39,6 +39,26 @@ test('Section 100: PlatformBackendServices issues Ed25519-signed license leases 
     if (sql.includes('SELECT lease_id, device_fingerprint_hash')) {
       return { rows: [], rowCount: 0 };
     }
+    if (sql.includes('FROM ai_models_catalog')) {
+      return {
+        rows: [{
+          version: '1.0.0',
+          release_status: 'ACTIVE',
+          tier_group: 'GROUP_B',
+          total_size_bytes: '6',
+        } as unknown as TRow],
+        rowCount: 1,
+      };
+    }
+    if (sql.includes('FROM ai_model_chunks')) {
+      return {
+        rows: [
+          { chunk_index: 0, sha256_hex: 'a'.repeat(64), byte_length: 4 },
+          { chunk_index: 1, sha256_hex: 'b'.repeat(64), byte_length: 2 },
+        ] as unknown as TRow[],
+        rowCount: 2,
+      };
+    }
     return { rows: [], rowCount: 1 };
   };
 
@@ -217,6 +237,41 @@ test('Section 100: PlatformBackendServices issues Ed25519-signed license leases 
   assert.equal(clientResult.reason, 'VALID');
   assert.equal(clientResult.payload?.plan, 'PRO');
   assert.deepEqual(clientResult.allowedModelTiers, ['GROUP_A', 'GROUP_B']);
+
+  // The legacy path and envelope are also preserved for the existing client verifier.
+  await getRoutes.get('/api/v1/models/:modelId/manifest')!(
+    { params: { modelId: 'model-test' }, query: {}, headers: {} },
+    mockReply,
+  );
+  const manifestEnvelope = sentBody as {
+    payloadBase64: string;
+    signatureBase64: string;
+    algorithm: 'Ed25519';
+    keyVersion: number;
+    decodedPreview: {
+      modelId: string;
+      version: string;
+      status: string;
+      tier: string;
+      totalBytes: number;
+      chunkSizeBytes: number;
+      chunks: { index: number; url: string; byteOffset: number; byteLength: number; sha256Hex: string }[];
+      issuedAtMs: number;
+    };
+  };
+  const manifestResult = await OfflineCryptoVerifier.verifyModelManifest(
+    manifestEnvelope,
+    publicKeyInfo.publicKeySpkiBase64,
+  );
+  assert.equal(manifestResult.isValid, true);
+  assert.equal(manifestResult.manifest?.modelId, 'model-test');
+  assert.equal(manifestResult.manifest?.tier, 'GROUP_B');
+  assert.equal(manifestResult.manifest?.totalBytes, 6);
+  assert.equal(manifestResult.manifest?.chunks[1].byteOffset, 4);
+  assert.equal(
+    manifestResult.manifest?.chunks[0].url,
+    'https://cdn.avapardaz.ir/api/v1/models/model-test/1.0.0/chunks/0',
+  );
 
   await postRoutes.get('/api/v1/asr/transcribe-chunk')!(
     { body: {}, headers: {} },
