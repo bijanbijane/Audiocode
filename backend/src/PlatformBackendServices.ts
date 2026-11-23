@@ -362,6 +362,32 @@ export class PlatformBackendServices {
           });
         }
 
+        const expectedTotalBytes = Number(entry.total_size_bytes);
+        const hasInvalidChunk = chunkResult.rows.some((chunk, index) =>
+          !Number.isSafeInteger(chunk.chunk_index) ||
+          chunk.chunk_index !== index ||
+          !Number.isSafeInteger(chunk.byte_length) ||
+          chunk.byte_length <= 0 ||
+          !/^[a-f0-9]{64}$/i.test(chunk.sha256_hex),
+        );
+        const actualTotalBytes = chunkResult.rows.reduce(
+          (sum, chunk) => sum + chunk.byte_length,
+          0,
+        );
+        if (
+          !Number.isSafeInteger(expectedTotalBytes) ||
+          expectedTotalBytes <= 0 ||
+          hasInvalidChunk ||
+          !Number.isSafeInteger(actualTotalBytes) ||
+          actualTotalBytes !== expectedTotalBytes
+        ) {
+          return reply.status(409).send({
+            error: 'MODEL_MANIFEST_INTEGRITY_MISMATCH',
+            modelId,
+            version: entry.version,
+          });
+        }
+
         let byteOffset = 0;
         const chunks = chunkResult.rows.map((chunk) => {
           const offset = byteOffset;
