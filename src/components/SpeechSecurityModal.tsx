@@ -9,6 +9,7 @@ import {
   FileWarning,
   Trash2,
 } from 'lucide-react';
+import { AccessibleModal } from './AccessibleModal';
 import type {
   AdversarialRobustnessReport,
   DeletionCascadeReport,
@@ -72,15 +73,6 @@ export const SpeechSecurityModal: React.FC<SpeechSecurityModalProps> = ({ isOpen
       void fetchOverview();
     }
   }, [isOpen]);
-
-  useEffect(() => {
-    if (!isOpen) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [isOpen, onClose]);
 
   if (!isOpen) return null;
 
@@ -164,23 +156,24 @@ export const SpeechSecurityModal: React.FC<SpeechSecurityModalProps> = ({ isOpen
   };
 
   return (
-    <div
-      role="dialog"
-      aria-modal="true"
-      aria-label="مرکز امنیت، حریم خصوصی و تاب‌آوری صوتی (فاز ۱۴)"
-      data-testid="speech-security-modal"
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-4"
+    <AccessibleModal
+      isOpen={isOpen}
+      onClose={onClose}
+      ariaLabel="مرکز امنیت، حریم خصوصی و تاب‌آوری صوتی (فاز ۱۴)"
+      dir="rtl"
+      dataTestId="speech-security-modal"
+      panelClassName="w-full max-w-6xl"
     >
-      <div className="w-full max-w-6xl max-h-[90vh] flex flex-col rounded-lg border border-[#2C313A] bg-[#181A1F] text-slate-100 shadow-2xl overflow-hidden">
+      <div className="w-full max-h-[90vh] flex flex-col rounded-2xl border border-[var(--avp-border)] bg-[var(--avp-surface)] text-[var(--avp-text)] shadow-[var(--avp-shadow-md)] overflow-hidden">
         {/* Header */}
-        <div className="flex items-center justify-between gap-4 px-5 py-3.5 border-b border-[#2C313A] bg-[#14161A]">
+        <div className="flex items-center justify-between gap-4 px-5 py-3.5 border-b border-[var(--avp-border)] bg-[var(--avp-surface-shell)]">
           <div className="flex items-center gap-2.5">
-            <ShieldCheck className="w-5 h-5 text-emerald-400" aria-hidden="true" />
+            <ShieldCheck className="w-5 h-5 text-[var(--avp-success-text)]" aria-hidden="true" />
             <div>
-              <h2 className="text-sm font-bold text-slate-100">
+              <h2 className="text-sm font-bold text-[var(--avp-text)]">
                 امنیت هوش مصنوعی گفتار، تاب‌آوری خصمانه و مهندسی حریم خصوصی (فاز ۱۴)
               </h2>
-              <p className="text-[11px] text-slate-400 font-mono" dir="ltr">
+              <p className="text-[11px] text-[var(--avp-text-muted)] font-mono" dir="ltr">
                 Threat Model · Audio/SSRF Sandbox · Streaming ASR1 Guard · Adversarial Slices · PII Derivatives
               </p>
             </div>
@@ -190,15 +183,15 @@ export const SpeechSecurityModal: React.FC<SpeechSecurityModalProps> = ({ isOpen
             type="button"
             onClick={onClose}
             aria-label="بستن پنل امنیت"
-            className="p-1.5 rounded border border-[#2C313A] text-slate-400 hover:text-white hover:bg-[#23272E] cursor-pointer"
+            className="avp-btn-icon avp-btn-icon-sm"
           >
             <X className="w-4 h-4" />
           </button>
         </div>
 
         {/* Navigation Tabs */}
-        <div className="flex flex-wrap items-center justify-between gap-3 px-5 py-2 border-b border-[#2C313A] bg-[#1B1E24]">
-          <div className="flex items-center gap-2 text-xs">
+        <div className="flex flex-wrap items-center justify-between gap-3 px-5 py-2 border-b border-[var(--avp-border)] bg-[var(--avp-surface-shell)]">
+          <div className="flex flex-wrap items-center gap-2 text-xs">
             {[
               { id: 'redteam' as const, label: 'ماتریس دفاعی Red Team (A-G)' },
               { id: 'robustness' as const, label: 'تاب‌آوری صوتی FA/EN/CS' },
@@ -210,10 +203,8 @@ export const SpeechSecurityModal: React.FC<SpeechSecurityModalProps> = ({ isOpen
                 type="button"
                 data-testid={`sec-tab-${item.id}`}
                 onClick={() => setTab(item.id)}
-                className={`px-3 py-1.5 rounded font-medium cursor-pointer transition-colors ${
-                  tab === item.id
-                    ? 'bg-emerald-500 text-slate-950 font-semibold'
-                    : 'bg-[#14161A] text-slate-300 border border-[#2C313A] hover:bg-[#23272E]'
+                className={`avp-btn avp-btn-sm ${
+                  tab === item.id ? 'avp-btn-tonal' : 'avp-btn-outline'
                 }`}
               >
                 {item.label}
@@ -226,7 +217,7 @@ export const SpeechSecurityModal: React.FC<SpeechSecurityModalProps> = ({ isOpen
             data-testid="btn-run-red-team-suite"
             disabled={loading}
             onClick={handleRunRedTeam}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded bg-amber-400 hover:bg-amber-300 text-slate-950 font-semibold text-xs cursor-pointer disabled:opacity-50"
+            className="avp-btn avp-btn-sm avp-btn-primary"
           >
             <Play className="w-3.5 h-3.5" aria-hidden="true" />
             <span>اجرای مجدد تست Red Team</span>
@@ -234,9 +225,9 @@ export const SpeechSecurityModal: React.FC<SpeechSecurityModalProps> = ({ isOpen
         </div>
 
         {actionMsg && (
-          <div className="px-5 py-2 bg-emerald-500/10 border-b border-emerald-500/30 text-xs text-emerald-200 flex items-center justify-between">
+          <div className="px-5 py-2 bg-[var(--avp-success-soft)] border-b border-[var(--avp-border)] text-xs text-[var(--avp-success-text)] flex items-center justify-between">
             <span>{actionMsg}</span>
-            <button type="button" onClick={() => setActionMsg(null)} className="text-emerald-300 hover:text-white cursor-pointer">
+            <button type="button" onClick={() => setActionMsg(null)} className="font-semibold hover:underline cursor-pointer">
               بستن
             </button>
           </div>
@@ -245,7 +236,7 @@ export const SpeechSecurityModal: React.FC<SpeechSecurityModalProps> = ({ isOpen
         {/* Body */}
         <div className="flex-1 overflow-y-auto p-5 space-y-5 text-xs">
           {!data && (
-            <div className="text-center py-10 text-slate-400">در حال بارگذاری وضعیت امنیتی...</div>
+            <div className="text-center py-10 text-[var(--avp-text-muted)]">در حال بارگذاری وضعیت امنیتی...</div>
           )}
 
           {data && tab === 'redteam' && (
@@ -254,15 +245,15 @@ export const SpeechSecurityModal: React.FC<SpeechSecurityModalProps> = ({ isOpen
                 {data.redTeamGroups.map((grp) => (
                   <div
                     key={grp.groupCode}
-                    className="rounded border border-[#2C313A] bg-[#14161A] p-4 space-y-2.5"
+                    className="rounded-xl border border-[var(--avp-border)] bg-[var(--avp-surface-shell)] p-4 space-y-2.5"
                   >
-                    <div className="flex items-center justify-between border-b border-[#23272E] pb-2">
-                      <div className="font-semibold text-slate-100">
+                    <div className="flex items-center justify-between border-b border-[var(--avp-border-subtle)] pb-2">
+                      <div className="font-semibold text-[var(--avp-text)]">
                         گروه {grp.groupCode}: {grp.groupTitle}
                       </div>
                       <span
                         className={`font-mono text-[11px] font-bold ${
-                          grp.status === 'PASS' ? 'text-emerald-400' : 'text-rose-400'
+                          grp.status === 'PASS' ? 'text-[var(--avp-success-text)]' : 'text-[var(--avp-danger)]'
                         }`}
                       >
                         {grp.passedChecks}/{grp.totalChecks} {grp.status}
@@ -270,15 +261,15 @@ export const SpeechSecurityModal: React.FC<SpeechSecurityModalProps> = ({ isOpen
                     </div>
                     <div className="space-y-2">
                       {grp.findings.map((f) => (
-                        <div key={f.testId} className="p-2.5 rounded bg-[#1B1E24] border border-[#262B34] space-y-1">
+                        <div key={f.testId} className="p-2.5 rounded-lg bg-[var(--avp-surface)] border border-[var(--avp-border)] space-y-1">
                           <div className="flex items-center justify-between">
-                            <span className="font-mono text-[11px] text-amber-300">{f.testId}</span>
-                            <span className={`font-mono text-[11px] ${f.defended ? 'text-emerald-400' : 'text-rose-400'}`}>
+                            <span className="font-mono text-[11px] text-[var(--avp-warning-text)]">{f.testId}</span>
+                            <span className={`font-mono text-[11px] ${f.defended ? 'text-[var(--avp-success-text)]' : 'text-[var(--avp-danger)]'}`}>
                               {f.defended ? 'DEFENDED' : 'EXPOSED'}
                             </span>
                           </div>
-                          <div className="text-slate-200">{f.attackVector}</div>
-                          <div className="text-[11px] font-mono text-slate-400" dir="ltr">
+                          <div className="text-[var(--avp-text)]">{f.attackVector}</div>
+                          <div className="text-[11px] font-mono text-[var(--avp-text-muted)]" dir="ltr">
                             Observed: {f.observedOutcome}
                           </div>
                         </div>
@@ -289,9 +280,9 @@ export const SpeechSecurityModal: React.FC<SpeechSecurityModalProps> = ({ isOpen
               </div>
 
               {/* Live Spoken Prompt Injection Boundary Test */}
-              <div className="rounded border border-[#2C313A] bg-[#14161A] p-4 space-y-2">
-                <div className="font-semibold text-slate-100 flex items-center gap-1.5">
-                  <Lock className="w-4 h-4 text-amber-400" aria-hidden="true" />
+              <div className="rounded-xl border border-[var(--avp-border)] bg-[var(--avp-surface-shell)] p-4 space-y-2">
+                <div className="font-semibold text-[var(--avp-text)] flex items-center gap-1.5">
+                  <Lock className="w-4 h-4 text-[var(--avp-warning-text)]" aria-hidden="true" />
                   <span>آزمایش زنده مرز اعتماد رونوشت (Anti-Prompt Injection)</span>
                 </div>
                 <div className="flex flex-wrap gap-2">
@@ -299,13 +290,13 @@ export const SpeechSecurityModal: React.FC<SpeechSecurityModalProps> = ({ isOpen
                     type="text"
                     value={promptProbe}
                     onChange={(e) => setPromptProbe(e.target.value)}
-                    className="flex-1 min-w-[260px] px-3 py-1.5 rounded bg-[#1B1E24] border border-[#2C313A] text-slate-100 font-mono text-xs"
+                    className="avp-input flex-1 min-w-[260px] font-mono text-xs"
                   />
                   <button
                     type="button"
                     data-testid="btn-probe-prompt-injection"
                     onClick={handleTestPromptInjection}
-                    className="px-3 py-1.5 rounded bg-sky-500 text-slate-950 font-semibold text-xs hover:bg-sky-400 cursor-pointer"
+                    className="avp-btn avp-btn-sm avp-btn-primary"
                   >
                     آزمایش خنثی‌سازی و جلوگیری از اجرا
                   </button>
@@ -316,24 +307,24 @@ export const SpeechSecurityModal: React.FC<SpeechSecurityModalProps> = ({ isOpen
 
           {data && tab === 'robustness' && (
             <div className="space-y-4">
-              <div className="p-3.5 rounded border border-[#2C313A] bg-[#14161A] flex flex-wrap items-center justify-between gap-3">
+              <div className="p-3.5 rounded-xl border border-[var(--avp-border)] bg-[var(--avp-surface-shell)] flex flex-wrap items-center justify-between gap-3">
                 <div>
-                  <div className="font-semibold text-slate-100">
+                  <div className="font-semibold text-[var(--avp-text)]">
                     ارزیابی مجزای تاب‌آوری صوتی (بدون ترکیب گمراه‌کننده در یک امتیاز واحد)
                   </div>
-                  <div className="text-[11px] text-slate-400 mt-0.5">
+                  <div className="text-[11px] text-[var(--avp-text-muted)] mt-0.5">
                     {data.robustnessReport.explicitLimitations.join(' · ')}
                   </div>
                 </div>
                 <div className="flex items-center gap-4 font-mono text-xs" dir="ltr">
-                  <span className="text-emerald-300">Clean CER: {data.robustnessReport.summaryWithoutBlendedScore.cleanOverallCerPct}%</span>
-                  <span className="text-amber-300">Worst: {data.robustnessReport.summaryWithoutBlendedScore.worstDegradationCerPct}%</span>
+                  <span className="text-[var(--avp-success-text)]">Clean CER: {data.robustnessReport.summaryWithoutBlendedScore.cleanOverallCerPct}%</span>
+                  <span className="text-[var(--avp-warning-text)]">Worst: {data.robustnessReport.summaryWithoutBlendedScore.worstDegradationCerPct}%</span>
                 </div>
               </div>
 
-              <div className="overflow-x-auto rounded border border-[#2C313A]">
+              <div className="overflow-x-auto rounded-xl border border-[var(--avp-border)]">
                 <table className="w-full text-right border-collapse">
-                  <thead className="bg-[#14161A] text-slate-300 border-b border-[#2C313A] font-mono text-[11px]">
+                  <thead className="bg-[var(--avp-surface-secondary)] text-[var(--avp-text-secondary)] border-b border-[var(--avp-border)] font-mono text-[11px]">
                     <tr>
                       <th className="p-2.5 text-right">دسته اغتشاش / حمله صوتی</th>
                       <th className="p-2.5 text-center" dir="ltr">FA CER%</th>
@@ -344,18 +335,18 @@ export const SpeechSecurityModal: React.FC<SpeechSecurityModalProps> = ({ isOpen
                       <th className="p-2.5 text-center" dir="ltr">Timestamp Drift</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-[#23272E] bg-[#181A1F] font-mono text-[11px]">
+                  <tbody className="divide-y divide-[var(--avp-border-subtle)] bg-[var(--avp-surface)] font-mono text-[11px]">
                     {data.robustnessReport.familyMetrics.map((m) => (
-                      <tr key={m.familyId} className="hover:bg-[#1E2229]">
-                        <td className="p-2.5 font-sans text-xs text-slate-200">{m.familyLabel}</td>
-                        <td className="p-2.5 text-center text-sky-300" dir="ltr">{m.faCerPercent ?? '—'}%</td>
-                        <td className="p-2.5 text-center text-emerald-300" dir="ltr">{m.enCerPercent ?? '—'}%</td>
-                        <td className="p-2.5 text-center text-violet-300" dir="ltr">{m.codeSwitchCerPercent ?? '—'}%</td>
-                        <td className="p-2.5 text-center text-amber-300" dir="ltr">
+                      <tr key={m.familyId} className="hover:bg-[var(--avp-surface-hover)]/60">
+                        <td className="p-2.5 font-sans text-xs text-[var(--avp-text)]">{m.familyLabel}</td>
+                        <td className="p-2.5 text-center text-[var(--avp-accent-text)]" dir="ltr">{m.faCerPercent ?? '—'}%</td>
+                        <td className="p-2.5 text-center text-[var(--avp-success-text)]" dir="ltr">{m.enCerPercent ?? '—'}%</td>
+                        <td className="p-2.5 text-center text-[var(--avp-text-secondary)]" dir="ltr">{m.codeSwitchCerPercent ?? '—'}%</td>
+                        <td className="p-2.5 text-center text-[var(--avp-warning-text)]" dir="ltr">
                           {m.relativeDegradationVsCleanPct >= 0 ? `+${m.relativeDegradationVsCleanPct}` : m.relativeDegradationVsCleanPct}%
                         </td>
-                        <td className="p-2.5 text-center text-slate-300" dir="ltr">{m.emptyTranscriptRatePct}%</td>
-                        <td className="p-2.5 text-center text-slate-300" dir="ltr">{m.medianTimestampDriftMs} ms</td>
+                        <td className="p-2.5 text-center text-[var(--avp-text-secondary)]" dir="ltr">{m.emptyTranscriptRatePct}%</td>
+                        <td className="p-2.5 text-center text-[var(--avp-text-secondary)]" dir="ltr">{m.medianTimestampDriftMs} ms</td>
                       </tr>
                     ))}
                   </tbody>
@@ -368,34 +359,34 @@ export const SpeechSecurityModal: React.FC<SpeechSecurityModalProps> = ({ isOpen
             <div className="space-y-4">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                 {data.threatCatalog.map((t) => (
-                  <div key={t.threatId} className="p-3.5 rounded border border-[#2C313A] bg-[#14161A] space-y-1.5">
+                  <div key={t.threatId} className="p-3.5 rounded-xl border border-[var(--avp-border)] bg-[var(--avp-surface-shell)] space-y-1.5">
                     <div className="flex items-center justify-between font-mono text-[11px]">
-                      <span className="text-amber-300 font-bold">{t.threatId} · {t.category}</span>
-                      <span className={t.severity === 'CRITICAL' ? 'text-rose-400 font-bold' : 'text-amber-300'}>
+                      <span className="text-[var(--avp-warning-text)] font-bold">{t.threatId} · {t.category}</span>
+                      <span className={t.severity === 'CRITICAL' ? 'text-[var(--avp-danger)] font-bold' : 'text-[var(--avp-warning-text)]'}>
                         {t.severity} (L:{t.likelihood} × I:{t.impact})
                       </span>
                     </div>
-                    <div className="text-xs font-semibold text-slate-100">{t.title}</div>
-                    <div className="text-[11px] text-slate-300">{t.implementedControl}</div>
-                    <div className="text-[11px] text-slate-400">Residual Risk: {t.residualRisk}</div>
+                    <div className="text-xs font-semibold text-[var(--avp-text)]">{t.title}</div>
+                    <div className="text-[11px] text-[var(--avp-text-secondary)]">{t.implementedControl}</div>
+                    <div className="text-[11px] text-[var(--avp-text-muted)]">Residual Risk: {t.residualRisk}</div>
                   </div>
                 ))}
               </div>
 
-              <div className="rounded border border-[#2C313A] bg-[#14161A] p-4 space-y-2">
-                <div className="font-semibold text-slate-100 flex items-center gap-1.5">
-                  <FileWarning className="w-4 h-4 text-amber-400" aria-hidden="true" />
+              <div className="rounded-xl border border-[var(--avp-border)] bg-[var(--avp-surface-shell)] p-4 space-y-2">
+                <div className="font-semibold text-[var(--avp-text)] flex items-center gap-1.5">
+                  <FileWarning className="w-4 h-4 text-[var(--avp-warning-text)]" aria-hidden="true" />
                   <span>Playbookهای واکنش به رخداد امنیتی ({data.playbooks.length} دستورالعمل عملیاتی)</span>
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
                   {data.playbooks.map((pb) => (
-                    <div key={pb.playbookId} className="p-2.5 rounded bg-[#1B1E24] border border-[#262B34] space-y-1">
+                    <div key={pb.playbookId} className="p-2.5 rounded-lg bg-[var(--avp-surface)] border border-[var(--avp-border)] space-y-1">
                       <div className="flex items-center justify-between font-mono text-[11px]">
-                        <span className="text-sky-300">{pb.playbookId}</span>
-                        <span className="text-rose-300">{pb.severity}</span>
+                        <span className="text-[var(--avp-accent-text)]">{pb.playbookId}</span>
+                        <span className="text-[var(--avp-danger)]">{pb.severity}</span>
                       </div>
-                      <div className="text-xs font-medium text-slate-100">{pb.title}</div>
-                      <div className="text-[11px] text-slate-400">{pb.immediateContainmentSteps.join(' -> ')}</div>
+                      <div className="text-xs font-medium text-[var(--avp-text)]">{pb.title}</div>
+                      <div className="text-[11px] text-[var(--avp-text-muted)]">{pb.immediateContainmentSteps.join(' -> ')}</div>
                     </div>
                   ))}
                 </div>
@@ -406,9 +397,9 @@ export const SpeechSecurityModal: React.FC<SpeechSecurityModalProps> = ({ isOpen
           {data && tab === 'privacy' && (
             <div className="space-y-4">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div className="rounded border border-[#2C313A] bg-[#14161A] p-4 space-y-2.5">
-                  <div className="font-semibold text-slate-100">سیاست نگهداری مستقل و اقامت داده</div>
-                  <div className="grid grid-cols-2 gap-2 font-mono text-[11px] text-slate-300">
+                <div className="rounded-xl border border-[var(--avp-border)] bg-[var(--avp-surface-shell)] p-4 space-y-2.5">
+                  <div className="font-semibold text-[var(--avp-text)]">سیاست نگهداری مستقل و اقامت داده</div>
+                  <div className="grid grid-cols-2 gap-2 font-mono text-[11px] text-[var(--avp-text-secondary)]">
                     <div>Raw Audio TTL: {data.retentionPolicy.rawAudioTtlDays}d</div>
                     <div>Temp Chunks TTL: {data.retentionPolicy.intermediateChunksTtlHours}h</div>
                     <div>Raw Transcript TTL: {data.retentionPolicy.rawTranscriptTtlDays}d</div>
@@ -422,33 +413,33 @@ export const SpeechSecurityModal: React.FC<SpeechSecurityModalProps> = ({ isOpen
                     type="button"
                     data-testid="btn-execute-cascade-deletion"
                     onClick={handleCascadeDelete}
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded border border-rose-500/40 bg-rose-500/15 text-rose-200 hover:bg-rose-500/25 text-xs cursor-pointer"
+                    className="avp-btn avp-btn-sm avp-btn-danger-ghost"
                   >
                     <Trash2 className="w-3.5 h-3.5" aria-hidden="true" />
                     <span>اجرای تست حذف آبشاری رکورد Sandbox</span>
                   </button>
                 </div>
 
-                <div className="rounded border border-[#2C313A] bg-[#14161A] p-4 space-y-2.5">
-                  <div className="font-semibold text-slate-100">تولید مشتق سانسورشده PII (با حفظ متن اصلی)</div>
+                <div className="rounded-xl border border-[var(--avp-border)] bg-[var(--avp-surface-shell)] p-4 space-y-2.5">
+                  <div className="font-semibold text-[var(--avp-text)]">تولید مشتق سانسورشده PII (با حفظ متن اصلی)</div>
                   <textarea
                     rows={2}
                     value={piiInput}
                     onChange={(e) => setPiiInput(e.target.value)}
-                    className="w-full p-2 rounded bg-[#1B1E24] border border-[#2C313A] text-slate-100 text-xs"
+                    className="avp-input w-full p-2 text-xs"
                   />
                   <button
                     type="button"
                     data-testid="btn-create-pii-derivative"
                     onClick={handleCreatePiiDerivative}
-                    className="px-3 py-1.5 rounded bg-emerald-500 text-slate-950 font-semibold text-xs hover:bg-emerald-400 cursor-pointer"
+                    className="avp-btn avp-btn-sm avp-btn-primary"
                   >
                     ساخت نسخه سانسورشده (Derivative)
                   </button>
                   {data.redactedDerivatives.slice(0, 2).map((d) => (
-                    <div key={d.derivativeId} className="p-2 rounded bg-[#1B1E24] border border-[#262B34] text-[11px] space-y-1">
-                      <div className="text-emerald-300">{d.redactedText}</div>
-                      <div className="font-mono text-slate-400" dir="ltr">
+                    <div key={d.derivativeId} className="p-2 rounded-lg bg-[var(--avp-surface)] border border-[var(--avp-border)] text-[11px] space-y-1">
+                      <div className="text-[var(--avp-success-text)]">{d.redactedText}</div>
+                      <div className="font-mono text-[var(--avp-text-muted)]" dir="ltr">
                         Original SHA256 preserved: {d.originalSha256.slice(0, 16)}... ({d.redactionsApplied} masked)
                       </div>
                     </div>
@@ -456,17 +447,17 @@ export const SpeechSecurityModal: React.FC<SpeechSecurityModalProps> = ({ isOpen
                 </div>
               </div>
 
-              <div className="rounded border border-[#2C313A] bg-[#14161A] p-4 space-y-2">
-                <div className="font-semibold text-slate-100 flex items-center gap-1.5">
-                  <Activity className="w-4 h-4 text-sky-400" aria-hidden="true" />
+              <div className="rounded-xl border border-[var(--avp-border)] bg-[var(--avp-surface-shell)] p-4 space-y-2">
+                <div className="font-semibold text-[var(--avp-text)] flex items-center gap-1.5">
+                  <Activity className="w-4 h-4 text-[var(--avp-accent-text)]" aria-hidden="true" />
                   <span>رویدادهای ممیزی امنیتی (بدون نشت متن یا کلید خام)</span>
                 </div>
                 <div className="max-h-[180px] overflow-y-auto space-y-1.5">
                   {data.auditEvents.map((ev) => (
-                    <div key={ev.eventId} className="p-2 rounded bg-[#1B1E24] border border-[#262B34] flex items-center justify-between gap-2 text-[11px] font-mono">
-                      <span className="text-amber-300 shrink-0">{ev.eventType}</span>
-                      <span className="text-slate-300 truncate">{ev.sanitizedSummary}</span>
-                      <span className="text-emerald-400 shrink-0">{ev.actionOutcome}</span>
+                    <div key={ev.eventId} className="p-2 rounded-lg bg-[var(--avp-surface)] border border-[var(--avp-border)] flex items-center justify-between gap-2 text-[11px] font-mono">
+                      <span className="text-[var(--avp-warning-text)] shrink-0">{ev.eventType}</span>
+                      <span className="text-[var(--avp-text-secondary)] truncate">{ev.sanitizedSummary}</span>
+                      <span className="text-[var(--avp-success-text)] shrink-0">{ev.actionOutcome}</span>
                     </div>
                   ))}
                 </div>
@@ -475,6 +466,6 @@ export const SpeechSecurityModal: React.FC<SpeechSecurityModalProps> = ({ isOpen
           )}
         </div>
       </div>
-    </div>
+    </AccessibleModal>
   );
 };

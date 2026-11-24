@@ -32,10 +32,15 @@ import {
   ProjectSortField,
   filterAndSortProjects,
 } from '../projects/projectLibraryLogic';
+import { GlobalAppBar } from './GlobalAppBar';
+import { AccessibleModal } from './AccessibleModal';
+import { OfflineIndicator, PWAInstallButton } from '../ui/pwa/PWAInstallControls';
+import { formatNumberForLocale, toPersianDigits } from '../utils/formatters';
 
 interface ProjectsHubViewProps {
   locale: 'fa' | 'en';
   theme: 'light' | 'dark';
+  persianDigits?: boolean;
   projects: PersistedProjectSummary[];
   isLoading: boolean;
   errorMessage: string | null;
@@ -55,22 +60,34 @@ interface ProjectsHubViewProps {
 
 type HubViewMode = 'grid' | 'table';
 
-function formatAudioDurationClock(sec: number): string {
+function formatAudioDurationClock(sec: number, persianDigits = false): string {
   const safe = Math.max(0, Math.round(sec || 0));
   const mins = Math.floor(safe / 60);
   const secs = safe % 60;
-  return `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+  const raw = `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+  return persianDigits ? toPersianDigits(raw) : raw;
 }
 
-function formatRelativeModifiedTime(updatedAtMs: number, locale: 'fa' | 'en'): string {
+function formatRelativeModifiedTime(
+  updatedAtMs: number,
+  locale: 'fa' | 'en',
+  persianDigits = false,
+): string {
   const diffSec = Math.max(0, Math.floor((Date.now() - updatedAtMs) / 1000));
   if (diffSec < 60) return locale === 'fa' ? 'چند لحظه پیش' : 'Just now';
   const diffMin = Math.floor(diffSec / 60);
-  if (diffMin < 60) return locale === 'fa' ? `${diffMin} دقیقه پیش` : `${diffMin}m ago`;
+  if (diffMin < 60) {
+    const val = formatNumberForLocale(diffMin, { persianDigits });
+    return locale === 'fa' ? `${val} دقیقه پیش` : `${val}m ago`;
+  }
   const diffHr = Math.floor(diffMin / 60);
-  if (diffHr < 24) return locale === 'fa' ? `${diffHr} ساعت پیش` : `${diffHr}h ago`;
+  if (diffHr < 24) {
+    const val = formatNumberForLocale(diffHr, { persianDigits });
+    return locale === 'fa' ? `${val} ساعت پیش` : `${val}h ago`;
+  }
   const diffDay = Math.floor(diffHr / 24);
-  return locale === 'fa' ? `${diffDay} روز پیش` : `${diffDay}d ago`;
+  const val = formatNumberForLocale(diffDay, { persianDigits });
+  return locale === 'fa' ? `${val} روز پیش` : `${val}d ago`;
 }
 
 function formatProjectStatusLabel(status: ProjectLifecycleStatus, locale: 'fa' | 'en'): string {
@@ -90,7 +107,7 @@ function getStatusBadgeClasses(status: ProjectLifecycleStatus): string {
     case 'review':
       return 'bg-[var(--avp-brand-soft)] text-[var(--avp-brand)] border-[var(--avp-brand)]/25';
     case 'completed':
-      return 'bg-[var(--avp-success)]/15 text-[var(--avp-success)] border-[var(--avp-success)]/30';
+      return 'bg-[var(--avp-success-soft)] text-[var(--avp-success-text)] border-[var(--avp-success)]/30';
     case 'editing':
     default:
       return 'bg-[var(--avp-surface-2)] text-[var(--avp-text-secondary)] border-[var(--avp-border)]';
@@ -100,6 +117,7 @@ function getStatusBadgeClasses(status: ProjectLifecycleStatus): string {
 export const ProjectsHubView: React.FC<ProjectsHubViewProps> = ({
   locale,
   theme,
+  persianDigits = false,
   projects,
   isLoading,
   errorMessage,
@@ -228,101 +246,110 @@ export const ProjectsHubView: React.FC<ProjectsHubViewProps> = ({
       className="min-h-screen flex flex-col bg-[var(--avp-bg)] text-[var(--avp-text)]"
       onClick={() => setOpenMenuId(null)}
     >
-      {/* Unified 48px Global Application Header (Shared Architecture with HeaderNav) */}
-      <header className="sticky top-0 z-30 h-[var(--avp-header-h)] bg-[var(--avp-surface)] border-b border-[var(--avp-border)] px-3 sm:px-5 flex items-center justify-between gap-3">
-        <div className="flex items-center gap-2.5 min-w-0">
-          <div className="w-7 h-7 rounded-[var(--avp-radius-sm)] bg-[var(--avp-brand)] text-white flex items-center justify-center shadow-[var(--avp-shadow-xs)] shrink-0">
-            <svg viewBox="0 0 24 24" className="w-4 h-4" fill="none" aria-hidden="true">
-              <path
-                d="M4 12.5h2.2l1.8-5.5 2.6 10 2.4-7.5 1.8 4.2 1.7-1.2H20"
-                stroke="currentColor"
-                strokeWidth="2.1"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              />
-            </svg>
+      {/* Unified 48px Global Application Header via GlobalAppBar */}
+      <GlobalAppBar
+        className="sticky top-0 backdrop-blur-sm bg-[var(--avp-surface-shell)]/95"
+        startSlot={
+          <div className="flex items-center gap-2.5 min-w-0">
+            <div className="w-7 h-7 rounded-[var(--avp-radius-sm)] bg-[var(--avp-brand)] text-white flex items-center justify-center shadow-[var(--avp-shadow-xs)] shrink-0">
+              <svg viewBox="0 0 24 24" className="w-4 h-4" fill="none" aria-hidden="true">
+                <path
+                  d="M4 12.5h2.2l1.8-5.5 2.6 10 2.4-7.5 1.8 4.2 1.7-1.2H20"
+                  stroke="currentColor"
+                  strokeWidth="2.1"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </svg>
+            </div>
+            <div className="flex items-center gap-2 min-w-0">
+              <h1 className="text-[13px] font-bold tracking-tight text-[var(--avp-text)] leading-none whitespace-nowrap">
+                {isFa ? 'آواپرداز' : 'Avapardaz'}
+              </h1>
+              <span className="hidden sm:inline-block text-[11px] px-2 py-0.5 rounded-[var(--avp-radius-xs)] bg-[var(--avp-surface-2)] text-[var(--avp-text-secondary)] border border-[var(--avp-border-subtle)] font-medium truncate">
+                {isFa ? 'استودیوی تدوین گفتار و پادکست' : 'Persian Speech & Podcast Studio'}
+              </span>
+            </div>
           </div>
-          <div className="flex items-center gap-2 min-w-0">
-            <h1 className="text-[13px] font-bold tracking-tight text-[var(--avp-text)] leading-none">
-              {isFa ? 'آواپرداز' : 'Avapardaz'}
-            </h1>
-            <span className="hidden sm:inline-block text-[11px] px-2 py-0.5 rounded-[var(--avp-radius-xs)] bg-[var(--avp-surface-2)] text-[var(--avp-text-secondary)] border border-[var(--avp-border-subtle)] font-medium">
-              {isFa ? 'استودیوی تدوین گفتار و پادکست' : 'Persian Speech & Podcast Studio'}
-            </span>
-          </div>
-        </div>
-
-        <div className="flex items-center gap-2">
-          <button
-            type="button"
-            data-testid="btn-new-project"
-            onClick={onOpenNewProjectModal}
-            className="avp-btn-primary text-xs font-semibold cursor-pointer shadow-[var(--avp-shadow-xs)]"
-          >
-            <Plus className="w-3.5 h-3.5" />
-            <span>{isFa ? 'پروژه جدید' : 'New Project'}</span>
-          </button>
-
-          {/* Unified 4-Button System Utility Capsule: [EN/FA | Theme | System Health | Settings] */}
-          <div className="flex items-center gap-0.5 p-0.5 rounded-[var(--avp-radius-sm)] border border-[var(--avp-border)] bg-[var(--avp-surface-2)]">
-            <button
-              type="button"
-              onClick={onToggleLocale}
-              title={isFa ? 'Switch to English' : 'تغییر به فارسی'}
-              aria-label={isFa ? 'تغییر زبان به انگلیسی' : 'Switch language to Persian'}
-              className="h-6 px-1.5 rounded-[var(--avp-radius-xs)] text-[10px] font-semibold text-[var(--avp-text-secondary)] hover:bg-[var(--avp-hover)] hover:text-[var(--avp-text)] inline-flex items-center gap-1 cursor-pointer transition-colors"
-            >
-              <Languages className="w-3 h-3" />
-              <span>{isFa ? 'EN' : 'FA'}</span>
-            </button>
+        }
+        endSlot={
+          <div className="flex items-center gap-1.5 sm:gap-2">
+            <div className="hidden md:inline-flex items-center gap-1.5">
+              <OfflineIndicator inline locale={locale} />
+              <PWAInstallButton compact locale={locale} />
+            </div>
 
             <button
               type="button"
-              onClick={onToggleTheme}
-              title={
-                theme === 'dark'
-                  ? isFa
-                    ? 'حالت روشن'
-                    : 'Light mode'
-                  : isFa
-                    ? 'حالت تیره'
-                    : 'Dark mode'
-              }
-              aria-label={isFa ? 'تغییر تم روشن و تیره' : 'Toggle theme'}
-              className="w-6 h-6 rounded-[var(--avp-radius-xs)] text-[var(--avp-text-secondary)] hover:bg-[var(--avp-hover)] hover:text-[var(--avp-text)] inline-flex items-center justify-center cursor-pointer transition-colors"
+              data-testid="btn-new-project"
+              onClick={onOpenNewProjectModal}
+              className="avp-btn avp-btn-sm avp-btn-primary px-3 shadow-[var(--avp-shadow-xs)]"
             >
-              {theme === 'dark' ? (
-                <Sun className="w-3.5 h-3.5 text-amber-400" />
-              ) : (
-                <Moon className="w-3.5 h-3.5" />
-              )}
+              <Plus className="w-3.5 h-3.5" aria-hidden="true" />
+              <span>{isFa ? 'پروژه جدید' : 'New Project'}</span>
             </button>
 
-            {onOpenLifecycleModal && (
+            {/* Unified 4-Button System Utility Capsule: [EN/FA | Theme | System Health | Settings] */}
+            <div className="flex items-center gap-0.5 p-0.5 rounded-[var(--avp-radius-sm)] border border-[var(--avp-border)] bg-[var(--avp-surface-2)]">
               <button
                 type="button"
-                onClick={onOpenLifecycleModal}
-                title={isFa ? 'سلامت سیستم و مدل‌های آفلاین' : 'System Health & Local Models'}
-                aria-label={isFa ? 'سلامت سیستم و مدل‌های آفلاین' : 'System Health & Local Models'}
+                onClick={onToggleLocale}
+                title={isFa ? 'Switch to English' : 'تغییر به فارسی'}
+                aria-label={isFa ? 'تغییر زبان به انگلیسی' : 'Switch language to Persian'}
+                className="h-6 px-1.5 rounded-[var(--avp-radius-xs)] text-[10px] font-semibold text-[var(--avp-text-secondary)] hover:bg-[var(--avp-hover)] hover:text-[var(--avp-text)] inline-flex items-center gap-1 cursor-pointer transition-colors"
+              >
+                <Languages className="w-3 h-3" />
+                <span>{isFa ? 'EN' : 'FA'}</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={onToggleTheme}
+                title={
+                  theme === 'dark'
+                    ? isFa
+                      ? 'حالت روشن'
+                      : 'Light mode'
+                    : isFa
+                      ? 'حالت تیره'
+                      : 'Dark mode'
+                }
+                aria-label={isFa ? 'تغییر تم روشن و تیره' : 'Toggle theme'}
                 className="w-6 h-6 rounded-[var(--avp-radius-xs)] text-[var(--avp-text-secondary)] hover:bg-[var(--avp-hover)] hover:text-[var(--avp-text)] inline-flex items-center justify-center cursor-pointer transition-colors"
               >
-                <ShieldCheck className="w-3.5 h-3.5 text-[var(--avp-brand)]" />
+                {theme === 'dark' ? (
+                  <Sun className="w-3.5 h-3.5 text-amber-400" />
+                ) : (
+                  <Moon className="w-3.5 h-3.5" />
+                )}
               </button>
-            )}
 
-            <button
-              type="button"
-              data-testid="btn-open-settings-hub"
-              onClick={onOpenSettings}
-              title={isFa ? 'تنظیمات' : 'Settings'}
-              aria-label={isFa ? 'تنظیمات' : 'Settings'}
-              className="w-6 h-6 rounded-[var(--avp-radius-xs)] text-[var(--avp-text-secondary)] hover:bg-[var(--avp-hover)] hover:text-[var(--avp-text)] inline-flex items-center justify-center cursor-pointer transition-colors"
-            >
-              <Settings className="w-3.5 h-3.5" />
-            </button>
+              {onOpenLifecycleModal && (
+                <button
+                  type="button"
+                  onClick={onOpenLifecycleModal}
+                  title={isFa ? 'سلامت سیستم و مدل‌های آفلاین' : 'System Health & Local Models'}
+                  aria-label={isFa ? 'سلامت سیستم و مدل‌های آفلاین' : 'System Health & Local Models'}
+                  className="w-6 h-6 rounded-[var(--avp-radius-xs)] text-[var(--avp-text-secondary)] hover:bg-[var(--avp-hover)] hover:text-[var(--avp-text)] inline-flex items-center justify-center cursor-pointer transition-colors"
+                >
+                  <ShieldCheck className="w-3.5 h-3.5 text-[var(--avp-brand)]" />
+                </button>
+              )}
+
+              <button
+                type="button"
+                data-testid="btn-open-settings-hub"
+                onClick={onOpenSettings}
+                title={isFa ? 'تنظیمات' : 'Settings'}
+                aria-label={isFa ? 'تنظیمات' : 'Settings'}
+                className="w-6 h-6 rounded-[var(--avp-radius-xs)] text-[var(--avp-text-secondary)] hover:bg-[var(--avp-hover)] hover:text-[var(--avp-text)] inline-flex items-center justify-center cursor-pointer transition-colors"
+              >
+                <Settings className="w-3.5 h-3.5" />
+              </button>
+            </div>
           </div>
-        </div>
-      </header>
+        }
+      />
 
       {/* Main Content */}
       <main className="flex-1 max-w-[1280px] w-full mx-auto px-4 sm:px-6 py-6 sm:py-8 space-y-6">
@@ -489,8 +516,8 @@ export const ProjectsHubView: React.FC<ProjectsHubViewProps> = ({
                 <h2 className="text-lg font-bold flex items-center gap-2">
                   <FolderOpen className="w-5 h-5 text-[var(--avp-brand)]" />
                   <span>{isFa ? 'پروژه‌های شما' : 'Your Projects'}</span>
-                  <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-[var(--avp-surface-2)] text-[var(--avp-text-secondary)]">
-                    {projects.length}
+                  <span className="text-xs font-medium px-2 py-0.5 rounded-[var(--avp-radius-sm)] bg-[var(--avp-surface-2)] text-[var(--avp-text-secondary)] font-mono tabular-nums">
+                    {formatNumberForLocale(projects.length, { persianDigits })}
                   </span>
                 </h2>
                 <p className="text-xs text-[var(--avp-text-secondary)] mt-0.5">
@@ -788,17 +815,17 @@ export const ProjectsHubView: React.FC<ProjectsHubViewProps> = ({
                       <div className="pt-2 border-t border-[var(--avp-border-subtle)] flex items-center justify-between gap-2 text-[11px] text-[var(--avp-text-secondary)]">
                         <div className="flex items-center gap-3">
                           <span
-                            className="inline-flex items-center gap-1 font-mono"
+                            className="inline-flex items-center gap-1 font-mono tabular-nums"
                             dir="ltr"
                           >
                             <Clock className="w-3 h-3" />
-                            {formatAudioDurationClock(item.durationSec)}
+                            {formatAudioDurationClock(item.durationSec, persianDigits)}
                           </span>
                           <span>
                             {item.wordCount > 0
                               ? isFa
-                                ? `${item.wordCount} کلمه`
-                                : `${item.wordCount} words`
+                                ? `${formatNumberForLocale(item.wordCount, { persianDigits })} کلمه`
+                                : `${formatNumberForLocale(item.wordCount, { persianDigits })} words`
                               : isFa
                                 ? 'بدون متن'
                                 : 'No transcript'}
@@ -807,7 +834,7 @@ export const ProjectsHubView: React.FC<ProjectsHubViewProps> = ({
 
                         <div className="flex items-center gap-1.5 text-[var(--avp-brand)] font-semibold">
                           <span className="text-[var(--avp-text-muted)] font-normal">
-                            {formatRelativeModifiedTime(item.updatedAtMs, locale)}
+                            {formatRelativeModifiedTime(item.updatedAtMs, locale, persianDigits)}
                           </span>
                           <Play className="w-3 h-3 fill-current ms-1 opacity-0 group-hover:opacity-100 transition-opacity" />
                         </div>
@@ -817,10 +844,10 @@ export const ProjectsHubView: React.FC<ProjectsHubViewProps> = ({
                 })}
               </div>
             ) : (
-              /* High-Density Studio Table View (Blueprint 1 - P2-1) */
+              /* High-Density Studio Table View */
               <div
                 data-testid="projects-table"
-                className="rounded-[var(--avp-radius-lg)] border border-[var(--avp-border)] bg-[var(--avp-surface)] overflow-hidden shadow-[var(--avp-shadow-xs)]"
+                className="rounded-[var(--avp-radius-lg)] border border-[var(--avp-border)] bg-[var(--avp-surface)] overflow-x-auto shadow-[var(--avp-shadow-xs)]"
               >
                 <table className="w-full text-xs border-collapse">
                   <thead>
@@ -890,14 +917,14 @@ export const ProjectsHubView: React.FC<ProjectsHubViewProps> = ({
                               {formatProjectStatusLabel(item.status, locale)}
                             </span>
                           </td>
-                          <td className="px-3 font-mono font-semibold" dir="ltr">
-                            {formatAudioDurationClock(item.durationSec)}
+                          <td className="px-3 font-mono font-semibold tabular-nums" dir="ltr">
+                            {formatAudioDurationClock(item.durationSec, persianDigits)}
                           </td>
-                          <td className="px-3 text-[var(--avp-text-secondary)] hidden md:table-cell">
-                            {item.wordCount}
+                          <td className="px-3 text-[var(--avp-text-secondary)] hidden md:table-cell font-mono tabular-nums">
+                            {formatNumberForLocale(item.wordCount, { persianDigits })}
                           </td>
                           <td className="px-3 text-[var(--avp-text-muted)] hidden lg:table-cell">
-                            {formatRelativeModifiedTime(item.updatedAtMs, locale)}
+                            {formatRelativeModifiedTime(item.updatedAtMs, locale, persianDigits)}
                           </td>
                           <td
                             className="px-3 text-end"
@@ -932,25 +959,27 @@ export const ProjectsHubView: React.FC<ProjectsHubViewProps> = ({
         )}
       </main>
 
-      {/* Delete Project Confirmation Dialog */}
-      {confirmDeleteItem && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-[2px] p-4"
-          role="dialog"
-          aria-modal="true"
-          data-testid="confirm-delete-project-modal"
-          onClick={() => setConfirmDeleteItem(null)}
-        >
-          <div
-            className="w-full max-w-md rounded-2xl border border-[var(--avp-border)] bg-[var(--avp-surface)] p-5 shadow-[var(--avp-shadow-md)] space-y-4"
-            onClick={(e) => e.stopPropagation()}
-          >
+      {/* Delete Project Confirmation Dialog via AccessibleModal */}
+      <AccessibleModal
+        isOpen={Boolean(confirmDeleteItem)}
+        onClose={() => {
+          if (!isDeleting) setConfirmDeleteItem(null);
+        }}
+        disableEscape={isDeleting}
+        closeOnBackdropClick={!isDeleting}
+        dir={isFa ? 'rtl' : 'ltr'}
+        labelledBy="confirm-delete-project-title"
+        dataTestId="confirm-delete-project-modal"
+        panelClassName="w-full max-w-md rounded-2xl border border-[var(--avp-border)] bg-[var(--avp-surface)] p-5 shadow-[var(--avp-shadow-md)] space-y-4"
+      >
+        {confirmDeleteItem && (
+          <>
             <div className="flex items-start gap-3">
-              <div className="w-10 h-10 rounded-xl bg-[var(--avp-error)]/15 text-[var(--avp-error)] flex items-center justify-center shrink-0">
+              <div className="w-10 h-10 rounded-xl bg-[var(--avp-error-soft)] text-[var(--avp-error)] flex items-center justify-center shrink-0">
                 <Trash2 className="w-5 h-5" />
               </div>
               <div className="space-y-1">
-                <h3 className="text-base font-bold text-[var(--avp-text)]">
+                <h3 id="confirm-delete-project-title" className="text-base font-bold text-[var(--avp-text)]">
                   {isFa ? 'حذف پروژه؟' : 'Delete Project?'}
                 </h3>
                 <p className="text-xs text-[var(--avp-text-secondary)] leading-relaxed">
@@ -966,7 +995,7 @@ export const ProjectsHubView: React.FC<ProjectsHubViewProps> = ({
                 type="button"
                 onClick={() => setConfirmDeleteItem(null)}
                 disabled={isDeleting}
-                className="h-9 px-4 rounded-xl border border-[var(--avp-border)] text-xs font-medium text-[var(--avp-text-secondary)] hover:bg-[var(--avp-hover)] cursor-pointer"
+                className="avp-btn avp-btn-outline"
               >
                 {isFa ? 'انصراف' : 'Cancel'}
               </button>
@@ -975,7 +1004,7 @@ export const ProjectsHubView: React.FC<ProjectsHubViewProps> = ({
                 data-testid="btn-confirm-delete-project"
                 onClick={() => void handleConfirmDelete()}
                 disabled={isDeleting}
-                className="h-9 px-4 rounded-xl bg-[var(--avp-error)] text-white text-xs font-semibold hover:opacity-90 cursor-pointer"
+                className="avp-btn avp-btn-danger"
               >
                 {isDeleting
                   ? isFa
@@ -986,9 +1015,9 @@ export const ProjectsHubView: React.FC<ProjectsHubViewProps> = ({
                     : 'Delete Project'}
               </button>
             </div>
-          </div>
-        </div>
-      )}
+          </>
+        )}
+      </AccessibleModal>
     </div>
   );
 };

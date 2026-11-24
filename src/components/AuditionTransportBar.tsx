@@ -13,7 +13,7 @@ import {
   Square,
   X,
 } from 'lucide-react';
-import { formatTimecode, secondsToFlicks } from '../engine/timebase';
+import { formatNumberForLocale, formatStudioTimecode } from '../utils/formatters';
 
 export interface WaveformSelectionState {
   startSec: number;
@@ -36,6 +36,8 @@ interface AuditionTransportBarProps {
   peakDb: number;
   rmsDb: number;
   locale?: 'fa' | 'en';
+  timecodeFormat?: 'mm:ss.ms' | 'hh:mm:ss';
+  persianDigits?: boolean;
   onTogglePlay: () => void;
   onPlaySelection: () => void;
   onStopAndReset: () => void;
@@ -67,6 +69,8 @@ export const AuditionTransportBar: React.FC<AuditionTransportBarProps> = ({
   peakDb,
   rmsDb,
   locale = 'fa',
+  timecodeFormat = 'mm:ss.ms',
+  persianDigits = false,
   onTogglePlay,
   onPlaySelection,
   onStopAndReset,
@@ -85,8 +89,11 @@ export const AuditionTransportBar: React.FC<AuditionTransportBarProps> = ({
   const safeTotal = Math.max(0.1, totalDurationSec);
   const progressPct = Math.max(0, Math.min(100, (playheadSec / safeTotal) * 100));
   const peakPct = Math.max(0, Math.min(100, ((peakDb + 60) / 60) * 100));
-  const rmsPct = Math.max(0, Math.min(100, ((rmsDb + 60) / 60) * 100));
+  void rmsDb;
   const selectionLenSec = selection ? Math.max(0, selection.endSec - selection.startSec) : 0;
+
+  const formattedPlayhead = formatStudioTimecode(playheadSec, timecodeFormat, persianDigits);
+  const formattedTotal = formatStudioTimecode(totalDurationSec, timecodeFormat, persianDigits);
 
   const statusText = !hasAudio
     ? isFa
@@ -147,20 +154,20 @@ export const AuditionTransportBar: React.FC<AuditionTransportBarProps> = ({
         />
       </div>
 
-      {/* Main 50px 3-Zone Symmetrical Grid Transport Row */}
-      <div className="w-full px-3 sm:px-4 h-[50px] grid grid-cols-[1fr_auto_1fr] items-center gap-2">
-        {/* Zone 1 (Start — Framed Studio Telemetry Pod: LTR Timecode + Status + 12-Segment Stereo L/R Output Meter) */}
-        <div className="flex items-center gap-2 min-w-0 justify-self-start px-2.5 py-1 rounded-xl border border-[var(--avp-border)] bg-[var(--avp-surface-secondary)]/65">
+      {/* Responsive Transport Row: 2 clean rows on < sm (390px), symmetrical 50px 3-zone grid on sm+ */}
+      <div className="w-full px-2.5 sm:px-4 py-1.5 sm:py-0 min-h-[50px] sm:h-[50px] flex flex-wrap sm:grid sm:grid-cols-[1fr_auto_1fr] items-center justify-between gap-1.5 sm:gap-2">
+        {/* Zone 1 (Start — Timecode HUD + Status + LED Output Meter) */}
+        <div className="order-2 sm:order-1 flex items-center gap-2 min-w-0 justify-self-start px-2 sm:px-2.5 py-1 rounded-xl border border-[var(--avp-border)] bg-[var(--avp-surface-secondary)]/65">
           <div className="flex items-center gap-1.5" dir="ltr">
             <span
               data-testid="audition-timecode-hud"
-              className="avp-bidi-num text-[12px] sm:text-[12.5px] font-semibold text-[var(--avp-text)] sm:min-w-[72px]"
+              className="avp-bidi-num text-[11.5px] sm:text-[12.5px] font-semibold text-[var(--avp-text)] sm:min-w-[72px]"
             >
-              {formatTimecode(secondsToFlicks(playheadSec))}
+              {formattedPlayhead}
             </span>
-            <span className="text-[11px] text-[var(--avp-text-faint)] hidden sm:inline">/</span>
-            <span className="avp-bidi-num text-[11px] text-[var(--avp-text-muted)] hidden sm:inline">
-              {formatTimecode(secondsToFlicks(totalDurationSec))}
+            <span className="text-[11px] text-[var(--avp-text-faint)]">/</span>
+            <span className="avp-bidi-num text-[10.5px] sm:text-[11px] text-[var(--avp-text-muted)]">
+              {formattedTotal}
             </span>
           </div>
 
@@ -253,14 +260,14 @@ export const AuditionTransportBar: React.FC<AuditionTransportBarProps> = ({
               })}
             </div>
             <span className="avp-bidi-num text-[10px] font-medium text-[var(--avp-text-muted)] w-[38px]">
-              {peakDb <= -59 ? '-∞' : peakDb.toFixed(0)} dB
+              {peakDb <= -59 ? '-∞' : formatNumberForLocale(Math.round(peakDb), { persianDigits })} dB
             </span>
           </div>
         </div>
 
-        {/* Zone 2 (Exact Geometric Center — Framed Hardware Transport Deck, LOCKED dir="ltr") */}
+        {/* Zone 2 (Exact Geometric Center on sm+ / Full-width primary row on < sm, LOCKED dir="ltr") */}
         <div
-          className="flex items-center justify-center gap-0.5 justify-self-center px-2 py-1 rounded-xl border border-[var(--avp-border)] bg-[var(--avp-surface-secondary)]/75"
+          className="order-1 sm:order-2 w-full sm:w-auto flex items-center justify-center gap-1 sm:gap-0.5 justify-self-center px-2 py-1 rounded-xl border border-[var(--avp-border)] bg-[var(--avp-surface-secondary)]/75"
           dir="ltr"
         >
           <div className="hidden lg:inline-flex items-center gap-0.5 me-0.5 pe-1 border-e border-[var(--avp-border)]">
@@ -306,14 +313,14 @@ export const AuditionTransportBar: React.FC<AuditionTransportBarProps> = ({
               onClick={onStepBack}
               aria-label={isFa ? `${seekStepSec} ثانیه عقب` : `Back ${seekStepSec}s`}
               title={isFa ? `${seekStepSec} ثانیه عقب` : `Back ${seekStepSec}s`}
-              className="avp-btn avp-btn-sm avp-btn-ghost px-2 font-mono text-[11px]"
+              className="avp-btn min-h-[36px] sm:min-h-0 sm:avp-btn-sm avp-btn-ghost px-2 font-mono text-[11px]"
             >
               <SkipBack className="w-3.5 h-3.5" strokeWidth={1.75} aria-hidden="true" />
-              <span className="hidden sm:inline">-{seekStepSec}s</span>
+              <span className="hidden xs:inline sm:inline">-{formatNumberForLocale(seekStepSec, { persianDigits })}s</span>
             </button>
           )}
 
-          {/* Focal Play / Pause CTA (Primary Budget #2) */}
+          {/* Focal Play / Pause CTA */}
           <button
             type="button"
             data-testid="toolbar-btn-play-pause"
@@ -329,7 +336,7 @@ export const AuditionTransportBar: React.FC<AuditionTransportBarProps> = ({
                   : 'Start playback'
             }
             title={isFa ? 'پخش / مکث (Space)' : 'Play / Pause (Space)'}
-            className={`avp-btn avp-btn-md min-w-[86px] mx-1 ${
+            className={`avp-btn h-[36px] sm:h-[var(--avp-ctrl-md)] min-w-[92px] sm:min-w-[86px] mx-0.5 sm:mx-1 ${
               isPlaying
                 ? 'bg-[var(--avp-warning)] text-slate-950 hover:opacity-90'
                 : 'avp-btn-primary'
@@ -356,9 +363,9 @@ export const AuditionTransportBar: React.FC<AuditionTransportBarProps> = ({
               onClick={onStepForward}
               aria-label={isFa ? `${seekStepSec} ثانیه جلو` : `Forward ${seekStepSec}s`}
               title={isFa ? `${seekStepSec} ثانیه جلو` : `Forward ${seekStepSec}s`}
-              className="avp-btn avp-btn-sm avp-btn-ghost px-2 font-mono text-[11px]"
+              className="avp-btn min-h-[36px] sm:min-h-0 sm:avp-btn-sm avp-btn-ghost px-2 font-mono text-[11px]"
             >
-              <span className="hidden sm:inline">+{seekStepSec}s</span>
+              <span className="hidden xs:inline sm:inline">+{formatNumberForLocale(seekStepSec, { persianDigits })}s</span>
               <SkipForward className="w-3.5 h-3.5" strokeWidth={1.75} aria-hidden="true" />
             </button>
           )}
@@ -390,15 +397,15 @@ export const AuditionTransportBar: React.FC<AuditionTransportBarProps> = ({
                   ? 'تکرار کل فایل (L)'
                   : 'Loop Full Track (L)'
             }
-            className={`avp-btn avp-btn-sm ms-0.5 ${loopSelection ? 'avp-btn-tonal' : 'avp-btn-ghost'}`}
+            className={`avp-btn min-h-[36px] sm:min-h-0 sm:avp-btn-sm ms-0.5 ${loopSelection ? 'avp-btn-tonal' : 'avp-btn-ghost'}`}
           >
             <Repeat className="w-3.5 h-3.5" strokeWidth={1.75} aria-hidden="true" />
             <span className="hidden md:inline">{isFa ? 'تکرار' : 'Loop'}</span>
           </button>
         </div>
 
-        {/* Zone 3 (End — Context-Aware Selection Range Play + Marker Nav + Playback Rate) */}
-        <div className="flex items-center justify-end gap-1.5 shrink-0 justify-self-end">
+        {/* Zone 3 (End — Selection Play + Marker Nav + Playback Rate) */}
+        <div className="order-3 flex items-center justify-end gap-1.5 shrink-0 justify-self-end">
           {selection && selectionLenSec >= 0.05 && (
             <>
               <div
@@ -406,8 +413,9 @@ export const AuditionTransportBar: React.FC<AuditionTransportBarProps> = ({
                 dir="ltr"
                 className="hidden 2xl:inline-flex items-center text-[11px] font-mono tabular-nums text-[var(--avp-warning-text)] font-medium whitespace-nowrap"
               >
-                {selection.startSec.toFixed(2)}–{selection.endSec.toFixed(2)}s (Δ
-                {selectionLenSec.toFixed(2)}s)
+                {formatNumberForLocale(selection.startSec, { persianDigits, maximumFractionDigits: 2 })}–
+                {formatNumberForLocale(selection.endSec, { persianDigits, maximumFractionDigits: 2 })}s (Δ
+                {formatNumberForLocale(selectionLenSec, { persianDigits, maximumFractionDigits: 2 })}s)
               </div>
 
               <button
@@ -426,7 +434,6 @@ export const AuditionTransportBar: React.FC<AuditionTransportBarProps> = ({
 
           {/* Framed Marker Step & Playback Speed Utility Capsule */}
           <div className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-xl border border-[var(--avp-border)] bg-[var(--avp-surface-secondary)]/65">
-            {/* LTR Marker Step Buttons */}
             <div className="hidden lg:inline-flex items-center gap-0.5 pe-1 border-e border-[var(--avp-border)]" dir="ltr">
               <button
                 type="button"
@@ -450,7 +457,6 @@ export const AuditionTransportBar: React.FC<AuditionTransportBarProps> = ({
               </button>
             </div>
 
-            {/* Playback Rate (honest native Web Audio scaling) */}
             <label
               className="inline-flex items-center gap-1 text-xs text-[var(--avp-text-secondary)]"
               title={

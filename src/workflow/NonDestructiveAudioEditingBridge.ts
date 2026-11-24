@@ -914,8 +914,8 @@ export class NonDestructiveAudioEditingSession {
       });
       if (res.ok) {
         this.currentEdl = res.snapshot;
-      } else {
-        // Explicit user override when boundary is valid
+      } else if (target.risk.approvalPermitted && target.risk.overallLevel !== 'CRITICAL') {
+        // Explicit user override when boundary is valid and not CRITICAL risk
         this.currentEdl = {
           ...this.currentEdl,
           edlVersion: this.currentEdl.edlVersion + 1,
@@ -1003,7 +1003,12 @@ export class NonDestructiveAudioEditingSession {
         });
         if (res.ok) {
           nextEdl = res.snapshot;
-        } else if (params.includeNeedsReview && p.proposedRange) {
+        } else if (
+          params.includeNeedsReview &&
+          p.proposedRange &&
+          p.risk.approvalPermitted &&
+          p.risk.overallLevel !== 'CRITICAL'
+        ) {
           nextEdl = {
             ...nextEdl,
             edlVersion: nextEdl.edlVersion + 1,

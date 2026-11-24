@@ -34,9 +34,12 @@ import {
   TranscriptLayerKind,
   TranscriptTransformationEngine,
 } from '../persian-linguistics';
+import { formatNumberForLocale, formatStudioTimecode } from '../utils/formatters';
 
 interface EdlReviewPanelProps {
   locale: 'fa' | 'en';
+  persianDigits?: boolean;
+  timecodeFormat?: 'mm:ss.ms' | 'hh:mm:ss';
   sampleRate: number;
   tokens: readonly PersianWordToken[];
   speechEventResult: SpeechEventAnalysisResult | null;
@@ -44,6 +47,7 @@ interface EdlReviewPanelProps {
   isAnalyzing: boolean;
   canUndoEdl: boolean;
   canRedoEdl: boolean;
+  forceExpanded?: boolean;
   onRunAnalysis: () => void;
   onApproveProposal: (proposalId: string) => void;
   onRejectProposal: (proposalId: string) => void;
@@ -65,14 +69,14 @@ type PanelTab = 'edl' | 'events' | 'linguistics';
 function riskIcon(risk: EditProposal['risk']['overallLevel']) {
   switch (risk) {
     case 'LOW':
-      return <ShieldCheck className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" aria-hidden="true" />;
+      return <ShieldCheck className="w-3.5 h-3.5 text-[var(--avp-success-text)]" aria-hidden="true" />;
     case 'MEDIUM':
-      return <AlertCircle className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" aria-hidden="true" />;
+      return <AlertCircle className="w-3.5 h-3.5 text-[var(--avp-warning-text)]" aria-hidden="true" />;
     case 'HIGH':
-      return <AlertTriangle className="w-3.5 h-3.5 text-orange-600 dark:text-orange-400" aria-hidden="true" />;
+      return <AlertTriangle className="w-3.5 h-3.5 text-[var(--avp-warning)]" aria-hidden="true" />;
     case 'CRITICAL':
     case 'UNKNOWN':
-      return <ShieldAlert className="w-3.5 h-3.5 text-rose-600 dark:text-rose-400" aria-hidden="true" />;
+      return <ShieldAlert className="w-3.5 h-3.5 text-[var(--avp-danger)]" aria-hidden="true" />;
   }
 }
 
@@ -99,6 +103,8 @@ function statusLabel(status: EditProposal['status'], isFa: boolean): string {
 
 export const EdlReviewPanel: React.FC<EdlReviewPanelProps> = ({
   locale,
+  persianDigits = false,
+  timecodeFormat = 'mm:ss.ms',
   sampleRate,
   tokens,
   speechEventResult,
@@ -106,6 +112,7 @@ export const EdlReviewPanel: React.FC<EdlReviewPanelProps> = ({
   isAnalyzing,
   canUndoEdl,
   canRedoEdl,
+  forceExpanded = false,
   onRunAnalysis,
   onApproveProposal,
   onRejectProposal,
@@ -120,8 +127,14 @@ export const EdlReviewPanel: React.FC<EdlReviewPanelProps> = ({
 }) => {
   const isFa = locale === 'fa';
   const [activeTab, setActiveTab] = useState<PanelTab>('edl');
-  const [isDrawerOpen, setIsDrawerOpen] = useState<boolean>(false);
+  const [isDrawerOpen, setIsDrawerOpen] = useState<boolean>(forceExpanded);
   const [expandedProposalId, setExpandedProposalId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (forceExpanded) {
+      setIsDrawerOpen(true);
+    }
+  }, [forceExpanded]);
 
   // P13 Persian Linguistic Refinement interactive state (non-destructive, versioned)
   const [lingLayer, setLingLayer] = useState<TranscriptLayerKind>('READABLE');
@@ -356,11 +369,15 @@ export const EdlReviewPanel: React.FC<EdlReviewPanelProps> = ({
   const approvedCount = proposals.filter((p) => p.status === 'APPROVED').length;
   const events = speechEventResult?.events ?? [];
 
+  const drawerVisible = forceExpanded || isDrawerOpen;
+
   return (
     <section
       data-testid="edl-review-inspector-dock"
       aria-label={isFa ? 'پنل بازبینی EDL، رویدادهای گفتاری و پالایش فارسی' : 'EDL Review, Speech Events & Persian Linguistics'}
-      className="border-t border-[var(--avp-border)] bg-[var(--avp-surface)] shrink-0 overflow-hidden"
+      className={`border-t border-[var(--avp-border)] bg-[var(--avp-surface)] shrink-0 overflow-hidden ${
+        forceExpanded ? 'flex flex-col h-full min-h-0' : ''
+      }`}
     >
       {/* Unified Inspector Sub-Header (36px — Docked inside Right Editorial Inspector) */}
       <div className="h-[36px] px-2.5 border-b border-[var(--avp-border-subtle)] bg-[var(--avp-surface-shell)] flex items-center justify-between gap-1.5">
@@ -401,7 +418,7 @@ export const EdlReviewPanel: React.FC<EdlReviewPanelProps> = ({
             >
               <span>{isFa ? 'EDL' : 'EDL'}</span>
               <span className="inline-flex items-center justify-center min-w-[15px] h-[14px] px-1 rounded-full bg-[var(--avp-surface-secondary)] font-mono text-[9px] font-bold">
-                {proposals.length}
+                {formatNumberForLocale(proposals.length, { persianDigits })}
               </span>
             </button>
 
@@ -426,7 +443,7 @@ export const EdlReviewPanel: React.FC<EdlReviewPanelProps> = ({
             >
               <span>{isFa ? 'رویدادها' : 'Events'}</span>
               <span className="inline-flex items-center justify-center min-w-[15px] h-[14px] px-1 rounded-full bg-[var(--avp-surface-secondary)] font-mono text-[9px] font-bold">
-                {events.length}
+                {formatNumberForLocale(events.length, { persianDigits })}
               </span>
             </button>
 
@@ -439,13 +456,13 @@ export const EdlReviewPanel: React.FC<EdlReviewPanelProps> = ({
                 setActiveTab('linguistics');
                 setIsDrawerOpen(true);
               }}
-              className={`inline-flex items-center gap-1 h-[22px] px-1.5 rounded-[5px] text-[10.5px] font-medium whitespace-nowrap cursor-pointer transition-colors ${
+              className={`inline-flex items-center gap-1 h-[22px] px-1.5 rounded-[5px] text-[10px] xl:text-[10.5px] font-medium whitespace-nowrap cursor-pointer transition-colors ${
                 activeTab === 'linguistics'
                   ? 'bg-[var(--avp-surface)] text-[var(--avp-accent-text)] font-semibold shadow-2xs'
                   : 'text-[var(--avp-text-secondary)] hover:text-[var(--avp-text)]'
               }`}
             >
-              <span>{isFa ? 'پالایش فارسی' : 'Linguistics'}</span>
+              <span>{isFa ? 'فارسی' : 'Persian'}</span>
             </button>
           </div>
         </div>
@@ -453,7 +470,7 @@ export const EdlReviewPanel: React.FC<EdlReviewPanelProps> = ({
         <div className="flex items-center gap-1 shrink-0">
           {activeTab !== 'linguistics' && (
             <>
-              {isDrawerOpen && (
+              {drawerVisible && (
                 <>
                   <button
                     type="button"
@@ -514,8 +531,12 @@ export const EdlReviewPanel: React.FC<EdlReviewPanelProps> = ({
       </div>
 
       {/* Tab 1: Mission 05 EDL Review (Rendered inside Unified Right Editorial Inspector) */}
-      {isDrawerOpen && activeTab === 'edl' && (
-        <div className="p-2.5 space-y-2.5 max-h-[260px] overflow-y-auto bg-[var(--avp-surface)]">
+      {drawerVisible && activeTab === 'edl' && (
+        <div
+          className={`p-2.5 space-y-2.5 overflow-y-auto bg-[var(--avp-surface)] ${
+            forceExpanded ? 'flex-1 min-h-0' : 'max-h-[260px]'
+          }`}
+        >
           {!edlSnapshot ? (
             <div className="text-[11.5px] text-[var(--avp-text-muted)] py-3 text-center space-y-1">
               <p>
@@ -579,7 +600,9 @@ export const EdlReviewPanel: React.FC<EdlReviewPanelProps> = ({
                             dir="ltr"
                             className="font-mono tabular-nums text-[10.5px] text-[var(--avp-warning-text)] hover:underline cursor-pointer"
                           >
-                            {startSec.toFixed(2)}s–{endSec.toFixed(2)}s ({durationMs}ms)
+                            {formatStudioTimecode(startSec, timecodeFormat, persianDigits)}–
+                            {formatStudioTimecode(endSec, timecodeFormat, persianDigits)} (
+                            {formatNumberForLocale(durationMs, { persianDigits })}ms)
                           </button>
                         </div>
 
@@ -677,8 +700,12 @@ export const EdlReviewPanel: React.FC<EdlReviewPanelProps> = ({
       )}
 
       {/* Tab 2: Mission 04 Speech Events */}
-      {isDrawerOpen && activeTab === 'events' && (
-        <div className="p-2.5 space-y-2 max-h-[260px] overflow-y-auto text-[11.5px] bg-[var(--avp-surface)]">
+      {drawerVisible && activeTab === 'events' && (
+        <div
+          className={`p-2.5 space-y-2 overflow-y-auto text-[11.5px] bg-[var(--avp-surface)] ${
+            forceExpanded ? 'flex-1 min-h-0' : 'max-h-[260px]'
+          }`}
+        >
           {events.length === 0 ? (
             <p className="text-[var(--avp-text-muted)] py-5 text-center">
               {isFa
@@ -706,8 +733,9 @@ export const EdlReviewPanel: React.FC<EdlReviewPanelProps> = ({
                   dir="ltr"
                   className="font-mono tabular-nums text-[10.5px] text-[var(--avp-warning-text)] hover:underline cursor-pointer"
                 >
-                  {ev.startSec.toFixed(2)}s–{ev.endSec.toFixed(2)}s ·{' '}
-                  {Math.round(ev.confidence * 100)}%
+                  {formatStudioTimecode(ev.startSec, timecodeFormat, persianDigits)}–
+                  {formatStudioTimecode(ev.endSec, timecodeFormat, persianDigits)} ·{' '}
+                  {formatNumberForLocale(Math.round(ev.confidence * 100), { persianDigits })}%
                 </button>
               </div>
             ))
@@ -716,8 +744,12 @@ export const EdlReviewPanel: React.FC<EdlReviewPanelProps> = ({
       )}
 
       {/* Tab 3: Mission 13 Persian Linguistic Intelligence */}
-      {isDrawerOpen && activeTab === 'linguistics' && (
-        <div className="p-2.5 space-y-2.5 max-h-[260px] overflow-y-auto text-[11.5px] bg-[var(--avp-surface)]">
+      {drawerVisible && activeTab === 'linguistics' && (
+        <div
+          className={`p-2.5 space-y-2.5 overflow-y-auto text-[11.5px] bg-[var(--avp-surface)] ${
+            forceExpanded ? 'flex-1 min-h-0' : 'max-h-[260px]'
+          }`}
+        >
           {lingStatusMsg && (
             <div className="rounded-lg border border-[var(--avp-accent)]/30 bg-[var(--avp-accent-soft)] px-2.5 py-2 text-[var(--avp-text)]">
               {lingStatusMsg}

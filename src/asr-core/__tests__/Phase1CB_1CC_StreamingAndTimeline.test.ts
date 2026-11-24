@@ -19,7 +19,7 @@
  *   - Consumer adapters (TranscriptDocument, AvapardazTranscriptResult, LocalNeuralTranscriptionResult, CoreTranscriptionResult)
  */
 
-import { describe, it } from 'node:test';
+import { describe, it, after } from 'node:test';
 import assert from 'node:assert/strict';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
@@ -27,8 +27,13 @@ import * as os from 'node:os';
 import {
   NativeSherpaStreamingRecognizer,
   streamWavFileWithNativeSherpa,
+  disposeAllSharedNativeSherpaWorkers,
   type NativeSherpaStreamingEvent,
 } from '../NativeSherpaStreamingRecognizer';
+
+after(() => {
+  disposeAllSharedNativeSherpaWorkers();
+});
 import {
   StreamingTranscriptAssembler,
 } from '../StreamingTranscriptAssembler';
@@ -374,7 +379,7 @@ describe('Phase 1C-C: StreamingTranscriptAssembler & Canonical Timeline (TC-01..
         utteranceIndex: uIdx,
         startSample16k,
         endSample16k,
-        rawText: 'گفتار آزمایشی پایدار',
+        rawText: hasWordTimestamps ? 'گفتار آزمایشی پایدار' : 'بخش آزمایشی بدون زمانبندی کلمه',
         wordTimestampsAvailable: hasWordTimestamps,
         words: hasWordTimestamps
           ? [

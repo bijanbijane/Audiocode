@@ -11,12 +11,16 @@ import {
   mapFrequencyToSvgX,
 } from '../engine/dspFrequencyResponse';
 
+import { formatNumberForLocale } from '../utils/formatters';
+
 interface DspFrequencyResponseGraphProps {
   ephemeralParams: EphemeralDspParams;
   committedParams: EphemeralDspParams;
   sampleRate?: number;
   isGestureActive?: boolean;
   eqResponseCurveDb?: { freqHz: number; gainDb: number }[] | null;
+  locale?: 'fa' | 'en';
+  persianDigits?: boolean;
 }
 
 const SVG_WIDTH = 640;
@@ -58,7 +62,11 @@ export const DspFrequencyResponseGraph: React.FC<DspFrequencyResponseGraphProps>
   sampleRate = 48000,
   isGestureActive = false,
   eqResponseCurveDb,
+  locale = 'fa',
+  persianDigits = false,
 }) => {
+  const isFa = locale === 'fa';
+  const useFaDigits = isFa && persianDigits;
   const [referenceInputDb, setReferenceInputDb] = useState<number>(-6);
 
   const hasUncommittedDiff =
@@ -122,39 +130,44 @@ export const DspFrequencyResponseGraph: React.FC<DspFrequencyResponseGraphProps>
       data-comp-gr-db={liveCurve.passbandReductionDb}
       data-effective-1khz-db={liveCurve.effectiveAt1kHzDb}
       data-50hz-gain-db={liveCurve.effectiveAt50HzDb}
-      className="px-4 py-3 border-b border-slate-200 dark:border-[#252F42] bg-slate-50 dark:bg-[#0E131D]/65 space-y-2.5"
+      className="px-4 py-3 border-b border-[var(--avp-border)] bg-[var(--avp-bg-subtle)] space-y-2.5"
     >
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex flex-wrap items-baseline gap-2">
-          <h3 className="text-xs font-semibold text-slate-900 dark:text-slate-100">
-            منحنی لحظه‌ای پاسخ فرکانسی (۲۰Hz – ۲۰kHz)
+          <h3 className="text-xs font-semibold text-[var(--avp-text)]">
+            {isFa
+              ? `منحنی لحظه‌ای پاسخ فرکانسی (${formatNumberForLocale(20, { persianDigits: useFaDigits })}Hz – ${formatNumberForLocale(20, { persianDigits: useFaDigits })}kHz)`
+              : 'Live Frequency Response (20Hz – 20kHz)'}
           </h3>
-          <span className="text-[11px] text-slate-600 dark:text-slate-400">
+          <span className="text-[11px] text-[var(--avp-text-secondary)]">
             {isGestureActive || hasUncommittedDiff
-              ? 'نمایش زنده حین تغییر (مقایسه با مرجع ثبت‌شده)'
-              : 'پاسخ فیلتر بالاگذر و کاهش پویای کمپرسور'}
+              ? isFa
+                ? 'نمایش زنده حین تغییر (مقایسه با مرجع ثبت‌شده)'
+                : 'Live gesture preview (vs committed baseline)'
+              : isFa
+                ? 'پاسخ فیلتر بالاگذر و کاهش پویای کمپرسور'
+                : 'HPF & dynamic compressor gain reduction'}
           </span>
         </div>
 
         <div className="flex items-center gap-2 text-[11px]">
-          <span className="text-slate-600 dark:text-slate-400">سطح ورودی مرجع:</span>
+          <span className="text-[var(--avp-text-secondary)]">
+            {isFa ? 'سطح ورودی مرجع:' : 'Reference input:'}
+          </span>
           <div
             dir="ltr"
             role="group"
-            aria-label="سطح سیگنال مرجع کمپرسور"
-            className="inline-flex items-center p-0.5 rounded bg-slate-100 dark:bg-[#0B0F17] border border-slate-300 dark:border-[#252F42]"
+            aria-label={isFa ? 'سطح سیگنال مرجع کمپرسور' : 'Compressor reference input level'}
+            className="avp-segmented"
           >
             {REF_INPUT_OPTIONS.map((lvl) => (
               <button
                 key={lvl}
                 type="button"
                 data-testid={`btn-dsp-ref-input-${lvl}`}
+                aria-pressed={referenceInputDb === lvl}
                 onClick={() => setReferenceInputDb(lvl)}
-                className={`px-2 py-0.5 rounded font-mono tabular-nums transition-colors cursor-pointer whitespace-nowrap ${
-                  referenceInputDb === lvl
-                    ? 'bg-amber-400 text-slate-950 font-semibold'
-                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
-                }`}
+                className="avp-segmented-item font-mono tabular-nums text-[11px]"
               >
                 {lvl} dBFS
               </button>
@@ -163,11 +176,15 @@ export const DspFrequencyResponseGraph: React.FC<DspFrequencyResponseGraphProps>
         </div>
       </div>
 
-      <div className="rounded-md border border-[#252F42] bg-[#0B0F17] overflow-hidden" dir="ltr">
+      <div className="rounded-md border border-[var(--avp-border-strong)] bg-[#0E131D] overflow-hidden" dir="ltr">
         <svg
           direction="ltr"
           role="img"
-          aria-label="نمودار لحظه‌ای پاسخ فرکانسی فیلتر بالاگذر و کمپرسور"
+          aria-label={
+            isFa
+              ? 'نمودار لحظه‌ای پاسخ فرکانسی فیلتر بالاگذر و کمپرسور'
+              : 'Real-time HPF and compressor frequency response graph'
+          }
           data-testid="dsp-frequency-response-svg"
           viewBox={`0 0 ${SVG_WIDTH} ${SVG_HEIGHT}`}
           className="w-full h-44 sm:h-48 block select-none"
@@ -193,7 +210,7 @@ export const DspFrequencyResponseGraph: React.FC<DspFrequencyResponseGraphProps>
                     textAnchor={anchor}
                     fill="#94A3B8"
                     fontSize="10"
-                    fontFamily="ui-monospace, SFMono-Regular, Menlo, monospace"
+                    fontFamily="var(--font-mono)"
                   >
                     {tick.label}
                   </text>
@@ -223,7 +240,7 @@ export const DspFrequencyResponseGraph: React.FC<DspFrequencyResponseGraphProps>
                       textAnchor="end"
                       fill={isZeroDb ? '#CBD5E1' : '#64748B'}
                       fontSize="9.5"
-                      fontFamily="ui-monospace, SFMono-Regular, Menlo, monospace"
+                      fontFamily="var(--font-mono)"
                     >
                       {db > 0 ? `+${db}` : String(db)}
                     </text>
@@ -304,7 +321,7 @@ export const DspFrequencyResponseGraph: React.FC<DspFrequencyResponseGraphProps>
               cy={livePaths.cutoffPoint.y}
               r={4.5}
               fill="#38BDF8"
-              stroke="#0B0F17"
+              stroke="#0E131D"
               strokeWidth={1.5}
             />
           </g>
@@ -313,36 +330,36 @@ export const DspFrequencyResponseGraph: React.FC<DspFrequencyResponseGraphProps>
 
       {/* Legend & Tabular Telemetry Strip */}
       <div className="flex flex-wrap items-center justify-between gap-2 text-[11px]">
-        <div className="flex flex-wrap items-center gap-2.5 text-slate-700 dark:text-slate-300">
+        <div className="flex flex-wrap items-center gap-2.5 text-[var(--avp-text-secondary)]">
           <span className="inline-flex items-center gap-1.5 whitespace-nowrap">
-            <span className="w-3 h-0.5 bg-amber-500 dark:bg-amber-400 inline-block" aria-hidden="true" />
-            <span>پاسخ موثر</span>
+            <span className="w-3 h-0.5 bg-[var(--avp-warning)] inline-block" aria-hidden="true" />
+            <span>{isFa ? 'پاسخ موثر' : 'Effective'}</span>
           </span>
           <span className="inline-flex items-center gap-1.5 whitespace-nowrap">
-            <span className="w-3 h-0.5 border-t border-dashed border-sky-600 dark:border-sky-400 inline-block" aria-hidden="true" />
-            <span>فیلتر بالاگذر</span>
+            <span className="w-3 h-0.5 border-t border-dashed border-[var(--avp-accent)] inline-block" aria-hidden="true" />
+            <span>{isFa ? 'فیلتر بالاگذر' : 'High-Pass'}</span>
           </span>
           {eqPath && (
-            <span className="inline-flex items-center gap-1.5 text-emerald-700 dark:text-emerald-300 whitespace-nowrap">
-              <span className="w-3 h-0.5 border-t border-dashed border-emerald-600 dark:border-emerald-400 inline-block" aria-hidden="true" />
-              <span>EQ ۸ بانده</span>
+            <span className="inline-flex items-center gap-1.5 text-[var(--avp-success-text)] whitespace-nowrap">
+              <span className="w-3 h-0.5 border-t border-dashed border-[var(--avp-success)] inline-block" aria-hidden="true" />
+              <span>{isFa ? 'EQ ۸ بانده' : '8-Band EQ'}</span>
             </span>
           )}
         </div>
 
-        <div dir="ltr" className="flex flex-wrap items-center gap-2 font-mono tabular-nums text-slate-700 dark:text-slate-300">
-          <span data-testid="dsp-graph-readout-hpf" className="text-sky-700 dark:text-sky-300">
+        <div dir="ltr" className="flex flex-wrap items-center gap-2 font-mono tabular-nums text-[var(--avp-text-secondary)]">
+          <span data-testid="dsp-graph-readout-hpf" className="text-[var(--avp-accent-text)]">
             HPF -3dB: {ephemeralParams.highPassHz}Hz
           </span>
-          <span className="text-slate-400 dark:text-slate-600" aria-hidden="true">·</span>
+          <span className="text-[var(--avp-text-subtle)]" aria-hidden="true">·</span>
           <span data-testid="dsp-graph-readout-50hz">
             50Hz: {formatSignedDb(liveCurve.effectiveAt50HzDb)}
           </span>
-          <span className="text-slate-400 dark:text-slate-600" aria-hidden="true">·</span>
-          <span data-testid="dsp-graph-readout-gr" className="text-amber-700 dark:text-amber-300">
+          <span className="text-[var(--avp-text-subtle)]" aria-hidden="true">·</span>
+          <span data-testid="dsp-graph-readout-gr" className="text-[var(--avp-warning-text)]">
             Comp GR: {liveCurve.passbandReductionDb.toFixed(1)}dB
           </span>
-          <span className="text-slate-400 dark:text-slate-600" aria-hidden="true">·</span>
+          <span className="text-[var(--avp-text-subtle)]" aria-hidden="true">·</span>
           <span data-testid="dsp-graph-readout-1khz">
             1kHz: {formatSignedDb(liveCurve.effectiveAt1kHzDb)}
           </span>

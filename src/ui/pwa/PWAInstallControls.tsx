@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Download, WifiOff } from 'lucide-react';
+import { AccessibleModal } from '../../components/AccessibleModal';
 
 interface BeforeInstallPromptEvent extends Event {
   prompt: () => Promise<void>;
@@ -80,7 +81,18 @@ export function useOnlineStatus(): boolean {
   return isOnline;
 }
 
-export const PWAInstallButton: React.FC = () => {
+interface PWAInstallButtonProps {
+  compact?: boolean;
+  locale?: 'fa' | 'en';
+  className?: string;
+}
+
+export const PWAInstallButton: React.FC<PWAInstallButtonProps> = ({
+  compact = false,
+  locale = 'fa',
+  className = '',
+}) => {
+  const isFa = locale === 'fa';
   const { isInstallable, isInstalled, isIOS, install } = usePWAInstall();
   const [showIOSGuide, setShowIOSGuide] = useState(false);
 
@@ -90,11 +102,13 @@ export const PWAInstallButton: React.FC = () => {
     return (
       <button
         type="button"
-        onClick={install}
-        className="inline-flex items-center gap-1.5 rounded-md border border-slate-700 bg-slate-800 hover:bg-slate-700 px-3 py-1.5 text-xs font-medium text-slate-100 whitespace-nowrap shrink-0 cursor-pointer"
+        data-testid="btn-pwa-install"
+        onClick={() => void install()}
+        title={isFa ? 'نصب نسخه آفلاین (PWA)' : 'Install Offline App'}
+        className={`avp-btn ${compact ? 'avp-btn-sm' : ''} avp-btn-outline ${className}`}
       >
-        <Download className="w-3.5 h-3.5 text-amber-400" aria-hidden="true" />
-        <span>نصب نسخه آفلاین</span>
+        <Download className="w-3.5 h-3.5 text-[var(--avp-brand)]" aria-hidden="true" />
+        <span>{isFa ? (compact ? 'نصب آفلاین' : 'نصب نسخه آفلاین') : compact ? 'Install' : 'Install App'}</span>
       </button>
     );
   }
@@ -104,36 +118,48 @@ export const PWAInstallButton: React.FC = () => {
       <>
         <button
           type="button"
+          data-testid="btn-pwa-ios-guide"
           onClick={() => setShowIOSGuide(true)}
-          className="inline-flex items-center gap-1.5 rounded-md border border-slate-700 bg-slate-800 hover:bg-slate-700 px-3 py-1.5 text-xs font-medium text-slate-200 whitespace-nowrap shrink-0 cursor-pointer"
+          className={`avp-btn ${compact ? 'avp-btn-sm' : ''} avp-btn-outline ${className}`}
         >
-          <Download className="w-3.5 h-3.5 text-amber-400" aria-hidden="true" />
-          <span>نصب در iOS</span>
+          <Download className="w-3.5 h-3.5 text-[var(--avp-brand)]" aria-hidden="true" />
+          <span>{isFa ? 'نصب در iOS' : 'Install on iOS'}</span>
         </button>
-        {showIOSGuide && (
-          <div
-            role="dialog"
-            aria-modal="true"
-            aria-label="راهنمای نصب نسخه آفلاین در iOS"
-            className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
-          >
-            <div className="w-full max-w-sm rounded-lg border border-slate-700 bg-slate-900 p-5 text-slate-100">
-              <h3 className="text-sm font-bold">نصب آواپرداز روی آیفون و آیپد</h3>
-              <p className="mt-2 text-xs leading-6 text-slate-300">
+
+        <AccessibleModal
+          isOpen={showIOSGuide}
+          onClose={() => setShowIOSGuide(false)}
+          dir={isFa ? 'rtl' : 'ltr'}
+          ariaLabel={isFa ? 'راهنمای نصب نسخه آفلاین در iOS' : 'iOS Offline Install Guide'}
+          closeOnBackdropClick
+          panelClassName="w-full max-w-sm rounded-2xl border border-[var(--avp-border)] bg-[var(--avp-surface)] p-5 text-[var(--avp-text)] shadow-[var(--avp-shadow-md)]"
+        >
+          <h3 className="text-sm font-bold">
+            {isFa ? 'نصب آواپرداز روی آیفون و آیپد' : 'Install Avapardaz on iOS'}
+          </h3>
+          <p className="mt-2 text-xs leading-6 text-[var(--avp-text-secondary)]">
+            {isFa ? (
+              <>
                 ۱. دکمه Share در نوار ابزار Safari را لمس کنید.
                 <br />
                 ۲. گزینه Add to Home Screen را انتخاب کنید تا برنامه بدون اینترنت اجرا شود.
-              </p>
-              <button
-                type="button"
-                onClick={() => setShowIOSGuide(false)}
-                className="mt-4 w-full rounded-md bg-slate-800 hover:bg-slate-700 py-2 text-xs font-medium text-slate-200 cursor-pointer"
-              >
-                بستن
-              </button>
-            </div>
-          </div>
-        )}
+              </>
+            ) : (
+              <>
+                1. Tap the Share button in Safari.
+                <br />
+                2. Select Add to Home Screen to launch Avapardaz offline.
+              </>
+            )}
+          </p>
+          <button
+            type="button"
+            onClick={() => setShowIOSGuide(false)}
+            className="mt-4 w-full avp-btn avp-btn-primary"
+          >
+            {isFa ? 'بستن' : 'Close'}
+          </button>
+        </AccessibleModal>
       </>
     );
   }
@@ -141,17 +167,39 @@ export const PWAInstallButton: React.FC = () => {
   return null;
 };
 
-export const OfflineIndicator: React.FC = () => {
+interface OfflineIndicatorProps {
+  inline?: boolean;
+  locale?: 'fa' | 'en';
+}
+
+export const OfflineIndicator: React.FC<OfflineIndicatorProps> = ({
+  inline = true,
+  locale = 'fa',
+}) => {
+  const isFa = locale === 'fa';
   const isOnline = useOnlineStatus();
   if (isOnline) return null;
 
   return (
     <div
       role="status"
-      className="fixed bottom-4 left-4 z-50 inline-flex items-center gap-2 rounded-md border border-amber-700 bg-amber-950/95 px-3 py-1.5 text-xs font-medium text-amber-200"
+      data-testid="offline-status-indicator"
+      className={
+        inline
+          ? 'inline-flex items-center gap-1.5 h-[26px] rounded-[var(--avp-radius-sm)] border border-[var(--avp-warning)]/40 bg-[var(--avp-warning-soft)] px-2 text-[11px] font-medium text-[var(--avp-warning-text)] whitespace-nowrap'
+          : 'inline-flex items-center gap-2 rounded-lg border border-[var(--avp-warning)]/40 bg-[var(--avp-warning-soft)] px-3 py-1.5 text-xs font-medium text-[var(--avp-warning-text)]'
+      }
     >
-      <WifiOff className="w-3.5 h-3.5 text-amber-400 shrink-0" aria-hidden="true" />
-      <span>حالت آفلاین — پردازش و ویرایش محلی فعال است</span>
+      <WifiOff className="w-3.5 h-3.5 text-[var(--avp-warning)] shrink-0" aria-hidden="true" />
+      <span>
+        {isFa
+          ? inline
+            ? 'حالت آفلاین فعال'
+            : 'حالت آفلاین — پردازش و ویرایش محلی فعال است'
+          : inline
+            ? 'Offline Ready'
+            : 'Offline Mode — Local editing active'}
+      </span>
     </div>
   );
 };

@@ -49,7 +49,7 @@ function createTestSourcePaths(tmpDir: string) {
     companionBundleFile,
     runtimeDir: SHERPA_RUNTIME_ROOT,
     modelDir: SHERPA_MODEL_DIR,
-    cepPluginDir: path.join(process.cwd(), 'audition-cep-extension'),
+    cepPluginDir: path.join(process.cwd(), 'packages', 'audition-cep-plugin'),
   };
 }
 
@@ -315,7 +315,7 @@ describe('Phase 1C-H & 1C-I: Installer, First-Run Health, Clean-Env Execution, A
           rawTranscriptText: 'متن محرمانه پادکست کاربر که نباید هرگز در لاگ ذخیره شود',
           audioFilePath: '/Users/reza/PrivateAudio/secret_episode.wav',
           authToken: 'Bearer eyJhbGciOiJIUzI1NiJ9',
-          safeStageName: 'CANONICAL_READY',
+          pipelineStage: 'CANONICAL_READY',
           chunkCount: 18,
         },
       });
@@ -328,7 +328,7 @@ describe('Phase 1C-H & 1C-I: Installer, First-Run Health, Clean-Env Execution, A
       assert.ok(!exportedJson.includes('متن محرمانه پادکست'));
       assert.ok(!exportedJson.includes('/Users/reza/PrivateAudio'));
       assert.ok(!exportedJson.includes('eyJhbGciOiJIUzI1NiJ9'));
-      assert.strictEqual(withConsent.report.sanitizedContext.safeStageName, 'CANONICAL_READY');
+      assert.strictEqual(withConsent.report.sanitizedContext.pipelineStage, 'CANONICAL_READY');
       assert.strictEqual(withConsent.report.sanitizedContext.chunkCount, 18);
 
       // 3. Submit & list structured Beta User Feedback

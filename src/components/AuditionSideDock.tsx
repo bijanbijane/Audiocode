@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { AudioAsset, EditTransaction, Track } from '../contracts/v1_2';
-import { formatTimecode, secondsToFlicks } from '../engine/timebase';
+import { formatNumberForLocale, formatStudioTimecode } from '../utils/formatters';
 import {
   BookmarkPlus,
   Edit3,
@@ -30,6 +30,8 @@ interface AuditionSideDockProps {
   history: EditTransaction[];
   markers: AuditionChapterMarker[];
   locale?: 'fa' | 'en';
+  persianDigits?: boolean;
+  timecodeFormat?: 'mm:ss.ms' | 'hh:mm:ss';
   collapsed?: boolean;
   activeDockTab?: AuditionDockTabId;
   onDockTabChange?: (tab: AuditionDockTabId) => void;
@@ -52,6 +54,8 @@ export const AuditionSideDock: React.FC<AuditionSideDockProps> = ({
   history,
   markers,
   locale = 'fa',
+  persianDigits = false,
+  timecodeFormat = 'mm:ss.ms',
   collapsed = false,
   activeDockTab: controlledTab,
   onDockTabChange,
@@ -148,13 +152,13 @@ export const AuditionSideDock: React.FC<AuditionSideDockProps> = ({
       className="avp-pane-shell flex flex-col h-full min-h-0"
     >
       {/* Slim Native Tab Strip (36px — Unified Inset Segmented Capsule aligned with 36px Horizon Line) */}
-      <div className="h-[36px] px-2 border-b border-[var(--avp-border)] flex items-center justify-between gap-1.5 shrink-0">
+      <div className="h-[36px] px-1.5 xl:px-2 border-b border-[var(--avp-border)] flex items-center justify-between gap-1 xl:gap-1.5 shrink-0">
         <div className="flex items-center gap-0.5 flex-1 min-w-0 p-0.5 rounded-lg border border-[var(--avp-border)] bg-[var(--avp-surface-secondary)]/85">
           <button
             type="button"
             data-testid="audition-dock-tab-files"
             onClick={() => setDockTab('files')}
-            className={`flex-1 h-[22px] px-1.5 rounded-[5px] inline-flex items-center justify-center gap-1 text-[10.5px] font-medium whitespace-nowrap transition-colors cursor-pointer ${
+            className={`flex-1 h-[22px] px-1 xl:px-1.5 rounded-[5px] inline-flex items-center justify-center gap-0.5 xl:gap-1 text-[10px] xl:text-[10.5px] font-medium whitespace-nowrap transition-colors cursor-pointer ${
               dockTab === 'files'
                 ? 'bg-[var(--avp-surface)] text-[var(--avp-accent-text)] font-semibold shadow-2xs'
                 : 'text-[var(--avp-text-secondary)] hover:text-[var(--avp-text)]'
@@ -168,7 +172,7 @@ export const AuditionSideDock: React.FC<AuditionSideDockProps> = ({
             type="button"
             data-testid="audition-dock-tab-effects"
             onClick={() => setDockTab('effects')}
-            className={`flex-1 h-[22px] px-1.5 rounded-[5px] inline-flex items-center justify-center gap-1 text-[10.5px] font-medium whitespace-nowrap transition-colors cursor-pointer ${
+            className={`flex-1 h-[22px] px-1 xl:px-1.5 rounded-[5px] inline-flex items-center justify-center gap-0.5 xl:gap-1 text-[10px] xl:text-[10.5px] font-medium whitespace-nowrap transition-colors cursor-pointer ${
               dockTab === 'effects'
                 ? 'bg-[var(--avp-surface)] text-[var(--avp-accent-text)] font-semibold shadow-2xs'
                 : 'text-[var(--avp-text-secondary)] hover:text-[var(--avp-text)]'
@@ -182,7 +186,7 @@ export const AuditionSideDock: React.FC<AuditionSideDockProps> = ({
             type="button"
             data-testid="audition-dock-tab-history"
             onClick={() => setDockTab('history')}
-            className={`flex-1 h-[22px] px-1.5 rounded-[5px] inline-flex items-center justify-center gap-1 text-[10.5px] font-medium whitespace-nowrap transition-colors cursor-pointer ${
+            className={`flex-1 h-[22px] px-1 xl:px-1.5 rounded-[5px] inline-flex items-center justify-center gap-0.5 xl:gap-1 text-[10px] xl:text-[10.5px] font-medium whitespace-nowrap transition-colors cursor-pointer ${
               dockTab === 'history'
                 ? 'bg-[var(--avp-surface)] text-[var(--avp-accent-text)] font-semibold shadow-2xs'
                 : 'text-[var(--avp-text-secondary)] hover:text-[var(--avp-text)]'
@@ -219,7 +223,7 @@ export const AuditionSideDock: React.FC<AuditionSideDockProps> = ({
                 dir="ltr"
                 className="avp-bidi-num text-[9.5px] px-1.5 py-0.5 rounded bg-[var(--avp-surface-secondary)] border border-[var(--avp-border-subtle)] text-[var(--avp-text-secondary)]"
               >
-                {sampleRate / 1000}kHz · PCM
+                {formatNumberForLocale(Number((sampleRate / 1000).toFixed(1)), { persianDigits })}kHz · PCM
               </bdi>
             </div>
 
@@ -264,7 +268,7 @@ export const AuditionSideDock: React.FC<AuditionSideDockProps> = ({
                       <div className="flex items-center gap-1.5 min-w-0">
                         <span
                           className={`w-2 h-2 rounded-full shrink-0 ${
-                            isHost ? 'bg-emerald-500' : 'bg-sky-400'
+                            isHost ? 'bg-[var(--avp-success)]' : 'bg-[var(--avp-accent)]'
                           }`}
                           aria-hidden="true"
                         />
@@ -281,7 +285,7 @@ export const AuditionSideDock: React.FC<AuditionSideDockProps> = ({
                           dir="ltr"
                           className="avp-bidi-num text-[10px] font-medium px-1.5 py-0.5 rounded bg-[var(--avp-surface-secondary)] text-[var(--avp-text-secondary)] shrink-0"
                         >
-                          {(endSec - startSec).toFixed(1)}s
+                          {formatNumberForLocale(endSec - startSec, { persianDigits, maximumFractionDigits: 1 })}s
                         </bdi>
                       )}
                     </div>
@@ -295,7 +299,7 @@ export const AuditionSideDock: React.FC<AuditionSideDockProps> = ({
                         {asset ? asset.name : `Track_${idx + 1}.wav`}
                       </bdi>
                       <span className="text-[10px] shrink-0">
-                        {speechClipsCount} {isFa ? 'کلیپ' : 'clip'}
+                        {formatNumberForLocale(speechClipsCount, { persianDigits })} {isFa ? 'کلیپ' : 'clip'}
                       </span>
                     </div>
                   </button>
@@ -384,7 +388,7 @@ export const AuditionSideDock: React.FC<AuditionSideDockProps> = ({
                               dir="ltr"
                               className="avp-bidi-num text-[10.5px] text-[var(--avp-text-muted)] shrink-0"
                             >
-                              {formatTimecode(secondsToFlicks(m.startSec))}
+                              {formatStudioTimecode(m.startSec, timecodeFormat, persianDigits)}
                             </bdi>
                           </button>
                           <div className="flex items-center gap-0.5 shrink-0">

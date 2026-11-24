@@ -130,7 +130,7 @@ export default defineConfig(({mode}) => {
             modelManifestSchemaVersion: 1,
             renderCheckpointSchemaVersion: 1,
             supportedLocalModelRuntimes: ['onnxruntime-web-wasm'],
-            serviceWorkerCacheVersion: 'paudio-shell-v1.3.0',
+            serviceWorkerCacheVersion: 'paudio-shell-v1.3.1',
             assetCount: assets.length,
             totalBytes: assets.reduce((sum, item) => sum + item.bytes, 0),
             assets,

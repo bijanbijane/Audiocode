@@ -12,7 +12,7 @@
  *   - Word & Segment Timestamp Error metrics and Real-Time Factor (RTF)
  */
 
-import { describe, it } from 'node:test';
+import { describe, it, after } from 'node:test';
 import assert from 'node:assert/strict';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
@@ -22,6 +22,7 @@ import {
 } from '../../asr-core/StreamingCanonicalAudioIngestion';
 import {
   streamWavFileWithNativeSherpa,
+  disposeAllSharedNativeSherpaWorkers,
 } from '../../asr-core/NativeSherpaStreamingRecognizer';
 import {
   StreamingTranscriptAssembler,
@@ -29,6 +30,10 @@ import {
 import {
   normalizeWithProfile,
 } from '../../asr-core/CoreNormalizationAndLanguage';
+
+after(() => {
+  disposeAllSharedNativeSherpaWorkers();
+});
 
 const MODEL_DIR = '/root/.avapardaz/models/sherpa-onnx-nemo-ctc-fa-shenava-rizeh-v1.0-non-streaming-int8-2026-06-26';
 const WAV_0 = path.join(MODEL_DIR, 'test_wavs', '0.wav');
@@ -71,66 +76,72 @@ function computeWerAndCer(referenceFa: string, hypothesisFa: string): { werPerce
 describe('Phase 1C-F: Production Hardening & Long-Session Reliability', () => {
   it('1C-F-01: Executes 20 sequential streaming ingestion + timeline assembly sessions with bounded RSS and zero memory/resource leaks', async () => {
     const rssCheckpoints: Array<{ session: number; rssMb: number; heapUsedMb: number }> = [];
+    const stagingDir = fs.mkdtempSync(path.join(os.tmpdir(), 'avp-1cf-staging-'));
 
-    for (let s = 1; s <= 20; s++) {
-      const canonSource = await createStreamingCanonicalAudioSource({
-        audioFilePath: WAV_1,
-      });
+    try {
+      for (let s = 1; s <= 20; s++) {
+        const canonSource = await createStreamingCanonicalAudioSource({
+          audioFilePath: WAV_1,
+          stagingRootDir: stagingDir,
+        });
 
-      const assembler = new StreamingTranscriptAssembler({
-        sessionId: `seq-hardening-${s}`,
-        sourceSampleRateHz: 16000,
-      });
-
-      const totalSamples = canonSource.canonicalExactSampleCount;
-      const step = 4096;
-      let seq = 0;
-      for (let pos = 0; pos < totalSamples; pos += step) {
-        const end = Math.min(totalSamples, pos + step);
-        const win = await canonSource.readCanonicalFloat32Window(pos, end);
-        assert.ok(win.length > 0);
-        seq++;
-        assembler.ingestEvent({
-          eventId: `ev_${s}_${seq}`,
+        const assembler = new StreamingTranscriptAssembler({
           sessionId: `seq-hardening-${s}`,
-          sequenceId: seq,
-          type: 'FINAL',
-          utteranceIndex: seq - 1,
-          startSample16k: pos,
-          endSample16k: end,
-          rawText: 'آزمون پایداری حافظه در نشست متوالی',
-          words: [
-            {
-              word: 'آزمون',
-              startSample16k: pos,
-              endSample16k: end,
-              confidence: 0.96,
-            },
-          ],
+          sourceSampleRateHz: 16000,
         });
+
+        const totalSamples = canonSource.canonicalExactSampleCount;
+        const step = 4096;
+        let seq = 0;
+        for (let pos = 0; pos < totalSamples; pos += step) {
+          const end = Math.min(totalSamples, pos + step);
+          const win = await canonSource.readCanonicalFloat32Window(pos, end);
+          assert.ok(win.length > 0);
+          seq++;
+          assembler.ingestEvent({
+            eventId: `ev_${s}_${seq}`,
+            sessionId: `seq-hardening-${s}`,
+            sequenceId: seq,
+            type: 'FINAL',
+            utteranceIndex: seq - 1,
+            startSample16k: pos,
+            endSample16k: end,
+            rawText: 'آزمون پایداری حافظه در نشست متوالی',
+            words: [
+              {
+                word: 'آزمون',
+                startSample16k: pos,
+                endSample16k: end,
+                confidence: 0.96,
+              },
+            ],
+          });
+        }
+
+        await canonSource.close('COMPLETED');
+        assert.strictEqual(canonSource.getLifecycleState(), 'CLEANED');
+
+        const canonical = assembler.finalizeStream();
+        assert.strictEqual(canonical.state, 'COMPLETED');
+
+        if ([1, 2, 5, 10, 20].includes(s)) {
+          if (global.gc) global.gc();
+          const mem = process.memoryUsage();
+          rssCheckpoints.push({
+            session: s,
+            rssMb: Number((mem.rss / (1024 * 1024)).toFixed(2)),
+            heapUsedMb: Number((mem.heapUsed / (1024 * 1024)).toFixed(2)),
+          });
+        }
       }
 
-      await canonSource.close('COMPLETED');
-      assert.strictEqual(canonSource.getLifecycleState(), 'CLEANED');
-
-      const canonical = assembler.finalizeStream();
-      assert.strictEqual(canonical.state, 'COMPLETED');
-
-      if ([1, 2, 5, 10, 20].includes(s)) {
-        if (global.gc) global.gc();
-        const mem = process.memoryUsage();
-        rssCheckpoints.push({
-          session: s,
-          rssMb: Number((mem.rss / (1024 * 1024)).toFixed(2)),
-          heapUsedMb: Number((mem.heapUsed / (1024 * 1024)).toFixed(2)),
-        });
-      }
+      assert.strictEqual(rssCheckpoints.length, 5);
+      const firstHeap = rssCheckpoints[0].heapUsedMb;
+      const lastHeap = rssCheckpoints[rssCheckpoints.length - 1].heapUsedMb;
+      assert.ok(lastHeap - firstHeap < 35, `Expected heap delta < 35 MB, got ${lastHeap - firstHeap} MB`);
+    } finally {
+      fs.rmSync(stagingDir, { recursive: true, force: true });
     }
-
-    assert.strictEqual(rssCheckpoints.length, 5);
-    const firstHeap = rssCheckpoints[0].heapUsedMb;
-    const lastHeap = rssCheckpoints[rssCheckpoints.length - 1].heapUsedMb;
-    assert.ok(lastHeap - firstHeap < 35, `Expected heap delta < 35 MB, got ${lastHeap - firstHeap} MB`);
   });
 
   it('1C-F-02: Handles fault injection (corrupt WAV header, zero-byte file, non-existent file) cleanly without process crash or temp file leak', async () => {
@@ -140,7 +151,7 @@ describe('Phase 1C-F: Production Hardening & Long-Session Reliability', () => {
       fs.writeFileSync(zeroByteFile, Buffer.alloc(0));
 
       await assert.rejects(
-        async () => await createStreamingCanonicalAudioSource({ audioFilePath: zeroByteFile }),
+        async () => await createStreamingCanonicalAudioSource({ audioFilePath: zeroByteFile, stagingRootDir: tmpDir }),
         /AUDIO_INGEST_EMPTY/
       );
 
@@ -148,8 +159,8 @@ describe('Phase 1C-F: Production Hardening & Long-Session Reliability', () => {
       fs.writeFileSync(corruptHeaderFile, Buffer.from('NOT_A_RIFF_WAV_FILE_HEADER_12345678901234567890'));
 
       await assert.rejects(
-        async () => await createStreamingCanonicalAudioSource({ audioFilePath: corruptHeaderFile }),
-        /AUDIO_INGEST_UNSUPPORTED_MAGIC/
+        async () => await createStreamingCanonicalAudioSource({ audioFilePath: corruptHeaderFile, stagingRootDir: tmpDir }),
+        /WAV_INVALID_SIGNATURE|AUDIO_INGEST_UNSUPPORTED_MAGIC/
       );
     } finally {
       fs.rmSync(tmpDir, { recursive: true, force: true });

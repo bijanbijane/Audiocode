@@ -122,11 +122,13 @@ export function applyAccessibilityAttributesToDocument(options: {
   fontScale: TranscriptFontScale;
   motionPreference: MotionPreference;
   highContrast: boolean;
+  density?: 'comfortable' | 'compact';
 }): void {
   if (typeof document === 'undefined') return;
   const root = document.documentElement;
   root.dataset.fontScale = options.fontScale;
   root.dataset.motion = options.motionPreference;
+  root.dataset.density = options.density ?? 'comfortable';
   if (options.highContrast) {
     root.classList.add('avp-high-contrast');
   } else {

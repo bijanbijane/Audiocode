@@ -14,7 +14,7 @@
  *   - CEP Plugin -> Host Bridge -> Local Companion -> Canonical Audio Ingestion -> Native Sherpa ASR -> Transcript Assembly -> Editing Engine -> EDL -> Preview -> Approval -> Export -> SESX Project Interchange
  */
 
-import { describe, it } from 'node:test';
+import { describe, it, after } from 'node:test';
 import assert from 'node:assert/strict';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
@@ -30,7 +30,12 @@ import {
 } from '../../asr-core/StreamingTranscriptAssembler';
 import {
   streamWavFileWithNativeSherpa,
+  disposeAllSharedNativeSherpaWorkers,
 } from '../../asr-core/NativeSherpaStreamingRecognizer';
+
+after(() => {
+  disposeAllSharedNativeSherpaWorkers();
+});
 
 const MODEL_DIR = '/root/.avapardaz/models/sherpa-onnx-nemo-ctc-fa-shenava-rizeh-v1.0-non-streaming-int8-2026-06-26';
 const WAV_0 = path.join(MODEL_DIR, 'test_wavs', '0.wav');
@@ -169,9 +174,16 @@ describe('Phase 1C-D: Non-Destructive Intelligent Audio Editing Integration (ED-
         'REJECTED'
       );
 
-      // Re-approve all decisions for preview & export
-      session.setDecisionApproval(targetId, 'APPROVE');
+      // Reset targetId to review if needed, then approve all safe (non-CRITICAL) decisions for preview & export
+      session.setDecisionApproval(targetId, 'RESET');
       session.setBulkApproval({ action: 'APPROVE_ALL', includeNeedsReview: true });
+      if (!session.getCanonicalEdlItems().some((i) => i.status === 'APPROVED')) {
+        session.addManualCut({
+          startSec: 1.3,
+          endSec: 1.75,
+          reason: 'حذف تپق اممم',
+        });
+      }
 
       // Generate FULL Preview and Final Export
       const previewFull = await session.generatePreview({ mode: 'FULL' });

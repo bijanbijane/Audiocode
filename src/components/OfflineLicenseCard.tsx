@@ -118,15 +118,15 @@ export const OfflineLicenseCard: React.FC = () => {
   };
 
   return (
-    <section className="border border-[#252F42] bg-[#131924] rounded-lg p-5 space-y-4">
+    <section className="border border-[var(--avp-border)] bg-[var(--avp-surface)] rounded-xl p-5 space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-2">
-          <KeyRound className="w-4 h-4 text-emerald-400" aria-hidden="true" />
+          <KeyRound className="w-4 h-4 text-[var(--avp-success-text)]" aria-hidden="true" />
           <div>
-            <h2 className="text-sm font-semibold text-slate-100">
+            <h2 className="text-sm font-semibold text-[var(--avp-text)]">
               لایسنس آفلاین رمزنگاری‌شده (Ed25519) و رجیستری امضاشده مدل‌ها
             </h2>
-            <p className="text-xs text-slate-400 mt-0.5">
+            <p className="text-xs text-[var(--avp-text-secondary)] mt-0.5">
               اعتبارسنجی نامتقارن آفلاین در WebCrypto بدون دسترسی به اینترنت + جلوگیری از گروگان‌گیری داده پس از انقضا
             </p>
           </div>
@@ -136,7 +136,7 @@ export const OfflineLicenseCard: React.FC = () => {
           type="button"
           onClick={runLiveEd25519Verification}
           disabled={status === 'loading'}
-          className="inline-flex items-center gap-2 px-3.5 py-2 text-xs font-semibold rounded border border-emerald-500/40 bg-emerald-500/15 text-emerald-200 hover:bg-emerald-500/25 disabled:opacity-60 cursor-pointer"
+          className="avp-btn avp-btn-tonal"
         >
           <Lock className="w-3.5 h-3.5" aria-hidden="true" />
           <span>
@@ -148,68 +148,68 @@ export const OfflineLicenseCard: React.FC = () => {
       </div>
 
       {errorMsg && (
-        <div className="p-3 rounded border border-rose-500/40 bg-rose-500/10 text-xs text-rose-200">
+        <div className="p-3 rounded-lg border border-[var(--avp-danger)]/40 bg-[var(--avp-danger-soft)] text-xs text-[var(--avp-danger)]">
           {errorMsg}
         </div>
       )}
 
       {report && (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3 text-xs">
-          <div className="p-3 rounded border border-[#252F42] bg-[#0E131D] space-y-1.5">
+          <div className="p-3 rounded-lg border border-[var(--avp-border)] bg-[var(--avp-surface-shell)] space-y-1.5">
             <div className="flex items-center justify-between">
-              <span className="text-slate-400">امضای لایسنس معتبر</span>
-              <CheckCircle2 className="w-4 h-4 text-emerald-400" aria-hidden="true" />
+              <span className="text-[var(--avp-text-secondary)]">امضای لایسنس معتبر</span>
+              <CheckCircle2 className="w-4 h-4 text-[var(--avp-success-text)]" aria-hidden="true" />
             </div>
-            <div dir="ltr" className="font-mono text-emerald-300 text-[11px]">
+            <div dir="ltr" className="font-mono text-[var(--avp-success-text)] text-[11px]">
               {report.leaseResult.reason} ({report.leaseResult.payload?.plan})
             </div>
-            <div className="text-slate-400 text-[11px]">
+            <div className="text-[var(--avp-text-muted)] text-[11px]">
               دسترسی مدل‌ها:{' '}
-              <span dir="ltr" className="font-mono text-slate-200">
+              <span dir="ltr" className="font-mono text-[var(--avp-text)]">
                 {report.leaseResult.allowedModelTiers.join(', ')}
               </span>
             </div>
           </div>
 
-          <div className="p-3 rounded border border-[#252F42] bg-[#0E131D] space-y-1.5">
+          <div className="p-3 rounded-lg border border-[var(--avp-border)] bg-[var(--avp-surface-shell)] space-y-1.5">
             <div className="flex items-center justify-between">
-              <span className="text-slate-400">دفاع در برابر دستکاری Payload</span>
-              <ShieldAlert className="w-4 h-4 text-amber-400" aria-hidden="true" />
+              <span className="text-[var(--avp-text-secondary)]">دفاع در برابر دستکاری Payload</span>
+              <ShieldAlert className="w-4 h-4 text-[var(--avp-warning-text)]" aria-hidden="true" />
             </div>
-            <div dir="ltr" className="font-mono text-rose-300 text-[11px]">
+            <div dir="ltr" className="font-mono text-[var(--avp-danger)] text-[11px]">
               {report.tamperedResult.reason}
             </div>
-            <div className="text-slate-400 text-[11px]">
+            <div className="text-[var(--avp-text-muted)] text-[11px]">
               نتیجه: رد امضای جعلی بدون نیاز به سرور
             </div>
           </div>
 
-          <div className="p-3 rounded border border-[#252F42] bg-[#0E131D] space-y-1.5">
+          <div className="p-3 rounded-lg border border-[var(--avp-border)] bg-[var(--avp-surface-shell)] space-y-1.5">
             <div className="flex items-center justify-between">
-              <span className="text-slate-400">سیاست عدم گروگان‌گیری داده</span>
-              <CheckCircle2 className="w-4 h-4 text-sky-400" aria-hidden="true" />
+              <span className="text-[var(--avp-text-secondary)]">سیاست عدم گروگان‌گیری داده</span>
+              <CheckCircle2 className="w-4 h-4 text-[var(--avp-accent-text)]" aria-hidden="true" />
             </div>
-            <div dir="ltr" className="font-mono text-amber-300 text-[11px]">
+            <div dir="ltr" className="font-mono text-[var(--avp-warning-text)] text-[11px]">
               {report.expiredResult.reason}
             </div>
-            <div className="text-slate-400 text-[11px]">
+            <div className="text-[var(--avp-text-muted)] text-[11px]">
               خروجی و گروه A باز می‌ماند:{' '}
-              <span dir="ltr" className="font-mono text-slate-200">
+              <span dir="ltr" className="font-mono text-[var(--avp-text)]">
                 {report.expiredResult.allowedModelTiers.join(', ')}
               </span>
             </div>
           </div>
 
-          <div className="p-3 rounded border border-[#252F42] bg-[#0E131D] space-y-1.5">
+          <div className="p-3 rounded-lg border border-[var(--avp-border)] bg-[var(--avp-surface-shell)] space-y-1.5">
             <div className="flex items-center justify-between">
-              <span className="text-slate-400">رجیستری مدل ۸MB امضاشده</span>
-              <CheckCircle2 className="w-4 h-4 text-emerald-400" aria-hidden="true" />
+              <span className="text-[var(--avp-text-secondary)]">رجیستری مدل ۸MB امضاشده</span>
+              <CheckCircle2 className="w-4 h-4 text-[var(--avp-success-text)]" aria-hidden="true" />
             </div>
-            <div dir="ltr" className="font-mono text-emerald-300 text-[11px]">
+            <div dir="ltr" className="font-mono text-[var(--avp-success-text)] text-[11px]">
               whisper-fa-int8: {report.manifestResult.reason} (
               {report.manifestResult.manifest?.chunks.length ?? 0} chunks)
             </div>
-            <div dir="ltr" className="font-mono text-rose-300 text-[11px]">
+            <div dir="ltr" className="font-mono text-[var(--avp-danger)] text-[11px]">
               legacy-denoise-v0: {report.revokedResult.reason}
             </div>
           </div>

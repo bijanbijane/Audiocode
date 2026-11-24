@@ -6,6 +6,7 @@ import {
   Cpu,
   Download,
   HardDrive,
+  Link2,
   RefreshCw,
   RotateCcw,
   ShieldAlert,
@@ -15,6 +16,8 @@ import {
   WifiOff,
   X,
 } from 'lucide-react';
+import { AccessibleModal } from './AccessibleModal';
+import { CompanionConnectionDiagnostic } from './CompanionConnectionDiagnostic';
 import {
   AppUpdateAndShellManager,
   AVAPARDAZ_VERSION_CONTRACT,
@@ -46,6 +49,7 @@ import {
 
 export type LifecycleModalTab =
   | 'model'
+  | 'companion'
   | 'offline'
   | 'health'
   | 'backup'
@@ -59,6 +63,8 @@ interface LifecycleManagementModalProps {
   workflowState: StudioWorkflowState;
   modelManager: LocalModelLifecycleManager;
   onModelStateChanged: () => void;
+  companionEndpoint?: string;
+  onChangeCompanionEndpoint?: (nextEndpoint: string) => void;
 }
 
 export const LifecycleManagementModal: React.FC<LifecycleManagementModalProps> = ({
@@ -68,6 +74,8 @@ export const LifecycleManagementModal: React.FC<LifecycleManagementModalProps> =
   workflowState,
   modelManager,
   onModelStateChanged,
+  companionEndpoint = 'http://127.0.0.1:4771',
+  onChangeCompanionEndpoint,
 }) => {
   const isFa = workflowState.locale === 'fa';
   const [activeTab, setActiveTab] = useState<LifecycleModalTab>(initialTab);
@@ -106,15 +114,6 @@ export const LifecycleManagementModal: React.FC<LifecycleManagementModalProps> =
       active = false;
     };
   }, [isOpen, modelManager, onModelStateChanged]);
-
-  useEffect(() => {
-    if (!isOpen) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [isOpen, onClose]);
 
   if (!isOpen) return null;
 
@@ -532,6 +531,7 @@ export const LifecycleManagementModal: React.FC<LifecycleManagementModalProps> =
 
   const tabs: { id: LifecycleModalTab; label: string; icon: React.ReactNode }[] = [
     { id: 'model', label: isFa ? 'مدل محلی ASR' : 'Local ASR Model', icon: <Cpu className="w-3.5 h-3.5" /> },
+    { id: 'companion', label: isFa ? 'اتصال Companion' : 'Companion Bridge', icon: <Link2 className="w-3.5 h-3.5" /> },
     { id: 'offline', label: isFa ? 'آفلاین و نسخه' : 'Offline & Version', icon: <WifiOff className="w-3.5 h-3.5" /> },
     { id: 'health', label: isFa ? 'سلامت ۱۴ زیرسیستم' : '14-Subsystem Health', icon: <Activity className="w-3.5 h-3.5" /> },
     { id: 'backup', label: isFa ? 'پشتیبان و بازیابی' : 'Backup & Restore', icon: <Archive className="w-3.5 h-3.5" /> },
@@ -568,38 +568,39 @@ export const LifecycleManagementModal: React.FC<LifecycleManagementModalProps> =
   };
 
   return (
-    <div
-      className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4"
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="lifecycle-modal-title"
-      data-testid="lifecycle-management-modal"
+    <AccessibleModal
+      isOpen={isOpen}
+      onClose={onClose}
+      labelledBy="lifecycle-modal-title"
+      dir={isFa ? 'rtl' : 'ltr'}
+      dataTestId="lifecycle-management-modal"
+      panelClassName="w-full max-w-4xl"
     >
-      <div className="w-full max-w-4xl max-h-[88vh] flex flex-col rounded-lg border border-slate-200 dark:border-[#252F42] bg-white dark:bg-[#131924] text-slate-900 dark:text-slate-100 shadow-2xl overflow-hidden">
+      <div className="w-full max-h-[88vh] flex flex-col rounded-2xl border border-[var(--avp-border)] bg-[var(--avp-surface)] text-[var(--avp-text)] shadow-[var(--avp-shadow-md)] overflow-hidden">
         {/* Header */}
-        <div className="px-5 py-3.5 border-b border-slate-200 dark:border-[#252F42] flex items-center justify-between shrink-0">
+        <div className="px-5 py-3.5 border-b border-[var(--avp-border)] bg-[var(--avp-surface-shell)] flex items-center justify-between shrink-0">
           <div>
             <h2 id="lifecycle-modal-title" className="text-sm font-bold">
               {isFa
-                ? 'مدیریت محصول محلی، سلامت زیرسیستم‌ها و چرخه عمر (AVP-P09 / P10 / P11)'
-                : 'Local Product Lifecycle, Subsystem Health & Diagnostics'}
+                ? 'مدیریت مدل محلی، اتصال Companion و سلامت زیرسیستم‌ها'
+                : 'Local Models, Companion Bridge & Subsystem Health'}
             </h2>
-            <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5 font-mono" dir="ltr">
-              v{AVAPARDAZ_VERSION_CONTRACT.appVersion} · Schema v{AVAPARDAZ_VERSION_CONTRACT.projectSchemaVersion} · OPFS Model Repository · 100% Local-First
+            <p className="text-xs text-[var(--avp-text-muted)] mt-0.5 font-mono" dir="ltr">
+              v{AVAPARDAZ_VERSION_CONTRACT.appVersion} · Schema v{AVAPARDAZ_VERSION_CONTRACT.projectSchemaVersion} · OPFS · Local-First
             </p>
           </div>
           <button
             type="button"
             onClick={onClose}
             aria-label={isFa ? 'بستن' : 'Close'}
-            className="p-1.5 rounded text-slate-500 hover:text-slate-900 dark:hover:text-white cursor-pointer"
+            className="avp-btn-icon avp-btn-icon-sm"
           >
             <X className="w-4 h-4" />
           </button>
         </div>
 
         {/* Navigation tabs */}
-        <div className="px-5 pt-2 border-b border-slate-200 dark:border-[#252F42] flex items-center gap-4 overflow-x-auto shrink-0">
+        <div className="px-5 pt-2 border-b border-[var(--avp-border)] flex items-center gap-4 overflow-x-auto shrink-0 bg-[var(--avp-surface)]">
           {tabs.map((t) => (
             <button
               key={t.id}
@@ -608,8 +609,8 @@ export const LifecycleManagementModal: React.FC<LifecycleManagementModalProps> =
               onClick={() => setActiveTab(t.id)}
               className={`pb-2.5 inline-flex items-center gap-1.5 text-xs font-medium whitespace-nowrap border-b-2 cursor-pointer transition-colors ${
                 activeTab === t.id
-                  ? 'border-amber-500 text-amber-600 dark:text-amber-400'
-                  : 'border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                  ? 'border-[var(--avp-accent)] text-[var(--avp-accent-text)] font-semibold'
+                  : 'border-transparent text-[var(--avp-text-muted)] hover:text-[var(--avp-text)]'
               }`}
             >
               {t.icon}
@@ -623,7 +624,7 @@ export const LifecycleManagementModal: React.FC<LifecycleManagementModalProps> =
           {statusMessage && (
             <div
               data-testid="lifecycle-status-message"
-              className="rounded border border-sky-500/30 bg-sky-500/10 px-3 py-2 text-sky-900 dark:text-sky-200"
+              className="rounded-lg border border-[var(--avp-accent)]/35 bg-[var(--avp-accent-soft)] px-3 py-2 text-[var(--avp-accent-text)] font-medium"
             >
               {statusMessage}
             </div>
@@ -631,28 +632,28 @@ export const LifecycleManagementModal: React.FC<LifecycleManagementModalProps> =
 
           {activeTab === 'model' && (
             <div className="space-y-3">
-              <div className="rounded border border-slate-200 dark:border-[#252F42] bg-slate-50 dark:bg-[#0E131D] p-3.5 space-y-2">
+              <div className="rounded-xl border border-[var(--avp-border)] bg-[var(--avp-surface-shell)] p-3.5 space-y-2">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <div className="font-semibold">
                     {isFa ? 'وضعیت فعلی مدل محلی:' : 'Current Local Model State:'}{' '}
                     <span
                       data-testid="model-lifecycle-state"
-                      className="font-mono text-amber-600 dark:text-amber-400"
+                      className="font-mono text-[var(--avp-accent-text)]"
                     >
                       {modelSnap.state}
                     </span>
                   </div>
-                  <div className="font-mono text-[11px] text-slate-500 dark:text-slate-400" dir="ltr">
+                  <div className="font-mono text-[11px] text-[var(--avp-text-muted)]" dir="ltr">
                     Storage: {modelSnap.storageBackend} · Runtime Ready: {String(modelSnap.runtimeReady)}
                   </div>
                 </div>
 
-                <p className="text-slate-600 dark:text-slate-400">{describeModelState()}</p>
+                <p className="text-[var(--avp-text-secondary)]">{describeModelState()}</p>
 
                 {modelSnap.activeModel && (
                   <div
                     data-testid="model-active-info"
-                    className="font-mono text-[11px] text-slate-700 dark:text-slate-300 space-y-0.5 pt-1 border-t border-slate-200 dark:border-[#252F42]"
+                    className="font-mono text-[11px] text-[var(--avp-text-secondary)] space-y-0.5 pt-2 border-t border-[var(--avp-border-subtle)]"
                     dir="ltr"
                   >
                     <div>
@@ -669,11 +670,11 @@ export const LifecycleManagementModal: React.FC<LifecycleManagementModalProps> =
                     <div>
                       CTC Vocabulary (tokens.txt):{' '}
                       {activeCtcVocab && activeCtcVocab.length > 0 ? (
-                        <span className="text-emerald-600 dark:text-emerald-400">
+                        <span className="text-[var(--avp-success-text)]">
                           Loaded ({activeCtcVocab.length} tokens)
                         </span>
                       ) : (
-                        <span className="text-amber-600 dark:text-amber-400">
+                        <span className="text-[var(--avp-warning-text)]">
                           Missing — import tokens.txt or click auto-install
                         </span>
                       )}
@@ -684,7 +685,7 @@ export const LifecycleManagementModal: React.FC<LifecycleManagementModalProps> =
                 {modelSnap.previousVerifiedModel && (
                   <div
                     data-testid="model-previous-info"
-                    className="font-mono text-[11px] text-slate-500 dark:text-slate-400 space-y-0.5 pt-2 border-t border-slate-200 dark:border-[#252F42]"
+                    className="font-mono text-[11px] text-[var(--avp-text-muted)] space-y-0.5 pt-2 border-t border-[var(--avp-border-subtle)]"
                     dir="ltr"
                   >
                     <div>
@@ -696,7 +697,7 @@ export const LifecycleManagementModal: React.FC<LifecycleManagementModalProps> =
                 )}
 
                 {isInstallingModel && installProgressPct !== null && (
-                  <div className="pt-1 font-mono text-[11px] text-amber-500" dir="ltr">
+                  <div className="pt-1 font-mono text-[11px] text-[var(--avp-accent-text)]" dir="ltr">
                     Streaming chunks to OPFS & verifying SHA-256... {installProgressPct}%
                   </div>
                 )}
@@ -708,7 +709,7 @@ export const LifecycleManagementModal: React.FC<LifecycleManagementModalProps> =
                   data-testid="btn-install-browser-persian-model"
                   disabled={isInstallingModel}
                   onClick={handleAutoInstallBrowserShenavaModel}
-                  className="inline-flex items-center gap-1.5 px-3 py-2 rounded-md bg-emerald-500 text-slate-950 font-semibold hover:bg-emerald-400 disabled:opacity-50 cursor-pointer"
+                  className="avp-btn avp-btn-primary"
                 >
                   <Download className="w-3.5 h-3.5" />
                   <span>
@@ -722,7 +723,7 @@ export const LifecycleManagementModal: React.FC<LifecycleManagementModalProps> =
                   </span>
                 </button>
 
-                <label className="inline-flex items-center gap-1.5 px-3 py-2 rounded-md bg-amber-400 text-slate-950 font-semibold hover:bg-amber-300 cursor-pointer">
+                <label className="avp-btn avp-btn-tonal cursor-pointer">
                   <Upload className="w-3.5 h-3.5" />
                   <span>
                     {isInstallingModel
@@ -743,7 +744,7 @@ export const LifecycleManagementModal: React.FC<LifecycleManagementModalProps> =
                   />
                 </label>
 
-                <label className="inline-flex items-center gap-1.5 px-3 py-2 rounded-md border border-slate-300 dark:border-[#2C3A52] bg-white dark:bg-[#141C2B] text-slate-800 dark:text-slate-200 font-medium hover:bg-slate-50 dark:hover:bg-[#1B2538] cursor-pointer">
+                <label className="avp-btn avp-btn-outline cursor-pointer">
                   <Upload className="w-3.5 h-3.5" />
                   <span>{isFa ? 'وارد کردن واژگان (tokens.txt)' : 'Import tokens.txt'}</span>
                   <input
@@ -762,7 +763,7 @@ export const LifecycleManagementModal: React.FC<LifecycleManagementModalProps> =
                     data-testid="btn-verify-model-offline"
                     disabled={isInstallingModel}
                     onClick={handleVerifyModelOffline}
-                    className="inline-flex items-center gap-1.5 px-3 py-2 rounded-md border border-emerald-500/40 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-500/10 cursor-pointer"
+                    className="avp-btn avp-btn-outline border-[var(--avp-success)]/40 text-[var(--avp-success-text)]"
                   >
                     <ShieldCheck className="w-3.5 h-3.5" />
                     <span>{isFa ? 'راستی‌آزمایی آفلاین OPFS' : 'Verify OPFS Integrity'}</span>
@@ -775,7 +776,7 @@ export const LifecycleManagementModal: React.FC<LifecycleManagementModalProps> =
                     data-testid="btn-rollback-model"
                     disabled={isInstallingModel}
                     onClick={handleRollbackModel}
-                    className="inline-flex items-center gap-1.5 px-3 py-2 rounded-md border border-amber-500/40 text-amber-700 dark:text-amber-300 hover:bg-amber-500/10 cursor-pointer"
+                    className="avp-btn avp-btn-outline border-[var(--avp-warning)]/40 text-[var(--avp-warning-text)]"
                   >
                     <RotateCcw className="w-3.5 h-3.5" />
                     <span>{isFa ? 'بازگشت به مدل قبلی تأییدشده' : 'Rollback to Previous Model'}</span>
@@ -788,7 +789,7 @@ export const LifecycleManagementModal: React.FC<LifecycleManagementModalProps> =
                     data-testid="btn-remove-model"
                     disabled={isInstallingModel}
                     onClick={handleRemoveModel}
-                    className="inline-flex items-center gap-1.5 px-3 py-2 rounded-md border border-rose-500/40 text-rose-600 dark:text-rose-300 hover:bg-rose-500/10 cursor-pointer"
+                    className="avp-btn avp-btn-danger-ghost"
                   >
                     <Trash2 className="w-3.5 h-3.5" />
                     <span>{isFa ? 'حذف مدل (با حفظ پروژه‌ها)' : 'Remove Model (Keep Projects)'}</span>
@@ -798,19 +799,30 @@ export const LifecycleManagementModal: React.FC<LifecycleManagementModalProps> =
             </div>
           )}
 
+          {activeTab === 'companion' && (
+            <div className="space-y-3" data-testid="lifecycle-companion-tab">
+              <CompanionConnectionDiagnostic
+                endpoint={companionEndpoint}
+                onChangeEndpoint={(next) => onChangeCompanionEndpoint?.(next)}
+                locale={workflowState.locale}
+                defaultExpanded
+              />
+            </div>
+          )}
+
           {activeTab === 'offline' && (
             <div className="space-y-3">
               <button
                 type="button"
                 onClick={handleCheckOfflineReadiness}
-                className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-md bg-amber-400 text-slate-950 font-semibold hover:bg-amber-300 cursor-pointer"
+                className="avp-btn avp-btn-primary"
               >
                 <RefreshCw className="w-3.5 h-3.5" />
                 <span>{isFa ? 'بررسی واقعی کش آفلاین پوسته' : 'Verify Real Offline Shell Cache'}</span>
               </button>
 
               {offlineReport && (
-                <div className="rounded border border-slate-200 dark:border-[#252F42] bg-slate-50 dark:bg-[#0E131D] p-3.5 space-y-1.5">
+                <div className="rounded-xl border border-[var(--avp-border)] bg-[var(--avp-surface-shell)] p-3.5 space-y-1.5">
                   <div className="font-semibold">
                     {offlineReport.offlineStartupReady
                       ? isFa
@@ -820,8 +832,8 @@ export const LifecycleManagementModal: React.FC<LifecycleManagementModalProps> =
                         ? 'راه‌اندازی کاملاً آفلاین هنوز تأیید نشده است.'
                         : 'Offline startup not yet verified.'}
                   </div>
-                  <p className="text-slate-600 dark:text-slate-400">{offlineReport.note}</p>
-                  <div className="font-mono text-[11px] text-slate-500" dir="ltr">
+                  <p className="text-[var(--avp-text-secondary)]">{offlineReport.note}</p>
+                  <div className="font-mono text-[11px] text-[var(--avp-text-muted)]" dir="ltr">
                     SW Active: {String(offlineReport.serviceWorkerRegistered)} · WASM:{' '}
                     {String(offlineReport.wasmAssetsCached)} · Model Installed:{' '}
                     {String(offlineReport.localModelInstalled)}
@@ -833,8 +845,8 @@ export const LifecycleManagementModal: React.FC<LifecycleManagementModalProps> =
 
           {activeTab === 'health' && (
             <div className="space-y-3">
-              <div className="flex items-center justify-between">
-                <p className="text-slate-600 dark:text-slate-400">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <p className="text-[var(--avp-text-secondary)]">
                   {isFa
                     ? 'بررسی زنده ۱۴ زیرسیستم واقعی (مرورگر، حافظه، بودجه، WASM، مدل ASR، Worker، OPFS، IndexedDB، کش آفلاین، رندر و...)'
                     : 'Live inspection across all 14 real runtime subsystems.'}
@@ -844,7 +856,7 @@ export const LifecycleManagementModal: React.FC<LifecycleManagementModalProps> =
                   data-testid="btn-run-health-checks"
                   onClick={handleRunHealthChecks}
                   disabled={runningHealth}
-                  className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-md bg-amber-400 text-slate-950 font-semibold hover:bg-amber-300 cursor-pointer"
+                  className="avp-btn avp-btn-primary"
                 >
                   <Activity className="w-3.5 h-3.5" />
                   <span>
@@ -863,7 +875,7 @@ export const LifecycleManagementModal: React.FC<LifecycleManagementModalProps> =
                 <div className="space-y-2" data-testid="health-report-results">
                   <div className="font-semibold">
                     {isFa ? 'وضعیت کلی:' : 'Overall Status:'}{' '}
-                    <span className="font-mono text-amber-600 dark:text-amber-400">
+                    <span className="font-mono text-[var(--avp-accent-text)]">
                       {healthReport.overallStatus}
                     </span>{' '}
                     ({healthReport.subsystems.length} {isFa ? 'زیرسیستم' : 'subsystems'})
@@ -872,7 +884,7 @@ export const LifecycleManagementModal: React.FC<LifecycleManagementModalProps> =
                     {healthReport.subsystems.map((sub) => (
                       <div
                         key={sub.subsystemId}
-                        className="rounded border border-slate-200 dark:border-[#252F42] bg-slate-50 dark:bg-[#0E131D] p-2.5 space-y-1"
+                        className="rounded-xl border border-[var(--avp-border)] bg-[var(--avp-surface-shell)] p-2.5 space-y-1"
                       >
                         <div className="flex items-center justify-between gap-2">
                           <span className="font-semibold">
@@ -881,16 +893,16 @@ export const LifecycleManagementModal: React.FC<LifecycleManagementModalProps> =
                           <span
                             className={`font-mono text-[11px] font-semibold ${
                               sub.status === 'HEALTHY'
-                                ? 'text-emerald-600 dark:text-emerald-400'
+                                ? 'text-[var(--avp-success-text)]'
                                 : sub.status === 'DEGRADED'
-                                  ? 'text-amber-600 dark:text-amber-400'
-                                  : 'text-rose-600 dark:text-rose-400'
+                                  ? 'text-[var(--avp-warning-text)]'
+                                  : 'text-[var(--avp-danger)]'
                             }`}
                           >
                             {sub.status}
                           </span>
                         </div>
-                        <p className="text-[11px] text-slate-600 dark:text-slate-400">
+                        <p className="text-[11px] text-[var(--avp-text-secondary)]">
                           {isFa ? sub.summaryFa : sub.summaryEn}
                         </p>
                       </div>
@@ -903,12 +915,13 @@ export const LifecycleManagementModal: React.FC<LifecycleManagementModalProps> =
 
           {activeTab === 'backup' && (
             <div className="space-y-3">
-              <div className="flex items-center gap-3">
+              <div className="flex flex-wrap items-center gap-3">
                 <label className="inline-flex items-center gap-1.5 cursor-pointer">
                   <input
                     type="radio"
                     checked={backupMode === 'METADATA_ONLY'}
                     onChange={() => setBackupMode('METADATA_ONLY')}
+                    className="accent-[var(--avp-accent)]"
                   />
                   <span>{isFa ? 'فقط فراداده، متن و EDL (سبک)' : 'Metadata, Transcript & EDL Only'}</span>
                 </label>
@@ -917,6 +930,7 @@ export const LifecycleManagementModal: React.FC<LifecycleManagementModalProps> =
                     type="radio"
                     checked={backupMode === 'COMPLETE_PACKAGE'}
                     onChange={() => setBackupMode('COMPLETE_PACKAGE')}
+                    className="accent-[var(--avp-accent)]"
                   />
                   <span>{isFa ? 'بسته کامل پروژه با کد SHA-256' : 'Complete Project Package (SHA-256)'}</span>
                 </label>
@@ -924,7 +938,7 @@ export const LifecycleManagementModal: React.FC<LifecycleManagementModalProps> =
               <button
                 type="button"
                 onClick={handleExportProjectBackup}
-                className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-md bg-amber-400 text-slate-950 font-semibold hover:bg-amber-300 cursor-pointer"
+                className="avp-btn avp-btn-primary"
               >
                 <Download className="w-3.5 h-3.5" />
                 <span>{isFa ? 'ساخت و دانلود بسته پشتیبان محلی' : 'Create & Download Local Backup'}</span>
@@ -938,7 +952,7 @@ export const LifecycleManagementModal: React.FC<LifecycleManagementModalProps> =
                 <button
                   type="button"
                   onClick={handleInspectStorage}
-                  className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-md bg-amber-400 text-slate-950 font-semibold hover:bg-amber-300 cursor-pointer"
+                  className="avp-btn avp-btn-primary"
                 >
                   <HardDrive className="w-3.5 h-3.5" />
                   <span>{isFa ? 'اندازه‌گیری فضای ذخیره‌سازی' : 'Inspect Local Storage'}</span>
@@ -946,7 +960,7 @@ export const LifecycleManagementModal: React.FC<LifecycleManagementModalProps> =
                 <button
                   type="button"
                   onClick={handleSafeCleanup}
-                  className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-md border border-slate-300 dark:border-[#252F42] hover:bg-slate-100 dark:hover:bg-[#1E2738] cursor-pointer"
+                  className="avp-btn avp-btn-outline"
                 >
                   <Trash2 className="w-3.5 h-3.5" />
                   <span>{isFa ? 'پاک‌سازی ایمن فایل‌های موقت' : 'Safe Temp Cleanup'}</span>
@@ -954,7 +968,7 @@ export const LifecycleManagementModal: React.FC<LifecycleManagementModalProps> =
               </div>
 
               {storageReport && (
-                <div className="rounded border border-slate-200 dark:border-[#252F42] bg-slate-50 dark:bg-[#0E131D] p-3.5 font-mono text-[11px] space-y-1" dir="ltr">
+                <div className="rounded-xl border border-[var(--avp-border)] bg-[var(--avp-surface-shell)] p-3.5 font-mono text-[11px] space-y-1" dir="ltr">
                   <div>StorageManager API: {String(storageReport.storageApiAvailable)}</div>
                   <div>Estimated Usage: {storageReport.estimatedUsageBytes ?? 'N/A'} B</div>
                   <div>Estimated Quota: {storageReport.estimatedQuotaBytes ?? 'N/A'} B</div>
@@ -968,8 +982,8 @@ export const LifecycleManagementModal: React.FC<LifecycleManagementModalProps> =
 
           {activeTab === 'diagnostics' && (
             <div className="space-y-3">
-              <div className="flex items-center justify-between gap-2">
-                <span className="text-slate-600 dark:text-slate-400">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <span className="text-[var(--avp-text-secondary)]">
                   {isFa
                     ? 'تمام گزارش‌های عیب‌یابی قبل از نمایش پاک‌سازی می‌شوند و شامل هیچ صوت یا متن کاربر نیستند.'
                     : 'All diagnostic exports are strictly sanitized and never include user audio or transcript content.'}
@@ -977,7 +991,7 @@ export const LifecycleManagementModal: React.FC<LifecycleManagementModalProps> =
                 <button
                   type="button"
                   onClick={handleRefreshDiagnostics}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-amber-400 text-slate-950 font-semibold hover:bg-amber-300 cursor-pointer"
+                  className="avp-btn avp-btn-primary"
                 >
                   <CheckCircle2 className="w-3.5 h-3.5" />
                   <span>{isFa ? 'تولید گزارش عیب‌یابی' : 'Generate Diagnostics'}</span>
@@ -986,7 +1000,7 @@ export const LifecycleManagementModal: React.FC<LifecycleManagementModalProps> =
               {diagJsonPreview && (
                 <pre
                   dir="ltr"
-                  className="rounded border border-slate-200 dark:border-[#252F42] bg-slate-50 dark:bg-[#0B0F17] p-3 text-[11px] font-mono overflow-x-auto max-h-64"
+                  className="rounded-xl border border-[var(--avp-border)] bg-[var(--avp-surface-shell)] p-3 text-[11px] font-mono overflow-x-auto max-h-64"
                 >
                   {diagJsonPreview}
                 </pre>
@@ -995,7 +1009,7 @@ export const LifecycleManagementModal: React.FC<LifecycleManagementModalProps> =
           )}
         </div>
       </div>
-    </div>
+    </AccessibleModal>
   );
 };
 

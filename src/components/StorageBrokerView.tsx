@@ -147,15 +147,15 @@ export const StorageBrokerView: React.FC<StorageBrokerViewProps> = ({
   return (
     <div dir="rtl" className="space-y-6">
       {/* Acceptance Gate Benchmark Runner (PoC #1, #2 & #3) */}
-      <section className="border border-[#252F42] bg-[#131924] rounded-lg p-5 space-y-4">
+      <section className="border border-[var(--avp-border)] bg-[var(--avp-surface)] rounded-lg p-5 space-y-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-2">
-            <Gauge className="w-4 h-4 text-amber-400" aria-hidden="true" />
+            <Gauge className="w-4 h-4 text-[var(--avp-brand)]" aria-hidden="true" />
             <div>
-              <h2 className="text-sm font-semibold text-slate-100">
+              <h2 className="text-sm font-semibold text-[var(--avp-text)]">
                 بنچمارک معیارهای قبولی (Acceptance Gate — PoC #1, #2 & #3)
               </h2>
-              <p className="text-xs text-slate-400 mt-0.5">
+              <p className="text-xs text-[var(--avp-text-secondary)] mt-0.5">
                 سنجش واقعی Ring Buffer، Seek Index، هرم Peak، بودجه OPFS و فیلتر ضد Aliasing
               </p>
             </div>
@@ -166,7 +166,7 @@ export const StorageBrokerView: React.FC<StorageBrokerViewProps> = ({
               <button
                 type="button"
                 onClick={downloadEvaluationReport}
-                className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-medium rounded border border-[#252F42] bg-[#0E131D] text-slate-200 hover:bg-[#1E2738] cursor-pointer"
+                className="avp-btn avp-btn-outline text-xs"
               >
                 <span>دریافت گزارش PoC (JSON)</span>
               </button>
@@ -175,7 +175,7 @@ export const StorageBrokerView: React.FC<StorageBrokerViewProps> = ({
               type="button"
               onClick={runAcceptanceGateBenchmark}
               disabled={isRunningBench}
-              className="inline-flex items-center gap-2 px-3.5 py-2 text-xs font-semibold rounded bg-amber-400 text-slate-950 hover:bg-amber-300 disabled:opacity-60 cursor-pointer"
+              className="avp-btn avp-btn-primary text-xs font-semibold"
             >
               <Play className="w-3.5 h-3.5" aria-hidden="true" />
               <span>{isRunningBench ? 'در حال اجرا...' : 'اجرای بنچمارک معیارهای قبولی'}</span>
@@ -184,9 +184,9 @@ export const StorageBrokerView: React.FC<StorageBrokerViewProps> = ({
         </div>
 
         {bench && (
-          <div className="overflow-x-auto border border-[#252F42] rounded-md">
+          <div className="overflow-x-auto border border-[var(--avp-border)] rounded-md">
             <table className="w-full text-right text-xs">
-              <thead className="bg-[#101520] text-slate-400 border-b border-[#252F42]">
+              <thead className="bg-[var(--avp-bg-subtle)] text-[var(--avp-text-secondary)] border-b border-[var(--avp-border)]">
                 <tr>
                   <th className="py-2.5 px-4 font-medium">شاخص سنجش</th>
                   <th className="py-2.5 px-4 font-medium">حد قبولی (Pass Gate)</th>
@@ -194,94 +194,94 @@ export const StorageBrokerView: React.FC<StorageBrokerViewProps> = ({
                   <th className="py-2.5 px-4 font-medium">نتیجه</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-[#1E2738] font-mono">
+              <tbody className="divide-y divide-[var(--avp-border-subtle)] font-mono">
                 <tr>
-                  <td className="py-2.5 px-4 font-sans text-slate-200">پرش صوتی Ring Buffer (Underrun)</td>
-                  <td className="py-2.5 px-4 text-slate-400">
+                  <td className="py-2.5 px-4 font-sans text-[var(--avp-text)]">پرش صوتی Ring Buffer (Underrun)</td>
+                  <td className="py-2.5 px-4 text-[var(--avp-text-secondary)]">
                     دقیقاً <span dir="ltr" className="inline-block">0</span>
                   </td>
-                  <td className="py-2.5 px-4 text-slate-100">
+                  <td className="py-2.5 px-4 text-[var(--avp-text)]">
                     <span dir="ltr" className="inline-block">{bench.ringBufferUnderruns}</span>
                   </td>
-                  <td className="py-2.5 px-4 text-emerald-400 font-sans">
+                  <td className="py-2.5 px-4 text-[var(--avp-success-text)] font-sans">
                     <CheckCircle2 className="w-3.5 h-3.5 inline ml-1" />
                     قبول ({bench.ringBufferShared ? 'SharedArrayBuffer' : 'Fallback Buffer'})
                   </td>
                 </tr>
                 <tr>
-                  <td className="py-2.5 px-4 font-sans text-slate-200">زمان جستجو در ثانیه ۷۰۰۰ (Seek Latency)</td>
-                  <td className="py-2.5 px-4 text-slate-400">
+                  <td className="py-2.5 px-4 font-sans text-[var(--avp-text)]">زمان جستجو در ثانیه ۷۰۰۰ (Seek Latency)</td>
+                  <td className="py-2.5 px-4 text-[var(--avp-text-secondary)]">
                     <span dir="ltr" className="inline-block">&lt; 40 ms</span>
                   </td>
-                  <td className="py-2.5 px-4 text-slate-100">
+                  <td className="py-2.5 px-4 text-[var(--avp-text)]">
                     <span dir="ltr" className="inline-block">{bench.seekLatencyMs} ms</span>
                   </td>
-                  <td className="py-2.5 px-4 text-emerald-400 font-sans">
+                  <td className="py-2.5 px-4 text-[var(--avp-success-text)] font-sans">
                     <CheckCircle2 className="w-3.5 h-3.5 inline ml-1" />
                     قبول
                   </td>
                 </tr>
                 <tr>
-                  <td className="py-2.5 px-4 font-sans text-slate-200">ساخت هرم Peak (بخش ۲ ثانیه‌ای ۴۸kHz)</td>
-                  <td className="py-2.5 px-4 text-slate-400">
+                  <td className="py-2.5 px-4 font-sans text-[var(--avp-text)]">ساخت هرم Peak (بخش ۲ ثانیه‌ای ۴۸kHz)</td>
+                  <td className="py-2.5 px-4 text-[var(--avp-text-secondary)]">
                     <span dir="ltr" className="inline-block">&lt; 2500 ms</span> (کل ۲ ساعت)
                   </td>
-                  <td className="py-2.5 px-4 text-slate-100">
+                  <td className="py-2.5 px-4 text-[var(--avp-text)]">
                     <span dir="ltr" className="inline-block">{bench.peakPyramidMs} ms</span>
                   </td>
-                  <td className="py-2.5 px-4 text-emerald-400 font-sans">
+                  <td className="py-2.5 px-4 text-[var(--avp-success-text)] font-sans">
                     <CheckCircle2 className="w-3.5 h-3.5 inline ml-1" />
                     قبول
                   </td>
                 </tr>
                 <tr>
-                  <td className="py-2.5 px-4 font-sans text-slate-200">تضعیف ۱۴kHz در Resampler به ۱۶kHz</td>
-                  <td className="py-2.5 px-4 text-slate-400">
+                  <td className="py-2.5 px-4 font-sans text-[var(--avp-text)]">تضعیف ۱۴kHz در Resampler به ۱۶kHz</td>
+                  <td className="py-2.5 px-4 text-[var(--avp-text-secondary)]">
                     <span dir="ltr" className="inline-block">&gt; 45 dB</span>
                   </td>
-                  <td className="py-2.5 px-4 text-slate-100">
+                  <td className="py-2.5 px-4 text-[var(--avp-text)]">
                     <span dir="ltr" className="inline-block">-{bench.aliasingAttenuationDb} dB</span>
                   </td>
-                  <td className="py-2.5 px-4 text-emerald-400 font-sans">
+                  <td className="py-2.5 px-4 text-[var(--avp-success-text)] font-sans">
                     <CheckCircle2 className="w-3.5 h-3.5 inline ml-1" />
                     قبول
                   </td>
                 </tr>
                 <tr>
-                  <td className="py-2.5 px-4 font-sans text-slate-200">سقف بودجه RAM / OPFS (مدل ۲ ساعته)</td>
-                  <td className="py-2.5 px-4 text-slate-400">
+                  <td className="py-2.5 px-4 font-sans text-[var(--avp-text)]">سقف بودجه RAM / OPFS (مدل ۲ ساعته)</td>
+                  <td className="py-2.5 px-4 text-[var(--avp-text-secondary)]">
                     <span dir="ltr" className="inline-block">&lt; 150 MB RAM · &lt; 400 MB OPFS</span>
                   </td>
-                  <td className="py-2.5 px-4 text-slate-100">
+                  <td className="py-2.5 px-4 text-[var(--avp-text)]">
                     <span dir="ltr" className="inline-block">
                       {bench.estimated2HrRamMb} MB RAM · {bench.estimated2HrOpfsMb} MB OPFS
                     </span>
                   </td>
-                  <td className="py-2.5 px-4 text-emerald-400 font-sans">
+                  <td className="py-2.5 px-4 text-[var(--avp-success-text)] font-sans">
                     <CheckCircle2 className="w-3.5 h-3.5 inline ml-1" />
                     قبول
                   </td>
                 </tr>
                 {gateReport?.results.map((gate) => (
                   <tr key={gate.gateName}>
-                    <td className="py-2.5 px-4 font-sans text-slate-200">
+                    <td className="py-2.5 px-4 font-sans text-[var(--avp-text)]">
                       <span dir="ltr" className="inline-block font-mono text-[11px]">
                         {gate.gateName}
                       </span>
                     </td>
-                    <td className="py-2.5 px-4 text-slate-400">
+                    <td className="py-2.5 px-4 text-[var(--avp-text-secondary)]">
                       <span dir="ltr" className="inline-block">
                         {gate.threshold}
                       </span>
                     </td>
-                    <td className="py-2.5 px-4 text-slate-100">
+                    <td className="py-2.5 px-4 text-[var(--avp-text)]">
                       <span dir="ltr" className="inline-block">
                         {gate.measuredValue}
                       </span>
                     </td>
                     <td
                       className={`py-2.5 px-4 font-sans ${
-                        gate.passed ? 'text-emerald-400' : 'text-rose-400'
+                        gate.passed ? 'text-[var(--avp-success-text)]' : 'text-[var(--avp-danger-text)]'
                       }`}
                     >
                       <CheckCircle2 className="w-3.5 h-3.5 inline ml-1" />
@@ -298,26 +298,26 @@ export const StorageBrokerView: React.FC<StorageBrokerViewProps> = ({
       <OfflineLicenseCard />
 
       {/* Runtime Capabilities & Isolation Matrix */}
-      <section className="border border-[#252F42] bg-[#131924] rounded-lg p-5">
+      <section className="border border-[var(--avp-border)] bg-[var(--avp-surface)] rounded-lg p-5">
         <div className="flex items-center gap-2 mb-4">
-          <Cpu className="w-4 h-4 text-amber-400" aria-hidden="true" />
-          <h2 className="text-sm font-semibold text-slate-100">
+          <Cpu className="w-4 h-4 text-[var(--avp-brand)]" aria-hidden="true" />
+          <h2 className="text-sm font-semibold text-[var(--avp-text)]">
             قابلیت‌های واقعی مرورگر و ایزوله‌سازی اجرایی (Runtime Capabilities)
           </h2>
         </div>
 
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
-          <div className="p-3 rounded border border-[#252F42] bg-[#0E131D]">
-            <div className="text-slate-400">مسیر انتقال صدا</div>
-            <div dir="ltr" className="font-mono text-slate-100 mt-1 text-right">{capabilities.transportMode}</div>
+          <div className="p-3 rounded border border-[var(--avp-border)] bg-[var(--avp-bg-subtle)]">
+            <div className="text-[var(--avp-text-secondary)]">مسیر انتقال صدا</div>
+            <div dir="ltr" className="font-mono text-[var(--avp-text)] mt-1 text-right">{capabilities.transportMode}</div>
           </div>
-          <div className="p-3 rounded border border-[#252F42] bg-[#0E131D]">
-            <div className="text-slate-400">شتاب‌دهنده پردازش</div>
-            <div dir="ltr" className="font-mono text-sky-400 mt-1 text-right">{capabilities.gpuFallbackMode}</div>
+          <div className="p-3 rounded border border-[var(--avp-border)] bg-[var(--avp-bg-subtle)]">
+            <div className="text-[var(--avp-text-secondary)]">شتاب‌دهنده پردازش</div>
+            <div dir="ltr" className="font-mono text-[var(--avp-accent-text)] mt-1 text-right">{capabilities.gpuFallbackMode}</div>
           </div>
-          <div className="p-3 rounded border border-[#252F42] bg-[#0E131D]">
-            <div className="text-slate-400">OPFS & SyncAccessHandle</div>
-            <div dir="ltr" className={`font-mono mt-1 text-right ${telemetry.opfsSupported ? 'text-emerald-400' : 'text-amber-400'}`}>
+          <div className="p-3 rounded border border-[var(--avp-border)] bg-[var(--avp-bg-subtle)]">
+            <div className="text-[var(--avp-text-secondary)]">OPFS & SyncAccessHandle</div>
+            <div dir="ltr" className={`font-mono mt-1 text-right ${telemetry.opfsSupported ? 'text-[var(--avp-success-text)]' : 'text-[var(--avp-warning-text)]'}`}>
               {telemetry.opfsSupported
                 ? telemetry.syncAccessHandleSupported
                   ? 'OPFS SyncActive'
@@ -325,9 +325,9 @@ export const StorageBrokerView: React.FC<StorageBrokerViewProps> = ({
                 : 'OPFS Unavailable (No Durable Cache)'}
             </div>
           </div>
-          <div className="p-3 rounded border border-[#252F42] bg-[#0E131D]">
-            <div className="text-slate-400">رده سخت‌افزار</div>
-            <div dir="ltr" className="font-mono text-slate-100 mt-1 text-right">
+          <div className="p-3 rounded border border-[var(--avp-border)] bg-[var(--avp-bg-subtle)]">
+            <div className="text-[var(--avp-text-secondary)]">رده سخت‌افزار</div>
+            <div dir="ltr" className="font-mono text-[var(--avp-text)] mt-1 text-right">
               {capabilities.deviceTier} ({capabilities.hardwareConcurrency} Threads)
             </div>
           </div>
@@ -336,11 +336,11 @@ export const StorageBrokerView: React.FC<StorageBrokerViewProps> = ({
 
       {/* Rolling LRU PCM Block Cache & OPFS I/O Broker */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <section className="border border-[#252F42] bg-[#131924] rounded-lg p-5 space-y-4">
+        <section className="border border-[var(--avp-border)] bg-[var(--avp-surface)] rounded-lg p-5 space-y-4">
           <div className="flex items-center justify-between gap-2">
             <div className="flex items-center gap-2">
-              <HardDrive className="w-4 h-4 text-emerald-400" aria-hidden="true" />
-              <h2 className="text-sm font-semibold text-slate-100">
+              <HardDrive className="w-4 h-4 text-[var(--avp-success)]" aria-hidden="true" />
+              <h2 className="text-sm font-semibold text-[var(--avp-text)]">
                 کش چرخشی بلوک‌های PCM (Rolling LRU Cache)
               </h2>
             </div>
@@ -348,24 +348,24 @@ export const StorageBrokerView: React.FC<StorageBrokerViewProps> = ({
               type="button"
               onClick={onSimulateLruCacheFill}
               disabled={isTestingLru}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded border border-[#252F42] bg-[#0E131D] text-slate-200 hover:bg-[#1E2738] disabled:opacity-60 cursor-pointer"
+              className="avp-btn avp-btn-sm avp-btn-outline text-xs"
             >
               <Play className="w-3 h-3" aria-hidden="true" />
               <span>{isTestingLru ? 'در حال پرکردن کش...' : 'آزمون پرشدن و تخلیه LRU'}</span>
             </button>
           </div>
 
-          <p className="text-xs text-slate-400 leading-relaxed">
+          <p className="text-xs text-[var(--avp-text-secondary)] leading-relaxed">
             برای جلوگیری از اشغال چند گیگابایت فضای دیسک توسط Float32 خام، فقط بلوک‌های فعال اطراف Playhead در کش با سقف حجمی مشخص نگهداری و بلوک‌های قدیمی‌تر به‌صورت LRU تخلیه می‌شوند.
           </p>
 
           <div>
             <div className="flex justify-between text-xs mb-1.5 font-mono">
-              <span className="text-slate-300">
+              <span className="text-[var(--avp-text)]">
                 مصرف فعلی:{' '}
                 <span dir="ltr" className="inline-block">{usedBytesLabel}</span>
               </span>
-              <span className="text-slate-400">
+              <span className="text-[var(--avp-text-secondary)]">
                 سقف کش فعال:{' '}
                 <span dir="ltr" className="inline-block">
                   {(telemetry.cacheStats.maxBytes / (1024 * 1024)).toFixed(1)} MB
@@ -382,59 +382,59 @@ export const StorageBrokerView: React.FC<StorageBrokerViewProps> = ({
                 (<span dir="ltr" className="inline-block">{cachePct}%</span>)
               </span>
             </div>
-            <div className="h-2 w-full bg-[#0E131D] rounded overflow-hidden border border-[#252F42]">
+            <div className="h-2 w-full bg-[var(--avp-bg-subtle)] rounded overflow-hidden border border-[var(--avp-border)]">
               <div
-                className="h-full bg-emerald-400 transition-all"
+                className="h-full bg-[var(--avp-success)] transition-all"
                 style={{ width: `${cachePct}%` }}
               />
             </div>
           </div>
 
           <div className="grid grid-cols-4 gap-2 text-xs font-mono text-center">
-            <div className="p-2 rounded bg-[#0E131D] border border-[#252F42]">
-              <div className="text-slate-500 text-[11px]">Blocks</div>
-              <div className="text-slate-100 mt-0.5">{telemetry.cacheStats.cachedBlocks}</div>
+            <div className="p-2 rounded bg-[var(--avp-bg-subtle)] border border-[var(--avp-border)]">
+              <div className="text-[var(--avp-text-muted)] text-[11px]">Blocks</div>
+              <div className="text-[var(--avp-text)] mt-0.5">{telemetry.cacheStats.cachedBlocks}</div>
             </div>
-            <div className="p-2 rounded bg-[#0E131D] border border-[#252F42]">
-              <div className="text-slate-500 text-[11px]">Hits</div>
-              <div className="text-emerald-400 mt-0.5">{telemetry.cacheStats.hits}</div>
+            <div className="p-2 rounded bg-[var(--avp-bg-subtle)] border border-[var(--avp-border)]">
+              <div className="text-[var(--avp-text-muted)] text-[11px]">Hits</div>
+              <div className="text-[var(--avp-success-text)] mt-0.5">{telemetry.cacheStats.hits}</div>
             </div>
-            <div className="p-2 rounded bg-[#0E131D] border border-[#252F42]">
-              <div className="text-slate-500 text-[11px]">Misses</div>
-              <div className="text-amber-400 mt-0.5">{telemetry.cacheStats.misses}</div>
+            <div className="p-2 rounded bg-[var(--avp-bg-subtle)] border border-[var(--avp-border)]">
+              <div className="text-[var(--avp-text-muted)] text-[11px]">Misses</div>
+              <div className="text-[var(--avp-warning-text)] mt-0.5">{telemetry.cacheStats.misses}</div>
             </div>
-            <div className="p-2 rounded bg-[#0E131D] border border-[#252F42]">
-              <div className="text-slate-500 text-[11px]">Evictions</div>
-              <div className="text-rose-400 mt-0.5">{telemetry.cacheStats.evictions}</div>
+            <div className="p-2 rounded bg-[var(--avp-bg-subtle)] border border-[var(--avp-border)]">
+              <div className="text-[var(--avp-text-muted)] text-[11px]">Evictions</div>
+              <div className="text-[var(--avp-danger-text)] mt-0.5">{telemetry.cacheStats.evictions}</div>
             </div>
           </div>
         </section>
 
-        <section className="border border-[#252F42] bg-[#131924] rounded-lg p-5 space-y-4">
+        <section className="border border-[var(--avp-border)] bg-[var(--avp-surface)] rounded-lg p-5 space-y-4">
           <div className="flex items-center justify-between gap-2">
             <div className="flex items-center gap-2">
-              <Shield className="w-4 h-4 text-sky-400" aria-hidden="true" />
-              <h2 className="text-sm font-semibold text-slate-100">
+              <Shield className="w-4 h-4 text-[var(--avp-accent)]" aria-hidden="true" />
+              <h2 className="text-sm font-semibold text-[var(--avp-text)]">
                 کارگزار I/O در OPFS (پیشگیری از قفل انحصاری)
               </h2>
             </div>
             <button
               type="button"
               onClick={onRunBrokerConcurrencyTest}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded border border-sky-500/40 bg-sky-500/10 text-sky-200 hover:bg-sky-500/20 cursor-pointer"
+              className="avp-btn avp-btn-sm border border-[var(--avp-accent)]/40 bg-[var(--avp-accent-soft)] text-[var(--avp-accent-text)] hover:opacity-90 text-xs"
             >
               <Play className="w-3 h-3" aria-hidden="true" />
               <span>تست هم‌زمانی ۲ Worker</span>
             </button>
           </div>
 
-          <p className="text-xs text-slate-400 leading-relaxed">
-            متد <code className="font-mono text-slate-200">createSyncAccessHandle()</code> روی هر فایل قفل انحصاری می‌گذارد. تمام دسترسی‌های <code className="font-mono text-slate-200">playback-feeder</code> و <code className="font-mono text-slate-200">ai-worker</code> از طریق یک Broker متمرکز صف‌بندی می‌شوند تا خطای <code className="font-mono text-rose-300">NoModificationAllowedError</code> هرگز رخ ندهد.
+          <p className="text-xs text-[var(--avp-text-secondary)] leading-relaxed">
+            متد <code className="font-mono text-[var(--avp-text)]">createSyncAccessHandle()</code> روی هر فایل قفل انحصاری می‌گذارد. تمام دسترسی‌های <code className="font-mono text-[var(--avp-text)]">playback-feeder</code> و <code className="font-mono text-[var(--avp-text)]">ai-worker</code> از طریق یک Broker متمرکز صف‌بندی می‌شوند تا خطای <code className="font-mono text-[var(--avp-danger-text)]">NoModificationAllowedError</code> هرگز رخ ندهد.
           </p>
 
-          <div className="flex items-center justify-between p-3 rounded bg-[#0E131D] border border-[#252F42] text-xs">
-            <span className="text-slate-300">وضعیت ذخیره‌سازی پایدار (Eviction Protection):</span>
-            <span className={`font-mono ${telemetry.opfsSupported ? 'text-emerald-400' : 'text-amber-400'}`}>
+          <div className="flex items-center justify-between p-3 rounded bg-[var(--avp-bg-subtle)] border border-[var(--avp-border)] text-xs">
+            <span className="text-[var(--avp-text)]">وضعیت ذخیره‌سازی پایدار (Eviction Protection):</span>
+            <span className={`font-mono ${telemetry.opfsSupported ? 'text-[var(--avp-success-text)]' : 'text-[var(--avp-warning-text)]'}`}>
               {!telemetry.opfsSupported
                 ? 'OPFS Unavailable (غیرماندگار)'
                 : telemetry.persistentStorageGranted === true
@@ -445,7 +445,7 @@ export const StorageBrokerView: React.FC<StorageBrokerViewProps> = ({
             </span>
           </div>
 
-          <div className="text-xs font-mono text-slate-400">
+          <div className="text-xs font-mono text-[var(--avp-text-secondary)]">
             تعداد تداخل‌های قفل پیش‌گیری‌شده: {telemetry.lockConflictsPrevented} · آخرین اجاره‌های دستگیره: {telemetry.activeLeases.length}
           </div>
         </section>
@@ -453,17 +453,17 @@ export const StorageBrokerView: React.FC<StorageBrokerViewProps> = ({
 
       {/* Seek Table & Draft Contracts v1.2 */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <section className="border border-[#252F42] bg-[#131924] rounded-lg overflow-hidden">
-          <div className="flex items-center gap-2 px-5 py-3.5 border-b border-[#252F42]">
-            <Database className="w-4 h-4 text-slate-400" aria-hidden="true" />
-            <h2 className="text-sm font-semibold text-slate-100">
+        <section className="border border-[var(--avp-border)] bg-[var(--avp-surface)] rounded-lg overflow-hidden">
+          <div className="flex items-center gap-2 px-5 py-3.5 border-b border-[var(--avp-border)]">
+            <Database className="w-4 h-4 text-[var(--avp-text-secondary)]" aria-hidden="true" />
+            <h2 className="text-sm font-semibold text-[var(--avp-text)]">
               جدول جستجوی دقیق نمونه (Sample-Accurate Seek Table)
             </h2>
           </div>
           {primaryAsset ? (
             <div className="overflow-x-auto max-h-[260px]">
               <table className="w-full text-right text-xs font-mono">
-                <thead className="bg-[#101520] text-slate-400 border-b border-[#252F42]">
+                <thead className="bg-[var(--avp-bg-subtle)] text-[var(--avp-text-secondary)] border-b border-[var(--avp-border)]">
                   <tr>
                     <th className="py-2 px-4">Block</th>
                     <th className="py-2 px-4">Start Sample</th>
@@ -471,19 +471,19 @@ export const StorageBrokerView: React.FC<StorageBrokerViewProps> = ({
                     <th className="py-2 px-4">Byte Offset</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-[#1E2738]">
+                <tbody className="divide-y divide-[var(--avp-border-subtle)]">
                   {primaryAsset.seekTable.map((entry) => (
                     <tr key={entry.blockIndex}>
-                      <td className="py-2 px-4 text-amber-400">
+                      <td className="py-2 px-4 text-[var(--avp-brand-text)]">
                         <span dir="ltr" className="inline-block">#{entry.blockIndex}</span>
                       </td>
-                      <td className="py-2 px-4 text-slate-200">
+                      <td className="py-2 px-4 text-[var(--avp-text)]">
                         <span dir="ltr" className="inline-block">{entry.startSample.toLocaleString()}</span>
                       </td>
-                      <td className="py-2 px-4 text-slate-300">
+                      <td className="py-2 px-4 text-[var(--avp-text-secondary)]">
                         <span dir="ltr" className="inline-block">{entry.sampleCount.toLocaleString()}</span>
                       </td>
-                      <td className="py-2 px-4 text-slate-400">
+                      <td className="py-2 px-4 text-[var(--avp-text-muted)]">
                         <span dir="ltr" className="inline-block">{entry.byteOffset.toLocaleString()} B</span>
                       </td>
                     </tr>
@@ -492,20 +492,20 @@ export const StorageBrokerView: React.FC<StorageBrokerViewProps> = ({
               </table>
             </div>
           ) : (
-            <div className="p-4 text-xs text-slate-400">فایلی بارگذاری نشده است.</div>
+            <div className="p-4 text-xs text-[var(--avp-text-secondary)]">فایلی بارگذاری نشده است.</div>
           )}
         </section>
 
-        <section className="border border-[#252F42] bg-[#131924] rounded-lg overflow-hidden">
-          <div className="flex items-center gap-2 px-5 py-3.5 border-b border-[#252F42]">
-            <FileCode2 className="w-4 h-4 text-amber-400" aria-hidden="true" />
-            <h2 className="text-sm font-semibold text-slate-100">
+        <section className="border border-[var(--avp-border)] bg-[var(--avp-surface)] rounded-lg overflow-hidden">
+          <div className="flex items-center gap-2 px-5 py-3.5 border-b border-[var(--avp-border)]">
+            <FileCode2 className="w-4 h-4 text-[var(--avp-brand)]" aria-hidden="true" />
+            <h2 className="text-sm font-semibold text-[var(--avp-text)]">
               پیش‌نویس قراردادهای فنی هسته (Core Draft Contracts v0.1)
             </h2>
           </div>
           <pre
             dir="ltr"
-            className="p-4 text-[11px] font-mono text-slate-300 bg-[#0B0F17] overflow-x-auto max-h-[260px] leading-5"
+            className="p-4 text-[11px] font-mono text-[var(--avp-text)] bg-[var(--avp-bg-subtle)] overflow-x-auto max-h-[260px] leading-5"
           >{`export const FLICKS_PER_SECOND = ${FLICKS_PER_SECOND.toLocaleString()}; // 16k, 44.1k, 48k exact
 export interface TimeRange { readonly start: Flicks; readonly end: Flicks; }
 

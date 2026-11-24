@@ -367,48 +367,16 @@ export const StudioRootBootstrapper: React.FC<StudioRootBootstrapperProps> = ({
     );
   }
 
-  const explicitMobileTierRequested =
-    typeof window !== 'undefined' &&
-    new URLSearchParams(window.location.search).get('tier') === 'mobile';
-
-  if (bootstrapSummary.resolvedTier === 'MOBILE_COMPANION' && explicitMobileTierRequested) {
-    const pendingRecs = v12Project.recommendations.filter((r) => r.status === 'PENDING');
-    return (
-      <>
-        <MobileCompanionWorkspace
-          projectName={v12Project.name}
-          pendingRecommendations={pendingRecs}
-          estimatedMemoryUsageMb={92}
-          maxSafeMemoryMb={bootstrapSummary.maxSafeRamMb}
-          onAuditionPreview={(_recId, _mode) => {}}
-          onNudgeCutBoundary={handleNudgeMobileBoundary}
-          onAccept={(id) => commitRecommendationDecision(id, 'ACCEPTED')}
-          onReject={(id) => commitRecommendationDecision(id, 'REJECTED')}
-          onUndo={handleV12Undo}
-        />
-        <OfflineIndicator />
-      </>
-    );
-  }
-
-  const queryWantsV12Shell =
-    typeof window !== 'undefined' &&
-    new URLSearchParams(window.location.search).get('shell') === 'v12';
-
-  if (desktopStudioElement && !useV12DesktopShell && !queryWantsV12Shell) {
-    return (
-      <>
-        {desktopStudioElement}
-        <div className="fixed bottom-24 right-4 z-40">
-          <PWAInstallButton />
-        </div>
-        <OfflineIndicator />
-      </>
-    );
+  if (desktopStudioElement && !useV12DesktopShell) {
+    return <>{desktopStudioElement}</>;
   }
 
   return (
-    <>
+    <div className="flex flex-col min-h-screen">
+      <div className="flex items-center justify-end gap-2 px-4 py-1.5 bg-[var(--avp-surface-shell)] border-b border-[var(--avp-border)]">
+        <OfflineIndicator inline />
+        <PWAInstallButton compact />
+      </div>
       <DesktopAudioStudioApp
         project={v12Project}
         tokens={tokens}
@@ -439,10 +407,6 @@ export const StudioRootBootstrapper: React.FC<StudioRootBootstrapperProps> = ({
         onApplyAutoAcousticFix={() => {}}
         onTriggerExport={() => {}}
       />
-      <div className="fixed bottom-4 right-4 z-40">
-        <PWAInstallButton />
-      </div>
-      <OfflineIndicator />
-    </>
+    </div>
   );
 };

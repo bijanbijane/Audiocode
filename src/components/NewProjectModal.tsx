@@ -15,6 +15,7 @@ import {
   validateBrowserAudioFile,
 } from '../projects/audioFileValidator';
 import { validateProjectName } from '../projects/projectLibraryLogic';
+import { AccessibleModal } from './AccessibleModal';
 
 interface NewProjectModalProps {
   isOpen: boolean;
@@ -43,15 +44,6 @@ export const NewProjectModal: React.FC<NewProjectModalProps> = ({
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [isValidating, setIsValidating] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
-
-  useEffect(() => {
-    if (!isOpen) return;
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && !isSubmitting) onClose();
-    };
-    window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
-  }, [isOpen, isSubmitting, onClose]);
 
   const resetDialog = () => {
     setSelectedFile(null);
@@ -125,8 +117,6 @@ export const NewProjectModal: React.FC<NewProjectModalProps> = ({
     }
   };
 
-  if (!isOpen) return null;
-
   const canCreate = Boolean(
     selectedFile &&
       validation?.valid &&
@@ -136,38 +126,39 @@ export const NewProjectModal: React.FC<NewProjectModalProps> = ({
   );
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/45 backdrop-blur-[2px] p-4"
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="new-project-modal-title"
-      data-testid="new-project-modal"
+    <AccessibleModal
+      isOpen={isOpen}
+      onClose={handleClose}
+      dir={isFa ? 'rtl' : 'ltr'}
+      labelledBy="new-project-modal-title"
+      disableEscape={isSubmitting}
+      dataTestId="new-project-modal"
+      panelClassName="w-full max-w-lg rounded-2xl border border-[var(--avp-border)] bg-[var(--avp-surface)] text-[var(--avp-text)] shadow-[var(--avp-shadow-md)] overflow-hidden"
     >
-      <div className="w-full max-w-lg rounded-2xl border border-[var(--avp-border)] bg-[var(--avp-surface)] text-[var(--avp-text)] shadow-[var(--avp-shadow-md)] overflow-hidden">
-        {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-[var(--avp-border)]">
-          <div>
-            <h2 id="new-project-modal-title" className="text-base font-bold">
-              {isFa ? 'ساخت پروژه جدید' : 'Create New Project'}
-            </h2>
-            <p className="text-xs text-[var(--avp-text-secondary)] mt-0.5">
-              {isFa
-                ? 'فایل صوتی خود را وارد کنید تا پردازش محلی در استودیو آغاز شود.'
-                : 'Import an audio file to begin local speech editing in Studio.'}
-            </p>
-          </div>
-          <button
-            type="button"
-            onClick={handleClose}
-            disabled={isSubmitting}
-            aria-label={isFa ? 'بستن پنجره' : 'Close dialog'}
-            className="p-2 rounded-lg text-[var(--avp-text-secondary)] hover:bg-[var(--avp-hover)] hover:text-[var(--avp-text)] disabled:opacity-40 cursor-pointer"
-          >
-            <X className="w-4 h-4" />
-          </button>
+      {/* Header */}
+      <div className="flex items-center justify-between px-6 py-4 border-b border-[var(--avp-border)]">
+        <div>
+          <h2 id="new-project-modal-title" className="text-base font-bold">
+            {isFa ? 'ساخت پروژه جدید' : 'Create New Project'}
+          </h2>
+          <p className="text-xs text-[var(--avp-text-secondary)] mt-0.5">
+            {isFa
+              ? 'فایل صوتی خود را وارد کنید تا پردازش محلی در استودیو آغاز شود.'
+              : 'Import an audio file to begin local speech editing in Studio.'}
+          </p>
         </div>
+        <button
+          type="button"
+          onClick={handleClose}
+          disabled={isSubmitting}
+          aria-label={isFa ? 'بستن پنجره' : 'Close dialog'}
+          className="p-2 rounded-lg text-[var(--avp-text-secondary)] hover:bg-[var(--avp-hover)] hover:text-[var(--avp-text)] disabled:opacity-40 cursor-pointer"
+        >
+          <X className="w-4 h-4" />
+        </button>
+      </div>
 
-        <form onSubmit={handleSubmit} className="p-6 space-y-5">
+      <form onSubmit={handleSubmit} className="p-6 space-y-5">
           {/* Dropzone / File Picker */}
           <div>
             <input
@@ -354,7 +345,6 @@ export const NewProjectModal: React.FC<NewProjectModalProps> = ({
             </button>
           </div>
         </form>
-      </div>
-    </div>
+    </AccessibleModal>
   );
 };

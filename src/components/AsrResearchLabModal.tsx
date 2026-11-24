@@ -16,6 +16,7 @@ import {
   Sparkles,
   X,
 } from 'lucide-react';
+import { AccessibleModal } from './AccessibleModal';
 import {
   AsrLabEngineId,
   AsrLabExperimentRecord,
@@ -206,16 +207,11 @@ export const AsrResearchLabModal: React.FC<AsrResearchLabModalProps> = ({
       benchmarkAbortRef.current = null;
       return;
     }
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
-    };
-    window.addEventListener('keydown', onKey);
     return () => {
-      window.removeEventListener('keydown', onKey);
       benchmarkAbortRef.current?.abort();
       benchmarkAbortRef.current = null;
     };
-  }, [isOpen, onClose]);
+  }, [isOpen]);
 
   // Derived analytics
   const datasetAudit = useMemo(() => {
@@ -589,25 +585,26 @@ export const AsrResearchLabModal: React.FC<AsrResearchLabModalProps> = ({
       : [];
 
   return (
-    <div
-      role="dialog"
-      aria-modal="true"
-      aria-label="آزمایشگاه تحقیق و توسعه ASR فارسی-انگلیسی"
-      className="fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-sm flex items-center justify-center p-3 sm:p-5"
+    <AccessibleModal
+      isOpen={isOpen}
+      onClose={onClose}
       dir="rtl"
+      ariaLabel="آزمایشگاه تحقیق و توسعه ASR فارسی-انگلیسی"
+      closeOnBackdropClick
+      panelClassName="w-full max-w-6xl"
     >
-      <div className="w-full max-w-6xl max-h-[92vh] bg-[#0E131D] border border-[#252F42] rounded-xl shadow-2xl flex flex-col overflow-hidden text-slate-100">
+      <div className="w-full max-h-[92vh] bg-[var(--avp-surface)] border border-[var(--avp-border)] rounded-xl shadow-[var(--avp-shadow-md)] flex flex-col overflow-hidden text-[var(--avp-text)]">
         {/* Header */}
-        <header className="flex items-center justify-between gap-4 px-5 py-3.5 border-b border-[#252F42] bg-[#0B0F17]">
+        <header className="flex items-center justify-between gap-4 px-5 py-3.5 border-b border-[var(--avp-border)] bg-[var(--avp-surface-shell)]">
           <div className="flex items-center gap-3">
-            <FlaskConical className="w-5 h-5 text-amber-400 shrink-0" aria-hidden="true" />
+            <FlaskConical className="w-5 h-5 text-[var(--avp-warning-text)] shrink-0" aria-hidden="true" />
             <div>
-              <h2 className="text-sm sm:text-base font-bold text-slate-100">
+              <h2 className="text-sm sm:text-base font-bold text-[var(--avp-text)]">
                 آزمایشگاه مستقل پژوهش، استریم و مسیریابی ASR (فاز ۱ تا ۹)
               </h2>
-              <p className="text-xs text-slate-400">
-                وضعیت صادقانه محیط: <span className="text-amber-300 font-mono">G0_CPU_ONLY</span> · وضعیت انتشار:{' '}
-                <span className="text-sky-300 font-mono">{truthSummary.overallReleaseStatus}</span> (ابزارهای محلی فعال؛ ورکر GPU و کلیدهای ابری در انتظار پیکربندی)
+              <p className="text-xs text-[var(--avp-text-secondary)]">
+                وضعیت صادقانه محیط: <span className="text-[var(--avp-warning-text)] font-mono">G0_CPU_ONLY</span> · وضعیت انتشار:{' '}
+                <span className="text-[var(--avp-accent-text)] font-mono">{truthSummary.overallReleaseStatus}</span> (ابزارهای محلی فعال؛ ورکر GPU و کلیدهای ابری در انتظار پیکربندی)
               </p>
             </div>
           </div>
@@ -615,7 +612,7 @@ export const AsrResearchLabModal: React.FC<AsrResearchLabModalProps> = ({
             type="button"
             onClick={onClose}
             aria-label="بستن آزمایشگاه ASR"
-            className="p-2 rounded-md border border-[#252F42] bg-[#141B27] text-slate-300 hover:text-white hover:bg-[#1E2738] cursor-pointer"
+            className="avp-btn avp-btn-secondary w-8 h-8 px-0"
           >
             <X className="w-4 h-4" />
           </button>
@@ -624,7 +621,7 @@ export const AsrResearchLabModal: React.FC<AsrResearchLabModalProps> = ({
         {/* Sub-navigation Tabs */}
         <nav
           aria-label="بخش‌های آزمایشگاه ASR"
-          className="flex flex-wrap items-center gap-1.5 px-5 py-2.5 border-b border-[#252F42] bg-[#111827]"
+          className="flex flex-wrap items-center gap-1.5 px-5 py-2.5 border-b border-[var(--avp-border)] bg-[var(--avp-bg-subtle)]"
         >
           {(
             [
@@ -644,10 +641,10 @@ export const AsrResearchLabModal: React.FC<AsrResearchLabModalProps> = ({
                 type="button"
                 data-testid={`lab-tab-${tab.id}`}
                 onClick={() => setActiveTab(tab.id)}
-                className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium whitespace-nowrap transition-colors cursor-pointer ${
+                className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium whitespace-nowrap transition-colors cursor-pointer border ${
                   active
-                    ? 'bg-amber-400 text-slate-950 font-semibold'
-                    : 'bg-[#172030] text-slate-300 hover:bg-[#1F2A3E] border border-[#252F42]'
+                    ? 'bg-[var(--avp-brand)] text-[var(--avp-on-brand)] border-[var(--avp-brand)] font-semibold'
+                    : 'bg-[var(--avp-surface)] text-[var(--avp-text-secondary)] hover:bg-[var(--avp-hover)] hover:text-[var(--avp-text)] border-[var(--avp-border)]'
                 }`}
               >
                 <Icon className="w-3.5 h-3.5" aria-hidden="true" />
@@ -658,33 +655,33 @@ export const AsrResearchLabModal: React.FC<AsrResearchLabModalProps> = ({
         </nav>
 
         {/* Main Scrollable Content */}
-        <div className="flex-1 overflow-y-auto p-5 space-y-5">
+        <div className="flex-1 overflow-y-auto p-5 space-y-5 bg-[var(--avp-bg)]">
           {benchmarkError && (
-            <div className="p-3 rounded-lg border border-rose-500/40 bg-rose-500/10 text-xs text-rose-200">
+            <div className="p-3 rounded-lg border border-[var(--avp-danger)]/40 bg-[var(--avp-danger-soft)] text-xs text-[var(--avp-danger-text)]">
               {benchmarkError}
             </div>
           )}
           {/* TAB 1: BENCHMARK & ERROR TAXONOMY */}
           {activeTab === 'benchmark' && (
             <section className="space-y-4">
-              <div className="p-4 rounded-lg border border-[#252F42] bg-[#141B27] space-y-3">
+              <div className="p-4 rounded-lg border border-[var(--avp-border)] bg-[var(--avp-surface)] space-y-3">
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <div>
-                    <h3 className="text-sm font-semibold text-slate-100">
+                    <h3 className="text-sm font-semibold text-[var(--avp-text)]">
                       اجرای هم‌زمان موتورهای ASR روی صدای ۱۶kHz مونو استودیو
                     </h3>
-                    <p className="text-xs text-slate-400">
+                    <p className="text-xs text-[var(--avp-text-secondary)]">
                       هر موتور بدون کلید API یا ورکر GPU با خطای صریح و هزینه صفر (`NOT_BILLED_FAILED_RUN`) ثبت می‌شود.
                     </p>
                   </div>
-                  <div className="flex items-center gap-2">
-                    <label className="text-xs text-slate-300 flex items-center gap-1.5">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <label className="text-xs text-[var(--avp-text-secondary)] flex items-center gap-1.5">
                       <span>نرمال‌سازی:</span>
                       <select
                         aria-label="نسخه نرمال‌سازی"
                         value={normMode}
                         onChange={(e) => setNormMode(e.target.value as 'fa_strict_v1' | 'fa_relaxed_v1')}
-                        className="bg-[#0B0F17] border border-[#252F42] rounded px-2 py-1 text-xs text-slate-100"
+                        className="avp-input h-8 px-2 text-xs"
                       >
                         <option value="fa_strict_v1">FA-STRICT-V1 (حساس به نیم‌فاصله)</option>
                         <option value="fa_relaxed_v1">FA-RELAXED-V1</option>
@@ -695,7 +692,7 @@ export const AsrResearchLabModal: React.FC<AsrResearchLabModalProps> = ({
                       data-testid="btn-run-benchmark"
                       onClick={handleRunBenchmark}
                       disabled={isRunningExp}
-                      className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-md text-xs font-semibold bg-amber-400 text-slate-950 hover:bg-amber-300 disabled:opacity-50 cursor-pointer"
+                      className="avp-btn avp-btn-primary"
                     >
                       <Sparkles className="w-3.5 h-3.5" aria-hidden="true" />
                       <span>{isRunningExp ? 'در حال اجرا...' : 'اجرای آزمایش بنچمارک'}</span>
@@ -705,7 +702,7 @@ export const AsrResearchLabModal: React.FC<AsrResearchLabModalProps> = ({
                         type="button"
                         data-testid="btn-cancel-benchmark"
                         onClick={handleCancelBenchmark}
-                        className="inline-flex items-center gap-1 px-3 py-2 rounded-md text-xs border border-rose-500/40 bg-rose-500/15 text-rose-200 hover:bg-rose-500/25 cursor-pointer"
+                        className="avp-btn avp-btn-danger"
                       >
                         <span>لغو</span>
                       </button>
@@ -714,7 +711,7 @@ export const AsrResearchLabModal: React.FC<AsrResearchLabModalProps> = ({
                       <button
                         type="button"
                         onClick={handleDownloadBenchmarkJson}
-                        className="inline-flex items-center gap-1 px-3 py-2 rounded-md text-xs border border-[#252F42] bg-[#0B0F17] text-slate-200 hover:bg-[#1E2738] cursor-pointer"
+                        className="avp-btn avp-btn-secondary"
                       >
                         <Download className="w-3.5 h-3.5" aria-hidden="true" />
                         <span>خروجی JSON</span>
@@ -729,7 +726,7 @@ export const AsrResearchLabModal: React.FC<AsrResearchLabModalProps> = ({
                     return (
                       <label
                         key={eng.engineId}
-                        className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded border border-[#252F42] bg-[#0B0F17] text-xs cursor-pointer"
+                        className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md border border-[var(--avp-border)] bg-[var(--avp-bg-subtle)] text-xs cursor-pointer"
                       >
                         <input
                           type="checkbox"
@@ -741,8 +738,9 @@ export const AsrResearchLabModal: React.FC<AsrResearchLabModalProps> = ({
                                 : prev.filter((id) => id !== eng.engineId)
                             )
                           }
+                          className="accent-[var(--avp-brand)]"
                         />
-                        <span className="text-slate-200">{eng.displayName}</span>
+                        <span className="text-[var(--avp-text)]">{eng.displayName}</span>
                       </label>
                     );
                   })}
@@ -751,9 +749,9 @@ export const AsrResearchLabModal: React.FC<AsrResearchLabModalProps> = ({
 
               {expResult && (
                 <div className="space-y-4">
-                  <div className="overflow-x-auto rounded-lg border border-[#252F42]">
+                  <div className="overflow-x-auto rounded-lg border border-[var(--avp-border)]">
                     <table className="w-full text-right text-xs" data-testid="benchmark-results-table">
-                      <thead className="bg-[#111827] text-slate-300 border-b border-[#252F42]">
+                      <thead className="bg-[var(--avp-surface-shell)] text-[var(--avp-text-secondary)] border-b border-[var(--avp-border)]">
                         <tr>
                           <th className="p-2.5">موتور / هویت مدل</th>
                           <th className="p-2.5">وضعیت اجرا</th>
@@ -764,13 +762,13 @@ export const AsrResearchLabModal: React.FC<AsrResearchLabModalProps> = ({
                           <th className="p-2.5">برچسب هزینه</th>
                         </tr>
                       </thead>
-                      <tbody className="divide-y divide-[#252F42] bg-[#0B0F17]">
+                      <tbody className="divide-y divide-[var(--avp-border-subtle)] bg-[var(--avp-surface)]">
                         {expResult.engineResults.map((res) => (
                           <tr key={res.engineId} data-testid={`benchmark-row-${res.engineId}`}>
                             <td className="p-2.5">
-                              <div className="font-medium text-slate-100">{res.engineName}</div>
+                              <div className="font-medium text-[var(--avp-text)]">{res.engineName}</div>
                               {res.modelIdentity.modelId && (
-                                <div className="text-[10px] font-mono text-slate-400">
+                                <div className="text-[10px] font-mono text-[var(--avp-text-muted)]">
                                   {res.modelIdentity.modelId}@{res.modelIdentity.modelVersion ?? 'unknown'}
                                   {res.modelIdentity.architecture ? ` · ${res.modelIdentity.architecture}` : ''}
                                   {res.modelIdentity.modelSha256
@@ -779,7 +777,7 @@ export const AsrResearchLabModal: React.FC<AsrResearchLabModalProps> = ({
                                 </div>
                               )}
                               {res.errorMessage && (
-                                <div className="text-[11px] text-amber-300/90 mt-0.5">
+                                <div className="text-[11px] text-[var(--avp-warning-text)] mt-0.5">
                                   {res.errorMessage}
                                 </div>
                               )}
@@ -789,16 +787,16 @@ export const AsrResearchLabModal: React.FC<AsrResearchLabModalProps> = ({
                                 data-testid={`benchmark-status-${res.engineId}`}
                                 className={
                                   res.status === 'SUCCESS'
-                                    ? 'text-emerald-400'
+                                    ? 'text-[var(--avp-success-text)]'
                                     : res.status === 'MODEL_NOT_INSTALLED' || res.status === 'MODEL_NOT_READY'
-                                      ? 'text-rose-300'
-                                      : 'text-amber-300'
+                                      ? 'text-[var(--avp-danger-text)]'
+                                      : 'text-[var(--avp-warning-text)]'
                                 }
                               >
                                 {res.status}
                               </span>
                             </td>
-                            <td className="p-2.5 font-mono text-[11px] text-slate-300">
+                            <td className="p-2.5 font-mono text-[11px] text-[var(--avp-text-secondary)]">
                               <span data-testid={`benchmark-provenance-${res.engineId}`}>
                                 {res.hypothesisProvenance}
                               </span>
@@ -812,7 +810,7 @@ export const AsrResearchLabModal: React.FC<AsrResearchLabModalProps> = ({
                             <td className="p-2.5 font-mono">
                               {res.rtf} ({res.processingTimeMs}ms)
                             </td>
-                            <td className="p-2.5 text-slate-300">
+                            <td className="p-2.5 text-[var(--avp-text-secondary)]">
                               ${res.costUsd.toFixed(5)} · <span className="font-mono text-[11px]">{res.costLabel}</span>
                             </td>
                           </tr>
@@ -829,12 +827,12 @@ export const AsrResearchLabModal: React.FC<AsrResearchLabModalProps> = ({
                         <div
                           key={localRes.engineId}
                           data-testid="lab-local-model-unavailable-notice"
-                          className="p-3.5 rounded-lg border border-amber-500/40 bg-amber-500/10 text-xs text-amber-200 space-y-1"
+                          className="p-3.5 rounded-lg border border-[var(--avp-warning)]/40 bg-[var(--avp-warning-soft)] text-xs text-[var(--avp-warning-text)] space-y-1"
                         >
                           <div className="font-semibold">
                             موتور محلی آماده استنتاج مستقل نیست ({localRes.status}) — هیچ نتیجه CER/WER ساختگی محاسبه نشد.
                           </div>
-                          <div className="text-amber-200/80">
+                          <div className="opacity-90">
                             {localRes.errorMessage ?? 'برای اجرای بنچمارک واقعی، ابتدا مدل ONNX تأییدشده را از بخش مدیریت مدل نصب و بارگذاری کنید.'}
                           </div>
                         </div>
@@ -843,13 +841,13 @@ export const AsrResearchLabModal: React.FC<AsrResearchLabModalProps> = ({
                           key={localRes.engineId}
                           className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs"
                         >
-                          <div className="p-3 rounded-lg border border-[#252F42] bg-[#0B0F17] space-y-1">
-                            <div className="text-slate-400">خروجی خام مدل محلی (`rawOutputText`)</div>
-                            <div className="text-slate-100">{localRes.rawOutputText}</div>
+                          <div className="p-3 rounded-lg border border-[var(--avp-border)] bg-[var(--avp-surface)] space-y-1">
+                            <div className="text-[var(--avp-text-secondary)]">خروجی خام مدل محلی (`rawOutputText`)</div>
+                            <div className="text-[var(--avp-text)]">{localRes.rawOutputText}</div>
                           </div>
-                          <div className="p-3 rounded-lg border border-[#252F42] bg-[#0B0F17] space-y-1">
-                            <div className="text-amber-300">خروجی نرمال‌شده (`normalizedOutputText`)</div>
-                            <div className="text-slate-100">{localRes.normalizedOutputText}</div>
+                          <div className="p-3 rounded-lg border border-[var(--avp-border)] bg-[var(--avp-surface)] space-y-1">
+                            <div className="text-[var(--avp-warning-text)]">خروجی نرمال‌شده (`normalizedOutputText`)</div>
+                            <div className="text-[var(--avp-text)]">{localRes.normalizedOutputText}</div>
                           </div>
                         </div>
                       ) : null,
@@ -857,32 +855,32 @@ export const AsrResearchLabModal: React.FC<AsrResearchLabModalProps> = ({
 
                   {localNormReport && (
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4" data-testid="lab-local-accuracy-details">
-                      <div className="p-3.5 rounded-lg border border-[#252F42] bg-[#141B27] space-y-2">
-                        <h4 className="text-xs font-semibold text-amber-300">
+                      <div className="p-3.5 rounded-lg border border-[var(--avp-border)] bg-[var(--avp-surface)] space-y-2">
+                        <h4 className="text-xs font-semibold text-[var(--avp-warning-text)]">
                           تاکسونومی ۳۶گرهی خطا (TAXONOMY-V1.0) و معیارهای {normMode}
                         </h4>
-                        <p className="text-xs text-slate-300">
+                        <p className="text-xs text-[var(--avp-text-secondary)]">
                           CER: <span className="font-mono">{(localNormReport.cer * 100).toFixed(2)}%</span> · WER:{' '}
                           <span className="font-mono">{(localNormReport.wer * 100).toFixed(2)}%</span> · MER:{' '}
                           <span className="font-mono">{(localNormReport.mer * 100).toFixed(2)}%</span>
                         </p>
-                        <p className="text-xs text-slate-400">
+                        <p className="text-xs text-[var(--avp-text-muted)]">
                           تعداد خطاهای طبقه‌بندی‌شده: {localTaxonomy.length} مورد (
                           {localTaxonomy.slice(0, 3).map((t) => t.error_category).join('، ') || 'بدون خطای ساختاری'}
                           )
                         </p>
                       </div>
-                      <div className="p-3.5 rounded-lg border border-[#252F42] bg-[#141B27] space-y-2">
-                        <h4 className="text-xs font-semibold text-sky-300">
+                      <div className="p-3.5 rounded-lg border border-[var(--avp-border)] bg-[var(--avp-surface)] space-y-2">
+                        <h4 className="text-xs font-semibold text-[var(--avp-accent-text)]">
                           آزمون آماری Paired Bootstrap + Holm-Bonferroni
                         </h4>
                         {pairedStats.map((st) => (
-                          <div key={st.engine_a_id} className="text-xs text-slate-300 space-y-1">
+                          <div key={st.engine_a_id} className="text-xs text-[var(--avp-text-secondary)] space-y-1">
                             <div>
                               تفاوت میانگین CER:{' '}
                               <span className="font-mono">{(st.mean_difference_a_minus_b * 100).toFixed(2)}pp</span>
                             </div>
-                            <div className="text-amber-300">
+                            <div className="text-[var(--avp-warning-text)]">
                               وضعیت کفایت آماری:{' '}
                               <span className="font-mono">
                                 {st.sample_coverage_adequate ? 'ADEQUATE' : 'INSUFFICIENT_SAMPLE_COUNT'}
@@ -903,36 +901,36 @@ export const AsrResearchLabModal: React.FC<AsrResearchLabModalProps> = ({
           {activeTab === 'dataset' && (
             <section className="space-y-4">
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                <div className="p-3 rounded-lg border border-[#252F42] bg-[#141B27]">
-                  <div className="text-[11px] text-slate-400">کل نمونه‌های ممیزی‌شده</div>
-                  <div className="text-lg font-bold font-mono text-slate-100">
+                <div className="p-3 rounded-lg border border-[var(--avp-border)] bg-[var(--avp-surface)]">
+                  <div className="text-[11px] text-[var(--avp-text-secondary)]">کل نمونه‌های ممیزی‌شده</div>
+                  <div className="text-lg font-bold font-mono text-[var(--avp-text)]">
                     {datasetAudit.qcRows.length}
                   </div>
                 </div>
-                <div className="p-3 rounded-lg border border-[#252F42] bg-[#141B27]">
-                  <div className="text-[11px] text-slate-400">نشت گوینده بین Train/Test</div>
-                  <div className="text-lg font-bold font-mono text-emerald-400">
+                <div className="p-3 rounded-lg border border-[var(--avp-border)] bg-[var(--avp-surface)]">
+                  <div className="text-[11px] text-[var(--avp-text-secondary)]">نشت گوینده بین Train/Test</div>
+                  <div className="text-lg font-bold font-mono text-[var(--avp-success-text)]">
                     {datasetAudit.splits.speakerLeakageCount}
                   </div>
                 </div>
-                <div className="p-3 rounded-lg border border-[#252F42] bg-[#141B27]">
-                  <div className="text-[11px] text-slate-400">گویندگان Train / Val / Test</div>
-                  <div className="text-sm font-bold font-mono text-amber-300">
+                <div className="p-3 rounded-lg border border-[var(--avp-border)] bg-[var(--avp-surface)]">
+                  <div className="text-[11px] text-[var(--avp-text-secondary)]">گویندگان Train / Val / Test</div>
+                  <div className="text-sm font-bold font-mono text-[var(--avp-warning-text)]">
                     {datasetAudit.splits.trainSpeakers.length} / {datasetAudit.splits.validationSpeakers.length} /{' '}
                     {datasetAudit.splits.testSpeakers.length}
                   </div>
                 </div>
-                <div className="p-3 rounded-lg border border-[#252F42] bg-[#141B27]">
-                  <div className="text-[11px] text-slate-400">هش مانیفست قفل‌شده Test</div>
-                  <div className="text-xs font-mono text-sky-300 truncate">
+                <div className="p-3 rounded-lg border border-[var(--avp-border)] bg-[var(--avp-surface)]">
+                  <div className="text-[11px] text-[var(--avp-text-secondary)]">هش مانیفست قفل‌شده Test</div>
+                  <div className="text-xs font-mono text-[var(--avp-accent-text)] truncate">
                     {datasetAudit.splits.frozenTestManifestSha256}
                   </div>
                 </div>
               </div>
 
-              <div className="overflow-x-auto rounded-lg border border-[#252F42]">
+              <div className="overflow-x-auto rounded-lg border border-[var(--avp-border)]">
                 <table className="w-full text-right text-xs">
-                  <thead className="bg-[#111827] text-slate-300 border-b border-[#252F42]">
+                  <thead className="bg-[var(--avp-surface-shell)] text-[var(--avp-text-secondary)] border-b border-[var(--avp-border)]">
                     <tr>
                       <th className="p-2.5">شناسه نمونه</th>
                       <th className="p-2.5">گوینده</th>
@@ -942,23 +940,23 @@ export const AsrResearchLabModal: React.FC<AsrResearchLabModalProps> = ({
                       <th className="p-2.5">Split بدون نشت</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-[#252F42] bg-[#0B0F17]">
+                  <tbody className="divide-y divide-[var(--avp-border-subtle)] bg-[var(--avp-surface)]">
                     {datasetAudit.qcRows.map(({ sample, qc }) => {
                       const assigned =
                         datasetAudit.splits.splitSamples.find((s) => s.sample_id === sample.sample_id)
                           ?.assigned_split ?? sample.assigned_split;
                       return (
                         <tr key={sample.sample_id}>
-                          <td className="p-2.5 font-mono text-amber-300">{sample.sample_id}</td>
+                          <td className="p-2.5 font-mono text-[var(--avp-warning-text)]">{sample.sample_id}</td>
                           <td className="p-2.5 font-mono">{sample.speaker_id}</td>
                           <td className="p-2.5">
                             {sample.language} · {sample.recording_environment}
                           </td>
-                          <td className="p-2.5 font-mono text-emerald-400">
+                          <td className="p-2.5 font-mono text-[var(--avp-success-text)]">
                             {qc.qcScore}/100 ({qc.qualityStatus})
                           </td>
-                          <td className="p-2.5 text-slate-300">{sample.consent_status}</td>
-                          <td className="p-2.5 font-mono text-sky-300">{assigned}</td>
+                          <td className="p-2.5 text-[var(--avp-text-secondary)]">{sample.consent_status}</td>
+                          <td className="p-2.5 font-mono text-[var(--avp-accent-text)]">{assigned}</td>
                         </tr>
                       );
                     })}
@@ -971,14 +969,14 @@ export const AsrResearchLabModal: React.FC<AsrResearchLabModalProps> = ({
           {/* TAB 3: PHASE 4 INDEPENDENT MODEL RC1 */}
           {activeTab === 'model' && (
             <section className="space-y-4">
-              <div className="p-4 rounded-lg border border-[#252F42] bg-[#141B27] space-y-3">
+              <div className="p-4 rounded-lg border border-[var(--avp-border)] bg-[var(--avp-surface)] space-y-3">
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <div>
-                    <h3 className="text-sm font-semibold text-slate-100">
+                    <h3 className="text-sm font-semibold text-[var(--avp-text)]">
                       معماری ۳ لایه مستقل و مدیریت چک‌پوینت ({activeCkpt.modelVersion})
                     </h3>
-                    <p className="text-xs text-slate-400">
-                      چک‌پوینت فعال: <span className="font-mono text-amber-300">{activeCkpt.checkpointId}</span> ·
+                    <p className="text-xs text-[var(--avp-text-secondary)]">
+                      چک‌پوینت فعال: <span className="font-mono text-[var(--avp-warning-text)]">{activeCkpt.checkpointId}</span> ·
                       Step: <span className="font-mono">{activeCkpt.globalStep}</span> · Val CER:{' '}
                       <span className="font-mono">{activeCkpt.validationCerPercent}%</span>
                     </p>
@@ -988,7 +986,7 @@ export const AsrResearchLabModal: React.FC<AsrResearchLabModalProps> = ({
                       type="button"
                       data-testid="btn-advance-checkpoint"
                       onClick={() => handleAdvanceOrRollbackCheckpoint('save')}
-                      className="px-3 py-1.5 rounded bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 text-xs hover:bg-emerald-500/30 cursor-pointer"
+                      className="px-3 py-1.5 rounded-md bg-[var(--avp-success-soft)] border border-[var(--avp-success)]/40 text-[var(--avp-success-text)] text-xs font-medium cursor-pointer"
                     >
                       ذخیره چک‌پوینت (+50 Step)
                     </button>
@@ -996,7 +994,7 @@ export const AsrResearchLabModal: React.FC<AsrResearchLabModalProps> = ({
                       type="button"
                       data-testid="btn-rollback-checkpoint"
                       onClick={() => handleAdvanceOrRollbackCheckpoint('rollback')}
-                      className="inline-flex items-center gap-1 px-3 py-1.5 rounded bg-rose-500/15 border border-rose-500/40 text-rose-300 text-xs hover:bg-rose-500/25 cursor-pointer"
+                      className="avp-btn avp-btn-danger"
                     >
                       <RotateCcw className="w-3.5 h-3.5" aria-hidden="true" />
                       <span>بازگشت (Rollback)</span>
@@ -1006,14 +1004,14 @@ export const AsrResearchLabModal: React.FC<AsrResearchLabModalProps> = ({
 
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-3 items-end">
                   <div className="md:col-span-2">
-                    <label className="block text-xs text-slate-300 mb-1">
+                    <label className="block text-xs text-[var(--avp-text-secondary)] mb-1">
                       خروجی خام تست ۳ لایه (Raw Model Input برای مشاهده جداسازی لایه ۱ تا ۳):
                     </label>
                     <input
                       type="text"
                       value={phase4RawInput}
                       onChange={(e) => setPhase4RawInput(e.target.value)}
-                      className="w-full px-3 py-2 rounded border border-[#252F42] bg-[#0B0F17] text-xs text-slate-100"
+                      className="avp-input w-full h-9 px-3 text-xs"
                     />
                   </div>
                   <div className="flex gap-2">
@@ -1021,7 +1019,7 @@ export const AsrResearchLabModal: React.FC<AsrResearchLabModalProps> = ({
                       aria-label="پروفیل دامنه تخصصی"
                       value={domainProfile}
                       onChange={(e) => setDomainProfile(e.target.value as DomainProfileName)}
-                      className="flex-1 px-2.5 py-2 rounded border border-[#252F42] bg-[#0B0F17] text-xs text-slate-100"
+                      className="avp-input flex-1 h-9 px-2.5 text-xs"
                     >
                       <option value="technology">دامنه فناوری</option>
                       <option value="general">عمومی</option>
@@ -1033,7 +1031,7 @@ export const AsrResearchLabModal: React.FC<AsrResearchLabModalProps> = ({
                       type="button"
                       data-testid="btn-run-phase4-infer"
                       onClick={handleRunPhase4Inference}
-                      className="px-3 py-2 rounded bg-amber-400 text-slate-950 font-semibold text-xs hover:bg-amber-300 cursor-pointer"
+                      className="avp-btn avp-btn-primary h-9"
                     >
                       تبدیل ۳ لایه
                     </button>
@@ -1041,24 +1039,24 @@ export const AsrResearchLabModal: React.FC<AsrResearchLabModalProps> = ({
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs">
-                  <div className="p-3 rounded border border-[#252F42] bg-[#0B0F17]">
-                    <div className="text-slate-400 mb-1">لایه ۱: `raw_model_output`</div>
-                    <div className="text-slate-200">{phase4Output.raw_model_output}</div>
+                  <div className="p-3 rounded-md border border-[var(--avp-border)] bg-[var(--avp-bg-subtle)]">
+                    <div className="text-[var(--avp-text-secondary)] mb-1">لایه ۱: `raw_model_output`</div>
+                    <div className="text-[var(--avp-text)]">{phase4Output.raw_model_output}</div>
                   </div>
-                  <div className="p-3 rounded border border-[#252F42] bg-[#0B0F17]">
-                    <div className="text-amber-300 mb-1">لایه ۲: `normalized_text`</div>
-                    <div className="text-slate-100">{phase4Output.normalized_text}</div>
+                  <div className="p-3 rounded-md border border-[var(--avp-border)] bg-[var(--avp-bg-subtle)]">
+                    <div className="text-[var(--avp-warning-text)] mb-1">لایه ۲: `normalized_text`</div>
+                    <div className="text-[var(--avp-text)]">{phase4Output.normalized_text}</div>
                   </div>
-                  <div className="p-3 rounded border border-emerald-500/30 bg-[#0B0F17]">
-                    <div className="text-emerald-400 mb-1">لایه ۳: `domain_adapted_text`</div>
-                    <div className="text-slate-100">{phase4Output.domain_adapted_text}</div>
+                  <div className="p-3 rounded-md border border-[var(--avp-success)]/40 bg-[var(--avp-bg-subtle)]">
+                    <div className="text-[var(--avp-success-text)] mb-1">لایه ۳: `domain_adapted_text`</div>
+                    <div className="text-[var(--avp-text)]">{phase4Output.domain_adapted_text}</div>
                   </div>
                 </div>
               </div>
 
-              <div className="overflow-x-auto rounded-lg border border-[#252F42]">
+              <div className="overflow-x-auto rounded-lg border border-[var(--avp-border)]">
                 <table className="w-full text-right text-xs">
-                  <thead className="bg-[#111827] text-slate-300 border-b border-[#252F42]">
+                  <thead className="bg-[var(--avp-surface-shell)] text-[var(--avp-text-secondary)] border-b border-[var(--avp-border)]">
                     <tr>
                       <th className="p-2.5">کاندید</th>
                       <th className="p-2.5">مدل / پارامتر</th>
@@ -1066,22 +1064,22 @@ export const AsrResearchLabModal: React.FC<AsrResearchLabModalProps> = ({
                       <th className="p-2.5">وضعیت در G0_CPU_ONLY</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-[#252F42] bg-[#0B0F17]">
+                  <tbody className="divide-y divide-[var(--avp-border-subtle)] bg-[var(--avp-surface)]">
                     {PHASE4_CANDIDATE_MODEL_REGISTRY.map((m) => (
                       <tr key={m.candidateId}>
-                        <td className="p-2.5 font-mono text-amber-300">{m.candidateId}</td>
+                        <td className="p-2.5 font-mono text-[var(--avp-warning-text)]">{m.candidateId}</td>
                         <td className="p-2.5">
                           {m.modelName} ({m.parameterCount})
                         </td>
-                        <td className="p-2.5 font-mono text-emerald-400">
+                        <td className="p-2.5 font-mono text-[var(--avp-success-text)]">
                           {m.licenseVerification.weightsLicense} · {m.licenseVerification.verificationStatus}
                         </td>
                         <td className="p-2.5 font-mono text-xs">
                           <span
                             className={
                               m.localExecutionStatusInG0 === 'EXECUTABLE_IN_G0_CPU'
-                                ? 'text-emerald-400'
-                                : 'text-amber-300'
+                                ? 'text-[var(--avp-success-text)]'
+                                : 'text-[var(--avp-warning-text)]'
                             }
                           >
                             {m.localExecutionStatusInG0}
@@ -1093,12 +1091,12 @@ export const AsrResearchLabModal: React.FC<AsrResearchLabModalProps> = ({
                 </table>
               </div>
 
-              <div className="p-3 rounded-lg border border-[#252F42] bg-[#141B27] text-xs text-slate-300">
+              <div className="p-3 rounded-lg border border-[var(--avp-border)] bg-[var(--avp-surface)] text-xs text-[var(--avp-text-secondary)]">
                 ارزیابی مقایسه Baseline با RC1 روی {phase4Comparison.sampleCount} نمونه: CER فارسی از{' '}
-                <span className="font-mono text-slate-200">{phase4Comparison.persianBaselineCerPercent}%</span> به{' '}
-                <span className="font-mono text-emerald-400">{phase4Comparison.persianFineTunedCerPercent}%</span> و CER کدسوئیچ از{' '}
-                <span className="font-mono text-slate-200">{phase4Comparison.mixedBaselineCerPercent}%</span> به{' '}
-                <span className="font-mono text-emerald-400">{phase4Comparison.mixedFineTunedCerPercent}%</span> رسید.
+                <span className="font-mono text-[var(--avp-text)]">{phase4Comparison.persianBaselineCerPercent}%</span> به{' '}
+                <span className="font-mono text-[var(--avp-success-text)]">{phase4Comparison.persianFineTunedCerPercent}%</span> و CER کدسوئیچ از{' '}
+                <span className="font-mono text-[var(--avp-text)]">{phase4Comparison.mixedBaselineCerPercent}%</span> به{' '}
+                <span className="font-mono text-[var(--avp-success-text)]">{phase4Comparison.mixedFineTunedCerPercent}%</span> رسید.
               </div>
             </section>
           )}
@@ -1106,22 +1104,22 @@ export const AsrResearchLabModal: React.FC<AsrResearchLabModalProps> = ({
           {/* TAB 4: PHASE 5 REAL-TIME STREAMING ASR1 & VAD */}
           {activeTab === 'streaming' && (
             <section className="space-y-4">
-              <div className="p-4 rounded-lg border border-[#252F42] bg-[#141B27] space-y-3">
+              <div className="p-4 rounded-lg border border-[var(--avp-border)] bg-[var(--avp-surface)] space-y-3">
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <div>
-                    <h3 className="text-sm font-semibold text-slate-100">
+                    <h3 className="text-sm font-semibold text-[var(--avp-text)]">
                       موتور استریم زنده با پروتکل باینری `ASR1` (۲۴ بایت هدر + PCM16 مونو)
                     </h3>
-                    <p className="text-xs text-slate-400">
-                      وضعیت Web AudioWorklet خارج از ترد اصلی: <span className="font-mono text-emerald-400">{workletStatus}</span> (`/asr-stream-worklet.js`)
+                    <p className="text-xs text-[var(--avp-text-secondary)]">
+                      وضعیت Web AudioWorklet خارج از ترد اصلی: <span className="font-mono text-[var(--avp-success-text)]">{workletStatus}</span> (`/asr-stream-worklet.js`)
                     </p>
                   </div>
-                  <div className="flex items-center gap-2">
+                  <div className="flex flex-wrap items-center gap-2">
                     <select
                       aria-label="انتخاب بک‌اند استریم"
                       value={selectedStreamBackend}
                       onChange={(e) => setSelectedStreamBackend(e.target.value as StreamingBackendId)}
-                      className="px-2.5 py-2 rounded border border-[#252F42] bg-[#0B0F17] text-xs text-slate-100"
+                      className="avp-input h-9 px-2.5 text-xs"
                     >
                       {PHASE5_STREAMING_BACKEND_REGISTRY.map((b) => (
                         <option key={b.backendId} value={b.backendId}>
@@ -1133,7 +1131,7 @@ export const AsrResearchLabModal: React.FC<AsrResearchLabModalProps> = ({
                       type="button"
                       data-testid="btn-run-stream-sim"
                       onClick={handleRunStreamBurstSimulation}
-                      className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded bg-amber-400 text-slate-950 font-semibold text-xs hover:bg-amber-300 cursor-pointer"
+                      className="avp-btn avp-btn-primary h-9"
                     >
                       <Mic className="w-3.5 h-3.5" aria-hidden="true" />
                       <span>اجرای شبیه‌ساز فریم زنده ۱۰۰ms</span>
@@ -1144,10 +1142,10 @@ export const AsrResearchLabModal: React.FC<AsrResearchLabModalProps> = ({
                 {/* Mandatory Transparent Mode Disclosure */}
                 <div
                   data-testid="stream-mode-disclosure"
-                  className={`p-2.5 rounded border text-xs flex items-center justify-between ${
+                  className={`p-2.5 rounded-md border text-xs flex items-center justify-between ${
                     activeStreamingSpec.nativeIncrementalStreamingSupported
-                      ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-200'
-                      : 'border-amber-500/40 bg-amber-500/10 text-amber-200'
+                      ? 'border-[var(--avp-success)]/40 bg-[var(--avp-success-soft)] text-[var(--avp-success-text)]'
+                      : 'border-[var(--avp-warning)]/40 bg-[var(--avp-warning-soft)] text-[var(--avp-warning-text)]'
                   }`}
                 >
                   <span>
@@ -1157,30 +1155,30 @@ export const AsrResearchLabModal: React.FC<AsrResearchLabModalProps> = ({
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs">
-                  <div className="p-3 rounded border border-[#252F42] bg-[#0B0F17]">
-                    <div className="text-slate-400">سربار تجمعی Qwen (۳۰s با چانک ۲s)</div>
-                    <div className="font-mono text-amber-300 mt-1">
+                  <div className="p-3 rounded-md border border-[var(--avp-border)] bg-[var(--avp-bg-subtle)]">
+                    <div className="text-[var(--avp-text-secondary)]">سربار تجمعی Qwen (۳۰s با چانک ۲s)</div>
+                    <div className="font-mono text-[var(--avp-warning-text)] mt-1">
                       {qwenOverhead.totalCumulativeAudioSec}s ({qwenOverhead.overheadMultiplier}x)
                     </div>
-                    <div className="text-[11px] text-slate-400 mt-0.5">
+                    <div className="text-[11px] text-[var(--avp-text-muted)] mt-0.5">
                       محدودیت نرم VAD برای مهار سربار: ۱۲.۰ ثانیه
                     </div>
                   </div>
-                  <div className="p-3 rounded border border-[#252F42] bg-[#0B0F17]">
-                    <div className="text-slate-400">هیسترزیس VAD ۵۱۲ نمونه</div>
-                    <div className="font-mono text-sky-300 mt-1">
+                  <div className="p-3 rounded-md border border-[var(--avp-border)] bg-[var(--avp-bg-subtle)]">
+                    <div className="text-[var(--avp-text-secondary)]">هیسترزیس VAD ۵۱۲ نمونه</div>
+                    <div className="font-mono text-[var(--avp-accent-text)] mt-1">
                       Start ≥ 0.50 · Continue ≥ 0.35 · Endpoint = 600ms
                     </div>
                   </div>
-                  <div className="p-3 rounded border border-[#252F42] bg-[#0B0F17]">
-                    <div className="text-slate-400">ابعاد پکت باینری ۱۰۰ms</div>
-                    <div className="font-mono text-emerald-400 mt-1">24B Header + 3200B PCM16 = 3224B</div>
+                  <div className="p-3 rounded-md border border-[var(--avp-border)] bg-[var(--avp-bg-subtle)]">
+                    <div className="text-[var(--avp-text-secondary)]">ابعاد پکت باینری ۱۰۰ms</div>
+                    <div className="font-mono text-[var(--avp-success-text)] mt-1">24B Header + 3200B PCM16 = 3224B</div>
                   </div>
                 </div>
 
                 {streamSimState && (
-                  <div className="p-3.5 rounded-lg border border-sky-500/30 bg-[#0B0F17] space-y-2 text-xs">
-                    <div className="flex flex-wrap gap-4 font-mono text-sky-300">
+                  <div className="p-3.5 rounded-lg border border-[var(--avp-accent)]/35 bg-[var(--avp-bg-subtle)] space-y-2 text-xs">
+                    <div className="flex flex-wrap gap-4 font-mono text-[var(--avp-accent-text)]">
                       <span>Session: {streamSimState.sessionId}</span>
                       <span>Frames: {streamSimState.framesSent}</span>
                       <span>Bytes: {streamSimState.totalBytes}</span>
@@ -1188,11 +1186,11 @@ export const AsrResearchLabModal: React.FC<AsrResearchLabModalProps> = ({
                       <span>Backpressure: {streamSimState.backpressure}</span>
                       <span>TTFP P95: {streamSimState.ttfpP95Ms}ms</span>
                     </div>
-                    <div className="text-slate-300">
-                      <span className="text-amber-300">پیش‌نمایش‌های موقت (Partial Replace):</span>{' '}
+                    <div className="text-[var(--avp-text-secondary)]">
+                      <span className="text-[var(--avp-warning-text)]">پیش‌نمایش‌های موقت (Partial Replace):</span>{' '}
                       {streamSimState.partials.join(' | ') || 'بدون بازنگری میانی در حالت Segmented'}
                     </div>
-                    <div className="text-emerald-300">
+                    <div className="text-[var(--avp-success-text)]">
                       <span className="font-semibold">متن نهایی قطعی (Committed Final):</span>{' '}
                       {streamSimState.finalTexts.join(' · ')}
                     </div>
@@ -1205,24 +1203,24 @@ export const AsrResearchLabModal: React.FC<AsrResearchLabModalProps> = ({
           {/* TAB 5: PHASE 6 ADAPTIVE ROUTER */}
           {activeTab === 'router' && (
             <section className="space-y-4">
-              <div className="p-4 rounded-lg border border-[#252F42] bg-[#141B27] space-y-3">
+              <div className="p-4 rounded-lg border border-[var(--avp-border)] bg-[var(--avp-surface)] space-y-3">
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <div>
-                    <h3 className="text-sm font-semibold text-slate-100">
+                    <h3 className="text-sm font-semibold text-[var(--avp-text)]">
                       مسیریاب هوشمند با فیلتر ۱۸ دروازه‌ای و محافظ حریم خصوصی (`disagreement_only: false`)
                     </h3>
-                    <p className="text-xs text-slate-400">
+                    <p className="text-xs text-[var(--avp-text-secondary)]">
                       پیش‌بینی محافظه‌کارانه خطا با `CER_Upper_95` و کنترلر بودجه اتمیک
                     </p>
                   </div>
-                  <div className="flex items-center gap-2">
+                  <div className="flex flex-wrap items-center gap-2">
                     <select
                       aria-label="سیاست مسیریابی"
                       value={routerStrategy}
                       onChange={(e) =>
                         handleEvaluateRouter(e.target.value as RoutingStrategyName, routerPrivacy)
                       }
-                      className="px-2.5 py-1.5 rounded border border-[#252F42] bg-[#0B0F17] text-xs"
+                      className="avp-input h-8 px-2.5 text-xs"
                     >
                       <option value="balanced">Balanced</option>
                       <option value="quality_first">Quality First</option>
@@ -1236,7 +1234,7 @@ export const AsrResearchLabModal: React.FC<AsrResearchLabModalProps> = ({
                       onChange={(e) =>
                         handleEvaluateRouter(routerStrategy, e.target.value as PrivacyRoutingPolicy)
                       }
-                      className="px-2.5 py-1.5 rounded border border-[#252F42] bg-[#0B0F17] text-xs"
+                      className="avp-input h-8 px-2.5 text-xs"
                     >
                       <option value="local_only">Local Only (قطع کامل انتقال ابری)</option>
                       <option value="local_preferred">Local Preferred</option>
@@ -1245,20 +1243,20 @@ export const AsrResearchLabModal: React.FC<AsrResearchLabModalProps> = ({
                   </div>
                 </div>
 
-                <div className="p-3 rounded border border-emerald-500/30 bg-[#0B0F17] text-xs space-y-1">
+                <div className="p-3 rounded-md border border-[var(--avp-success)]/40 bg-[var(--avp-bg-subtle)] text-xs space-y-1">
                   <div>
                     موتور منتخب اولیه:{' '}
-                    <span className="font-mono text-emerald-400 font-bold" data-testid="router-selected-primary">
+                    <span className="font-mono text-[var(--avp-success-text)] font-bold" data-testid="router-selected-primary">
                       {routerDecision.selected_primary ?? 'NONE'}
                     </span>{' '}
-                    · حالت اجرا: <span className="font-mono text-amber-300">{routerDecision.operating_mode}</span>
+                    · حالت اجرا: <span className="font-mono text-[var(--avp-warning-text)]">{routerDecision.operating_mode}</span>
                   </div>
-                  <div className="text-slate-300">{routerDecision.decision_reason}</div>
+                  <div className="text-[var(--avp-text-secondary)]">{routerDecision.decision_reason}</div>
                 </div>
 
-                <div className="overflow-x-auto rounded-lg border border-[#252F42]">
+                <div className="overflow-x-auto rounded-lg border border-[var(--avp-border)]">
                   <table className="w-full text-right text-xs">
-                    <thead className="bg-[#111827] text-slate-300 border-b border-[#252F42]">
+                    <thead className="bg-[var(--avp-surface-shell)] text-[var(--avp-text-secondary)] border-b border-[var(--avp-border)]">
                       <tr>
                         <th className="p-2">موتور</th>
                         <th className="p-2">وضعیت دروازه ۱۸گانه</th>
@@ -1267,18 +1265,18 @@ export const AsrResearchLabModal: React.FC<AsrResearchLabModalProps> = ({
                         <th className="p-2">دلیل رد (در صورت رد)</th>
                       </tr>
                     </thead>
-                    <tbody className="divide-y divide-[#252F42] bg-[#0B0F17]">
+                    <tbody className="divide-y divide-[var(--avp-border-subtle)] bg-[var(--avp-surface)]">
                       {routerDecision.candidates.map((cand) => (
                         <tr key={cand.engine_id}>
                           <td className="p-2 font-mono">{cand.engine_id}</td>
                           <td className="p-2 font-mono">
-                            <span className={cand.eligible ? 'text-emerald-400' : 'text-rose-400'}>
+                            <span className={cand.eligible ? 'text-[var(--avp-success-text)]' : 'text-[var(--avp-danger-text)]'}>
                               {cand.eligible ? 'ELIGIBLE' : 'REJECTED'}
                             </span>
                           </td>
                           <td className="p-2 font-mono">{cand.eligible ? cand.utility_score.toFixed(4) : '—'}</td>
                           <td className="p-2 font-mono">{cand.predicted_cer_upper_95.toFixed(3)}</td>
-                          <td className="p-2 text-[11px] text-slate-400 font-mono">
+                          <td className="p-2 text-[11px] text-[var(--avp-text-muted)] font-mono">
                             {cand.rejection_reasons.join(', ') || '—'}
                           </td>
                         </tr>
@@ -1287,15 +1285,15 @@ export const AsrResearchLabModal: React.FC<AsrResearchLabModalProps> = ({
                   </table>
                 </div>
 
-                <div className="p-3 rounded border border-[#252F42] bg-[#0B0F17] text-xs text-slate-300 flex flex-wrap gap-4">
+                <div className="p-3 rounded-md border border-[var(--avp-border)] bg-[var(--avp-bg-subtle)] text-xs text-[var(--avp-text-secondary)] flex flex-wrap gap-4">
                   <span>
-                    دقت تطابق با Oracle: <strong className="font-mono text-emerald-400">{routerRegret.routingAccuracyPercent}%</strong>
+                    دقت تطابق با Oracle: <strong className="font-mono text-[var(--avp-success-text)]">{routerRegret.routingAccuracyPercent}%</strong>
                   </span>
                   <span>
-                    میانگین Quality Regret: <strong className="font-mono text-amber-300">{routerRegret.meanQualityRegretCer}</strong>
+                    میانگین Quality Regret: <strong className="font-mono text-[var(--avp-warning-text)]">{routerRegret.meanQualityRegretCer}</strong>
                   </span>
                   <span>
-                    نقض بودجه: <strong className="font-mono text-emerald-400">{routerRegret.budgetViolationRate}%</strong>
+                    نقض بودجه: <strong className="font-mono text-[var(--avp-success-text)]">{routerRegret.budgetViolationRate}%</strong>
                   </span>
                 </div>
               </div>
@@ -1306,77 +1304,77 @@ export const AsrResearchLabModal: React.FC<AsrResearchLabModalProps> = ({
           {activeTab === 'research_security' && (
             <section className="space-y-4">
               {/* Phase 7 */}
-              <div className="p-4 rounded-lg border border-[#252F42] bg-[#141B27] space-y-2 text-xs">
-                <div className="flex items-center justify-between">
-                  <h3 className="text-sm font-semibold text-slate-100 flex items-center gap-2">
-                    <Layers className="w-4 h-4 text-amber-400" aria-hidden="true" />
+              <div className="p-4 rounded-lg border border-[var(--avp-border)] bg-[var(--avp-surface)] space-y-2 text-xs">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <h3 className="text-sm font-semibold text-[var(--avp-text)] flex items-center gap-2">
+                    <Layers className="w-4 h-4 text-[var(--avp-warning-text)]" aria-hidden="true" />
                     <span>فاز ۷: دروازه تصمیم آموزش از صفر و پروتوتایپ‌های FastConformer</span>
                   </h3>
                   <span
                     data-testid="from-scratch-verdict"
-                    className="font-mono px-2 py-0.5 rounded bg-rose-500/20 text-rose-300 border border-rose-500/40"
+                    className="font-mono px-2 py-0.5 rounded bg-[var(--avp-danger-soft)] text-[var(--avp-danger-text)] border border-[var(--avp-danger)]/40"
                   >
                     {fromScratchReport.assignedDataTier} · {fromScratchReport.trackBProductionFromScratchDecision}
                   </span>
                 </div>
-                <p className="text-slate-300">{fromScratchReport.permittedGoalsSummary}</p>
+                <p className="text-[var(--avp-text-secondary)]">{fromScratchReport.permittedGoalsSummary}</p>
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-2 pt-1 font-mono text-[11px]">
-                  <div className="p-2.5 rounded border border-[#252F42] bg-[#0B0F17]">
+                  <div className="p-2.5 rounded-md border border-[var(--avp-border)] bg-[var(--avp-bg-subtle)]">
                     FC-CTC-S1: {(archPrototypes.ctcS1.totalParameters / 1e6).toFixed(2)}M Params ·{' '}
                     {archPrototypes.ctcS1.estimatedGflopsPer10SecAudio} GFLOPs/10s
                   </div>
-                  <div className="p-2.5 rounded border border-[#252F42] bg-[#0B0F17]">
+                  <div className="p-2.5 rounded-md border border-[var(--avp-border)] bg-[var(--avp-bg-subtle)]">
                     FC-RNNT-S1: {(archPrototypes.rnntS1.totalParameters / 1e6).toFixed(2)}M Params
                   </div>
-                  <div className="p-2.5 rounded border border-[#252F42] bg-[#0B0F17]">
+                  <div className="p-2.5 rounded-md border border-[var(--avp-border)] bg-[var(--avp-bg-subtle)]">
                     Hybrid Loss H01 (0.5/0.5): {archPrototypes.lossH01.combinedTotalLoss.toFixed(3)}
                   </div>
                 </div>
               </div>
 
               {/* Phase 8 Truth Audit & Security */}
-              <div className="p-4 rounded-lg border border-[#252F42] bg-[#141B27] space-y-3 text-xs">
-                <div className="flex items-center justify-between">
-                  <h3 className="text-sm font-semibold text-slate-100 flex items-center gap-2">
-                    <ShieldCheck className="w-4 h-4 text-emerald-400" aria-hidden="true" />
+              <div className="p-4 rounded-lg border border-[var(--avp-border)] bg-[var(--avp-surface)] space-y-3 text-xs">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <h3 className="text-sm font-semibold text-[var(--avp-text)] flex items-center gap-2">
+                    <ShieldCheck className="w-4 h-4 text-[var(--avp-success-text)]" aria-hidden="true" />
                     <span>فاز ۸: ممیزی صداقت معماری و تست امنیتی OWASP ASVS / STRIDE</span>
                   </h3>
                   <button
                     type="button"
                     data-testid="btn-rerun-security-audit"
                     onClick={() => setSecurityReport(runAdversarialSecurityAndReadinessAudit())}
-                    className="px-3 py-1.5 rounded bg-[#1D283A] border border-[#252F42] text-slate-200 hover:bg-[#25344B] cursor-pointer"
+                    className="avp-btn avp-btn-secondary"
                   >
                     اجرای مجدد تست نفوذ ورودی
                   </button>
                 </div>
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 font-mono">
-                  <div className="p-2 rounded bg-[#0B0F17] border border-[#252F42]">
-                    تست‌های امنیتی: <span className="text-emerald-400">{securityReport.passedCount}/{securityReport.totalChecks} PASS</span>
+                  <div className="p-2 rounded-md bg-[var(--avp-bg-subtle)] border border-[var(--avp-border)]">
+                    تست‌های امنیتی: <span className="text-[var(--avp-success-text)]">{securityReport.passedCount}/{securityReport.totalChecks} PASS</span>
                   </div>
-                  <div className="p-2 rounded bg-[#0B0F17] border border-[#252F42]">
+                  <div className="p-2 rounded-md bg-[var(--avp-bg-subtle)] border border-[var(--avp-border)]">
                     تایید محلی کامل: {truthSummary.countsByStatus.IMPLEMENTED_AND_VERIFIED}
                   </div>
-                  <div className="p-2 rounded bg-[#0B0F17] border border-[#252F42]">
+                  <div className="p-2 rounded-md bg-[var(--avp-bg-subtle)] border border-[var(--avp-border)]">
                     نیازمند GPU/PG: {truthSummary.countsByStatus.PARTIALLY_IMPLEMENTED}
                   </div>
-                  <div className="p-2 rounded bg-[#0B0F17] border border-[#252F42]">
-                    وضعیت کل سیستم: <span className="text-amber-300">{truthSummary.overallReleaseStatus}</span>
+                  <div className="p-2 rounded-md bg-[var(--avp-bg-subtle)] border border-[var(--avp-border)]">
+                    وضعیت کل سیستم: <span className="text-[var(--avp-warning-text)]">{truthSummary.overallReleaseStatus}</span>
                   </div>
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
                   {PHASE8_SYSTEM_INVENTORY.slice(0, 4).map((inv) => (
-                    <div key={inv.componentId} className="p-2 rounded border border-[#252F42] bg-[#0B0F17] flex justify-between gap-2">
-                      <span className="text-slate-200">{inv.name}</span>
-                      <span className="font-mono text-[11px] text-sky-300 shrink-0">{inv.truthStatus}</span>
+                    <div key={inv.componentId} className="p-2 rounded-md border border-[var(--avp-border)] bg-[var(--avp-bg-subtle)] flex justify-between gap-2">
+                      <span className="text-[var(--avp-text)]">{inv.name}</span>
+                      <span className="font-mono text-[11px] text-[var(--avp-accent-text)] shrink-0">{inv.truthStatus}</span>
                     </div>
                   ))}
                 </div>
               </div>
 
               {/* Phase 9 Continuous Learning & Canary */}
-              <div className="p-4 rounded-lg border border-[#252F42] bg-[#141B27] space-y-3 text-xs">
-                <h3 className="text-sm font-semibold text-slate-100">
+              <div className="p-4 rounded-lg border border-[var(--avp-border)] bg-[var(--avp-surface)] space-y-3 text-xs">
+                <h3 className="text-sm font-semibold text-[var(--avp-text)]">
                   فاز ۹: جمع‌آوری بازخورد با دروازه رضایت‌نامه ۸گانه، Champion/Challenger و Canary
                 </h3>
                 <form onSubmit={handleSubmitFeedback} className="space-y-2">
@@ -1386,50 +1384,51 @@ export const AsrResearchLabModal: React.FC<AsrResearchLabModalProps> = ({
                       value={fbText}
                       onChange={(e) => setFbText(e.target.value)}
                       aria-label="متن اصلاحی کاربر"
-                      className="flex-1 min-w-[240px] px-3 py-2 rounded border border-[#252F42] bg-[#0B0F17] text-xs text-slate-100"
+                      className="avp-input flex-1 min-w-[240px] h-9 px-3 text-xs"
                     />
-                    <label className="inline-flex items-center gap-1.5 text-slate-200 cursor-pointer">
+                    <label className="inline-flex items-center gap-1.5 text-[var(--avp-text-secondary)] cursor-pointer">
                       <input
                         type="checkbox"
                         data-testid="chk-training-consent"
                         checked={trainingConsent}
                         onChange={(e) => setTrainingConsent(e.target.checked)}
+                        className="accent-[var(--avp-brand)]"
                       />
                       <span>رضایت صریح برای استفاده آموزشی (`ALLOW_MODEL_TRAINING`)</span>
                     </label>
                     <button
                       type="submit"
                       data-testid="btn-submit-feedback"
-                      className="px-3.5 py-2 rounded bg-amber-400 text-slate-950 font-semibold hover:bg-amber-300 cursor-pointer"
+                      className="avp-btn avp-btn-primary h-9"
                     >
                       ثبت بازخورد
                     </button>
                   </div>
                   {fbResultMsg && (
-                    <div data-testid="feedback-consent-result" className="p-2 rounded bg-[#0B0F17] border border-sky-500/30 text-sky-200">
+                    <div data-testid="feedback-consent-result" className="p-2 rounded-md bg-[var(--avp-accent-soft)] border border-[var(--avp-accent)]/35 text-[var(--avp-accent-text)]">
                       {fbResultMsg}
                     </div>
                   )}
                 </form>
 
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
-                  <div className="p-2.5 rounded border border-[#252F42] bg-[#0B0F17]">
-                    <div className="text-slate-400">دروازه Champion/Challenger</div>
-                    <div className="text-emerald-400 font-mono mt-1">
+                  <div className="p-2.5 rounded-md border border-[var(--avp-border)] bg-[var(--avp-bg-subtle)]">
+                    <div className="text-[var(--avp-text-secondary)]">دروازه Champion/Challenger</div>
+                    <div className="text-[var(--avp-success-text)] font-mono mt-1">
                       {championGate.approvedForCanaryPromotion ? 'APPROVED' : 'REJECTED'} (+
                       {championGate.overallRelativeCerImprovementPercent}% Rel CER)
                     </div>
                   </div>
-                  <div className="p-2.5 rounded border border-[#252F42] bg-[#0B0F17]">
-                    <div className="text-slate-400">پایش PSI (کوهورت با ۱۴ نمونه)</div>
-                    <div className="text-amber-300 font-mono mt-1">
+                  <div className="p-2.5 rounded-md border border-[var(--avp-border)] bg-[var(--avp-bg-subtle)]">
+                    <div className="text-[var(--avp-text-secondary)]">پایش PSI (کوهورت با ۱۴ نمونه)</div>
+                    <div className="text-[var(--avp-warning-text)] font-mono mt-1">
                       {psiLowSampleDemo.status} (جلوگیری از آلارم کاذب &lt; 30 نمونه)
                     </div>
                   </div>
-                  <div className="p-2.5 rounded border border-[#252F42] bg-[#0B0F17] flex items-center justify-between gap-2">
+                  <div className="p-2.5 rounded-md border border-[var(--avp-border)] bg-[var(--avp-bg-subtle)] flex items-center justify-between gap-2">
                     <div>
-                      <div className="text-slate-400">Canary Rollout</div>
-                      <div className="font-mono text-sky-300 mt-0.5">
+                      <div className="text-[var(--avp-text-secondary)]">Canary Rollout</div>
+                      <div className="font-mono text-[var(--avp-accent-text)] mt-0.5">
                         {canaryState.mode} · {canaryState.stagePercent}%
                       </div>
                     </div>
@@ -1446,7 +1445,7 @@ export const AsrResearchLabModal: React.FC<AsrResearchLabModalProps> = ({
                           })
                         )
                       }
-                      className="px-2.5 py-1 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 cursor-pointer"
+                      className="px-2.5 py-1 rounded bg-[var(--avp-success-soft)] text-[var(--avp-success-text)] border border-[var(--avp-success)]/40 cursor-pointer"
                     >
                       ارتقا
                     </button>
@@ -1457,6 +1456,6 @@ export const AsrResearchLabModal: React.FC<AsrResearchLabModalProps> = ({
           )}
         </div>
       </div>
-    </div>
+    </AccessibleModal>
   );
 };

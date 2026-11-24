@@ -4,12 +4,15 @@ import {
   Check,
   ChevronLeft,
   ChevronRight,
+  Download,
   RefreshCw,
   X,
 } from 'lucide-react';
 import { StudioWorkflowState, WorkflowLocale } from '../workflow/StudioWorkflowController';
 import { UserFacingFailureModel } from '../reliability';
 import type { CompanionHealthResponse } from '../host-bridge/companion/CompanionWebClient';
+import { OfflineIndicator } from '../ui/pwa/PWAInstallControls';
+import { toPersianDigits } from '../utils/formatters';
 
 export interface AdvancedLabActions {
   readonly onOpenAsrLab: () => void;
@@ -43,8 +46,9 @@ interface WorkflowStageBarProps {
   onRecoverFailure?: () => void;
   onImportAudioClick: () => void;
   onOpenLifecycleModal: (
-    initialTab?: 'model' | 'offline' | 'health' | 'backup' | 'storage' | 'diagnostics',
+    initialTab?: 'model' | 'offline' | 'health' | 'backup' | 'storage' | 'diagnostics' | 'companion',
   ) => void;
+  persianDigits?: boolean;
 }
 
 export function formatAsrShortStatus(
@@ -93,10 +97,13 @@ export const WorkflowStageBar: React.FC<WorkflowStageBarProps> = ({
   onSelectStep,
   onRunCloudGeminiAsr,
   activeFailure,
+  canInstallPwa,
+  onTriggerInstallPwa,
   onDismissFailure,
   onRetryFailure,
   onRecoverFailure,
   onOpenLifecycleModal,
+  persianDigits = false,
 }) => {
   const isFa = workflowState.locale === 'fa';
   const StepArrow = isFa ? ChevronLeft : ChevronRight;
@@ -111,19 +118,104 @@ export const WorkflowStageBar: React.FC<WorkflowStageBarProps> = ({
     label: string;
     done: boolean;
   }> = [
-    { id: 'file', num: isFa ? '۱' : '1', label: isFa ? 'فایل' : 'File', done: hasAudioLoaded },
+    {
+      id: 'file',
+      num: isFa || persianDigits ? '۱' : '1',
+      label: isFa ? 'فایل' : 'File',
+      done: hasAudioLoaded,
+    },
     {
       id: 'transcribe',
-      num: isFa ? '۲' : '2',
+      num: isFa || persianDigits ? '۲' : '2',
       label: isFa ? 'رونویسی' : 'Transcribe',
       done: hasTranscriptWords,
     },
-    { id: 'review', num: isFa ? '۳' : '3', label: isFa ? 'بازبینی' : 'Review', done: isReviewDone },
-    { id: 'export', num: isFa ? '۴' : '4', label: isFa ? 'خروجی' : 'Export', done: isExportComplete },
+    {
+      id: 'review',
+      num: isFa || persianDigits ? '۳' : '3',
+      label: isFa ? 'بازبینی' : 'Review',
+      done: isReviewDone,
+    },
+    {
+      id: 'export',
+      num: isFa || persianDigits ? '۴' : '4',
+      label: isFa ? 'خروجی' : 'Export',
+      done: isExportComplete,
+    },
   ];
 
   return (
     <>
+      {/* Responsive Mobile/Tablet Workflow Stepper + Inline PWA/Offline Utility Strip (< lg) */}
+      <div
+        data-testid="mobile-workflow-stage-bar"
+        className="lg:hidden border-b border-[var(--avp-border)] bg-[var(--avp-surface-shell)] px-3 py-1.5 flex items-center justify-between gap-2 overflow-x-auto"
+      >
+        <nav
+          aria-label={isFa ? 'مراحل کار تدوین صوتی' : 'Audio editing workflow stages'}
+          className="flex items-center min-w-0"
+        >
+          <ol className="flex items-center gap-0.5 bg-[var(--avp-surface-secondary)]/80 border border-[var(--avp-border)] rounded-lg p-0.5">
+            {steps.map((step, idx) => {
+              const isActive = activeStep === step.id;
+              return (
+                <li key={step.id} className="flex items-center gap-0.5">
+                  <button
+                    type="button"
+                    data-testid={`mobile-workflow-step-${step.id}`}
+                    aria-current={isActive ? 'step' : undefined}
+                    onClick={() => onSelectStep(step.id)}
+                    className={`inline-flex items-center gap-1 h-[26px] px-2 rounded-md text-[11px] transition-colors whitespace-nowrap cursor-pointer ${
+                      isActive
+                        ? 'bg-[var(--avp-surface)] text-[var(--avp-accent-text)] font-semibold shadow-2xs'
+                        : step.done
+                          ? 'text-[var(--avp-text-secondary)] font-medium'
+                          : 'text-[var(--avp-text-muted)]'
+                    }`}
+                  >
+                    <span
+                      className={`w-3.5 h-3.5 rounded-full inline-flex items-center justify-center text-[9.5px] font-semibold shrink-0 ${
+                        isActive
+                          ? 'bg-[var(--avp-accent)] text-white'
+                          : step.done
+                            ? 'text-[var(--avp-accent-text)]'
+                            : 'text-[var(--avp-text-faint)]'
+                      }`}
+                    >
+                      {step.done && !isActive ? (
+                        <Check className="w-2.5 h-2.5" strokeWidth={2.5} aria-hidden="true" />
+                      ) : persianDigits ? (
+                        toPersianDigits(step.num)
+                      ) : (
+                        step.num
+                      )}
+                    </span>
+                    <span>{step.label}</span>
+                  </button>
+                  {idx < steps.length - 1 && (
+                    <StepArrow className="w-3 h-3 text-[var(--avp-text-faint)] shrink-0" aria-hidden="true" />
+                  )}
+                </li>
+              );
+            })}
+          </ol>
+        </nav>
+
+        <div className="flex items-center gap-1.5 shrink-0">
+          <OfflineIndicator inline locale={workflowState.locale} />
+          {canInstallPwa && (
+            <button
+              type="button"
+              data-testid="btn-stagebar-pwa-install"
+              onClick={onTriggerInstallPwa}
+              className="avp-btn avp-btn-sm avp-btn-outline"
+            >
+              <Download className="w-3 h-3 text-[var(--avp-brand)]" aria-hidden="true" />
+              <span>{isFa ? 'نصب' : 'Install'}</span>
+            </button>
+          )}
+        </div>
+      </div>
 
       {/* Honest User-Facing Failure Banner (only when an actual failure occurred) */}
       {activeFailure && (

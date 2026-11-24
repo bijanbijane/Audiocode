@@ -58,6 +58,7 @@ import {
   selectContiguousTokenRange,
 } from '../utils/transcriptSync';
 import type { WaveformSelectionState } from './AuditionTransportBar';
+import { formatNumberForLocale, formatStudioTimecode } from '../utils/formatters';
 
 type TranscriptLayer = 'display' | 'normalized' | 'original';
 
@@ -85,6 +86,8 @@ interface TranscriptPanelProps {
   playheadSec: number;
   totalDurationSec?: number;
   locale?: 'fa' | 'en';
+  persianDigits?: boolean;
+  timecodeFormat?: 'mm:ss.ms' | 'hh:mm:ss';
   showTimestamps?: boolean;
   autoFollowPlayhead?: boolean;
   timelineSelection?: WaveformSelectionState | null;
@@ -245,6 +248,8 @@ export const TranscriptPanel: React.FC<TranscriptPanelProps> = ({
   playheadSec,
   totalDurationSec = 12,
   locale = 'fa',
+  persianDigits = false,
+  timecodeFormat = 'mm:ss.ms',
   showTimestamps = true,
   autoFollowPlayhead = true,
   timelineSelection = null,
@@ -355,12 +360,22 @@ export const TranscriptPanel: React.FC<TranscriptPanelProps> = ({
   const isWindowed = tokens.length > HIGH_SCALE_WINDOW_THRESHOLD;
   const totalPages = isWindowed ? Math.ceil(tokens.length / HIGH_SCALE_PAGE_SIZE) : 1;
 
-  // Auto-follow playhead across pages when enabled
+  // Auto-follow playhead across pages and scroll active word into view when enabled
   useEffect(() => {
     if (!autoFollowPlayhead || activePlayheadTokenIndex < 0) return;
     if (isWindowed) {
       const targetPage = Math.floor(activePlayheadTokenIndex / HIGH_SCALE_PAGE_SIZE);
       if (targetPage !== windowPage) setWindowPage(targetPage);
+    }
+    const container = streamContainerRef.current;
+    if (!container) return;
+    const activeEl = container.querySelector<HTMLElement>('[data-active-playhead="true"]');
+    if (activeEl) {
+      const cRect = container.getBoundingClientRect();
+      const eRect = activeEl.getBoundingClientRect();
+      if (eRect.top < cRect.top + 16 || eRect.bottom > cRect.bottom - 16) {
+        activeEl.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+      }
     }
   }, [autoFollowPlayhead, activePlayheadTokenIndex, isWindowed, windowPage]);
 
@@ -761,15 +776,15 @@ export const TranscriptPanel: React.FC<TranscriptPanelProps> = ({
               className="inline-flex items-center h-[20px] px-1.5 rounded bg-[var(--avp-surface-secondary)] border border-[var(--avp-border-subtle)] text-[10px] sm:text-[10.5px] font-medium text-[var(--avp-text-secondary)] whitespace-nowrap"
             >
               <bdi dir="ltr" className="avp-bidi-num font-mono font-semibold">{tokens.length}</bdi>
-              <span className="hidden sm:inline ms-1">{isFa ? 'واژه' : 'words'}</span>
+              <span className="hidden xl:inline ms-1">{isFa ? 'واژه' : 'words'}</span>
             </span>
           </div>
 
-          <span className="avp-divider-v hidden md:inline-block" aria-hidden="true" />
+          <span className="avp-divider-v hidden xl:inline-block" aria-hidden="true" />
 
-          {/* Desktop Inline Search Input (md+) */}
-          <div className="hidden md:flex items-center gap-1 flex-1 max-w-[220px]">
-            <div className="relative flex-1">
+          {/* Desktop Inline Search Input (xl+) */}
+          <div className="hidden xl:flex items-center gap-1 flex-1 min-w-0 max-w-[220px]">
+            <div className="relative flex-1 min-w-0">
               <Search
                 className="w-3.5 h-3.5 text-[var(--avp-text-faint)] absolute top-1/2 -translate-y-1/2 start-2.5 pointer-events-none"
                 strokeWidth={1.75}
@@ -844,8 +859,8 @@ export const TranscriptPanel: React.FC<TranscriptPanelProps> = ({
             )}
           </div>
 
-          {/* Mobile Search Toggle Icon Button (<md) */}
-          <div className="md:hidden shrink-0">
+          {/* Compact/Tablet Search Toggle Icon Button (<xl) */}
+          <div className="xl:hidden shrink-0">
             <button
               type="button"
               data-testid="btn-toggle-mobile-search"
@@ -885,6 +900,8 @@ export const TranscriptPanel: React.FC<TranscriptPanelProps> = ({
             type="button"
             data-testid="btn-toggle-advanced-text-tools"
             aria-expanded={showAdvancedTools}
+            aria-label={isFa ? 'ابزارهای متنی' : 'Text Tools'}
+            title={isFa ? 'ابزارهای متنی' : 'Text Tools'}
             onClick={() => setShowAdvancedTools((v) => !v)}
             className={`inline-flex items-center gap-1 h-[26px] px-2 rounded-lg border text-[11px] font-medium cursor-pointer transition-colors ${
               showAdvancedTools
@@ -893,7 +910,7 @@ export const TranscriptPanel: React.FC<TranscriptPanelProps> = ({
             }`}
           >
             <Sliders className="w-3.5 h-3.5" strokeWidth={1.75} aria-hidden="true" />
-            <span className="hidden sm:inline">{isFa ? 'ابزارهای متنی' : 'Text Tools'}</span>
+            <span className="hidden xl:inline">{isFa ? 'ابزارهای متنی' : 'Text Tools'}</span>
             {showAdvancedTools ? (
               <ChevronUp className="w-3 h-3" strokeWidth={1.75} aria-hidden="true" />
             ) : (
@@ -943,9 +960,9 @@ export const TranscriptPanel: React.FC<TranscriptPanelProps> = ({
         </div>
       </div>
 
-      {/* Collapsible Mobile Search Row (<md only, toggled via search icon) */}
+      {/* Collapsible Compact/Tablet Search Row (<xl, toggled via search icon) */}
       {showMobileSearch && (
-        <div className="md:hidden px-3 py-1.5 border-b border-[var(--avp-border)] bg-[var(--avp-surface-secondary)] flex items-center gap-1.5">
+        <div className="xl:hidden px-3 py-1.5 border-b border-[var(--avp-border)] bg-[var(--avp-surface-secondary)] flex items-center gap-1.5">
           <div className="relative flex-1">
             <Search
               className="w-3.5 h-3.5 text-[var(--avp-text-faint)] absolute top-1/2 -translate-y-1/2 start-2.5 pointer-events-none"
@@ -1747,7 +1764,7 @@ export const TranscriptPanel: React.FC<TranscriptPanelProps> = ({
                     {showTimestamps && (
                       <span className="inline-flex items-center gap-0.5 px-1 py-0.2 rounded bg-[var(--avp-surface-secondary)]/80 group-hover/turn:bg-[var(--avp-accent-soft)]/60 transition-colors">
                         <Play
-                          className="w-2 h-2 opacity-40 group-hover/turn:opacity-100 text-[var(--avp-accent-text)] transition-opacity shrink-0 fill-current"
+                          className="w-2 h-2 opacity-60 sm:opacity-40 group-hover/turn:opacity-100 text-[var(--avp-accent-text)] transition-opacity shrink-0 fill-current"
                           strokeWidth={2}
                           aria-hidden="true"
                         />
@@ -1755,7 +1772,7 @@ export const TranscriptPanel: React.FC<TranscriptPanelProps> = ({
                           dir="ltr"
                           className="avp-bidi-num text-[9.5px] text-[var(--avp-text-muted)] group-hover/turn:text-[var(--avp-text)]"
                         >
-                          {turn.startSec.toFixed(1)}s
+                          {formatStudioTimecode(turn.startSec, timecodeFormat, persianDigits)}
                         </bdi>
                       </span>
                     )}
@@ -1781,8 +1798,8 @@ export const TranscriptPanel: React.FC<TranscriptPanelProps> = ({
                     ))}
                   </div>
 
-                  {/* Column 3 (Left/End on Desktop — 120px Axis Aligned with Waveform Track Headers) */}
-                  <div className="hidden sm:flex items-center justify-end gap-1 self-center sm:border-s border-[var(--avp-border-subtle)] sm:ps-2 min-w-[112px]">
+                  {/* Column 3 (Left/End — Aligned Axis & Touch Discoverable) */}
+                  <div className="flex items-center justify-end gap-1 self-center sm:border-s border-[var(--avp-border-subtle)] sm:ps-2 min-w-[112px]">
                     {onPlaySelectionRange && (
                       <button
                         type="button"
@@ -1796,7 +1813,7 @@ export const TranscriptPanel: React.FC<TranscriptPanelProps> = ({
                         }
                         title={isFa ? 'پخش این نوبت گفتار' : 'Play this speaker turn'}
                         aria-label={isFa ? 'پخش نوبت گفتار' : 'Play speaker turn'}
-                        className="inline-flex items-center justify-center w-[20px] h-[20px] rounded border border-[var(--avp-border-subtle)] bg-[var(--avp-surface)] text-[var(--avp-text-muted)] opacity-0 group-hover/turn:opacity-100 focus-visible:opacity-100 hover:text-[var(--avp-accent-text)] hover:border-[var(--avp-accent)]/50 transition-all cursor-pointer shrink-0"
+                        className="inline-flex items-center justify-center w-[22px] h-[22px] rounded border border-[var(--avp-border-subtle)] bg-[var(--avp-surface)] text-[var(--avp-text-muted)] opacity-75 sm:opacity-0 sm:group-hover/turn:opacity-100 focus-visible:opacity-100 hover:text-[var(--avp-accent-text)] hover:border-[var(--avp-accent)]/50 transition-all cursor-pointer shrink-0"
                       >
                         <Play className="w-2.5 h-2.5 fill-current" strokeWidth={2} aria-hidden="true" />
                       </button>
@@ -1813,16 +1830,16 @@ export const TranscriptPanel: React.FC<TranscriptPanelProps> = ({
                           ? `انتخاب کل این نوبت (${turn.items.length} واژه · ${turnDurSec.toFixed(1)} ثانیه)`
                           : `Select entire turn (${turn.items.length} words · ${turnDurSec.toFixed(1)}s)`
                       }
-                      className={`inline-flex items-center gap-1 h-[20px] px-1.5 rounded border text-[9.5px] font-mono tabular-nums transition-all cursor-pointer shrink-0 ${
+                      className={`inline-flex items-center gap-1 h-[22px] px-1.5 rounded border text-[9.5px] font-mono tabular-nums transition-all cursor-pointer shrink-0 ${
                         isEntireTurnSelected
                           ? 'border-[var(--avp-accent)] bg-[var(--avp-accent-soft)] text-[var(--avp-accent-text)] font-semibold'
                           : 'border-[var(--avp-border-subtle)] bg-[var(--avp-surface-secondary)]/55 text-[var(--avp-text-faint)] group-hover/turn:border-[var(--avp-border)] group-hover/turn:text-[var(--avp-text-secondary)] hover:bg-[var(--avp-surface-hover)]'
                       }`}
                     >
-                      <bdi dir="ltr">{turnDurSec.toFixed(1)}s</bdi>
+                      <bdi dir="ltr">{formatNumberForLocale(turnDurSec, { persianDigits, maximumFractionDigits: 1 })}s</bdi>
                       <span aria-hidden="true">·</span>
                       <span>
-                        {turn.items.length} {isFa ? 'واژه' : 'w'}
+                        {formatNumberForLocale(turn.items.length, { persianDigits })} {isFa ? 'واژه' : 'w'}
                       </span>
                     </button>
                   </div>

@@ -41,33 +41,33 @@ function getOverallStatusCopy(
     case 'CHECKING':
       return {
         label: isFa ? 'در حال بررسی اتصال...' : 'Checking connection...',
-        textClass: 'text-sky-700 dark:text-sky-300',
-        icon: <RefreshCw className="w-4 h-4 text-sky-600 dark:text-sky-400 animate-spin shrink-0" aria-hidden="true" />,
+        textClass: 'text-[var(--avp-accent-text)]',
+        icon: <RefreshCw className="w-4 h-4 text-[var(--avp-accent)] animate-spin shrink-0" aria-hidden="true" />,
       };
     case 'CONNECTED':
       return {
         label: isFa ? 'متصل و آماده' : 'Connected & Ready',
-        textClass: 'text-emerald-700 dark:text-emerald-400',
-        icon: <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" aria-hidden="true" />,
+        textClass: 'text-[var(--avp-success-text)]',
+        icon: <CheckCircle2 className="w-4 h-4 text-[var(--avp-success)] shrink-0" aria-hidden="true" />,
       };
     case 'DEGRADED':
       return {
         label: isFa ? 'اتصال ناقص' : 'Degraded',
-        textClass: 'text-amber-700 dark:text-amber-400',
-        icon: <AlertTriangle className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0" aria-hidden="true" />,
+        textClass: 'text-[var(--avp-warning-text)]',
+        icon: <AlertTriangle className="w-4 h-4 text-[var(--avp-warning)] shrink-0" aria-hidden="true" />,
       };
     case 'INVALID_ENDPOINT':
       return {
         label: isFa ? 'نشانی نامعتبر' : 'Invalid Endpoint',
-        textClass: 'text-rose-700 dark:text-rose-400',
-        icon: <XCircle className="w-4 h-4 text-rose-600 dark:text-rose-400 shrink-0" aria-hidden="true" />,
+        textClass: 'text-[var(--avp-danger-text)]',
+        icon: <XCircle className="w-4 h-4 text-[var(--avp-danger)] shrink-0" aria-hidden="true" />,
       };
     case 'UNREACHABLE':
     default:
       return {
         label: isFa ? 'قطع / در دسترس نیست' : 'Unreachable',
-        textClass: 'text-rose-700 dark:text-rose-400',
-        icon: <XCircle className="w-4 h-4 text-rose-600 dark:text-rose-400 shrink-0" aria-hidden="true" />,
+        textClass: 'text-[var(--avp-danger-text)]',
+        icon: <XCircle className="w-4 h-4 text-[var(--avp-danger)] shrink-0" aria-hidden="true" />,
       };
   }
 }
@@ -77,21 +77,21 @@ function getStageStatusMeta(status: DiagnosticStageStatus, isFa: boolean) {
     case 'PASS':
       return {
         label: isFa ? 'تایید شد' : 'Pass',
-        className: 'text-emerald-700 dark:text-emerald-400',
-        icon: <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400 shrink-0" aria-hidden="true" />,
+        className: 'text-[var(--avp-success-text)]',
+        icon: <CheckCircle2 className="w-3.5 h-3.5 text-[var(--avp-success)] shrink-0" aria-hidden="true" />,
       };
     case 'WARN':
       return {
         label: isFa ? 'هشدار' : 'Warn',
-        className: 'text-amber-700 dark:text-amber-400',
-        icon: <AlertTriangle className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400 shrink-0" aria-hidden="true" />,
+        className: 'text-[var(--avp-warning-text)]',
+        icon: <AlertTriangle className="w-3.5 h-3.5 text-[var(--avp-warning)] shrink-0" aria-hidden="true" />,
       };
     case 'FAIL':
     default:
       return {
         label: isFa ? 'ناموفق' : 'Fail',
-        className: 'text-rose-700 dark:text-rose-400',
-        icon: <XCircle className="w-3.5 h-3.5 text-rose-600 dark:text-rose-400 shrink-0" aria-hidden="true" />,
+        className: 'text-[var(--avp-danger-text)]',
+        icon: <XCircle className="w-3.5 h-3.5 text-[var(--avp-danger)] shrink-0" aria-hidden="true" />,
       };
   }
 }
@@ -210,19 +210,19 @@ export const CompanionConnectionDiagnostic: React.FC<CompanionConnectionDiagnost
       data-testid="companion-connection-diagnostic"
       data-connection-status={effectiveStatus}
       aria-label={isFa ? 'عیب‌یابی اتصال سرویس محلی Companion' : 'Local Companion Connection Diagnostics'}
-      className="border border-slate-200 dark:border-[#252F42] bg-white dark:bg-[#131924] rounded-lg"
+      className="border border-[var(--avp-border)] bg-[var(--avp-surface)] rounded-lg"
     >
       {/* Compact Top Summary Header */}
       <div className="px-4 py-3 flex flex-wrap items-center justify-between gap-3">
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1 min-w-0">
           <div className="flex items-center gap-2 min-w-0">
-            <Server className="w-4 h-4 text-slate-500 dark:text-slate-400 shrink-0" aria-hidden="true" />
-            <h2 className="text-sm font-semibold text-slate-900 dark:text-slate-100 whitespace-nowrap">
+            <Server className="w-4 h-4 text-[var(--avp-text-secondary)] shrink-0" aria-hidden="true" />
+            <h2 className="text-sm font-semibold text-[var(--avp-text)] whitespace-nowrap">
               {isFa ? 'عیب‌یابی اتصال سرویس محلی Companion' : 'Local Companion Connection Diagnostic'}
             </h2>
           </div>
 
-          <span className="h-3.5 w-px bg-slate-300 dark:bg-[#252F42] hidden sm:inline-block" aria-hidden="true" />
+          <span className="h-3.5 w-px bg-[var(--avp-border)] hidden sm:inline-block" aria-hidden="true" />
 
           <div
             role="status"
@@ -234,12 +234,12 @@ export const CompanionConnectionDiagnostic: React.FC<CompanionConnectionDiagnost
             <span>{statusMeta.label}</span>
           </div>
 
-          <span className="text-slate-300 dark:text-slate-600 hidden sm:inline" aria-hidden="true">·</span>
+          <span className="text-[var(--avp-text-subtle)] hidden sm:inline" aria-hidden="true">·</span>
 
           <span
             dir="ltr"
             data-testid="companion-configured-endpoint"
-            className="font-mono text-xs text-slate-600 dark:text-slate-400 truncate max-w-[260px]"
+            className="font-mono text-xs text-[var(--avp-text-secondary)] truncate max-w-[260px]"
             title={endpoint}
           >
             {endpoint}
@@ -247,11 +247,11 @@ export const CompanionConnectionDiagnostic: React.FC<CompanionConnectionDiagnost
 
           {report && (
             <>
-              <span className="text-slate-300 dark:text-slate-600 hidden md:inline" aria-hidden="true">·</span>
+              <span className="text-[var(--avp-text-subtle)] hidden md:inline" aria-hidden="true">·</span>
               <span
                 dir="ltr"
                 data-testid="companion-diagnostic-latency"
-                className="font-mono tabular-nums text-xs text-slate-500 dark:text-slate-400"
+                className="font-mono tabular-nums text-xs text-[var(--avp-text-muted)]"
               >
                 {report.totalLatencyMs} ms
               </span>
@@ -265,7 +265,7 @@ export const CompanionConnectionDiagnostic: React.FC<CompanionConnectionDiagnost
             data-testid="btn-companion-retest"
             onClick={() => void executeProbe(endpoint)}
             disabled={isChecking}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-md border border-slate-300 dark:border-[#252F42] bg-slate-50 dark:bg-[#0E131D] text-slate-800 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-[#1E2738] disabled:opacity-50 whitespace-nowrap cursor-pointer focus-visible:outline-2 focus-visible:outline-amber-400"
+            className="avp-btn avp-btn-sm avp-btn-outline text-xs font-semibold"
           >
             <RefreshCw className={`w-3.5 h-3.5 ${isChecking ? 'animate-spin' : ''}`} aria-hidden="true" />
             <span>{isFa ? 'بررسی مجدد اتصال' : 'Test Connection'}</span>
@@ -276,7 +276,7 @@ export const CompanionConnectionDiagnostic: React.FC<CompanionConnectionDiagnost
             data-testid="btn-companion-toggle-details"
             aria-expanded={isExpanded}
             onClick={() => setIsExpanded((v) => !v)}
-            className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium rounded-md border border-slate-200 dark:border-[#252F42] text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-[#1E2738] whitespace-nowrap cursor-pointer focus-visible:outline-2 focus-visible:outline-amber-400"
+            className="avp-btn avp-btn-sm avp-btn-ghost border border-[var(--avp-border)] text-xs"
           >
             <span>{isExpanded ? (isFa ? 'بستن جزئیات' : 'Hide Details') : (isFa ? 'جزئیات و نشانی' : 'Endpoint & Details')}</span>
             {isExpanded ? (
@@ -290,7 +290,7 @@ export const CompanionConnectionDiagnostic: React.FC<CompanionConnectionDiagnost
 
       {/* Expandable Diagnostic Body */}
       {isExpanded && (
-        <div className="border-t border-slate-200 dark:border-[#252F42] px-4 py-3.5 space-y-4">
+        <div className="border-t border-[var(--avp-border)] px-4 py-3.5 space-y-4">
           {/* Endpoint Configuration Form */}
           <form
             onSubmit={handleSubmitEndpoint}
@@ -300,7 +300,7 @@ export const CompanionConnectionDiagnostic: React.FC<CompanionConnectionDiagnost
             <div className="flex-1 min-w-0 space-y-1">
               <label
                 htmlFor={inputId}
-                className="block text-xs font-medium text-slate-700 dark:text-slate-300"
+                className="block text-xs font-medium text-[var(--avp-text-secondary)]"
               >
                 {isFa
                   ? 'نشانی پیکربندی‌شده API سرویس محلی Companion'
@@ -318,7 +318,7 @@ export const CompanionConnectionDiagnostic: React.FC<CompanionConnectionDiagnost
                 }}
                 placeholder="/api/v2/companion"
                 aria-invalid={Boolean(validationError)}
-                className="w-full px-3 py-2 text-xs font-mono rounded-md border border-slate-300 dark:border-[#2A354B] bg-slate-50 dark:bg-[#0B0F17] text-slate-900 dark:text-slate-100 placeholder:text-slate-400 focus:outline-none focus:border-amber-500 dark:focus:border-amber-400"
+                className="avp-input w-full px-3 py-2 text-xs font-mono"
               />
             </div>
 
@@ -327,7 +327,7 @@ export const CompanionConnectionDiagnostic: React.FC<CompanionConnectionDiagnost
                 type="submit"
                 data-testid="btn-companion-save-test"
                 disabled={isChecking}
-                className="px-3.5 py-2 text-xs font-semibold rounded-md bg-amber-400 text-slate-950 hover:bg-amber-300 active:bg-amber-500 disabled:opacity-50 whitespace-nowrap cursor-pointer focus-visible:outline-2 focus-visible:outline-amber-300"
+                className="avp-btn avp-btn-primary text-xs font-semibold"
               >
                 {isFa ? 'ذخیره و بررسی' : 'Save & Probe'}
               </button>
@@ -336,10 +336,10 @@ export const CompanionConnectionDiagnostic: React.FC<CompanionConnectionDiagnost
                 type="button"
                 data-testid="btn-companion-preset-same-origin"
                 onClick={() => handleSelectPreset(DEFAULT_COMPANION_ENDPOINT)}
-                className={`px-2.5 py-2 text-xs font-medium rounded-md border whitespace-nowrap cursor-pointer transition-colors ${
+                className={`avp-btn text-xs transition-colors ${
                   endpoint === DEFAULT_COMPANION_ENDPOINT
-                    ? 'border-emerald-500/60 bg-emerald-500/10 text-emerald-800 dark:text-emerald-300'
-                    : 'border-slate-300 dark:border-[#252F42] bg-slate-50 dark:bg-[#0E131D] text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-[#1E2738]'
+                    ? 'border-[var(--avp-success)]/60 bg-[var(--avp-success-soft)] text-[var(--avp-success-text)]'
+                    : 'avp-btn-outline'
                 }`}
               >
                 {isFa ? (
@@ -355,10 +355,10 @@ export const CompanionConnectionDiagnostic: React.FC<CompanionConnectionDiagnost
                 type="button"
                 data-testid="btn-companion-preset-standalone"
                 onClick={() => handleSelectPreset(STANDALONE_COMPANION_ENDPOINT)}
-                className={`px-2.5 py-2 text-xs font-medium rounded-md border whitespace-nowrap cursor-pointer transition-colors ${
+                className={`avp-btn text-xs transition-colors ${
                   endpoint === STANDALONE_COMPANION_ENDPOINT
-                    ? 'border-emerald-500/60 bg-emerald-500/10 text-emerald-800 dark:text-emerald-300'
-                    : 'border-slate-300 dark:border-[#252F42] bg-slate-50 dark:bg-[#0E131D] text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-[#1E2738]'
+                    ? 'border-[var(--avp-success)]/60 bg-[var(--avp-success-soft)] text-[var(--avp-success-text)]'
+                    : 'avp-btn-outline'
                 }`}
               >
                 {isFa ? (
@@ -376,9 +376,9 @@ export const CompanionConnectionDiagnostic: React.FC<CompanionConnectionDiagnost
             <div
               role="alert"
               data-testid="companion-endpoint-validation-error"
-              className="px-3 py-2 rounded-md border border-rose-500/40 bg-rose-50 dark:bg-rose-950/30 text-xs text-rose-800 dark:text-rose-200 flex items-center gap-2"
+              className="px-3 py-2 rounded-md border border-[var(--avp-danger)]/40 bg-[var(--avp-danger-soft)] text-xs text-[var(--avp-danger-text)] flex items-center gap-2"
             >
-              <XCircle className="w-4 h-4 text-rose-600 dark:text-rose-400 shrink-0" aria-hidden="true" />
+              <XCircle className="w-4 h-4 text-[var(--avp-danger)] shrink-0" aria-hidden="true" />
               <span>{validationError}</span>
             </div>
           )}
@@ -394,7 +394,7 @@ export const CompanionConnectionDiagnostic: React.FC<CompanionConnectionDiagnost
                     : report.stages.length === 2
                       ? 'md:grid-cols-2'
                       : 'md:grid-cols-1'
-                } divide-y md:divide-y-0 md:divide-x ${isFa ? 'md:divide-x-reverse' : ''} divide-slate-200 dark:divide-[#252F42] border border-slate-200 dark:border-[#252F42] rounded-md bg-slate-50/70 dark:bg-[#0E131D]`}
+                } divide-y md:divide-y-0 md:divide-x ${isFa ? 'md:divide-x-reverse' : ''} divide-[var(--avp-border)] border border-[var(--avp-border)] rounded-md bg-[var(--avp-bg-subtle)]`}
               >
                 {report.stages.map((stage) => {
                   const stageMeta = getStageStatusMeta(stage.status, isFa);
@@ -405,7 +405,7 @@ export const CompanionConnectionDiagnostic: React.FC<CompanionConnectionDiagnost
                       className="p-3 space-y-1.5"
                     >
                       <div className="flex items-center justify-between gap-2 text-xs">
-                        <span className="font-semibold text-slate-800 dark:text-slate-200">
+                        <span className="font-semibold text-[var(--avp-text)]">
                           {getStageTitle(stage.id, isFa)}
                         </span>
                         <span className={`inline-flex items-center gap-1 font-semibold whitespace-nowrap ${stageMeta.className}`}>
@@ -414,11 +414,11 @@ export const CompanionConnectionDiagnostic: React.FC<CompanionConnectionDiagnost
                         </span>
                       </div>
 
-                      <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
+                      <p className="text-xs text-[var(--avp-text-secondary)] leading-relaxed">
                         {isFa ? stage.summaryFa : stage.summaryEn}
                       </p>
 
-                      <div className="flex items-center justify-between gap-2 text-[11px] font-mono tabular-nums text-slate-500 dark:text-slate-400 pt-0.5">
+                      <div className="flex items-center justify-between gap-2 text-[11px] font-mono tabular-nums text-[var(--avp-text-muted)] pt-0.5">
                         <span dir="ltr" className="truncate" title={stage.detail ?? undefined}>
                           {stage.detail ?? '—'}
                         </span>
@@ -437,10 +437,10 @@ export const CompanionConnectionDiagnostic: React.FC<CompanionConnectionDiagnost
               {report.health && (
                 <div
                   data-testid="companion-runtime-metadata"
-                  className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-600 dark:text-slate-400"
+                  className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-[var(--avp-text-secondary)]"
                 >
-                  <span className="inline-flex items-center gap-1.5 text-slate-800 dark:text-slate-200 font-medium">
-                    <Activity className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" aria-hidden="true" />
+                  <span className="inline-flex items-center gap-1.5 text-[var(--avp-text)] font-medium">
+                    <Activity className="w-3.5 h-3.5 text-[var(--avp-success)]" aria-hidden="true" />
                     <span dir="ltr" className="font-mono">
                       {report.health.runtime.runtimeName}
                     </span>
@@ -450,14 +450,14 @@ export const CompanionConnectionDiagnostic: React.FC<CompanionConnectionDiagnost
                     {report.health.runtime.activeModelId ? (
                       <>
                         {isFa ? 'مدل فعال:' : 'Active model:'}{' '}
-                        <bdi dir="ltr" className="font-mono text-slate-800 dark:text-slate-200">
+                        <bdi dir="ltr" className="font-mono text-[var(--avp-text)]">
                           {report.health.runtime.activeModelId}
                         </bdi>
                       </>
                     ) : report.health.runtime.installedModels.length > 0 ? (
                       <>
                         {isFa ? 'مدل‌های محلی آماده:' : 'Local models ready:'}{' '}
-                        <span className="font-mono tabular-nums text-slate-800 dark:text-slate-200">
+                        <span className="font-mono tabular-nums text-[var(--avp-text)]">
                           {report.health.runtime.installedModels.length}
                         </span>
                       </>
@@ -474,7 +474,7 @@ export const CompanionConnectionDiagnostic: React.FC<CompanionConnectionDiagnost
                     {report.health.runtime.processRssMb} MB RSS
                   </span>
                   <span aria-hidden="true">·</span>
-                  <span className="inline-flex items-center gap-1 text-emerald-700 dark:text-emerald-400">
+                  <span className="inline-flex items-center gap-1 text-[var(--avp-success-text)]">
                     <ShieldCheck className="w-3.5 h-3.5" aria-hidden="true" />
                     <span>
                       {report.health.offlineOnlyEnforced
@@ -489,7 +489,7 @@ export const CompanionConnectionDiagnostic: React.FC<CompanionConnectionDiagnost
                   {formattedCheckedTime && (
                     <>
                       <span aria-hidden="true">·</span>
-                      <span className="tabular-nums text-slate-500 dark:text-slate-400">
+                      <span className="tabular-nums text-[var(--avp-text-muted)]">
                         {isFa ? `آخرین بررسی: ${formattedCheckedTime}` : `Checked: ${formattedCheckedTime}`}
                       </span>
                     </>
@@ -502,7 +502,7 @@ export const CompanionConnectionDiagnostic: React.FC<CompanionConnectionDiagnost
                 <div
                   role="note"
                   data-testid="companion-remediation-note"
-                  className="px-3 py-2 rounded-md border border-amber-500/35 bg-amber-50/70 dark:bg-amber-950/20 text-xs text-amber-900 dark:text-amber-200"
+                  className="px-3 py-2 rounded-md border border-[var(--avp-warning)]/35 bg-[var(--avp-warning-soft)] text-xs text-[var(--avp-warning-text)]"
                 >
                   {isFa ? report.remediationFa : report.remediationEn}
                 </div>

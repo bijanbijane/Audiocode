@@ -143,7 +143,7 @@ if (fs.existsSync(path.join(SHERPA_MODEL_DIR, 'test_wavs'))) {
 }
 
 // 7. Copy Adobe Audition CEP Extension
-const cepSrcDir = path.join(REPO_ROOT, 'audition-cep-extension');
+const cepSrcDir = path.join(REPO_ROOT, 'packages', 'audition-cep-plugin');
 if (fs.existsSync(cepSrcDir)) {
   copyDirRecursive(cepSrcDir, path.join(payloadDir, 'cep-extension', 'ir.avapardaz.audition.cep'));
 }

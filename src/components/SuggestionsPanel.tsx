@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   AlertTriangle,
   Check,
@@ -29,6 +29,9 @@ import {
   SuggestionCategory4,
 } from '../utils/suggestionEngineLogic';
 import { SuggestionWaveformMiniCard } from './SuggestionWaveformMiniCard';
+import { AccessibleModal } from './AccessibleModal';
+import type { SuggestionCategoryFilter, SuggestionSortOrder } from '../settings/settingsStore';
+import { formatNumberForLocale, formatStudioTimecode } from '../utils/formatters';
 
 interface SuggestionsPanelProps {
   recommendations: SmartRecommendation[];
@@ -41,8 +44,17 @@ interface SuggestionsPanelProps {
   sampleRate?: number;
   totalDurationSec?: number;
   locale?: 'fa' | 'en';
+  persianDigits?: boolean;
+  timecodeFormat?: 'mm:ss.ms' | 'hh:mm:ss';
   contextBeforeSec?: number;
   contextAfterSec?: number;
+  defaultCategory?: SuggestionCategoryFilter;
+  defaultSort?: SuggestionSortOrder;
+  showContextTranscript?: boolean;
+  confirmBeforeApply?: boolean;
+  autoExpandDetails?: boolean;
+  focusNextAfterReview?: boolean;
+  embedded?: boolean;
   onSelect: (id: string) => void;
   onPreview: (rec: SmartRecommendation, mode: 'before' | 'after') => void;
   onPreviewWithContext?: (rec: SmartRecommendation, beforeSec: number, afterSec: number) => void;
@@ -84,8 +96,17 @@ export const SuggestionsPanel: React.FC<SuggestionsPanelProps> = ({
   sampleRate,
   totalDurationSec = 0,
   locale = 'fa',
+  persianDigits = false,
+  timecodeFormat = 'mm:ss.ms',
   contextBeforeSec = 2,
   contextAfterSec = 2,
+  defaultCategory = 'all',
+  defaultSort = 'time',
+  showContextTranscript = true,
+  confirmBeforeApply = true,
+  autoExpandDetails = false,
+  focusNextAfterReview = true,
+  embedded = false,
   onSelect,
   onPreview,
   onPreviewWithContext,
@@ -98,17 +119,28 @@ export const SuggestionsPanel: React.FC<SuggestionsPanelProps> = ({
   onSoftenBreathsAndCoughs,
 }) => {
   const isFa = locale === 'fa';
-  const [categoryFilter, setCategoryFilter] = useState<'all' | SuggestionCategory4>('all');
+  const [categoryFilter, setCategoryFilter] = useState<'all' | SuggestionCategory4>(defaultCategory);
   const [statusFilter, setStatusFilter] = useState<'all' | ReviewLifecycleState>('all');
   const [searchQuery, setSearchQuery] = useState('');
-  const [sortBy, setSortBy] = useState<'time' | 'category' | 'confidence' | 'order'>('time');
+  const [sortBy, setSortBy] = useState<SuggestionSortOrder>(defaultSort);
   const [approvedIds, setApprovedIds] = useState<Set<string>>(() => new Set());
   const [selectedBatchIds, setSelectedBatchIds] = useState<Set<string>>(() => new Set());
   const [showEditPlanModal, setShowEditPlanModal] = useState(false);
-  // Default collapsed so 3-4 complete suggestion cards sit visible above the fold (expandable on demand!)
-  const [showMiniCard, setShowMiniCard] = useState(false);
+  const [showMiniCard, setShowMiniCard] = useState(autoExpandDetails);
   const [showFiltersDrawer, setShowFiltersDrawer] = useState(false);
   const [showSearchInput, setShowSearchInput] = useState(false);
+
+  useEffect(() => {
+    setCategoryFilter(defaultCategory);
+  }, [defaultCategory]);
+
+  useEffect(() => {
+    setSortBy(defaultSort);
+  }, [defaultSort]);
+
+  useEffect(() => {
+    setShowMiniCard(autoExpandDetails);
+  }, [autoExpandDetails]);
 
   const effectiveApprovedIds = useMemo(() => {
     const next = new Set<string>();
@@ -248,13 +280,30 @@ export const SuggestionsPanel: React.FC<SuggestionsPanelProps> = ({
     setShowEditPlanModal(false);
   };
 
-  const hasExtraFilterActive = statusFilter !== 'all' || sortBy !== 'time';
+  const advanceFocusAfterReview = (reviewedId: string) => {
+    if (!focusNextAfterReview) return;
+    const currentIdx = filteredItems.findIndex((it) => it.recommendation.id === reviewedId);
+    const nextCandidate =
+      filteredItems.slice(currentIdx + 1).find((it) => it.lifecycle === 'pending') ??
+      filteredItems.find(
+        (it) => it.recommendation.id !== reviewedId && it.lifecycle === 'pending',
+      );
+    if (nextCandidate) {
+      onSelect(nextCandidate.recommendation.id);
+    }
+  };
+
+  const hasExtraFilterActive = statusFilter !== 'all' || sortBy !== defaultSort;
 
   return (
     <section
       data-testid="suggestions-panel"
       aria-label={isFa ? 'پیشنهادهای هوشمند تدوین' : 'Smart Editing Suggestions'}
-      className="avp-pane-shell flex flex-col h-full min-h-0 overflow-hidden"
+      className={
+        embedded
+          ? 'flex flex-col h-full min-h-0 overflow-hidden bg-[var(--avp-surface)]'
+          : 'avp-pane-shell flex flex-col h-full min-h-0 overflow-hidden'
+      }
     >
       {/* Slim Native Inspector Header (36px) */}
       <div className="h-[36px] px-3 border-b border-[var(--avp-border)] flex items-center justify-between gap-2 shrink-0">
@@ -266,7 +315,7 @@ export const SuggestionsPanel: React.FC<SuggestionsPanelProps> = ({
             data-testid="pending-recommendations-count"
             className="text-[11px] font-mono tabular-nums text-[var(--avp-accent-text)] font-semibold"
           >
-            ({pendingCount})
+            ({formatNumberForLocale(pendingCount, { persianDigits })})
           </span>
         </div>
 
@@ -358,7 +407,7 @@ export const SuggestionsPanel: React.FC<SuggestionsPanelProps> = ({
                       : 'bg-[var(--avp-surface-secondary)] text-[var(--avp-text-muted)]'
                   }`}
                 >
-                  {categoryCounts[cat]}
+                  {formatNumberForLocale(categoryCounts[cat], { persianDigits })}
                 </span>
               </button>
             );
@@ -424,6 +473,7 @@ export const SuggestionsPanel: React.FC<SuggestionsPanelProps> = ({
                   <option value="time">{isFa ? 'مرتب‌سازی: زمان' : 'Sort: Time'}</option>
                   <option value="confidence">{isFa ? 'مرتب‌سازی: اطمینان' : 'Sort: Confidence'}</option>
                   <option value="category">{isFa ? 'مرتب‌سازی: دسته' : 'Sort: Category'}</option>
+                  <option value="order">{isFa ? 'مرتب‌سازی: ترتیب تشخیص' : 'Sort: Detection Order'}</option>
                 </select>
               </div>
             )}
@@ -483,14 +533,20 @@ export const SuggestionsPanel: React.FC<SuggestionsPanelProps> = ({
             <button
               type="button"
               data-testid="btn-open-edit-plan-modal"
-              onClick={() => setShowEditPlanModal(true)}
+              onClick={() => {
+                if (confirmBeforeApply) {
+                  setShowEditPlanModal(true);
+                } else {
+                  handleConfirmExecuteEditPlan();
+                }
+              }}
               className="avp-btn avp-btn-sm avp-btn-tonal px-2 text-[10.5px] h-[22px]"
             >
               <Sparkles className="w-3 h-3" strokeWidth={1.75} aria-hidden="true" />
               <span>
                 {isFa
-                  ? `اعمال (${editPlan.applicableItems.length})`
-                  : `Apply (${editPlan.applicableItems.length})`}
+                  ? `اعمال (${formatNumberForLocale(editPlan.applicableItems.length, { persianDigits })})`
+                  : `Apply (${formatNumberForLocale(editPlan.applicableItems.length, { persianDigits })})`}
               </span>
             </button>
           )}
@@ -618,11 +674,12 @@ export const SuggestionsPanel: React.FC<SuggestionsPanelProps> = ({
                     title={hasValidConfidence ? `${Math.round(rec.confidence * 100)}% confidence` : undefined}
                   >
                     <span>
-                      {item.startSec.toFixed(2)}–{item.endSec.toFixed(2)}s
+                      {formatStudioTimecode(item.startSec, timecodeFormat, persianDigits)}–
+                      {formatStudioTimecode(item.endSec, timecodeFormat, persianDigits)}
                     </span>
                     <span className="text-[var(--avp-text-faint)]">·</span>
                     <span className="font-semibold text-[var(--avp-accent-text)]">
-                      Δ{item.durationSec.toFixed(2)}s
+                      Δ{formatNumberForLocale(item.durationSec, { persianDigits, maximumFractionDigits: 2 })}s
                     </span>
                   </span>
                 </div>
@@ -632,7 +689,7 @@ export const SuggestionsPanel: React.FC<SuggestionsPanelProps> = ({
                   {rec.relatedText}
                 </p>
 
-                {(item.contextBefore || item.contextAfter) ? (
+                {showContextTranscript && (item.contextBefore || item.contextAfter) ? (
                   <p className="text-[10.5px] text-[var(--avp-text-muted)] mt-0.5 truncate">
                     {item.contextBefore ? <span>… {item.contextBefore} </span> : null}
                     <mark className="px-1 rounded-xs bg-[var(--avp-warning-soft)] text-[var(--avp-text)] font-medium">
@@ -736,7 +793,7 @@ export const SuggestionsPanel: React.FC<SuggestionsPanelProps> = ({
                           }}
                           title={isFa ? 'پرش روی تایم‌لاین' : 'Jump on timeline'}
                           aria-label={isFa ? 'پرش روی تایم‌لاین' : 'Jump on timeline'}
-                          className="avp-btn-icon avp-btn-icon-sm opacity-0 group-hover/card:opacity-100 focus-visible:opacity-100 transition-opacity"
+                          className="avp-btn-icon avp-btn-icon-sm opacity-75 sm:opacity-0 sm:group-hover/card:opacity-100 focus-visible:opacity-100 transition-opacity"
                         >
                           <Crosshair className="w-3 h-3" strokeWidth={1.75} aria-hidden="true" />
                         </button>
@@ -750,7 +807,7 @@ export const SuggestionsPanel: React.FC<SuggestionsPanelProps> = ({
                         }}
                         title={isFa ? 'اصلاح مرز شروع (-40ms)' : 'Nudge start -40ms'}
                         aria-label={`اصلاح مرز ${rec.relatedText}`}
-                        className="avp-btn-icon avp-btn-icon-sm opacity-0 group-hover/card:opacity-100 focus-visible:opacity-100 transition-opacity"
+                        className="avp-btn-icon avp-btn-icon-sm opacity-75 sm:opacity-0 sm:group-hover/card:opacity-100 focus-visible:opacity-100 transition-opacity"
                       >
                         <SlidersHorizontal className="w-3 h-3" strokeWidth={1.75} aria-hidden="true" />
                       </button>
@@ -760,6 +817,7 @@ export const SuggestionsPanel: React.FC<SuggestionsPanelProps> = ({
                         onClick={(e) => {
                           e.stopPropagation();
                           onAccept(rec);
+                          advanceFocusAfterReview(rec.id);
                         }}
                         aria-label={`اعمال پیشنهاد ${rec.relatedText}`}
                         className="avp-btn avp-btn-sm avp-btn-tonal h-[24px] px-2.5 text-[11px]"
@@ -773,6 +831,7 @@ export const SuggestionsPanel: React.FC<SuggestionsPanelProps> = ({
                         onClick={(e) => {
                           e.stopPropagation();
                           onReject(rec.id);
+                          advanceFocusAfterReview(rec.id);
                         }}
                         aria-label={`رد پیشنهاد ${rec.relatedText}`}
                         title={isFa ? 'رد پیشنهاد' : 'Dismiss'}
@@ -804,111 +863,112 @@ export const SuggestionsPanel: React.FC<SuggestionsPanelProps> = ({
       </div>
 
       {/* Edit Plan Batch Confirmation Modal */}
-      {showEditPlanModal && (
-        <div
-          className="fixed inset-0 z-50 bg-slate-950/55 backdrop-blur-xs flex items-center justify-center p-4"
-          role="dialog"
-          aria-modal="true"
-          data-testid="edit-plan-confirm-modal"
-        >
-          <div className="w-full max-w-md rounded-2xl border border-[var(--avp-border)] bg-[var(--avp-surface-floating)] text-[var(--avp-text)] shadow-[var(--avp-shadow-md)] overflow-hidden">
-            <div className="px-5 py-3.5 border-b border-[var(--avp-border)] flex items-center justify-between">
-              <h3 className="text-sm font-bold">
-                {isFa ? 'خلاصه برنامه تدوین (Edit Plan)' : 'Review Edit Plan'}
-              </h3>
-              <button
-                type="button"
-                onClick={() => setShowEditPlanModal(false)}
-                className="avp-btn-icon avp-btn-icon-sm"
-              >
-                <X className="w-4 h-4" strokeWidth={1.75} />
-              </button>
-            </div>
+      <AccessibleModal
+        isOpen={showEditPlanModal}
+        onClose={() => setShowEditPlanModal(false)}
+        labelledBy="edit-plan-modal-title"
+        dir={isFa ? 'rtl' : 'ltr'}
+        dataTestId="edit-plan-confirm-modal"
+        panelClassName="w-full max-w-md"
+      >
+        <div className="w-full rounded-2xl border border-[var(--avp-border)] bg-[var(--avp-surface-floating)] text-[var(--avp-text)] shadow-[var(--avp-shadow-md)] overflow-hidden">
+          <div className="px-5 py-3.5 border-b border-[var(--avp-border)] flex items-center justify-between">
+            <h3 id="edit-plan-modal-title" className="text-sm font-bold">
+              {isFa ? 'خلاصه برنامه تدوین (Edit Plan)' : 'Review Edit Plan'}
+            </h3>
+            <button
+              type="button"
+              onClick={() => setShowEditPlanModal(false)}
+              aria-label={isFa ? 'بستن' : 'Close'}
+              className="avp-btn-icon avp-btn-icon-sm"
+            >
+              <X className="w-4 h-4" strokeWidth={1.75} />
+            </button>
+          </div>
 
-            <div className="p-5 space-y-3 text-xs">
-              <div className="grid grid-cols-2 gap-2.5">
-                <div className="rounded-xl border border-[var(--avp-border)] bg-[var(--avp-surface-shell)] p-3">
-                  <div className="text-[11px] text-[var(--avp-text-muted)]">
-                    {isFa ? 'قابل اعمال' : 'Ready to Apply'}
-                  </div>
-                  <div className="text-base font-bold font-mono text-[var(--avp-accent-text)] mt-0.5">
-                    {editPlan.applicableItems.length}
-                  </div>
+          <div className="p-5 space-y-3 text-xs">
+            <div className="grid grid-cols-2 gap-2.5">
+              <div className="rounded-xl border border-[var(--avp-border)] bg-[var(--avp-surface-shell)] p-3">
+                <div className="text-[11px] text-[var(--avp-text-muted)]">
+                  {isFa ? 'قابل اعمال' : 'Ready to Apply'}
                 </div>
-                <div className="rounded-xl border border-[var(--avp-border)] bg-[var(--avp-surface-shell)] p-3">
-                  <div className="text-[11px] text-[var(--avp-text-muted)]">
-                    {isFa ? 'کاهش زمان (بدون هم‌پوشانی)' : 'Deduplicated Reduction'}
-                  </div>
-                  <bdi dir="ltr" className="avp-bidi-num text-base font-bold block mt-0.5">
-                    -{editPlan.totalRemovalSec.toFixed(2)}s
-                  </bdi>
+                <div className="text-base font-bold font-mono text-[var(--avp-accent-text)] mt-0.5">
+                  {formatNumberForLocale(editPlan.applicableItems.length, { persianDigits })}
                 </div>
               </div>
-
-              {(editPlan.conflictCount > 0 ||
-                editPlan.staleCount > 0 ||
-                editPlan.invalidRangeCount > 0) && (
-                <div className="rounded-xl border border-[var(--avp-warning)]/40 bg-[var(--avp-warning-soft)] p-3 text-[11px] space-y-1">
-                  <div className="font-semibold text-[var(--avp-text)]">
-                    {isFa
-                      ? 'موارد کنارگذاشته‌شده برای حفظ سلامت صوت:'
-                      : 'Excluded for audio safety:'}
-                  </div>
-                  {editPlan.conflictCount > 0 && (
-                    <div>
-                      •{' '}
-                      {isFa
-                        ? `${editPlan.conflictCount} مورد دارای تعارض هم‌پوشانی`
-                        : `${editPlan.conflictCount} overlapping conflict(s)`}
-                    </div>
-                  )}
-                  {editPlan.staleCount > 0 && (
-                    <div>
-                      •{' '}
-                      {isFa
-                        ? `${editPlan.staleCount} مورد منقضی‌شده (Stale)`
-                        : `${editPlan.staleCount} stale item(s)`}
-                    </div>
-                  )}
-                  {editPlan.invalidRangeCount > 0 && (
-                    <div>
-                      •{' '}
-                      {isFa
-                        ? `${editPlan.invalidRangeCount} مورد با بازه نامعتبر`
-                        : `${editPlan.invalidRangeCount} invalid range(s)`}
-                    </div>
-                  )}
+              <div className="rounded-xl border border-[var(--avp-border)] bg-[var(--avp-surface-shell)] p-3">
+                <div className="text-[11px] text-[var(--avp-text-muted)]">
+                  {isFa ? 'کاهش زمان (بدون هم‌پوشانی)' : 'Deduplicated Reduction'}
                 </div>
-              )}
-
-              <p className="text-[11px] text-[var(--avp-text-muted)] leading-relaxed">
-                {isFa
-                  ? 'تغییرات به‌صورت غیرمخرب و از انتها به ابتدای تایم‌لاین اعمال می‌شوند و با Undo قابل بازگشت هستند.'
-                  : 'Edits apply non-destructively from latest to earliest timestamp and remain fully undoable.'}
-              </p>
+                <bdi dir="ltr" className="avp-bidi-num text-base font-bold block mt-0.5">
+                  -{formatNumberForLocale(editPlan.totalRemovalSec, { persianDigits, maximumFractionDigits: 2 })}s
+                </bdi>
+              </div>
             </div>
 
-            <div className="px-5 py-3 border-t border-[var(--avp-border)] bg-[var(--avp-surface-shell)] flex items-center justify-end gap-2">
-              <button
-                type="button"
-                onClick={() => setShowEditPlanModal(false)}
-                className="avp-btn avp-btn-outline"
-              >
-                {isFa ? 'انصراف' : 'Cancel'}
-              </button>
-              <button
-                type="button"
-                data-testid="btn-confirm-execute-edit-plan"
-                disabled={!editPlan.canExecute}
-                onClick={handleConfirmExecuteEditPlan}
-                className="avp-btn avp-btn-primary"
-              >
-                {isFa ? 'اجرای برنامه تدوین' : 'Execute Edit Plan'}
-              </button>
-            </div>
+            {(editPlan.conflictCount > 0 ||
+              editPlan.staleCount > 0 ||
+              editPlan.invalidRangeCount > 0) && (
+              <div className="rounded-xl border border-[var(--avp-warning)]/40 bg-[var(--avp-warning-soft)] p-3 text-[11px] space-y-1">
+                <div className="font-semibold text-[var(--avp-text)]">
+                  {isFa
+                    ? 'موارد کنارگذاشته‌شده برای حفظ سلامت صوت:'
+                    : 'Excluded for audio safety:'}
+                </div>
+                {editPlan.conflictCount > 0 && (
+                  <div>
+                    •{' '}
+                    {isFa
+                      ? `${formatNumberForLocale(editPlan.conflictCount, { persianDigits })} مورد دارای تعارض هم‌پوشانی`
+                      : `${editPlan.conflictCount} overlapping conflict(s)`}
+                  </div>
+                )}
+                {editPlan.staleCount > 0 && (
+                  <div>
+                    •{' '}
+                    {isFa
+                      ? `${formatNumberForLocale(editPlan.staleCount, { persianDigits })} مورد منقضی‌شده (Stale)`
+                      : `${editPlan.staleCount} stale item(s)`}
+                  </div>
+                )}
+                {editPlan.invalidRangeCount > 0 && (
+                  <div>
+                    •{' '}
+                    {isFa
+                      ? `${formatNumberForLocale(editPlan.invalidRangeCount, { persianDigits })} مورد با بازه نامعتبر`
+                      : `${editPlan.invalidRangeCount} invalid range(s)`}
+                  </div>
+                )}
+              </div>
+            )}
+
+            <p className="text-[11px] text-[var(--avp-text-muted)] leading-relaxed">
+              {isFa
+                ? 'تغییرات به‌صورت غیرمخرب و از انتها به ابتدای تایم‌لاین اعمال می‌شوند و با Undo قابل بازگشت هستند.'
+                : 'Edits apply non-destructively from latest to earliest timestamp and remain fully undoable.'}
+            </p>
+          </div>
+
+          <div className="px-5 py-3 border-t border-[var(--avp-border)] bg-[var(--avp-surface-shell)] flex items-center justify-end gap-2">
+            <button
+              type="button"
+              onClick={() => setShowEditPlanModal(false)}
+              className="avp-btn avp-btn-outline"
+            >
+              {isFa ? 'انصراف' : 'Cancel'}
+            </button>
+            <button
+              type="button"
+              data-testid="btn-confirm-execute-edit-plan"
+              disabled={!editPlan.canExecute}
+              onClick={handleConfirmExecuteEditPlan}
+              className="avp-btn avp-btn-primary"
+            >
+              {isFa ? 'اجرای برنامه تدوین' : 'Execute Edit Plan'}
+            </button>
           </div>
         </div>
-      )}
+      </AccessibleModal>
     </section>
   );
 };

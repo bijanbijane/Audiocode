@@ -1,11 +1,23 @@
 // Avapardaz Offline-First Service Worker (classic script — no ES module export syntax)
-var APP_SHELL_CACHE_VERSION = "paudio-shell-v1.3.0";
+var APP_SHELL_CACHE_VERSION = "paudio-shell-v1.3.1";
 var APP_SHELL_CRITICAL_ASSETS = [
   "/",
   "/index.html",
   "/manifest.webmanifest",
   "/icon.svg",
-  "/asr-stream-worklet.js"
+  "/asr-stream-worklet.js",
+  "/fonts/vazirmatn-arabic-400-normal.woff2",
+  "/fonts/vazirmatn-arabic-500-normal.woff2",
+  "/fonts/vazirmatn-arabic-600-normal.woff2",
+  "/fonts/vazirmatn-arabic-700-normal.woff2",
+  "/fonts/vazirmatn-latin-400-normal.woff2",
+  "/fonts/vazirmatn-latin-500-normal.woff2",
+  "/fonts/vazirmatn-latin-600-normal.woff2",
+  "/fonts/vazirmatn-latin-700-normal.woff2",
+  "/fonts/jetbrains-mono-latin-400-normal.woff2",
+  "/fonts/jetbrains-mono-latin-500-normal.woff2",
+  "/fonts/jetbrains-mono-latin-600-normal.woff2",
+  "/fonts/jetbrains-mono-latin-700-normal.woff2"
 ];
 
 function shouldBypassShellInterception(url, origin, requestHeaders) {

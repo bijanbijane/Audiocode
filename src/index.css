@@ -2,6 +2,104 @@
 @custom-variant dark (&:where(.dark, .dark *));
 
 /* ==========================================================================
+   AVAPARDAZ — SELF-HOSTED TYPOGRAPHY (Offline-First / Zero External Requests)
+   ========================================================================== */
+
+@font-face {
+  font-family: 'Vazirmatn';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('/fonts/vazirmatn-arabic-400-normal.woff2') format('woff2');
+  unicode-range: U+0600-06FF, U+0750-077F, U+08A0-08FF, U+FB50-FDFF, U+FE70-FEFF, U+200C-200E, U+2010-2019, U+2026;
+}
+@font-face {
+  font-family: 'Vazirmatn';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('/fonts/vazirmatn-latin-400-normal.woff2') format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+2000-206F, U+2074, U+20AC, U+2122, U+2191, U+2193, U+2212, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: 'Vazirmatn';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url('/fonts/vazirmatn-arabic-500-normal.woff2') format('woff2');
+  unicode-range: U+0600-06FF, U+0750-077F, U+08A0-08FF, U+FB50-FDFF, U+FE70-FEFF, U+200C-200E, U+2010-2019, U+2026;
+}
+@font-face {
+  font-family: 'Vazirmatn';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url('/fonts/vazirmatn-latin-500-normal.woff2') format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+2000-206F, U+2074, U+20AC, U+2122, U+2191, U+2193, U+2212, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: 'Vazirmatn';
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url('/fonts/vazirmatn-arabic-600-normal.woff2') format('woff2');
+  unicode-range: U+0600-06FF, U+0750-077F, U+08A0-08FF, U+FB50-FDFF, U+FE70-FEFF, U+200C-200E, U+2010-2019, U+2026;
+}
+@font-face {
+  font-family: 'Vazirmatn';
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url('/fonts/vazirmatn-latin-600-normal.woff2') format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+2000-206F, U+2074, U+20AC, U+2122, U+2191, U+2193, U+2212, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: 'Vazirmatn';
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url('/fonts/vazirmatn-arabic-700-normal.woff2') format('woff2');
+  unicode-range: U+0600-06FF, U+0750-077F, U+08A0-08FF, U+FB50-FDFF, U+FE70-FEFF, U+200C-200E, U+2010-2019, U+2026;
+}
+@font-face {
+  font-family: 'Vazirmatn';
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url('/fonts/vazirmatn-latin-700-normal.woff2') format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+2000-206F, U+2074, U+20AC, U+2122, U+2191, U+2193, U+2212, U+FEFF, U+FFFD;
+}
+
+@font-face {
+  font-family: 'JetBrains Mono';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('/fonts/jetbrains-mono-latin-400-normal.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'JetBrains Mono';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url('/fonts/jetbrains-mono-latin-500-normal.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'JetBrains Mono';
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url('/fonts/jetbrains-mono-latin-600-normal.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'JetBrains Mono';
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url('/fonts/jetbrains-mono-latin-700-normal.woff2') format('woff2');
+}
+
+/* ==========================================================================
    AVAPARDAZ — UNIFIED DESIGN SYSTEM (Studio v2)
    4-Layer Surface Architecture (L0 Shell -> L1 Canvas -> L2 Waveform -> L3 Float)
    Strict 60-30-10 Color Discipline · Single-Elevation · 4-Tier Button System
@@ -44,6 +142,9 @@
     --avp-accent-text: #0F6254;
     --avp-ready-bg: #DDF4E7;
     --avp-ready-text: #0F6254;
+    --avp-success: #15803D;
+    --avp-success-soft: #DCFCE7;
+    --avp-success-text: #14532D;
 
     --avp-warning: #D98A1C;
     --avp-warning-soft: #FEF5E6;
@@ -62,6 +163,7 @@
     --avp-wave-selection: #E5A13B;
 
     /* --- 6. Elevation & Shadows (L3 Only) --- */
+    --avp-shadow-xs: 0 1px 1px rgba(15, 23, 42, 0.04);
     --avp-shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.05);
     --avp-shadow-md: 0 8px 24px rgba(15, 23, 42, 0.10);
 
@@ -85,6 +187,7 @@
     --avp-ctrl-md: 32px;
     --avp-ctrl-lg: 36px;
 
+    --avp-radius-xs: 4px;
     --avp-radius-sm: 6px;
     --avp-radius-md: 8px;
     --avp-radius-lg: 10px;
@@ -129,6 +232,9 @@
     --avp-accent-text: #5EE0C0;
     --avp-ready-bg: rgba(67, 199, 167, 0.16);
     --avp-ready-text: #6EE0C3;
+    --avp-success: #16A34A;
+    --avp-success-soft: rgba(52, 211, 153, 0.16);
+    --avp-success-text: #6EE7B7;
 
     --avp-warning: #E8AB4A;
     --avp-warning-soft: rgba(232, 171, 74, 0.15);
@@ -147,8 +253,19 @@
     --avp-wave-selection: #E8AB4A;
 
     /* --- 6. Elevation & Shadows --- */
+    --avp-shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.24);
     --avp-shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.30);
     --avp-shadow-md: 0 12px 32px rgba(0, 0, 0, 0.48);
+  }
+
+  html[data-density="compact"] {
+    --avp-header-h: 44px;
+    --avp-transport-h: 48px;
+    --avp-ctrl-sm: 26px;
+    --avp-ctrl-md: 28px;
+    --avp-ctrl-lg: 32px;
+    --avp-space-3: 8px;
+    --avp-space-4: 12px;
   }
 
   html[data-font-scale="sm"] {
@@ -166,11 +283,19 @@
 
   html.avp-high-contrast {
     --avp-border: #66727E;
+    --avp-border-strong: #3E4A56;
     --avp-text-secondary: #2B3742;
+    --avp-text-muted: #3F4B57;
+    --avp-brand: #0E695A;
+    --avp-accent: #0E695A;
   }
   html.dark.avp-high-contrast {
     --avp-border: #7B8A97;
+    --avp-border-strong: #9BAAB7;
     --avp-text-secondary: #D3DCE6;
+    --avp-text-muted: #B6C4D2;
+    --avp-brand: #25B398;
+    --avp-accent: #25B398;
   }
 
   html {

@@ -26,6 +26,7 @@ import {
   SuggestionCategoryFilter,
   SuggestionSortOrder,
   SupportedPlaybackRate,
+  WorkspaceDensity,
   resetAllGlobalSettings,
   resetSettingsCategory,
   validateShortcutBinding,
@@ -33,6 +34,8 @@ import {
 import { StorageUsageEstimate, projectLibraryStore } from '../projects/projectLibraryStore';
 import { formatAudioByteSize } from '../projects/audioFileValidator';
 import { AdobeAuditionHostAdapter } from '../host-bridge/audition/AuditionHostAdapter';
+import { AccessibleModal } from './AccessibleModal';
+import { isLabModeEnabled } from '../utils/labMode';
 
 type SettingsNavTab = SettingsCategoryKey | 'advanced';
 
@@ -75,14 +78,7 @@ export const SettingsCenterModal: React.FC<SettingsCenterModalProps> = ({
     [],
   );
 
-  useEffect(() => {
-    if (!isOpen) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [isOpen, onClose]);
+  const isLabMode = isLabModeEnabled();
 
   useEffect(() => {
     if (!isOpen || activeTab !== 'storage') return;
@@ -132,15 +128,16 @@ export const SettingsCenterModal: React.FC<SettingsCenterModalProps> = ({
   };
 
   return (
-    <div
+    <AccessibleModal
+      isOpen={isOpen}
+      onClose={onClose}
+      labelledBy="settings-center-title"
       dir={isFa ? 'rtl' : 'ltr'}
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-[2px] p-3 sm:p-6"
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="settings-center-title"
-      data-testid="settings-center-modal"
+      disableEscape={Boolean(confirmResetScope)}
+      dataTestId="settings-center-modal"
+      panelClassName="w-full max-w-5xl"
     >
-      <div className="w-full max-w-5xl h-[min(86vh,760px)] rounded-2xl border border-[var(--avp-border)] bg-[var(--avp-surface)] text-[var(--avp-text)] shadow-[var(--avp-shadow-md)] flex flex-col overflow-hidden">
+      <div className="w-full h-[min(86vh,760px)] rounded-2xl border border-[var(--avp-border)] bg-[var(--avp-surface)] text-[var(--avp-text)] shadow-[var(--avp-shadow-md)] flex flex-col overflow-hidden">
         {/* Top Header */}
         <div className="px-6 py-4 border-b border-[var(--avp-border)] flex items-center justify-between gap-4 shrink-0">
           <div>
@@ -376,6 +373,31 @@ export const SettingsCenterModal: React.FC<SettingsCenterModalProps> = ({
                     <option value="hh:mm:ss">00:00:00 (HH:MM:SS)</option>
                   </select>
                 </label>
+
+                <label className="flex items-center justify-between gap-4 p-3.5 rounded-xl border border-[var(--avp-border)] bg-[var(--avp-bg)] cursor-pointer">
+                  <div>
+                    <div className="text-xs font-semibold">
+                      {isFa ? 'نمایش اعداد با ارقام فارسی (۰-۹)' : 'Use Persian Numerals (۰-۹)'}
+                    </div>
+                    <div className="text-[11px] text-[var(--avp-text-secondary)]">
+                      {isFa
+                        ? 'تبدیل ارقام شمارنده‌ها، تایم‌کدها و آمارهای رابط به ارقام فارسی'
+                        : 'Render UI counters, timecodes, and metrics with Persian digits'}
+                    </div>
+                  </div>
+                  <input
+                    type="checkbox"
+                    data-testid="settings-persian-digits"
+                    checked={settings.language.persianDigits}
+                    onChange={(e) =>
+                      onUpdateSettings({
+                        ...settings,
+                        language: { ...settings.language, persianDigits: e.target.checked },
+                      })
+                    }
+                    className="w-4 h-4 accent-[var(--avp-brand)]"
+                  />
+                </label>
               </section>
             )}
 
@@ -404,6 +426,10 @@ export const SettingsCenterModal: React.FC<SettingsCenterModalProps> = ({
                       key: 'showEditRegions' as const,
                       label: isFa ? 'نمایش محدوده‌های تدوین و پیشنهاد روی تایملاین' : 'Show Edit & Suggestion overlays on Timeline',
                     },
+                    {
+                      key: 'resetZoomOnProjectOpen' as const,
+                      label: isFa ? 'بازنشانی بزرگ‌نمایی تایملاین هنگام باز کردن پروژه جدید' : 'Reset timeline zoom on project open',
+                    },
                   ].map((item) => (
                     <label
                       key={item.key}
@@ -425,31 +451,67 @@ export const SettingsCenterModal: React.FC<SettingsCenterModalProps> = ({
                   ))}
                 </div>
 
-                <div className="space-y-1.5">
-                  <span className="text-xs font-semibold block">
-                    {isFa ? 'اندازه متن تدوین (Transcript)' : 'Transcript Text Size'}
-                  </span>
-                  <div className="inline-flex rounded-xl border border-[var(--avp-border)] p-1 bg-[var(--avp-bg)] gap-1">
-                    {(['sm', 'md', 'lg'] as const).map((sz) => (
-                      <button
-                        key={sz}
-                        type="button"
-                        onClick={() =>
-                          onUpdateSettings({
-                            ...settings,
-                            workspace: { ...settings.workspace, transcriptFontScale: sz },
-                            accessibility: { ...settings.accessibility, fontScale: sz },
-                          })
-                        }
-                        className={`px-3.5 py-1.5 rounded-lg text-xs font-medium cursor-pointer ${
-                          settings.workspace.transcriptFontScale === sz
-                            ? 'bg-[var(--avp-brand)] text-white dark:text-[#0B1419]'
-                            : 'text-[var(--avp-text-secondary)] hover:bg-[var(--avp-hover)]'
-                        }`}
-                      >
-                        {sz === 'sm' ? (isFa ? 'کوچک' : 'Small') : sz === 'md' ? (isFa ? 'متوسط' : 'Medium') : isFa ? 'بزرگ' : 'Large'}
-                      </button>
-                    ))}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div className="space-y-1.5">
+                    <span className="text-xs font-semibold block">
+                      {isFa ? 'تراکم چیدمان (Density)' : 'Workspace Density'}
+                    </span>
+                    <div className="inline-flex rounded-xl border border-[var(--avp-border)] p-1 bg-[var(--avp-bg)] gap-1">
+                      {(['comfortable', 'compact'] as WorkspaceDensity[]).map((den) => (
+                        <button
+                          key={den}
+                          type="button"
+                          data-testid={`settings-density-${den}`}
+                          onClick={() =>
+                            onUpdateSettings({
+                              ...settings,
+                              workspace: { ...settings.workspace, density: den },
+                            })
+                          }
+                          className={`px-3.5 py-1.5 rounded-lg text-xs font-medium cursor-pointer ${
+                            settings.workspace.density === den
+                              ? 'bg-[var(--avp-brand)] text-white dark:text-[#0B1419]'
+                              : 'text-[var(--avp-text-secondary)] hover:bg-[var(--avp-hover)]'
+                          }`}
+                        >
+                          {den === 'comfortable'
+                            ? isFa
+                              ? 'راحت (پیش‌فرض)'
+                              : 'Comfortable'
+                            : isFa
+                              ? 'فشرده'
+                              : 'Compact'}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <span className="text-xs font-semibold block">
+                      {isFa ? 'اندازه متن تدوین (Transcript)' : 'Transcript Text Size'}
+                    </span>
+                    <div className="inline-flex rounded-xl border border-[var(--avp-border)] p-1 bg-[var(--avp-bg)] gap-1">
+                      {(['sm', 'md', 'lg'] as const).map((sz) => (
+                        <button
+                          key={sz}
+                          type="button"
+                          onClick={() =>
+                            onUpdateSettings({
+                              ...settings,
+                              workspace: { ...settings.workspace, transcriptFontScale: sz },
+                              accessibility: { ...settings.accessibility, fontScale: sz },
+                            })
+                          }
+                          className={`px-3.5 py-1.5 rounded-lg text-xs font-medium cursor-pointer ${
+                            settings.workspace.transcriptFontScale === sz
+                              ? 'bg-[var(--avp-brand)] text-white dark:text-[#0B1419]'
+                              : 'text-[var(--avp-text-secondary)] hover:bg-[var(--avp-hover)]'
+                          }`}
+                        >
+                          {sz === 'sm' ? (isFa ? 'کوچک' : 'Small') : sz === 'md' ? (isFa ? 'متوسط' : 'Medium') : isFa ? 'بزرگ' : 'Large'}
+                        </button>
+                      ))}
+                    </div>
                   </div>
                 </div>
               </section>
@@ -558,6 +620,41 @@ export const SettingsCenterModal: React.FC<SettingsCenterModalProps> = ({
                   </label>
                 </div>
 
+                <div className="space-y-2.5">
+                  {[
+                    {
+                      key: 'stopAtPreviewEnd' as const,
+                      label: isFa
+                        ? 'توقف خودکار پخش در پایان بازه پیش‌شنوایی / انتخاب'
+                        : 'Stop playback automatically at end of selection/preview',
+                    },
+                    {
+                      key: 'loopEnabledByDefault' as const,
+                      label: isFa
+                        ? 'فعال‌بودن تکرار (Loop) به‌صورت پیش‌فرض هنگام باز کردن پروژه'
+                        : 'Enable Loop mode by default on project open',
+                    },
+                  ].map((opt) => (
+                    <label
+                      key={opt.key}
+                      className="flex items-center justify-between gap-4 p-3.5 rounded-xl border border-[var(--avp-border)] bg-[var(--avp-bg)] cursor-pointer"
+                    >
+                      <span className="text-xs font-medium">{opt.label}</span>
+                      <input
+                        type="checkbox"
+                        checked={settings.playback[opt.key]}
+                        onChange={(e) =>
+                          onUpdateSettings({
+                            ...settings,
+                            playback: { ...settings.playback, [opt.key]: e.target.checked },
+                          })
+                        }
+                        className="w-4 h-4 accent-[var(--avp-brand)]"
+                      />
+                    </label>
+                  ))}
+                </div>
+
                 <p className="text-[11px] text-[var(--avp-text-secondary)] rounded-xl border border-[var(--avp-border)] bg-[var(--avp-bg)] p-3">
                   {isFa
                     ? 'نکته فنی موتور پخش: تغییر سرعت از طریق Web Audio AudioBufferSourceNode.playbackRate انجام می‌شود و تغییر سرعت همراه با تغییر Pitch است (بدون ادعای Pitch-Preserving مصنوعی).'
@@ -628,6 +725,14 @@ export const SettingsCenterModal: React.FC<SettingsCenterModalProps> = ({
                   {
                     key: 'confirmBeforeApply' as const,
                     label: isFa ? 'نمایش خلاصه Edit Plan پیش از اعمال حذف گروهی' : 'Show Edit Plan confirmation before batch apply',
+                  },
+                  {
+                    key: 'autoExpandDetails' as const,
+                    label: isFa ? 'نمایش خودکار پیش‌نمایش موجی در پنل پیشنهادها' : 'Auto-expand mini waveform diff preview',
+                  },
+                  {
+                    key: 'focusNextAfterReview' as const,
+                    label: isFa ? 'انتقال خودکار انتخاب به پیشنهاد بعدی پس از تأیید یا رد' : 'Auto-focus next pending suggestion after review',
                   },
                 ].map((opt) => (
                   <label
@@ -705,6 +810,53 @@ export const SettingsCenterModal: React.FC<SettingsCenterModalProps> = ({
                       <option value={44100}>44100 Hz</option>
                       <option value={48000}>48000 Hz</option>
                     </select>
+                  </label>
+
+                  <label className="block space-y-1.5">
+                    <span className="text-xs font-semibold">
+                      {isFa ? 'محوشدگی پیش‌فرض مرز برش (Crossfade)' : 'Default Splice Crossfade'}
+                    </span>
+                    <select
+                      dir="ltr"
+                      value={settings.exportDefaults.defaultCrossfadeMs}
+                      onChange={(e) =>
+                        onUpdateSettings({
+                          ...settings,
+                          exportDefaults: {
+                            ...settings.exportDefaults,
+                            defaultCrossfadeMs: Number(e.target.value) as 0 | 5 | 10 | 15,
+                          },
+                        })
+                      }
+                      className="w-full h-10 rounded-xl border border-[var(--avp-border)] bg-[var(--avp-bg)] px-3 text-xs font-mono"
+                    >
+                      <option value={0}>0 ms (Hard Cut)</option>
+                      <option value={5}>5 ms</option>
+                      <option value={10}>10 ms (Default)</option>
+                      <option value={15}>15 ms</option>
+                    </select>
+                  </label>
+
+                  <label className="block space-y-1.5">
+                    <span className="text-xs font-semibold">
+                      {isFa ? 'پیشوند نام فایل خروجی' : 'Filename Prefix'}
+                    </span>
+                    <input
+                      type="text"
+                      dir="auto"
+                      value={settings.exportDefaults.filenamePrefix}
+                      onChange={(e) =>
+                        onUpdateSettings({
+                          ...settings,
+                          exportDefaults: {
+                            ...settings.exportDefaults,
+                            filenamePrefix: e.target.value,
+                          },
+                        })
+                      }
+                      placeholder={isFa ? 'مثلاً avapardaz_' : 'e.g. avapardaz_'}
+                      className="w-full h-10 rounded-xl border border-[var(--avp-border)] bg-[var(--avp-bg)] px-3 text-xs"
+                    />
                   </label>
                 </div>
               </section>
@@ -949,37 +1101,65 @@ export const SettingsCenterModal: React.FC<SettingsCenterModalProps> = ({
                   </div>
                 </div>
 
-                {/* Clean Developer / Engineering Panels Launcher */}
+                {/* Clean Product Health & Companion Tools + Strict ?mode=lab Engineering Gate */}
                 {onOpenDeveloperView && (
-                  <div className="space-y-2">
-                    <h4 className="text-xs font-bold text-[var(--avp-text-secondary)]">
-                      {isFa ? 'ابزارهای مهندسی و تشخیصی (توسعه‌دهندگان)' : 'Engineering & Diagnostic Tools'}
-                    </h4>
-                    <div className="flex flex-wrap gap-2">
-                      {(
-                        [
-                          { id: 'graph', label: isFa ? 'گراف پردازش و PDC' : 'Processing Graph & PDC' },
-                          { id: 'storage', label: isFa ? 'ذخیره‌سازی OPFS' : 'OPFS Storage Broker' },
-                          { id: 'shahab', label: 'SHAHAB LAB' },
-                          { id: 'asr-lab', label: isFa ? 'آزمایشگاه ASR' : 'ASR Research Lab' },
-                          { id: 'security', label: isFa ? 'امنیت و حریم خصوصی' : 'Speech Security' },
-                          { id: 'lifecycle', label: isFa ? 'سلامت و چرخه عمر' : 'Product Lifecycle' },
-                          { id: 'companion', label: isFa ? 'اتصال Companion / Audition' : 'Companion / Audition Bridge' },
-                        ] as const
-                      ).map((tool) => (
-                        <button
-                          key={tool.id}
-                          type="button"
-                          onClick={() => {
-                            onClose();
-                            onOpenDeveloperView(tool.id);
-                          }}
-                          className="h-8 px-3 rounded-lg border border-[var(--avp-border)] bg-[var(--avp-surface)] text-xs text-[var(--avp-text-secondary)] hover:bg-[var(--avp-hover)] hover:text-[var(--avp-text)] cursor-pointer"
-                        >
-                          {tool.label}
-                        </button>
-                      ))}
+                  <div className="space-y-3">
+                    <div className="space-y-2">
+                      <h4 className="text-xs font-bold text-[var(--avp-text-secondary)]">
+                        {isFa ? 'سلامت سیستم و اتصال دسکتاپ' : 'System Health & Desktop Bridge'}
+                      </h4>
+                      <div className="flex flex-wrap gap-2">
+                        {(
+                          [
+                            { id: 'lifecycle', label: isFa ? 'مدیریت مدل، آفلاین و سلامت ۱۴ زیرسیستم' : 'Models, Offline & 14-Subsystem Health' },
+                            { id: 'companion', label: isFa ? 'اتصال Companion / Audition' : 'Companion / Audition Bridge' },
+                          ] as const
+                        ).map((tool) => (
+                          <button
+                            key={tool.id}
+                            type="button"
+                            onClick={() => {
+                              onClose();
+                              onOpenDeveloperView(tool.id);
+                            }}
+                            className="avp-btn avp-btn-outline"
+                          >
+                            {tool.label}
+                          </button>
+                        ))}
+                      </div>
                     </div>
+
+                    {isLabMode && (
+                      <div className="space-y-2 pt-2 border-t border-[var(--avp-border)]">
+                        <h4 className="text-xs font-bold text-[var(--avp-warning-text)]">
+                          {isFa ? 'ابزارهای مهندسی و آزمایشگاه (?mode=lab)' : 'Engineering & R&D Lab Tools (?mode=lab)'}
+                        </h4>
+                        <div className="flex flex-wrap gap-2">
+                          {(
+                            [
+                              { id: 'graph', label: isFa ? 'گراف پردازش و PDC' : 'Processing Graph & PDC' },
+                              { id: 'storage', label: isFa ? 'ذخیره‌سازی OPFS' : 'OPFS Storage Broker' },
+                              { id: 'shahab', label: 'SHAHAB LAB' },
+                              { id: 'asr-lab', label: isFa ? 'آزمایشگاه ASR' : 'ASR Research Lab' },
+                              { id: 'security', label: isFa ? 'امنیت و حریم خصوصی' : 'Speech Security' },
+                            ] as const
+                          ).map((tool) => (
+                            <button
+                              key={tool.id}
+                              type="button"
+                              onClick={() => {
+                                onClose();
+                                onOpenDeveloperView(tool.id);
+                              }}
+                              className="avp-btn avp-btn-sm avp-btn-outline"
+                            >
+                              {tool.label}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                   </div>
                 )}
               </section>
@@ -995,7 +1175,7 @@ export const SettingsCenterModal: React.FC<SettingsCenterModalProps> = ({
                 type="button"
                 data-testid="btn-reset-settings-category"
                 onClick={() => setConfirmResetScope('category')}
-                className="h-9 px-3 rounded-xl border border-[var(--avp-border)] bg-[var(--avp-surface)] text-xs text-[var(--avp-text-secondary)] hover:bg-[var(--avp-hover)] inline-flex items-center gap-1.5 cursor-pointer"
+                className="avp-btn avp-btn-outline"
               >
                 <RotateCcw className="w-3.5 h-3.5" />
                 <span>{isFa ? 'بازنشانی این بخش' : 'Reset Category'}</span>
@@ -1005,7 +1185,7 @@ export const SettingsCenterModal: React.FC<SettingsCenterModalProps> = ({
               type="button"
               data-testid="btn-reset-all-settings"
               onClick={() => setConfirmResetScope('all')}
-              className="h-9 px-3 rounded-xl border border-[var(--avp-error)]/35 text-xs text-[var(--avp-error)] hover:bg-[var(--avp-error-soft)] inline-flex items-center gap-1.5 cursor-pointer"
+              className="avp-btn avp-btn-danger-ghost"
             >
               <RotateCcw className="w-3.5 h-3.5" />
               <span>{isFa ? 'بازنشانی تمام تنظیمات عمومی' : 'Reset All Global Settings'}</span>
@@ -1014,7 +1194,7 @@ export const SettingsCenterModal: React.FC<SettingsCenterModalProps> = ({
           <button
             type="button"
             onClick={onClose}
-            className="h-9 px-4 rounded-xl bg-[var(--avp-brand)] text-white dark:text-[#0B1419] text-xs font-semibold cursor-pointer"
+            className="avp-btn avp-btn-primary"
           >
             {isFa ? 'بستن' : 'Done'}
           </button>
@@ -1022,46 +1202,51 @@ export const SettingsCenterModal: React.FC<SettingsCenterModalProps> = ({
       </div>
 
       {/* Scoped Reset Confirmation Dialog */}
-      {confirmResetScope && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 p-4">
-          <div className="w-full max-w-md rounded-2xl border border-[var(--avp-border)] bg-[var(--avp-surface)] p-6 space-y-4 shadow-[var(--avp-shadow-md)]">
-            <div className="flex items-center gap-2.5 text-[var(--avp-warning)]">
-              <AlertTriangle className="w-5 h-5" />
-              <h3 className="text-sm font-bold text-[var(--avp-text)]">
-                {confirmResetScope === 'all'
-                  ? isFa
-                    ? 'بازنشانی تمام تنظیمات عمومی؟'
-                    : 'Reset all global settings?'
-                  : isFa
-                    ? 'بازنشانی این دسته از تنظیمات؟'
-                    : 'Reset this settings category?'}
-              </h3>
-            </div>
-            <p className="text-xs leading-relaxed text-[var(--avp-text-secondary)]">
-              {isFa
-                ? 'این عملیات فقط ترجیحات عمومی رابط را به پیش‌فرض برمی‌گرداند و هیچ پروژه، فایل صوتی، متن یا تاریخچه تدوین شما حذف نمی‌شود.'
-                : 'This resets global preferences to safe defaults. None of your projects, audio files, transcripts, or edit histories will be deleted.'}
-            </p>
-            <div className="flex items-center justify-end gap-2">
-              <button
-                type="button"
-                onClick={() => setConfirmResetScope(null)}
-                className="h-9 px-4 rounded-xl border border-[var(--avp-border)] text-xs text-[var(--avp-text-secondary)] cursor-pointer"
-              >
-                {isFa ? 'انصراف' : 'Cancel'}
-              </button>
-              <button
-                type="button"
-                data-testid="btn-confirm-settings-reset"
-                onClick={handleResetConfirm}
-                className="h-9 px-4 rounded-xl bg-[var(--avp-brand)] text-white dark:text-[#0B1419] text-xs font-semibold cursor-pointer"
-              >
-                {isFa ? 'تأیید بازنشانی' : 'Confirm Reset'}
-              </button>
-            </div>
+      <AccessibleModal
+        isOpen={Boolean(confirmResetScope)}
+        onClose={() => setConfirmResetScope(null)}
+        labelledBy="settings-reset-confirm-title"
+        dir={isFa ? 'rtl' : 'ltr'}
+        zIndexClassName="z-[60]"
+        panelClassName="w-full max-w-md"
+      >
+        <div className="w-full rounded-2xl border border-[var(--avp-border)] bg-[var(--avp-surface)] p-6 space-y-4 shadow-[var(--avp-shadow-md)] text-[var(--avp-text)]">
+          <div className="flex items-center gap-2.5 text-[var(--avp-warning)]">
+            <AlertTriangle className="w-5 h-5" />
+            <h3 id="settings-reset-confirm-title" className="text-sm font-bold text-[var(--avp-text)]">
+              {confirmResetScope === 'all'
+                ? isFa
+                  ? 'بازنشانی تمام تنظیمات عمومی؟'
+                  : 'Reset all global settings?'
+                : isFa
+                  ? 'بازنشانی این دسته از تنظیمات؟'
+                  : 'Reset this settings category?'}
+            </h3>
+          </div>
+          <p className="text-xs leading-relaxed text-[var(--avp-text-secondary)]">
+            {isFa
+              ? 'این عملیات فقط ترجیحات عمومی رابط را به پیش‌فرض برمی‌گرداند و هیچ پروژه، فایل صوتی، متن یا تاریخچه تدوین شما حذف نمی‌شود.'
+              : 'This resets global preferences to safe defaults. None of your projects, audio files, transcripts, or edit histories will be deleted.'}
+          </p>
+          <div className="flex items-center justify-end gap-2">
+            <button
+              type="button"
+              onClick={() => setConfirmResetScope(null)}
+              className="avp-btn avp-btn-outline"
+            >
+              {isFa ? 'انصراف' : 'Cancel'}
+            </button>
+            <button
+              type="button"
+              data-testid="btn-confirm-settings-reset"
+              onClick={handleResetConfirm}
+              className="avp-btn avp-btn-primary"
+            >
+              {isFa ? 'تأیید بازنشانی' : 'Confirm Reset'}
+            </button>
           </div>
         </div>
-      )}
-    </div>
+      </AccessibleModal>
+    </AccessibleModal>
   );
 };
