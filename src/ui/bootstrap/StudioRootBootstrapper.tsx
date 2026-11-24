@@ -360,9 +360,9 @@ export const StudioRootBootstrapper: React.FC<StudioRootBootstrapperProps> = ({
       <div
         dir="rtl"
         role="status"
-        className="min-h-screen bg-[#0B0F17] text-slate-200 flex items-center justify-center text-sm px-6 text-center"
+        className="min-h-screen bg-[var(--avp-bg)] text-[var(--avp-text)] flex items-center justify-center text-sm px-6 text-center"
       >
-        در حال کالیبراسیون موتور صوتی محلی و سنجش توان پردازشی دستگاه...
+        در حال آماده‌سازی استودیوی هوشمند آواپرداز...
       </div>
     );
   }

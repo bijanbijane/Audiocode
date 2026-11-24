@@ -3,7 +3,7 @@
 
 CREATE TABLE IF NOT EXISTS enterprise_api_keys (
     key_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    organization_id UUID NOT NULL,
+    organization_id VARCHAR(128) NOT NULL,
     key_prefix VARCHAR(20) NOT NULL,
     key_sha256_hex CHAR(64) UNIQUE NOT NULL,
     scopes TEXT[] NOT NULL, -- e.g., {'MODELS_READ', 'EXTERNAL_GATEWAY', 'CLOUD_ASR_ENTERPRISE'}

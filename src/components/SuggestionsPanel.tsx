@@ -1,14 +1,18 @@
-import React from 'react';
+import React, { useMemo, useState } from 'react';
 import {
-  Check,
-  X,
-  Play,
   AlertTriangle,
+  Check,
+  CheckCheck,
+  Crosshair,
+  Play,
+  RefreshCw,
   Scissors,
+  Search,
   ShieldCheck,
   SlidersHorizontal,
   Sparkles,
-  RefreshCw,
+  Waves,
+  X,
 } from 'lucide-react';
 import {
   AudioAsset,
@@ -16,7 +20,14 @@ import {
   SmartRecommendation,
   Track,
 } from '../contracts/v1_2';
-import { flicksToSeconds } from '../engine/timebase';
+import {
+  AnalyzedSuggestionItem,
+  analyzeSuggestionsForReview,
+  buildSuggestionEditPlan,
+  filterAndSortAnalyzedSuggestions,
+  ReviewLifecycleState,
+  SuggestionCategory4,
+} from '../utils/suggestionEngineLogic';
 import { SuggestionWaveformMiniCard } from './SuggestionWaveformMiniCard';
 
 interface SuggestionsPanelProps {
@@ -28,23 +39,38 @@ interface SuggestionsPanelProps {
   pcmSources?: Record<string, Float32Array>;
   tokens?: PersianWordToken[];
   sampleRate?: number;
+  totalDurationSec?: number;
+  locale?: 'fa' | 'en';
+  contextBeforeSec?: number;
+  contextAfterSec?: number;
   onSelect: (id: string) => void;
   onPreview: (rec: SmartRecommendation, mode: 'before' | 'after') => void;
+  onPreviewWithContext?: (rec: SmartRecommendation, beforeSec: number, afterSec: number) => void;
   onAccept: (rec: SmartRecommendation) => void;
+  onApplyApprovedBatch?: (items: readonly SmartRecommendation[]) => void;
   onReject: (id: string) => void;
   onNudgeBoundary: (id: string, deltaMs: number) => void;
+  onJumpToRange?: (startSec: number, endSec: number, trackId: string) => void;
   onBatchAcceptAllSafe?: () => void;
   onRescanDeepDisfluencies?: () => void;
   onSoftenBreathsAndCoughs?: () => void;
   onScanMultiTrackCrosstalk?: () => void;
 }
 
-const KIND_LABELS: Record<SmartRecommendation['kind'], string> = {
-  'co-articulated-filler': 'تپق کشیده متصل به کلمه',
-  'standalone-filler': 'تپق مستقل',
-  'long-pause': 'مکث طولانی',
-  repetition: 'هشدار تدوین متنی',
-  'crosstalk-bleed': 'نشت صدا (Mic Bleed)',
+const CATEGORY_LABELS: Record<SuggestionCategory4, { fa: string; en: string }> = {
+  filler: { fa: 'تپق', en: 'Filler' },
+  pause: { fa: 'مکث', en: 'Pause' },
+  repetition: { fa: 'تکرار', en: 'Repetition' },
+  breath: { fa: 'نفس', en: 'Breath' },
+};
+
+const LIFECYCLE_LABELS: Record<ReviewLifecycleState, { fa: string; en: string }> = {
+  pending: { fa: 'در انتظار', en: 'Pending' },
+  approved: { fa: 'تأییدشده', en: 'Approved' },
+  rejected: { fa: 'ردشده', en: 'Rejected' },
+  applied: { fa: 'اعمال‌شده', en: 'Applied' },
+  stale: { fa: 'منقضی', en: 'Stale' },
+  conflict: { fa: 'تعارض', en: 'Conflict' },
 };
 
 export const SuggestionsPanel: React.FC<SuggestionsPanelProps> = ({
@@ -54,33 +80,105 @@ export const SuggestionsPanel: React.FC<SuggestionsPanelProps> = ({
   tracks,
   assets,
   pcmSources,
-  tokens,
+  tokens = [],
   sampleRate,
+  totalDurationSec = 0,
+  locale = 'fa',
+  contextBeforeSec = 2,
+  contextAfterSec = 2,
   onSelect,
   onPreview,
+  onPreviewWithContext,
   onAccept,
+  onApplyApprovedBatch,
   onReject,
   onNudgeBoundary,
-  onBatchAcceptAllSafe,
+  onJumpToRange,
   onRescanDeepDisfluencies,
   onSoftenBreathsAndCoughs,
-  onScanMultiTrackCrosstalk,
 }) => {
-  const pendingCount = recommendations.filter((r) => r.status === 'Pending').length;
-  const safeBatchCount = recommendations.filter(
-    (r) =>
-      r.status === 'Pending' &&
-      !r.id.startsWith('rec-ezafe-') &&
-      !r.relatedText.startsWith('بررسی کسره اضافه') &&
-      !(r.boundary.trailingEzafeRisk && r.kind === 'repetition'),
-  ).length;
+  const isFa = locale === 'fa';
+  const [categoryFilter, setCategoryFilter] = useState<'all' | SuggestionCategory4>('all');
+  const [statusFilter, setStatusFilter] = useState<'all' | ReviewLifecycleState>('all');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [sortBy, setSortBy] = useState<'time' | 'category' | 'confidence' | 'order'>('time');
+  const [approvedIds, setApprovedIds] = useState<Set<string>>(() => new Set());
+  const [selectedBatchIds, setSelectedBatchIds] = useState<Set<string>>(() => new Set());
+  const [showEditPlanModal, setShowEditPlanModal] = useState(false);
+  // Default collapsed so 3-4 complete suggestion cards sit visible above the fold (expandable on demand!)
+  const [showMiniCard, setShowMiniCard] = useState(false);
+  const [showFiltersDrawer, setShowFiltersDrawer] = useState(false);
+  const [showSearchInput, setShowSearchInput] = useState(false);
+
+  const effectiveApprovedIds = useMemo(() => {
+    const next = new Set<string>();
+    const pendingSet = new Set(
+      recommendations
+        .filter((r) => r.status === 'Pending' || r.status === 'Modified')
+        .map((r) => r.id),
+    );
+    approvedIds.forEach((id) => {
+      if (pendingSet.has(id)) next.add(id);
+    });
+    return next;
+  }, [recommendations, approvedIds]);
+
+  const analyzedItems = useMemo(
+    () =>
+      analyzeSuggestionsForReview({
+        recommendations,
+        approvedIds: effectiveApprovedIds,
+        tokens,
+        durationSec: totalDurationSec,
+      }),
+    [recommendations, effectiveApprovedIds, tokens, totalDurationSec],
+  );
+
+  const categoryCounts = useMemo(() => {
+    const counts: Record<'all' | SuggestionCategory4, number> = {
+      all: analyzedItems.length,
+      filler: 0,
+      pause: 0,
+      repetition: 0,
+      breath: 0,
+    };
+    for (const item of analyzedItems) {
+      counts[item.category] += 1;
+    }
+    return counts;
+  }, [analyzedItems]);
+
+  const filteredItems = useMemo(
+    () =>
+      filterAndSortAnalyzedSuggestions(analyzedItems, {
+        category: categoryFilter,
+        status: statusFilter,
+        query: searchQuery,
+        sortBy,
+      }),
+    [analyzedItems, categoryFilter, statusFilter, searchQuery, sortBy],
+  );
+
+  const editPlan = useMemo(
+    () => buildSuggestionEditPlan(analyzedItems, effectiveApprovedIds),
+    [analyzedItems, effectiveApprovedIds],
+  );
+
+  const pendingCount = useMemo(
+    () => recommendations.filter((r) => r.status === 'Pending').length,
+    [recommendations],
+  );
+
   const activePreviewRec =
     recommendations.find((r) => r.id === selectedRecId) ??
+    filteredItems[0]?.recommendation ??
     recommendations.find((r) => r.status === 'Pending') ??
     recommendations[0] ??
     null;
+
   const canRenderMiniCard = Boolean(
-    activePreviewRec &&
+    showMiniCard &&
+      activePreviewRec &&
       tracks &&
       tracks.length > 0 &&
       assets &&
@@ -88,216 +186,575 @@ export const SuggestionsPanel: React.FC<SuggestionsPanelProps> = ({
       sampleRate > 0,
   );
 
+  const toggleApproveReview = (id: string) => {
+    setApprovedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const toggleBatchCheck = (id: string) => {
+    setSelectedBatchIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const handleBatchApproveFiltered = () => {
+    const targetIds =
+      selectedBatchIds.size > 0
+        ? Array.from(selectedBatchIds)
+        : filteredItems
+            .filter((it) => it.lifecycle === 'pending' && it.isRangeValid)
+            .map((it) => it.recommendation.id);
+    if (targetIds.length === 0) return;
+    setApprovedIds((prev) => {
+      const next = new Set(prev);
+      for (const id of targetIds) next.add(id);
+      return next;
+    });
+    setSelectedBatchIds(new Set());
+  };
+
+  const handleBatchRejectSelected = () => {
+    const targetIds = Array.from(selectedBatchIds);
+    for (const id of targetIds) {
+      onReject(id);
+    }
+    setSelectedBatchIds(new Set());
+    setApprovedIds((prev) => {
+      const next = new Set(prev);
+      for (const id of targetIds) next.delete(id);
+      return next;
+    });
+  };
+
+  const handleConfirmExecuteEditPlan = () => {
+    if (!editPlan.canExecute) return;
+    const recsToApply = editPlan.applicableItems.map((it) => it.recommendation);
+    if (onApplyApprovedBatch) {
+      onApplyApprovedBatch(recsToApply);
+    } else {
+      for (const rec of recsToApply) {
+        onAccept(rec);
+      }
+    }
+    setApprovedIds(new Set());
+    setSelectedBatchIds(new Set());
+    setShowEditPlanModal(false);
+  };
+
+  const hasExtraFilterActive = statusFilter !== 'all' || sortBy !== 'time';
+
   return (
     <section
-      dir="rtl"
-      aria-label="پیشنهادهای تدوین هوشمند"
-      className="border border-[#252F42] bg-[#131924] rounded-lg flex flex-col"
+      data-testid="suggestions-panel"
+      aria-label={isFa ? 'پیشنهادهای هوشمند تدوین' : 'Smart Editing Suggestions'}
+      className="avp-pane-shell flex flex-col h-full min-h-0 overflow-hidden"
     >
-      <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-3 border-b border-[#252F42]">
-        <div>
-          <h2 className="text-sm font-semibold text-slate-100">پیشنهادهای هوشمند تدوین</h2>
-          <p className="text-xs text-slate-400 mt-0.5">
-            تراز آکوستیکی فارسی · اعمال تک‌به‌تک یا پاک‌سازی دسته‌ای با قابلیت بازگشت (Undo)
-          </p>
+      {/* Slim Native Inspector Header (36px) */}
+      <div className="h-[36px] px-3 border-b border-[var(--avp-border)] flex items-center justify-between gap-2 shrink-0">
+        <div className="flex items-center gap-1.5 min-w-0">
+          <h2 className="text-[12.5px] font-semibold text-[var(--avp-text)] truncate">
+            {isFa ? 'پیشنهادهای هوشمند' : 'Smart Suggestions'}
+          </h2>
+          <span
+            data-testid="pending-recommendations-count"
+            className="text-[11px] font-mono tabular-nums text-[var(--avp-accent-text)] font-semibold"
+          >
+            ({pendingCount})
+          </span>
         </div>
-        <span data-testid="pending-recommendations-count" className="text-xs font-mono text-amber-400">
-          {pendingCount} در انتظار بررسی
-        </span>
-      </div>
 
-      {/* Batch Auto-Cleanup, Deep Disfluency/Retake Scan, Non-Verbal Breath Softening & Crosstalk Diarization Bar */}
-      {(onBatchAcceptAllSafe ||
-        onRescanDeepDisfluencies ||
-        onSoftenBreathsAndCoughs ||
-        onScanMultiTrackCrosstalk) && (
-        <div className="px-4 py-2 border-b border-[#252F42] bg-[#0E131D]/80 flex flex-wrap items-center justify-between gap-1.5">
-          {onBatchAcceptAllSafe && (
+        <div className="flex items-center gap-0.5 shrink-0">
+          <button
+            type="button"
+            onClick={() => setShowSearchInput((v) => !v)}
+            aria-pressed={showSearchInput || Boolean(searchQuery)}
+            title={isFa ? 'جستجو در پیشنهادها' : 'Search suggestions'}
+            aria-label={isFa ? 'جستجو در پیشنهادها' : 'Search suggestions'}
+            className={`avp-btn-icon avp-btn-icon-sm ${
+              showSearchInput || searchQuery ? 'avp-btn-tonal' : ''
+            }`}
+          >
+            <Search className="w-3.5 h-3.5" strokeWidth={1.75} aria-hidden="true" />
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setShowFiltersDrawer((v) => !v)}
+            aria-expanded={showFiltersDrawer}
+            title={isFa ? 'فیلتر وضعیت و مرتب‌سازی' : 'Status filter & sort'}
+            className={`avp-btn-icon avp-btn-icon-sm ${
+              showFiltersDrawer || hasExtraFilterActive ? 'avp-btn-tonal' : ''
+            }`}
+          >
+            <SlidersHorizontal className="w-3.5 h-3.5" strokeWidth={1.75} aria-hidden="true" />
+          </button>
+
+          {onRescanDeepDisfluencies && (
             <button
               type="button"
-              data-testid="btn-batch-apply-recommendations"
-              disabled={safeBatchCount === 0}
-              onClick={onBatchAcceptAllSafe}
-              className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-semibold rounded bg-emerald-500 text-slate-950 hover:bg-emerald-400 disabled:opacity-40 cursor-pointer disabled:cursor-not-allowed"
+              data-testid="btn-rescan-disfluencies"
+              onClick={onRescanDeepDisfluencies}
+              title={isFa ? 'اسکن مجدد تپق و مکث' : 'Rescan Disfluencies'}
+              aria-label={isFa ? 'اسکن مجدد' : 'Rescan'}
+              className="avp-btn-icon avp-btn-icon-sm"
             >
-              <Sparkles className="w-3.5 h-3.5" aria-hidden="true" />
-              <span>پاک‌سازی دسته‌ای تپق و مکث ({safeBatchCount})</span>
+              <RefreshCw className="w-3.5 h-3.5" strokeWidth={1.75} aria-hidden="true" />
             </button>
           )}
+          <button
+            type="button"
+            onClick={() => setShowMiniCard((v) => !v)}
+            aria-pressed={showMiniCard}
+            title={
+              isFa
+                ? 'نمایش یا پنهان‌کردن پیش‌نمایش موجی اثر حذف'
+                : 'Toggle before/after mini waveform diff'
+            }
+            aria-label={isFa ? 'پیش‌نمایش موجی' : 'Waveform diff preview'}
+            className={`avp-btn-icon avp-btn-icon-sm ${showMiniCard ? 'avp-btn-tonal' : ''}`}
+          >
+            <Waves className="w-3.5 h-3.5" strokeWidth={1.75} aria-hidden="true" />
+          </button>
+        </div>
+      </div>
 
-          <div className="flex flex-wrap items-center gap-1.5">
+      {/* Compact 2-Tier Category Tabs & Batch Strip */}
+      <div className="border-b border-[var(--avp-border)] bg-[var(--avp-surface)] shrink-0">
+        {/* Tier 1: Clean Underline Category Tabs with Counter Badges */}
+        <div
+          role="tablist"
+          aria-label={isFa ? 'دسته‌بندی پیشنهادها' : 'Suggestion categories'}
+          className="grid grid-cols-5 px-1.5 border-b border-[var(--avp-border-subtle)]"
+        >
+          {(['all', 'filler', 'pause', 'repetition', 'breath'] as const).map((cat) => {
+            const active = categoryFilter === cat;
+            const label = cat === 'all' ? (isFa ? 'همه' : 'All') : CATEGORY_LABELS[cat][locale];
+            return (
+              <button
+                key={cat}
+                type="button"
+                role="tab"
+                data-testid={`suggestion-cat-${cat}`}
+                aria-selected={active}
+                onClick={() => setCategoryFilter(cat)}
+                className={`h-[30px] px-1 text-[11px] font-medium transition-colors flex items-center justify-center gap-1 border-b-2 -mb-px cursor-pointer whitespace-nowrap ${
+                  active
+                    ? 'border-[var(--avp-accent)] text-[var(--avp-accent-text)] font-semibold'
+                    : 'border-transparent text-[var(--avp-text-muted)] hover:text-[var(--avp-text)]'
+                }`}
+              >
+                <span>{label}</span>
+                <span
+                  className={`inline-flex items-center justify-center min-w-[15px] h-[15px] px-1 rounded-full font-mono text-[9.5px] leading-none ${
+                    active
+                      ? 'bg-[var(--avp-accent-soft)] text-[var(--avp-accent-text)] font-bold'
+                      : 'bg-[var(--avp-surface-secondary)] text-[var(--avp-text-muted)]'
+                  }`}
+                >
+                  {categoryCounts[cat]}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+
+        {/* Optional Collapsible Search / Filter Drawers */}
+        {(showSearchInput || Boolean(searchQuery) || showFiltersDrawer) && (
+          <div className="px-2.5 pt-1.5 pb-1 space-y-1.5 border-b border-[var(--avp-border-subtle)] bg-[var(--avp-surface-secondary)]/50">
+            {(showSearchInput || Boolean(searchQuery)) && (
+              <div className="relative flex-1 min-w-0">
+                <Search
+                  className="w-3.5 h-3.5 text-[var(--avp-text-muted)] absolute top-1/2 -translate-y-1/2 start-2.5 pointer-events-none"
+                  strokeWidth={1.75}
+                  aria-hidden="true"
+                />
+                <input
+                  type="text"
+                  autoFocus={showSearchInput}
+                  data-testid="input-suggestions-search"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  placeholder={isFa ? 'جستجو در پیشنهادها...' : 'Filter suggestions...'}
+                  className="avp-input h-[26px] w-full ps-8 pe-6 text-[11.5px]"
+                />
+                {searchQuery && (
+                  <button
+                    type="button"
+                    onClick={() => setSearchQuery('')}
+                    aria-label={isFa ? 'پاک‌کردن جستجو' : 'Clear search'}
+                    className="absolute top-1/2 -translate-y-1/2 end-1.5 text-[var(--avp-text-muted)] hover:text-[var(--avp-text)] cursor-pointer"
+                  >
+                    <X className="w-3 h-3" strokeWidth={1.75} />
+                  </button>
+                )}
+              </div>
+            )}
+
+            {showFiltersDrawer && (
+              <div className="grid grid-cols-2 gap-1.5">
+                <select
+                  aria-label={isFa ? 'فیلتر وضعیت پیشنهاد' : 'Filter by status'}
+                  value={statusFilter}
+                  onChange={(e) => setStatusFilter(e.target.value as 'all' | ReviewLifecycleState)}
+                  className="avp-select w-full"
+                >
+                  <option value="all">{isFa ? 'همه وضعیت‌ها' : 'All Status'}</option>
+                  <option value="pending">{isFa ? 'در انتظار' : 'Pending'}</option>
+                  <option value="approved">{isFa ? 'تأییدشده' : 'Approved'}</option>
+                  <option value="applied">{isFa ? 'اعمال‌شده' : 'Applied'}</option>
+                  <option value="rejected">{isFa ? 'ردشده' : 'Rejected'}</option>
+                  <option value="conflict">{isFa ? 'تعارض' : 'Conflict'}</option>
+                </select>
+
+                <select
+                  aria-label={isFa ? 'مرتب‌سازی پیشنهادها' : 'Sort suggestions'}
+                  value={sortBy}
+                  onChange={(e) =>
+                    setSortBy(e.target.value as 'time' | 'category' | 'confidence' | 'order')
+                  }
+                  className="avp-select w-full"
+                >
+                  <option value="time">{isFa ? 'مرتب‌سازی: زمان' : 'Sort: Time'}</option>
+                  <option value="confidence">{isFa ? 'مرتب‌سازی: اطمینان' : 'Sort: Confidence'}</option>
+                  <option value="category">{isFa ? 'مرتب‌سازی: دسته' : 'Sort: Category'}</option>
+                </select>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Tier 2: Slim 30px Framed Batch Action Strip */}
+        <div className="px-2.5 h-[30px] flex items-center justify-between gap-1 bg-[var(--avp-surface-secondary)]/35">
+          <div className="flex items-center gap-1 min-w-0">
+            <button
+              type="button"
+              data-testid="btn-batch-approve-suggestions"
+              onClick={handleBatchApproveFiltered}
+              className="inline-flex items-center gap-1 h-[22px] px-2 rounded-md border border-[var(--avp-border)] bg-[var(--avp-surface)] hover:bg-[var(--avp-surface-hover)] text-[10.5px] font-medium text-[var(--avp-text)] cursor-pointer transition-colors"
+            >
+              <CheckCheck
+                className="w-3 h-3 text-[var(--avp-accent)]"
+                strokeWidth={1.75}
+                aria-hidden="true"
+              />
+              <span>
+                {selectedBatchIds.size > 0
+                  ? isFa
+                    ? `تأیید (${selectedBatchIds.size})`
+                    : `Approve (${selectedBatchIds.size})`
+                  : isFa
+                    ? 'تأیید دسته‌ای'
+                    : 'Approve All'}
+              </span>
+            </button>
+
+            {selectedBatchIds.size > 0 && (
+              <button
+                type="button"
+                onClick={handleBatchRejectSelected}
+                className="avp-btn avp-btn-sm avp-btn-danger-ghost px-1.5 text-[10.5px] h-[22px]"
+              >
+                <X className="w-3 h-3" strokeWidth={1.75} aria-hidden="true" />
+                <span>{isFa ? 'رد' : 'Reject'}</span>
+              </button>
+            )}
+
             {onSoftenBreathsAndCoughs && (
               <button
                 type="button"
                 data-testid="btn-soften-breaths-coughs"
                 onClick={onSoftenBreathsAndCoughs}
-                title="کاهش نرم ۱۰ دسی‌بل صدای نفس‌های پیش از جمله و حذف سرفه با Room Tone"
-                className="inline-flex items-center gap-1 px-2 py-1 text-xs rounded border border-amber-500/40 bg-amber-500/15 text-amber-200 hover:bg-amber-500/25 cursor-pointer"
+                title={isFa ? 'نرم‌سازی صدای نفس‌ها (-10dB)' : 'Soften Breaths (-10dB)'}
+                className="inline-flex items-center gap-1 h-[22px] px-2 rounded-md border border-[var(--avp-border)] bg-[var(--avp-surface)] hover:bg-[var(--avp-surface-hover)] text-[10.5px] font-medium text-[var(--avp-text-secondary)] hover:text-[var(--avp-text)] cursor-pointer transition-colors"
               >
-                <span>نرم‌سازی نفس‌ها (-10dB)</span>
-              </button>
-            )}
-
-            {onScanMultiTrackCrosstalk && (
-              <button
-                type="button"
-                data-testid="btn-scan-multitrack-crosstalk"
-                onClick={onScanMultiTrackCrosstalk}
-                title="تفکیک هم‌پوشانی گفتار از نشت صدای میکروفون (Normalized Cross-Correlation)"
-                className="inline-flex items-center gap-1 px-2 py-1 text-xs rounded border border-[#252F42] bg-[#131924] text-slate-200 hover:bg-[#1E2738] cursor-pointer"
-              >
-                <span>تفکیک نشت و هم‌پوشانی</span>
-              </button>
-            )}
-
-            {onRescanDeepDisfluencies && (
-              <button
-                type="button"
-                data-testid="btn-rescan-disfluencies"
-                onClick={onRescanDeepDisfluencies}
-                className="inline-flex items-center gap-1 px-2 py-1 text-xs rounded border border-[#252F42] bg-[#131924] text-slate-200 hover:bg-[#1E2738] cursor-pointer"
-              >
-                <RefreshCw className="w-3 h-3 text-sky-400" aria-hidden="true" />
-                <span>اسکن عمیق تپق</span>
+                {isFa ? 'نرم‌سازی نفس' : 'Soften Breaths'}
               </button>
             )}
           </div>
+
+          {effectiveApprovedIds.size > 0 && (
+            <button
+              type="button"
+              data-testid="btn-open-edit-plan-modal"
+              onClick={() => setShowEditPlanModal(true)}
+              className="avp-btn avp-btn-sm avp-btn-tonal px-2 text-[10.5px] h-[22px]"
+            >
+              <Sparkles className="w-3 h-3" strokeWidth={1.75} aria-hidden="true" />
+              <span>
+                {isFa
+                  ? `اعمال (${editPlan.applicableItems.length})`
+                  : `Apply (${editPlan.applicableItems.length})`}
+              </span>
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* On-Demand Mini Waveform Diff Preview (Toggled via Wave icon in header) */}
+      {canRenderMiniCard && activePreviewRec && tracks && assets && sampleRate && (
+        <div className="shrink-0 border-b border-[var(--avp-border)]">
+          <SuggestionWaveformMiniCard
+            recommendation={activePreviewRec}
+            tracks={tracks}
+            assets={assets}
+            pcmSources={pcmSources}
+            tokens={tokens}
+            sampleRate={sampleRate}
+            locale={locale}
+          />
         </div>
       )}
 
-      {canRenderMiniCard && activePreviewRec && tracks && assets && sampleRate && (
-        <SuggestionWaveformMiniCard
-          recommendation={activePreviewRec}
-          tracks={tracks}
-          assets={assets}
-          pcmSources={pcmSources}
-          tokens={tokens ?? []}
-          sampleRate={sampleRate}
-        />
-      )}
-
-      <div className="divide-y divide-[#252F42] max-h-[460px] overflow-y-auto">
-        {recommendations.length === 0 ? (
-          <div className="p-6 text-center text-xs text-slate-400">
-            پیشنهاد فعالی برای این فایل یافت نشد.
+      {/* Clean Suggestion List — 3 to 4 Complete Cards Visible Above the Fold */}
+      <div className="divide-y divide-[var(--avp-border-subtle)] overflow-y-auto flex-1 min-h-0 bg-[var(--avp-surface)]">
+        {filteredItems.length === 0 ? (
+          <div className="p-6 text-center space-y-1.5">
+            <p className="text-xs font-medium text-[var(--avp-text-secondary)]">
+              {recommendations.length === 0
+                ? isFa
+                  ? 'پیشنهاد تدوینی برای این پروژه یافت نشد.'
+                  : 'No editing suggestions detected yet.'
+                : isFa
+                  ? 'هیچ پیشنهادی با فیلتر فعلی مطابقت ندارد.'
+                  : 'No suggestions match the current filter.'}
+            </p>
+            {searchQuery || categoryFilter !== 'all' || statusFilter !== 'all' ? (
+              <button
+                type="button"
+                onClick={() => {
+                  setCategoryFilter('all');
+                  setStatusFilter('all');
+                  setSearchQuery('');
+                }}
+                className="text-xs font-medium text-[var(--avp-accent-text)] hover:underline cursor-pointer"
+              >
+                {isFa ? 'پاک کردن فیلترها' : 'Clear filters'}
+              </button>
+            ) : null}
           </div>
         ) : (
-          recommendations.map((rec) => {
+          filteredItems.map((item: AnalyzedSuggestionItem) => {
+            const rec = item.recommendation;
             const isSelected = rec.id === selectedRecId;
-            const startSec = flicksToSeconds(rec.boundary.snappedRange.startFlicks);
-            const endSec = flicksToSeconds(rec.boundary.snappedRange.endFlicks);
-            const isPending = rec.status === 'Pending';
+            const isReviewable =
+              item.lifecycle === 'pending' ||
+              item.lifecycle === 'approved' ||
+              item.lifecycle === 'conflict';
+            const isApproved = effectiveApprovedIds.has(rec.id);
+            const hasValidConfidence = Number.isFinite(rec.confidence) && rec.confidence > 0;
 
             return (
               <div
                 key={rec.id}
+                data-testid={`suggestion-card-${rec.id}`}
                 tabIndex={0}
-                onClick={() => onSelect(rec.id)}
+                onClick={() => {
+                  onSelect(rec.id);
+                  if (onJumpToRange && item.isRangeValid) {
+                    onJumpToRange(item.startSec, item.endSec, rec.trackId);
+                  }
+                }}
                 onKeyDown={(e) => {
                   if (e.target === e.currentTarget && (e.key === 'Enter' || e.key === ' ')) {
                     e.preventDefault();
                     onSelect(rec.id);
                   }
                 }}
-                className={`p-4 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-amber-400 ${
-                  isSelected ? 'bg-[#182132]' : 'hover:bg-[#161D2B]'
+                className={`group/card px-2.5 py-2 transition-colors cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--avp-accent)] ${
+                  isSelected
+                    ? 'bg-[var(--avp-accent-soft)]/45'
+                    : 'hover:bg-[var(--avp-surface-shell)]/70'
                 }`}
               >
-                {/* Header Metadata (Zero-pill clean inline typography) */}
-                <div className="flex items-center justify-between gap-2 text-xs">
-                  <span className="font-semibold text-slate-100">
-                    {KIND_LABELS[rec.kind]}
-                  </span>
-                  <span className="font-mono text-slate-400">
-                    {startSec.toFixed(2)}s – {endSec.toFixed(2)}s · {Math.round(rec.confidence * 100)}٪
+                {/* Layer 1: Unified Single-Row Metadata (Checkbox + Category + Status | Time Range + Δ Savings) */}
+                <div className="flex items-center justify-between gap-1.5 text-[10.5px]">
+                  <div className="flex items-center gap-1.5 min-w-0">
+                    {isReviewable && (
+                      <input
+                        type="checkbox"
+                        data-testid={`btn-review-approve-${rec.id}`}
+                        aria-label={
+                          isFa ? `انتخاب دسته‌ای ${rec.relatedText}` : `Select ${rec.relatedText}`
+                        }
+                        checked={selectedBatchIds.has(rec.id) || isApproved}
+                        onClick={(e) => e.stopPropagation()}
+                        onChange={() => {
+                          toggleBatchCheck(rec.id);
+                          toggleApproveReview(rec.id);
+                        }}
+                        className="rounded border-[var(--avp-border)] accent-[var(--avp-accent)] cursor-pointer shrink-0"
+                      />
+                    )}
+                    <span className="font-bold text-[11px] text-[var(--avp-text)] truncate">
+                      {CATEGORY_LABELS[item.category][locale]}
+                    </span>
+                    <span className="text-[var(--avp-text-faint)]" aria-hidden="true">
+                      ·
+                    </span>
+                    <span
+                      className={`text-[10px] font-medium whitespace-nowrap ${
+                        item.lifecycle === 'approved' || item.lifecycle === 'applied'
+                          ? 'text-[var(--avp-accent-text)]'
+                          : item.lifecycle === 'conflict' || item.lifecycle === 'stale'
+                            ? 'text-[var(--avp-warning-text)]'
+                            : 'text-[var(--avp-text-muted)]'
+                      }`}
+                    >
+                      {LIFECYCLE_LABELS[item.lifecycle][locale]}
+                    </span>
+                  </div>
+
+                  {/* Consolidated Monospace Time Range & Δ Savings Capsule */}
+                  <span
+                    dir="ltr"
+                    className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-[var(--avp-surface-secondary)]/85 text-[10px] font-mono tabular-nums text-[var(--avp-text-secondary)] shrink-0"
+                    title={hasValidConfidence ? `${Math.round(rec.confidence * 100)}% confidence` : undefined}
+                  >
+                    <span>
+                      {item.startSec.toFixed(2)}–{item.endSec.toFixed(2)}s
+                    </span>
+                    <span className="text-[var(--avp-text-faint)]">·</span>
+                    <span className="font-semibold text-[var(--avp-accent-text)]">
+                      Δ{item.durationSec.toFixed(2)}s
+                    </span>
                   </span>
                 </div>
 
-                <p className="text-xs text-slate-200 mt-1.5 font-medium">
+                {/* Layer 2: Concise Title + Whisper Context Line */}
+                <p className="mt-1 text-[12px] font-semibold text-[var(--avp-text)] truncate">
                   {rec.relatedText}
                 </p>
-                <p className="text-xs text-slate-400 mt-1 leading-relaxed">
-                  {rec.reasonFa}
-                </p>
 
-                {/* Sync Protection & Acoustic Boundary Detail */}
-                <div className="mt-2.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-slate-400">
-                  <span className="inline-flex items-center gap-1 text-emerald-400">
-                    {rec.recommendedMode === 'in-place-room-tone-suppression' ? (
-                      <>
-                        <ShieldCheck className="w-3.5 h-3.5" aria-hidden="true" />
-                        <span>حفظ سینک: جایگزینی درجا با Room Tone</span>
-                      </>
-                    ) : (
-                      <>
-                        <Scissors className="w-3.5 h-3.5" aria-hidden="true" />
-                        <span>برش هم‌زمان قفل‌شده (Ripple Cut)</span>
-                      </>
-                    )}
-                  </span>
-                  <span className="text-slate-600">·</span>
-                  <span className="font-mono">
-                    Zero-Cross: {rec.boundary.zeroCrossingAdjusted ? 'بله' : 'دقیق'} · Crossfade: {rec.boundary.microCrossfadeMs}ms
-                  </span>
-                </div>
+                {(item.contextBefore || item.contextAfter) ? (
+                  <p className="text-[10.5px] text-[var(--avp-text-muted)] mt-0.5 truncate">
+                    {item.contextBefore ? <span>… {item.contextBefore} </span> : null}
+                    <mark className="px-1 rounded-xs bg-[var(--avp-warning-soft)] text-[var(--avp-text)] font-medium">
+                      {item.contextInside || rec.relatedText}
+                    </mark>
+                    {item.contextAfter ? <span> {item.contextAfter} …</span> : null}
+                  </p>
+                ) : (
+                  <p className="text-[10.5px] text-[var(--avp-text-muted)] mt-0.5 truncate">
+                    {rec.reasonFa}
+                  </p>
+                )}
 
-                {rec.boundary.trailingEzafeRisk && (
-                  <div className="mt-2 flex items-start gap-2 p-2 rounded bg-rose-500/10 border border-rose-500/30 text-[11px] text-rose-200">
-                    <AlertTriangle className="w-3.5 h-3.5 text-rose-400 shrink-0 mt-0.5" aria-hidden="true" />
-                    <span>
-                      هشدار دنباله کسره اضافه: حذف این واژه ممکن است «{rec.boundary.trailingEzafeWord}ِ» را ناقص باقی بگذارد. حتماً پیش‌شنوایی را بررسی کنید.
+                {/* Concise Warnings Only When Present */}
+                {item.conflictingIds.length > 0 && (
+                  <div className="mt-0.5 flex items-center gap-1 text-[10px] text-[var(--avp-warning-text)]">
+                    <AlertTriangle className="w-2.5 h-2.5 shrink-0" strokeWidth={1.75} aria-hidden="true" />
+                    <span className="truncate">
+                      {isFa
+                        ? `هم‌پوشانی با ${item.conflictingIds.length} پیشنهاد دیگر`
+                        : `Overlaps ${item.conflictingIds.length} suggestion(s)`}
                     </span>
                   </div>
                 )}
 
-                {rec.syncProtectedReason && (
-                  <p className="mt-1.5 text-[11px] text-slate-400">
-                    {rec.syncProtectedReason}
-                  </p>
+                {rec.boundary.trailingEzafeRisk && (
+                  <div className="mt-0.5 flex items-center gap-1 text-[10px] text-[var(--avp-danger)]">
+                    <AlertTriangle className="w-2.5 h-2.5 shrink-0" strokeWidth={1.75} aria-hidden="true" />
+                    <span className="truncate">
+                      {isFa
+                        ? `خطر کسره اضافه روی «${rec.boundary.trailingEzafeWord}ِ»`
+                        : `Ezafe risk on "${rec.boundary.trailingEzafeWord}"`}
+                    </span>
+                  </div>
                 )}
 
-                {/* Actions */}
-                {isPending ? (
-                  <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
-                    <div className="flex items-center gap-1.5">
+                {/* Layer 3: Crisp 2-Pole Action Footer (Right: Context/Cut Preview Pill | Left: Apply + Dismiss) */}
+                {isReviewable ? (
+                  <div className="mt-1.5 flex items-center justify-between gap-1.5">
+                    <div className="inline-flex items-center rounded-md border border-[var(--avp-border)] bg-[var(--avp-surface-secondary)]/55 p-0.5">
                       <button
                         type="button"
                         onClick={(e) => {
                           e.stopPropagation();
-                          onPreview(rec, 'before');
+                          if (onPreviewWithContext) {
+                            onPreviewWithContext(rec, contextBeforeSec, contextAfterSec);
+                          } else {
+                            onPreview(rec, 'before');
+                          }
                         }}
-                        className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs rounded border border-[#252F42] bg-[#0E131D] text-slate-200 hover:bg-[#1E2738] whitespace-nowrap shrink-0 cursor-pointer"
+                        title={isFa ? 'پخش با بافت اطراف' : 'Play with context'}
+                        className="inline-flex items-center gap-1 h-[22px] px-2 rounded-[5px] text-[10.5px] font-medium text-[var(--avp-text-secondary)] hover:text-[var(--avp-text)] hover:bg-[var(--avp-surface)] cursor-pointer transition-colors"
                       >
-                        <Play className="w-3 h-3" aria-hidden="true" />
-                        <span>{previewingId === `${rec.id}-before` ? 'در حال پخش...' : 'شنیدن قبل'}</span>
+                        <Play
+                          className="w-2.5 h-2.5 text-[var(--avp-accent)]"
+                          strokeWidth={2}
+                          aria-hidden="true"
+                        />
+                        <span>
+                          {previewingId === `${rec.id}-before`
+                            ? isFa
+                              ? 'پخش...'
+                              : '...'
+                            : isFa
+                              ? 'بافت'
+                              : 'Context'}
+                        </span>
                       </button>
+
+                      <span className="w-px h-3 bg-[var(--avp-border)]" aria-hidden="true" />
+
                       <button
                         type="button"
                         onClick={(e) => {
                           e.stopPropagation();
                           onPreview(rec, 'after');
                         }}
-                        className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs rounded border border-sky-500/40 bg-sky-500/10 text-sky-200 hover:bg-sky-500/20 whitespace-nowrap shrink-0 cursor-pointer"
+                        title={isFa ? 'پیش‌شنوایی نتیجه پس از برش' : 'Preview cut splice'}
+                        className="inline-flex items-center gap-1 h-[22px] px-2 rounded-[5px] text-[10.5px] font-medium text-[var(--avp-text-secondary)] hover:text-[var(--avp-text)] hover:bg-[var(--avp-surface)] cursor-pointer transition-colors"
                       >
-                        <Play className="w-3 h-3" aria-hidden="true" />
-                        <span>{previewingId === `${rec.id}-after` ? 'در حال پخش...' : 'پیش‌شنوایی برش'}</span>
+                        <Scissors className="w-2.5 h-2.5" strokeWidth={1.75} aria-hidden="true" />
+                        <span>
+                          {previewingId === `${rec.id}-after`
+                            ? isFa
+                              ? 'پخش...'
+                              : '...'
+                            : isFa
+                              ? 'برش'
+                              : 'Cut'}
+                        </span>
                       </button>
+                    </div>
+
+                    <div className="flex items-center gap-1 shrink-0">
+                      {onJumpToRange && (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onJumpToRange(item.startSec, item.endSec, rec.trackId);
+                          }}
+                          title={isFa ? 'پرش روی تایم‌لاین' : 'Jump on timeline'}
+                          aria-label={isFa ? 'پرش روی تایم‌لاین' : 'Jump on timeline'}
+                          className="avp-btn-icon avp-btn-icon-sm opacity-0 group-hover/card:opacity-100 focus-visible:opacity-100 transition-opacity"
+                        >
+                          <Crosshair className="w-3 h-3" strokeWidth={1.75} aria-hidden="true" />
+                        </button>
+                      )}
+
                       <button
                         type="button"
                         onClick={(e) => {
                           e.stopPropagation();
                           onNudgeBoundary(rec.id, -40);
                         }}
-                        title="اصلاح مرز شروع (-40ms)"
+                        title={isFa ? 'اصلاح مرز شروع (-40ms)' : 'Nudge start -40ms'}
                         aria-label={`اصلاح مرز ${rec.relatedText}`}
-                        className="inline-flex items-center gap-1 px-2 py-1.5 text-xs rounded border border-[#252F42] text-slate-400 hover:text-slate-100 whitespace-nowrap shrink-0 cursor-pointer"
+                        className="avp-btn-icon avp-btn-icon-sm opacity-0 group-hover/card:opacity-100 focus-visible:opacity-100 transition-opacity"
                       >
-                        <SlidersHorizontal className="w-3 h-3" aria-hidden="true" />
-                        <span dir="ltr" className="font-mono">-40ms</span>
+                        <SlidersHorizontal className="w-3 h-3" strokeWidth={1.75} aria-hidden="true" />
                       </button>
-                    </div>
 
-                    <div className="flex items-center gap-1.5">
                       <button
                         type="button"
                         onClick={(e) => {
@@ -305,11 +762,12 @@ export const SuggestionsPanel: React.FC<SuggestionsPanelProps> = ({
                           onAccept(rec);
                         }}
                         aria-label={`اعمال پیشنهاد ${rec.relatedText}`}
-                        className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-semibold rounded bg-emerald-500 text-slate-950 hover:bg-emerald-400 whitespace-nowrap shrink-0 cursor-pointer"
+                        className="avp-btn avp-btn-sm avp-btn-tonal h-[24px] px-2.5 text-[11px]"
                       >
-                        <Check className="w-3.5 h-3.5" aria-hidden="true" />
-                        <span>اعمال</span>
+                        <Check className="w-3 h-3" strokeWidth={2} aria-hidden="true" />
+                        <span>{isFa ? 'اعمال' : 'Apply'}</span>
                       </button>
+
                       <button
                         type="button"
                         onClick={(e) => {
@@ -317,22 +775,26 @@ export const SuggestionsPanel: React.FC<SuggestionsPanelProps> = ({
                           onReject(rec.id);
                         }}
                         aria-label={`رد پیشنهاد ${rec.relatedText}`}
-                        className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs rounded border border-[#252F42] text-slate-300 hover:bg-rose-500/15 hover:text-rose-200 whitespace-nowrap shrink-0 cursor-pointer"
+                        title={isFa ? 'رد پیشنهاد' : 'Dismiss'}
+                        className="avp-btn-icon avp-btn-icon-sm avp-btn-danger-ghost"
                       >
-                        <X className="w-3.5 h-3.5" aria-hidden="true" />
-                        <span>رد</span>
+                        <X className="w-3.5 h-3.5" strokeWidth={1.75} aria-hidden="true" />
                       </button>
                     </div>
                   </div>
                 ) : (
-                  <div className="mt-2.5 text-xs font-medium">
-                    {rec.status === 'Accepted' ? (
-                      <span className="text-emerald-400">اعمال شد (قابل بازگشت با Undo)</span>
-                    ) : rec.status === 'Superseded' ? (
-                      <span className="text-slate-400">پوشش داده‌شده توسط برش قبلی</span>
-                    ) : (
-                      <span className="text-slate-500">رد شد</span>
-                    )}
+                  <div className="mt-1.5 text-[10.5px] font-medium text-[var(--avp-text-muted)]">
+                    {item.lifecycle === 'applied'
+                      ? isFa
+                        ? 'اعمال شد (قابل بازگشت با Undo)'
+                        : 'Applied (Undoable)'
+                      : item.lifecycle === 'stale'
+                        ? isFa
+                          ? 'منقضی‌شده در اثر تغییرات قبلی'
+                          : 'Stale after prior edits'
+                        : isFa
+                          ? 'رد شد'
+                          : 'Rejected'}
                   </div>
                 )}
               </div>
@@ -340,6 +802,113 @@ export const SuggestionsPanel: React.FC<SuggestionsPanelProps> = ({
           })
         )}
       </div>
+
+      {/* Edit Plan Batch Confirmation Modal */}
+      {showEditPlanModal && (
+        <div
+          className="fixed inset-0 z-50 bg-slate-950/55 backdrop-blur-xs flex items-center justify-center p-4"
+          role="dialog"
+          aria-modal="true"
+          data-testid="edit-plan-confirm-modal"
+        >
+          <div className="w-full max-w-md rounded-2xl border border-[var(--avp-border)] bg-[var(--avp-surface-floating)] text-[var(--avp-text)] shadow-[var(--avp-shadow-md)] overflow-hidden">
+            <div className="px-5 py-3.5 border-b border-[var(--avp-border)] flex items-center justify-between">
+              <h3 className="text-sm font-bold">
+                {isFa ? 'خلاصه برنامه تدوین (Edit Plan)' : 'Review Edit Plan'}
+              </h3>
+              <button
+                type="button"
+                onClick={() => setShowEditPlanModal(false)}
+                className="avp-btn-icon avp-btn-icon-sm"
+              >
+                <X className="w-4 h-4" strokeWidth={1.75} />
+              </button>
+            </div>
+
+            <div className="p-5 space-y-3 text-xs">
+              <div className="grid grid-cols-2 gap-2.5">
+                <div className="rounded-xl border border-[var(--avp-border)] bg-[var(--avp-surface-shell)] p-3">
+                  <div className="text-[11px] text-[var(--avp-text-muted)]">
+                    {isFa ? 'قابل اعمال' : 'Ready to Apply'}
+                  </div>
+                  <div className="text-base font-bold font-mono text-[var(--avp-accent-text)] mt-0.5">
+                    {editPlan.applicableItems.length}
+                  </div>
+                </div>
+                <div className="rounded-xl border border-[var(--avp-border)] bg-[var(--avp-surface-shell)] p-3">
+                  <div className="text-[11px] text-[var(--avp-text-muted)]">
+                    {isFa ? 'کاهش زمان (بدون هم‌پوشانی)' : 'Deduplicated Reduction'}
+                  </div>
+                  <bdi dir="ltr" className="avp-bidi-num text-base font-bold block mt-0.5">
+                    -{editPlan.totalRemovalSec.toFixed(2)}s
+                  </bdi>
+                </div>
+              </div>
+
+              {(editPlan.conflictCount > 0 ||
+                editPlan.staleCount > 0 ||
+                editPlan.invalidRangeCount > 0) && (
+                <div className="rounded-xl border border-[var(--avp-warning)]/40 bg-[var(--avp-warning-soft)] p-3 text-[11px] space-y-1">
+                  <div className="font-semibold text-[var(--avp-text)]">
+                    {isFa
+                      ? 'موارد کنارگذاشته‌شده برای حفظ سلامت صوت:'
+                      : 'Excluded for audio safety:'}
+                  </div>
+                  {editPlan.conflictCount > 0 && (
+                    <div>
+                      •{' '}
+                      {isFa
+                        ? `${editPlan.conflictCount} مورد دارای تعارض هم‌پوشانی`
+                        : `${editPlan.conflictCount} overlapping conflict(s)`}
+                    </div>
+                  )}
+                  {editPlan.staleCount > 0 && (
+                    <div>
+                      •{' '}
+                      {isFa
+                        ? `${editPlan.staleCount} مورد منقضی‌شده (Stale)`
+                        : `${editPlan.staleCount} stale item(s)`}
+                    </div>
+                  )}
+                  {editPlan.invalidRangeCount > 0 && (
+                    <div>
+                      •{' '}
+                      {isFa
+                        ? `${editPlan.invalidRangeCount} مورد با بازه نامعتبر`
+                        : `${editPlan.invalidRangeCount} invalid range(s)`}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              <p className="text-[11px] text-[var(--avp-text-muted)] leading-relaxed">
+                {isFa
+                  ? 'تغییرات به‌صورت غیرمخرب و از انتها به ابتدای تایم‌لاین اعمال می‌شوند و با Undo قابل بازگشت هستند.'
+                  : 'Edits apply non-destructively from latest to earliest timestamp and remain fully undoable.'}
+              </p>
+            </div>
+
+            <div className="px-5 py-3 border-t border-[var(--avp-border)] bg-[var(--avp-surface-shell)] flex items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setShowEditPlanModal(false)}
+                className="avp-btn avp-btn-outline"
+              >
+                {isFa ? 'انصراف' : 'Cancel'}
+              </button>
+              <button
+                type="button"
+                data-testid="btn-confirm-execute-edit-plan"
+                disabled={!editPlan.canExecute}
+                onClick={handleConfirmExecuteEditPlan}
+                className="avp-btn avp-btn-primary"
+              >
+                {isFa ? 'اجرای برنامه تدوین' : 'Execute Edit Plan'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </section>
   );
 };

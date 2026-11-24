@@ -16,6 +16,8 @@ export class AsrWorkerSupervisorAndWatchdog {
 
   /**
    * Executes a heavy ASR inference job under strict Timeout, Heartbeat, and RSS memory supervision.
+   * P1 #7: Invokes `onForceTerminateWorker` immediately when a threshold trips so isolated
+   * `node:worker_threads` or child processes executing synchronous C++/ONNX kernels are forcefully terminated.
    */
   public async runSupervisedInferenceJob<TResult>(params: {
     jobId: string;
@@ -24,6 +26,9 @@ export class AsrWorkerSupervisorAndWatchdog {
       emitHeartbeat: (progressPct: number) => void;
     }) => Promise<TResult>;
     readCurrentRssMbFn?: () => number;
+    onForceTerminateWorker?: (
+      reason: 'TIMEOUT' | 'HEARTBEAT_LOST' | 'MEMORY_LIMIT',
+    ) => Promise<void> | void;
   }): Promise<TResult> {
     const abortController = new AbortController();
     let lastHeartbeatAtMs = Date.now();
@@ -44,6 +49,7 @@ export class AsrWorkerSupervisorAndWatchdog {
         if (elapsedTotal > this.policy.maxExecutionTimeoutMs) {
           if (watchdogTimer) clearInterval(watchdogTimer);
           abortController.abort();
+          void Promise.resolve(params.onForceTerminateWorker?.('TIMEOUT')).catch(() => {});
           reject(
             new Error(
               `WATCHDOG_JOB_TIMEOUT: کار ${params.jobId} بیش از سقف ${this.policy.maxExecutionTimeoutMs}ms طول کشید.`,
@@ -55,6 +61,9 @@ export class AsrWorkerSupervisorAndWatchdog {
         if (sinceLastHeartbeat > this.policy.heartbeatIntervalMs) {
           if (watchdogTimer) clearInterval(watchdogTimer);
           abortController.abort();
+          void Promise.resolve(params.onForceTerminateWorker?.('HEARTBEAT_LOST')).catch(
+            () => {},
+          );
           reject(
             new Error(
               `WATCHDOG_HEARTBEAT_LOST: کارگر استنتاج ${params.jobId} پاسخگو نیست (Heartbeat Timeout).`,
@@ -66,6 +75,9 @@ export class AsrWorkerSupervisorAndWatchdog {
         if (currentRssMb > this.policy.maxWorkerRssMb) {
           if (watchdogTimer) clearInterval(watchdogTimer);
           abortController.abort();
+          void Promise.resolve(params.onForceTerminateWorker?.('MEMORY_LIMIT')).catch(
+            () => {},
+          );
           reject(
             new Error(
               `WATCHDOG_MEMORY_LIMIT_EXCEEDED: مصرف حافظه (${currentRssMb.toFixed(1)}MB) از سقف ${this.policy.maxWorkerRssMb}MB عبور کرد.`,
@@ -73,6 +85,7 @@ export class AsrWorkerSupervisorAndWatchdog {
           );
         }
       }, Math.min(250, Math.max(10, Math.floor(this.policy.heartbeatIntervalMs / 2))));
+      watchdogTimer.unref?.();
     });
 
     try {

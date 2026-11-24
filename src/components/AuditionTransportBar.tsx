@@ -8,7 +8,10 @@ import {
   Repeat,
   RotateCcw,
   Scissors,
+  SkipBack,
+  SkipForward,
   Square,
+  X,
 } from 'lucide-react';
 import { formatTimecode, secondsToFlicks } from '../engine/timebase';
 
@@ -21,17 +24,25 @@ export interface WaveformSelectionState {
 
 interface AuditionTransportBarProps {
   isPlaying: boolean;
+  hasAudio?: boolean;
+  isPreviewMode?: boolean;
+  previewLabel?: string | null;
   playheadSec: number;
   totalDurationSec: number;
   selection: WaveformSelectionState | null;
   loopSelection: boolean;
   playbackRate: number;
+  seekStepSec?: number;
   peakDb: number;
   rmsDb: number;
+  locale?: 'fa' | 'en';
   onTogglePlay: () => void;
   onPlaySelection: () => void;
   onStopAndReset: () => void;
+  onExitPreview?: () => void;
   onSeekSec: (sec: number) => void;
+  onStepBack?: () => void;
+  onStepForward?: () => void;
   onToggleLoop: () => void;
   onChangePlaybackRate: (rate: number) => void;
   onJumpPrevMarker: () => void;
@@ -40,19 +51,29 @@ interface AuditionTransportBarProps {
   onSetOutAtPlayhead: () => void;
 }
 
+const SPEED_OPTIONS = [0.5, 0.75, 1, 1.25, 1.5, 1.75, 2];
+
 export const AuditionTransportBar: React.FC<AuditionTransportBarProps> = ({
   isPlaying,
+  hasAudio = true,
+  isPreviewMode = false,
+  previewLabel = null,
   playheadSec,
   totalDurationSec,
   selection,
   loopSelection,
   playbackRate,
+  seekStepSec = 5,
   peakDb,
   rmsDb,
+  locale = 'fa',
   onTogglePlay,
   onPlaySelection,
   onStopAndReset,
+  onExitPreview,
   onSeekSec,
+  onStepBack,
+  onStepForward,
   onToggleLoop,
   onChangePlaybackRate,
   onJumpPrevMarker,
@@ -60,233 +81,401 @@ export const AuditionTransportBar: React.FC<AuditionTransportBarProps> = ({
   onSetInAtPlayhead,
   onSetOutAtPlayhead,
 }) => {
+  const isFa = locale === 'fa';
   const safeTotal = Math.max(0.1, totalDurationSec);
+  const progressPct = Math.max(0, Math.min(100, (playheadSec / safeTotal) * 100));
   const peakPct = Math.max(0, Math.min(100, ((peakDb + 60) / 60) * 100));
   const rmsPct = Math.max(0, Math.min(100, ((rmsDb + 60) / 60) * 100));
   const selectionLenSec = selection ? Math.max(0, selection.endSec - selection.startSec) : 0;
 
+  const statusText = !hasAudio
+    ? isFa
+      ? 'بدون صوت'
+      : 'No Audio'
+    : isPreviewMode
+      ? previewLabel ?? (isFa ? 'پیش‌شنوایی' : 'Previewing')
+      : isPlaying
+        ? isFa
+          ? 'در حال پخش'
+          : 'Playing'
+        : playheadSec > 0.05
+          ? isFa
+            ? 'مکث'
+            : 'Paused'
+          : isFa
+            ? 'آماده'
+            : 'Ready';
+
   return (
     <footer
       data-testid="audition-transport-deck"
-      aria-label="پلیر و نوار کنترل ترنسپورت ادوبی ادیشن"
-      className="sticky bottom-0 z-30 border-t border-[#2A2F3B] bg-[#16181D] text-slate-200 px-4 py-2.5"
+      aria-label={isFa ? 'نوار کنترل پخش صوت' : 'Audio transport control bar'}
+      className="fixed bottom-0 inset-x-0 z-30 border-t border-[var(--avp-border)] bg-[var(--avp-surface-shell)]/96 backdrop-blur-md text-[var(--avp-text)]"
     >
-      <div className="max-w-[1440px] mx-auto flex flex-col gap-2">
-        {/* Top Row: Interactive Playhead Scrub Slider with Selection Highlight */}
-        <div className="flex items-center gap-3" dir="ltr">
-          <span
-            data-testid="audition-timecode-hud"
-            className="text-sm font-mono tabular-nums text-[#2EE59D] min-w-[92px] tracking-tight"
-          >
-            {formatTimecode(secondsToFlicks(playheadSec))}
-          </span>
-
-          <div className="relative flex-1 flex items-center">
-            {selection && (
-              <div
-                aria-hidden="true"
-                className="pointer-events-none absolute top-1/2 -translate-y-1/2 h-2.5 rounded bg-sky-400/35 border border-sky-400/70"
-                style={{
-                  left: `${(selection.startSec / safeTotal) * 100}%`,
-                  width: `${Math.max(0.8, ((selection.endSec - selection.startSec) / safeTotal) * 100)}%`,
-                }}
-              />
-            )}
-            <input
-              type="range"
-              data-testid="audition-scrub-slider"
-              aria-label="نوار زمان پخش"
-              min={0}
-              max={safeTotal}
-              step={0.01}
-              value={Math.min(safeTotal, playheadSec)}
-              onChange={(e) => onSeekSec(Number(e.target.value))}
-              className="w-full h-2 accent-[#2EE59D] bg-[#252A36] rounded cursor-pointer relative z-10"
+      {/* Top Edge-Anchored Slim Progress Scrubber (3px resting, expands visually on hover) */}
+      <div
+        className="group relative w-full h-2.5 -mt-1 flex items-center cursor-pointer"
+        dir="ltr"
+      >
+        <div className="w-full h-[3px] group-hover:h-[5px] bg-[var(--avp-border)] transition-all relative overflow-hidden">
+          <div
+            className="h-full bg-[var(--avp-accent)]"
+            style={{ width: `${progressPct}%` }}
+          />
+          {selection && selectionLenSec > 0.01 && (
+            <div
+              aria-hidden="true"
+              className="pointer-events-none absolute inset-y-0 bg-[var(--avp-warning)]/70"
+              style={{
+                left: `${(selection.startSec / safeTotal) * 100}%`,
+                width: `${Math.max(0.8, ((selection.endSec - selection.startSec) / safeTotal) * 100)}%`,
+              }}
             />
+          )}
+        </div>
+        <input
+          type="range"
+          data-testid="audition-scrub-slider"
+          aria-label={isFa ? 'نوار زمان پخش' : 'Playback timeline scrubber'}
+          disabled={!hasAudio}
+          min={0}
+          max={safeTotal}
+          step={0.01}
+          value={Math.min(safeTotal, Math.max(0, playheadSec))}
+          onChange={(e) => onSeekSec(Number(e.target.value))}
+          className="absolute inset-0 w-full h-full opacity-0 cursor-pointer disabled:cursor-not-allowed z-10"
+        />
+      </div>
+
+      {/* Main 50px 3-Zone Symmetrical Grid Transport Row */}
+      <div className="w-full px-3 sm:px-4 h-[50px] grid grid-cols-[1fr_auto_1fr] items-center gap-2">
+        {/* Zone 1 (Start — Framed Studio Telemetry Pod: LTR Timecode + Status + 12-Segment Stereo L/R Output Meter) */}
+        <div className="flex items-center gap-2 min-w-0 justify-self-start px-2.5 py-1 rounded-xl border border-[var(--avp-border)] bg-[var(--avp-surface-secondary)]/65">
+          <div className="flex items-center gap-1.5" dir="ltr">
+            <span
+              data-testid="audition-timecode-hud"
+              className="avp-bidi-num text-[12px] sm:text-[12.5px] font-semibold text-[var(--avp-text)] sm:min-w-[72px]"
+            >
+              {formatTimecode(secondsToFlicks(playheadSec))}
+            </span>
+            <span className="text-[11px] text-[var(--avp-text-faint)] hidden sm:inline">/</span>
+            <span className="avp-bidi-num text-[11px] text-[var(--avp-text-muted)] hidden sm:inline">
+              {formatTimecode(secondsToFlicks(totalDurationSec))}
+            </span>
           </div>
 
-          <span className="text-xs font-mono tabular-nums text-slate-400 min-w-[82px] text-right">
-            {formatTimecode(secondsToFlicks(totalDurationSec))}
+          <span className="w-px h-3.5 bg-[var(--avp-border)] hidden md:block" aria-hidden="true" />
+
+          <span
+            data-testid="transport-status-badge"
+            className={`hidden md:inline-flex items-center gap-1.5 text-[11px] font-medium whitespace-nowrap ${
+              isPreviewMode
+                ? 'text-[var(--avp-warning-text)]'
+                : isPlaying
+                  ? 'text-[var(--avp-accent-text)]'
+                  : 'text-[var(--avp-text-secondary)]'
+            }`}
+          >
+            <span
+              className={`w-1.5 h-1.5 rounded-full ${
+                isPreviewMode
+                  ? 'bg-[var(--avp-warning)]'
+                  : isPlaying
+                    ? 'bg-[var(--avp-accent)]'
+                    : 'bg-emerald-500/70'
+              }`}
+              aria-hidden="true"
+            />
+            <span>{statusText}</span>
           </span>
+
+          {isPreviewMode && onExitPreview && (
+            <button
+              type="button"
+              data-testid="btn-exit-preview-mode"
+              onClick={onExitPreview}
+              className="avp-btn avp-btn-sm avp-btn-ghost"
+            >
+              <X className="w-3 h-3" strokeWidth={1.75} aria-hidden="true" />
+              <span>{isFa ? 'پایان' : 'Exit'}</span>
+            </button>
+          )}
+
+          <span className="w-px h-3.5 bg-[var(--avp-border)] hidden xl:block" aria-hidden="true" />
+
+          {/* 12-Segment Stereo L/R Studio LED Output Meter */}
+          <div
+            data-testid="audition-master-meter"
+            className="hidden xl:flex items-center gap-2"
+            dir="ltr"
+            aria-label={isFa ? 'سطح خروجی صدا dBFS' : 'Master output level dBFS'}
+          >
+            <div className="flex flex-col gap-[3px]">
+              {(['L', 'R'] as const).map((ch, chIdx) => {
+                const chPeak = chIdx === 0 ? peakPct : Math.max(0, peakPct - (isPlaying ? 4 : 0));
+                const activeSegments = isPlaying
+                  ? Math.max(2, Math.round((chPeak / 100) * 12))
+                  : chPeak > 2
+                    ? Math.round((chPeak / 100) * 12)
+                    : 0;
+                return (
+                  <div key={ch} className="flex items-center gap-1.5">
+                    <span className="text-[9px] font-mono font-bold leading-none text-[var(--avp-text-muted)] w-2.5">
+                      {ch}
+                    </span>
+                    <div className="flex items-center gap-[2px]">
+                      {Array.from({ length: 12 }).map((_, segIdx) => {
+                        const isLit = segIdx < activeSegments;
+                        const activeColor =
+                          segIdx >= 10
+                            ? 'bg-rose-500'
+                            : segIdx >= 8
+                              ? 'bg-amber-400'
+                              : 'bg-emerald-500';
+                        const idleColor =
+                          segIdx >= 10
+                            ? 'bg-rose-500/20 dark:bg-rose-500/15'
+                            : segIdx >= 8
+                              ? 'bg-amber-500/20 dark:bg-amber-400/15'
+                              : 'bg-emerald-600/20 dark:bg-emerald-500/18';
+                        return (
+                          <span
+                            key={segIdx}
+                            className={`w-[4.5px] h-[5px] rounded-[1px] transition-colors duration-75 ${
+                              isLit ? activeColor : idleColor
+                            }`}
+                          />
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+            <span className="avp-bidi-num text-[10px] font-medium text-[var(--avp-text-muted)] w-[38px]">
+              {peakDb <= -59 ? '-∞' : peakDb.toFixed(0)} dB
+            </span>
+          </div>
         </div>
 
-        {/* Bottom Row: Adobe Audition Transport Controls, In/Out Markers, Speed & Live Peak/RMS Meter */}
-        <div dir="rtl" className="flex flex-wrap items-center justify-between gap-3">
-          {/* Primary Playback & Selection Play Controls */}
-          <div className="flex items-center gap-1.5">
-            <button
-              type="button"
-              data-testid="audition-btn-rewind"
-              onClick={onStopAndReset}
-              aria-label="توقف و بازگشت به ابتدا"
-              title="بازگشت به ابتدا (Home)"
-              className="p-2 rounded border border-[#2D323E] bg-[#1F232C] hover:bg-[#292F3B] text-slate-300 cursor-pointer"
-            >
-              <RotateCcw className="w-3.5 h-3.5" aria-hidden="true" />
-            </button>
-
-            <button
-              type="button"
-              data-testid="audition-btn-stop"
-              onClick={onStopAndReset}
-              aria-label="توقف کامل"
-              className="p-2 rounded border border-[#2D323E] bg-[#1F232C] hover:bg-[#292F3B] text-slate-300 cursor-pointer"
-            >
-              <Square className="w-3.5 h-3.5" aria-hidden="true" />
-            </button>
-
-            <button
-              type="button"
-              data-testid="audition-btn-play-pause"
-              onClick={onTogglePlay}
-              aria-label={isPlaying ? 'توقف پخش' : 'شروع پخش'}
-              title="پخش / مکث (Space)"
-              className={`inline-flex items-center gap-1.5 px-4 py-1.5 rounded text-xs font-semibold whitespace-nowrap shrink-0 cursor-pointer transition-colors ${
-                isPlaying
-                  ? 'bg-amber-400 text-slate-950 hover:bg-amber-300'
-                  : 'bg-[#2EE59D] text-slate-950 hover:bg-[#52EEB0]'
-              }`}
-            >
-              {isPlaying ? (
-                <>
-                  <Pause className="w-3.5 h-3.5" aria-hidden="true" />
-                  <span>توقف پخش</span>
-                </>
-              ) : (
-                <>
-                  <Play className="w-3.5 h-3.5" aria-hidden="true" />
-                  <span>پخش</span>
-                </>
-              )}
-            </button>
-
-            <button
-              type="button"
-              data-testid="audition-btn-play-selection"
-              disabled={!selection || selectionLenSec < 0.05}
-              onClick={onPlaySelection}
-              title="پخش فقط محدوده انتخاب‌شده"
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded border border-sky-500/40 bg-sky-500/15 hover:bg-sky-500/25 disabled:opacity-40 text-sky-200 text-xs font-medium whitespace-nowrap shrink-0 cursor-pointer disabled:cursor-not-allowed"
-            >
-              <Scissors className="w-3.5 h-3.5 text-sky-300" aria-hidden="true" />
-              <span>پخش انتخاب</span>
-            </button>
-
-            <button
-              type="button"
-              data-testid="audition-btn-loop"
-              onClick={onToggleLoop}
-              aria-pressed={loopSelection}
-              title="تکرار پخش محدوده انتخابی (L)"
-              className={`inline-flex items-center gap-1 px-2.5 py-1.5 rounded border text-xs font-medium whitespace-nowrap shrink-0 cursor-pointer transition-colors ${
-                loopSelection
-                  ? 'border-amber-400/70 bg-amber-400/20 text-amber-200'
-                  : 'border-[#2D323E] bg-[#1F232C] text-slate-300 hover:bg-[#292F3B]'
-              }`}
-            >
-              <Repeat className="w-3.5 h-3.5" aria-hidden="true" />
-              <span>تکرار (Loop)</span>
-            </button>
-
-            <div className="h-5 w-px bg-[#2D323E] mx-1 hidden sm:block" aria-hidden="true" />
-
-            <button
-              type="button"
-              onClick={onJumpPrevMarker}
-              aria-label="پرش به نشانگر قبلی"
-              title="نشانگر یا فصل قبلی"
-              className="p-1.5 rounded border border-[#2D323E] bg-[#1F232C] hover:bg-[#292F3B] text-slate-300 cursor-pointer"
-            >
-              <ChevronRight className="w-3.5 h-3.5" aria-hidden="true" />
-            </button>
-            <button
-              type="button"
-              onClick={onJumpNextMarker}
-              aria-label="پرش به نشانگر بعدی"
-              title="نشانگر یا فصل بعدی"
-              className="p-1.5 rounded border border-[#2D323E] bg-[#1F232C] hover:bg-[#292F3B] text-slate-300 cursor-pointer"
-            >
-              <ChevronLeft className="w-3.5 h-3.5" aria-hidden="true" />
-            </button>
-          </div>
-
-          {/* Selection In/Out Marker Readout + Set I/O Buttons */}
-          <div className="flex flex-wrap items-center gap-2 text-xs">
+        {/* Zone 2 (Exact Geometric Center — Framed Hardware Transport Deck, LOCKED dir="ltr") */}
+        <div
+          className="flex items-center justify-center gap-0.5 justify-self-center px-2 py-1 rounded-xl border border-[var(--avp-border)] bg-[var(--avp-surface-secondary)]/75"
+          dir="ltr"
+        >
+          <div className="hidden lg:inline-flex items-center gap-0.5 me-0.5 pe-1 border-e border-[var(--avp-border)]">
             <button
               type="button"
               data-testid="audition-btn-set-in"
+              disabled={!hasAudio}
               onClick={onSetInAtPlayhead}
-              title="تنظیم نقطه شروع انتخاب روی مکان‌نما (I)"
-              className="px-2 py-1 rounded border border-[#2D323E] bg-[#1F232C] hover:bg-[#292F3B] font-mono text-[11px] text-slate-200 whitespace-nowrap shrink-0 cursor-pointer"
+              title={isFa ? 'تنظیم شروع انتخاب (I)' : 'Set Selection In (I)'}
+              className="avp-btn avp-btn-sm avp-btn-ghost px-1.5 font-mono text-[11px]"
             >
-              نقطه شروع (I)
+              I
             </button>
             <button
               type="button"
               data-testid="audition-btn-set-out"
+              disabled={!hasAudio}
               onClick={onSetOutAtPlayhead}
-              title="تنظیم نقطه پایان انتخاب روی مکان‌نما (O)"
-              className="px-2 py-1 rounded border border-[#2D323E] bg-[#1F232C] hover:bg-[#292F3B] font-mono text-[11px] text-slate-200 whitespace-nowrap shrink-0 cursor-pointer"
+              title={isFa ? 'تنظیم پایان انتخاب (O)' : 'Set Selection Out (O)'}
+              className="avp-btn avp-btn-sm avp-btn-ghost px-1.5 font-mono text-[11px]"
             >
-              نقطه پایان (O)
+              O
             </button>
-
-            <div
-              data-testid="audition-selection-hud"
-              dir="ltr"
-              className="px-2.5 py-1 rounded border border-[#2D323E] bg-[#111318] font-mono tabular-nums text-[11px] text-slate-300 whitespace-nowrap"
-            >
-              {selection ? (
-                <span>
-                  Sel: {selection.startSec.toFixed(2)}s .. {selection.endSec.toFixed(2)}s (Δ{' '}
-                  {selectionLenSec.toFixed(2)}s)
-                </span>
-              ) : (
-                <span className="text-slate-500">No Selection</span>
-              )}
-            </div>
           </div>
 
-          {/* Playback Speed & Real-Time Peak/RMS dBFS Output Meter */}
-          <div className="flex items-center gap-3">
-            <label className="inline-flex items-center gap-1.5 text-xs text-slate-300 whitespace-nowrap shrink-0">
-              <Gauge className="w-3.5 h-3.5 text-slate-400" aria-hidden="true" />
-              <span className="sr-only">سرعت پخش</span>
+          <button
+            type="button"
+            data-testid="audition-btn-rewind"
+            disabled={!hasAudio}
+            onClick={onStopAndReset}
+            aria-label={isFa ? 'بازگشت به ابتدا' : 'Rewind to start'}
+            title={isFa ? 'بازگشت به ابتدا (Home)' : 'Rewind (Home)'}
+            className="avp-btn-icon avp-btn-icon-sm hidden sm:inline-flex"
+          >
+            <RotateCcw className="w-3.5 h-3.5" strokeWidth={1.75} aria-hidden="true" />
+          </button>
+
+          {onStepBack && (
+            <button
+              type="button"
+              data-testid="audition-btn-step-back"
+              disabled={!hasAudio}
+              onClick={onStepBack}
+              aria-label={isFa ? `${seekStepSec} ثانیه عقب` : `Back ${seekStepSec}s`}
+              title={isFa ? `${seekStepSec} ثانیه عقب` : `Back ${seekStepSec}s`}
+              className="avp-btn avp-btn-sm avp-btn-ghost px-2 font-mono text-[11px]"
+            >
+              <SkipBack className="w-3.5 h-3.5" strokeWidth={1.75} aria-hidden="true" />
+              <span className="hidden sm:inline">-{seekStepSec}s</span>
+            </button>
+          )}
+
+          {/* Focal Play / Pause CTA (Primary Budget #2) */}
+          <button
+            type="button"
+            data-testid="toolbar-btn-play-pause"
+            disabled={!hasAudio}
+            onClick={onTogglePlay}
+            aria-label={
+              isPlaying
+                ? isFa
+                  ? 'توقف پخش'
+                  : 'Pause playback'
+                : isFa
+                  ? 'شروع پخش'
+                  : 'Start playback'
+            }
+            title={isFa ? 'پخش / مکث (Space)' : 'Play / Pause (Space)'}
+            className={`avp-btn avp-btn-md min-w-[86px] mx-1 ${
+              isPlaying
+                ? 'bg-[var(--avp-warning)] text-slate-950 hover:opacity-90'
+                : 'avp-btn-primary'
+            }`}
+          >
+            {isPlaying ? (
+              <>
+                <Pause className="w-3.5 h-3.5 fill-current" aria-hidden="true" />
+                <span>{isFa ? 'توقف' : 'Pause'}</span>
+              </>
+            ) : (
+              <>
+                <Play className="w-3.5 h-3.5 fill-current" aria-hidden="true" />
+                <span>{isFa ? 'پخش' : 'Play'}</span>
+              </>
+            )}
+          </button>
+
+          {onStepForward && (
+            <button
+              type="button"
+              data-testid="audition-btn-step-forward"
+              disabled={!hasAudio}
+              onClick={onStepForward}
+              aria-label={isFa ? `${seekStepSec} ثانیه جلو` : `Forward ${seekStepSec}s`}
+              title={isFa ? `${seekStepSec} ثانیه جلو` : `Forward ${seekStepSec}s`}
+              className="avp-btn avp-btn-sm avp-btn-ghost px-2 font-mono text-[11px]"
+            >
+              <span className="hidden sm:inline">+{seekStepSec}s</span>
+              <SkipForward className="w-3.5 h-3.5" strokeWidth={1.75} aria-hidden="true" />
+            </button>
+          )}
+
+          <button
+            type="button"
+            data-testid="audition-btn-stop"
+            disabled={!hasAudio}
+            onClick={onStopAndReset}
+            aria-label={isFa ? 'توقف کامل' : 'Stop'}
+            title={isFa ? 'توقف' : 'Stop'}
+            className="avp-btn-icon avp-btn-icon-sm hidden sm:inline-flex"
+          >
+            <Square className="w-3.5 h-3.5" strokeWidth={1.75} aria-hidden="true" />
+          </button>
+
+          <button
+            type="button"
+            data-testid="audition-btn-loop"
+            disabled={!hasAudio}
+            onClick={onToggleLoop}
+            aria-pressed={loopSelection}
+            title={
+              selection
+                ? isFa
+                  ? 'تکرار محدوده انتخابی (L)'
+                  : 'Loop Selection (L)'
+                : isFa
+                  ? 'تکرار کل فایل (L)'
+                  : 'Loop Full Track (L)'
+            }
+            className={`avp-btn avp-btn-sm ms-0.5 ${loopSelection ? 'avp-btn-tonal' : 'avp-btn-ghost'}`}
+          >
+            <Repeat className="w-3.5 h-3.5" strokeWidth={1.75} aria-hidden="true" />
+            <span className="hidden md:inline">{isFa ? 'تکرار' : 'Loop'}</span>
+          </button>
+        </div>
+
+        {/* Zone 3 (End — Context-Aware Selection Range Play + Marker Nav + Playback Rate) */}
+        <div className="flex items-center justify-end gap-1.5 shrink-0 justify-self-end">
+          {selection && selectionLenSec >= 0.05 && (
+            <>
+              <div
+                data-testid="audition-selection-hud"
+                dir="ltr"
+                className="hidden 2xl:inline-flex items-center text-[11px] font-mono tabular-nums text-[var(--avp-warning-text)] font-medium whitespace-nowrap"
+              >
+                {selection.startSec.toFixed(2)}–{selection.endSec.toFixed(2)}s (Δ
+                {selectionLenSec.toFixed(2)}s)
+              </div>
+
+              <button
+                type="button"
+                data-testid="audition-btn-play-selection"
+                disabled={!hasAudio}
+                onClick={onPlaySelection}
+                title={isFa ? 'پخش محدوده انتخاب‌شده' : 'Play Selected Range'}
+                className="hidden sm:inline-flex avp-btn avp-btn-sm avp-btn-tonal"
+              >
+                <Scissors className="w-3.5 h-3.5 text-[var(--avp-accent)]" strokeWidth={1.75} aria-hidden="true" />
+                <span className="hidden lg:inline">{isFa ? 'پخش انتخاب' : 'Range'}</span>
+              </button>
+            </>
+          )}
+
+          {/* Framed Marker Step & Playback Speed Utility Capsule */}
+          <div className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-xl border border-[var(--avp-border)] bg-[var(--avp-surface-secondary)]/65">
+            {/* LTR Marker Step Buttons */}
+            <div className="hidden lg:inline-flex items-center gap-0.5 pe-1 border-e border-[var(--avp-border)]" dir="ltr">
+              <button
+                type="button"
+                disabled={!hasAudio}
+                onClick={onJumpPrevMarker}
+                aria-label={isFa ? 'نشانگر قبلی' : 'Previous marker'}
+                title={isFa ? 'نشانگر قبلی' : 'Previous marker'}
+                className="avp-btn-icon avp-btn-icon-sm"
+              >
+                <ChevronLeft className="w-3.5 h-3.5" strokeWidth={1.75} aria-hidden="true" />
+              </button>
+              <button
+                type="button"
+                disabled={!hasAudio}
+                onClick={onJumpNextMarker}
+                aria-label={isFa ? 'نشانگر بعدی' : 'Next marker'}
+                title={isFa ? 'نشانگر بعدی' : 'Next marker'}
+                className="avp-btn-icon avp-btn-icon-sm"
+              >
+                <ChevronRight className="w-3.5 h-3.5" strokeWidth={1.75} aria-hidden="true" />
+              </button>
+            </div>
+
+            {/* Playback Rate (honest native Web Audio scaling) */}
+            <label
+              className="inline-flex items-center gap-1 text-xs text-[var(--avp-text-secondary)]"
+              title={
+                isFa
+                  ? 'سرعت پخش (تغییر نرخ بازپخش بومی مرورگر؛ بدون الگوریتم جداگانه حفظ زیر و بمی)'
+                  : 'Playback rate (native browser rate scaling without pitch-preserve DSP)'
+              }
+            >
+              <Gauge className="w-3.5 h-3.5 text-[var(--avp-text-muted)] hidden sm:block ms-1" strokeWidth={1.75} aria-hidden="true" />
+              <span className="sr-only">{isFa ? 'سرعت پخش' : 'Playback speed'}</span>
               <select
                 data-testid="audition-playback-speed"
-                aria-label="سرعت پخش"
+                aria-label={isFa ? 'سرعت پخش' : 'Playback speed'}
                 value={playbackRate}
                 onChange={(e) => onChangePlaybackRate(Number(e.target.value))}
-                className="px-2 py-1 rounded border border-[#2D323E] bg-[#1F232C] font-mono tabular-nums text-[11px] text-slate-200 cursor-pointer"
+                dir="ltr"
+                className="avp-select font-mono tabular-nums border-0 bg-transparent h-[26px]"
               >
-                <option value={0.75}>0.75x</option>
-                <option value={1}>1.00x</option>
-                <option value={1.25}>1.25x</option>
-                <option value={1.5}>1.50x</option>
+                {SPEED_OPTIONS.map((rate) => (
+                  <option key={rate} value={rate}>
+                    {rate.toFixed(2).replace(/\.00$/, '.0')}x
+                  </option>
+                ))}
               </select>
             </label>
-
-            <div
-              data-testid="audition-master-meter"
-              className="flex flex-col gap-1 min-w-[140px]"
-              dir="ltr"
-              aria-label="سطح‌سنج خروجی صدا dBFS"
-            >
-              <div className="flex items-center justify-between text-[10px] font-mono tabular-nums text-slate-400">
-                <span>MASTER</span>
-                <span>{peakDb <= -59 ? '-∞' : peakDb.toFixed(1)} dBFS</span>
-              </div>
-              <div className="h-2 w-full rounded bg-[#111318] border border-[#2D323E] overflow-hidden relative">
-                <div
-                  className="h-full bg-gradient-to-r from-[#2EE59D] via-amber-400 to-rose-500 transition-[width] duration-75"
-                  style={{ width: `${peakPct}%` }}
-                />
-                <div
-                  className="absolute top-0 bottom-0 w-0.5 bg-white/80"
-                  style={{ left: `${rmsPct}%` }}
-                />
-              </div>
-            </div>
           </div>
         </div>
       </div>

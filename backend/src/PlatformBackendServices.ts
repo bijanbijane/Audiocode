@@ -14,6 +14,7 @@ import {
 } from './license/DeviceSeatEnforcementService';
 
 export type { PgTransactionClient, PinnedPgClient };
+export { withPinnedPostgresTransaction as runInTransaction };
 
 export interface AuthenticatedRequestContext {
   readonly authenticatedUserId?: string;

@@ -1,24 +1,48 @@
 <!doctype html>
-<html lang="fa" dir="rtl" class="dark">
+<html lang="fa" dir="rtl">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>آواپرداز — استودیو هوشمند تدوین صوت فارسی</title>
-    <meta name="description" content="پلتفرم وب‌محور تدوین غیرمخرب، تحلیل آوایی فارسی، پردازش محلی DSP و ذخیره‌سازی هیبریدی OPFS (معماری نسخه ۱.۲)" />
-    <meta property="og:title" content="آواپرداز — استودیو هوشمند تدوین صوت فارسی" />
-    <meta property="og:description" content="پلتفرم وب‌محور تدوین غیرمخرب، تحلیل آوایی فارسی، پردازش محلی DSP و ذخیره‌سازی هیبریدی OPFS (معماری نسخه ۱.۲)" />
+    <title>آواپرداز — استودیوی هوشمند تدوین گفتار</title>
+    <meta name="description" content="استودیوی هوشمند و محلی تدوین گفتار فارسی با همگام‌سازی متن و صوت، پیشنهادهای هوشمند بازبینی و خروجی غیرمخرب استاندارد" />
+    <meta property="og:title" content="آواپرداز — استودیوی هوشمند تدوین گفتار" />
+    <meta property="og:description" content="استودیوی هوشمند و محلی تدوین گفتار فارسی با همگام‌سازی متن و صوت، پیشنهادهای هوشمند بازبینی و خروجی غیرمخرب استاندارد" />
     <meta property="og:type" content="website" />
     <meta name="twitter:card" content="summary_large_image" />
-    <meta name="theme-color" content="#0B0F17" />
+    <meta name="theme-color" content="#FAFBFC" />
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
-    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
     <meta name="apple-mobile-web-app-title" content="آواپرداز" />
     <link rel="manifest" href="/manifest.webmanifest" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
     <link rel="icon" type="image/svg+xml" href="/icon.svg" />
+    <script>
+      (function () {
+        try {
+          var stored = window.localStorage.getItem('avapardaz_theme_v1');
+          var isDark =
+            stored === 'dark' ||
+            (stored === 'system' &&
+              window.matchMedia &&
+              window.matchMedia('(prefers-color-scheme: dark)').matches);
+          var root = document.documentElement;
+          if (isDark) {
+            root.classList.add('dark');
+            root.dataset.theme = 'dark';
+            var meta = document.querySelector('meta[name="theme-color"]');
+            if (meta) meta.setAttribute('content', '#101720');
+          } else {
+            root.classList.remove('dark');
+            root.dataset.theme = 'light';
+          }
+        } catch (e) {
+          document.documentElement.classList.remove('dark');
+        }
+      })();
+    </script>
   </head>
-  <body class="bg-slate-50 text-slate-900 dark:bg-[#0B0F17] dark:text-slate-100 antialiased selection:bg-amber-500/30 selection:text-amber-950 dark:selection:text-amber-100">
+  <body class="bg-[var(--avp-bg)] text-[var(--avp-text)] antialiased selection:bg-[#16816F]/20 selection:text-[#172029] dark:selection:bg-[#43C7A7]/25 dark:selection:text-[#EDF2F5]">
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>

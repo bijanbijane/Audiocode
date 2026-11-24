@@ -101,8 +101,8 @@ export class DevOpsModelChunkerAndSigner {
       throw new Error('INVALID_CLI_FIELD: recommendedRamMb must be >= minRamMb');
     }
 
-    const fileBuffer = fs.readFileSync(config.sourceModelFilePath);
-    const totalBytes = fileBuffer.byteLength;
+    const stat = fs.statSync(config.sourceModelFilePath);
+    const totalBytes = stat.size;
     if (totalBytes === 0) {
       throw new Error('EMPTY_MODEL_FILE: cannot package zero-byte model binary');
     }
@@ -114,26 +114,35 @@ export class DevOpsModelChunkerAndSigner {
     let offset = 0;
     let chunkIndex = 0;
 
-    while (offset < totalBytes) {
-      const end = Math.min(offset + chunkSize, totalBytes);
-      const slice = fileBuffer.subarray(offset, end);
+    // P1 #9: Stream chunk-by-chunk via file descriptor instead of allocating whole 1.5GB model in RAM
+    const fd = fs.openSync(config.sourceModelFilePath, 'r');
+    const readBuf = Buffer.allocUnsafe(Math.min(chunkSize, totalBytes));
+    try {
+      while (offset < totalBytes) {
+        const toRead = Math.min(chunkSize, totalBytes - offset);
+        const bytesRead = fs.readSync(fd, readBuf, 0, toRead, offset);
+        if (bytesRead <= 0) break;
+        const slice = readBuf.subarray(0, bytesRead);
 
-      const sha256Hex = crypto.createHash('sha256').update(slice).digest('hex');
-      const fileName = `chunk_${String(chunkIndex).padStart(4, '0')}.bin`;
-      const chunkOutputPath = path.join(config.outputDirectory, fileName);
+        const sha256Hex = crypto.createHash('sha256').update(slice).digest('hex');
+        const fileName = `chunk_${String(chunkIndex).padStart(4, '0')}.bin`;
+        const chunkOutputPath = path.join(config.outputDirectory, fileName);
 
-      fs.writeFileSync(chunkOutputPath, slice);
+        fs.writeFileSync(chunkOutputPath, slice);
 
-      chunks.push({
-        index: chunkIndex,
-        url: `${normalizedBaseUrl}/${encodeURIComponent(modelId)}/${encodeURIComponent(version)}/${fileName}`,
-        byteOffset: offset,
-        byteLength: slice.byteLength,
-        sha256Hex,
-      });
+        chunks.push({
+          index: chunkIndex,
+          url: `${normalizedBaseUrl}/${encodeURIComponent(modelId)}/${encodeURIComponent(version)}/${fileName}`,
+          byteOffset: offset,
+          byteLength: slice.byteLength,
+          sha256Hex,
+        });
 
-      offset = end;
-      chunkIndex++;
+        offset += bytesRead;
+        chunkIndex++;
+      }
+    } finally {
+      fs.closeSync(fd);
     }
 
     const clientTier: ModelTier = config.tierGroup === 'GROUP_A' ? 'GROUP_A' : 'GROUP_B';

@@ -20,7 +20,12 @@ import {
   StorageBrokerTelemetry,
   Track,
 } from './contracts/v1_2';
-import { HeaderNav, WorkspaceTab } from './components/HeaderNav';
+import {
+  HeaderNav,
+  HeaderWorkflowStepItem,
+  ProjectSaveStatus,
+  WorkspaceTab,
+} from './components/HeaderNav';
 import { WaveformCanvas } from './components/WaveformCanvas';
 import {
   AsrInlineFeedbackState,
@@ -38,12 +43,32 @@ import { DataFactoryModal } from './components/DataFactoryModal';
 import { ModelFactoryModal } from './components/ModelFactoryModal';
 import { SpeechSecurityModal } from './components/SpeechSecurityModal';
 import { AuditionTransportBar, WaveformSelectionState } from './components/AuditionTransportBar';
-import { AuditionSideDock } from './components/AuditionSideDock';
-import { WorkflowStageBar } from './components/WorkflowStageBar';
-import { CompanionConnectionDiagnostic } from './components/CompanionConnectionDiagnostic';
-import { ShahabLiveStatusWidget } from './components/ShahabLiveStatusWidget';
+import { AuditionDockTabId, AuditionSideDock } from './components/AuditionSideDock';
+import {
+  formatAsrShortStatus,
+  StudioWorkflowStepId,
+  WorkflowStageBar,
+} from './components/WorkflowStageBar';
 import { EdlReviewPanel } from './components/EdlReviewPanel';
 import { RenderExportModal } from './components/RenderExportModal';
+import { ProjectsHubView } from './components/ProjectsHubView';
+import { NewProjectModal } from './components/NewProjectModal';
+import { SettingsCenterModal } from './components/SettingsCenterModal';
+import {
+  applyAccessibilityAttributesToDocument,
+  applyThemeToDocument,
+  resolveEffectiveTheme,
+} from './utils/themePreference';
+import {
+  GlobalSettingsV1,
+  loadGlobalSettings,
+  saveGlobalSettings,
+} from './settings/settingsStore';
+import {
+  extractDownsampledWaveformPeaks,
+  PersistedProjectSummary,
+} from './projects/projectLibraryLogic';
+import { projectLibraryStore } from './projects/projectLibraryStore';
 import {
   loadConfiguredCompanionEndpoint,
   saveConfiguredCompanionEndpoint,
@@ -266,6 +291,57 @@ export default function App() {
     totalAudioCacheBudgetBytes: AVAPARDAZ_MEMORY_POLICY.audioCacheBytes,
   }));
 
+  // Unified Global Settings (Light-First default) & App Navigation View
+  const [globalSettings, setGlobalSettings] = useState<GlobalSettingsV1>(() => loadGlobalSettings());
+  const [settingsModalOpen, setSettingsModalOpen] = useState(false);
+  const [settingsSaveStatus, setSettingsSaveStatus] = useState<'saved' | 'saving' | 'error'>('saved');
+  const [settingsSaveError, setSettingsSaveError] = useState<string | null>(null);
+
+  const [appView, setAppView] = useState<'projects' | 'studio'>(() => {
+    if (typeof window === 'undefined') return 'projects';
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('view') === 'studio' || params.get('project')) {
+      return 'studio';
+    }
+    return 'projects';
+  });
+  const [activePersistedProjectId, setActivePersistedProjectId] = useState<string | null>(() => {
+    if (typeof window === 'undefined') return null;
+    return new URLSearchParams(window.location.search).get('project');
+  });
+  const [projectSaveStatus, setProjectSaveStatus] = useState<ProjectSaveStatus>('sample');
+  const [hubProjects, setHubProjects] = useState<PersistedProjectSummary[]>([]);
+  const [hubLoading, setHubLoading] = useState<boolean>(true);
+  const [hubError, setHubError] = useState<string | null>(null);
+  const [hubCorruptedCount, setHubCorruptedCount] = useState<number>(0);
+  const [newProjectModalOpen, setNewProjectModalOpen] = useState(false);
+  const [activeWorkflowStep, setActiveWorkflowStep] = useState<StudioWorkflowStepId>('review');
+  const [customMarkers, setCustomMarkers] = useState<Array<{ id: string; label: string; startSec: number }>>([]);
+  const [mobileStudioPane, setMobileStudioPane] = useState<'center' | 'suggestions' | 'files'>('center');
+  const [leftRailCollapsed, setLeftRailCollapsed] = useState<boolean>(false);
+  const [sideDockTab, setSideDockTab] = useState<AuditionDockTabId>('files');
+  const [trackHeightPx, setTrackHeightPx] = useState<number>(82);
+
+  const handleStartSplitSashDrag = useCallback(
+    (e: React.MouseEvent<HTMLDivElement>) => {
+      e.preventDefault();
+      const startY = e.clientY;
+      const startTrackH = trackHeightPx;
+      const onMouseMove = (moveEvent: MouseEvent) => {
+        const deltaY = moveEvent.clientY - startY;
+        const nextH = Math.max(46, Math.min(180, Math.round(startTrackH + deltaY * 0.55)));
+        setTrackHeightPx(nextH);
+      };
+      const onMouseUp = () => {
+        window.removeEventListener('mousemove', onMouseMove);
+        window.removeEventListener('mouseup', onMouseUp);
+      };
+      window.addEventListener('mousemove', onMouseMove);
+      window.addEventListener('mouseup', onMouseUp);
+    },
+    [trackHeightPx],
+  );
+
   // Studio Tool Modals state
   const [renderModalOpen, setRenderModalOpen] = useState(false);
   const [lifecycleModalOpen, setLifecycleModalOpen] = useState(false);
@@ -278,13 +354,14 @@ export default function App() {
   const [securityOpen, setSecurityOpen] = useState(false);
   const [isTestingLru, setIsTestingLru] = useState(false);
 
-  // Mission 07/09/10/Unified Processing state controllers
+  // Mission 07/09/10/Unified Processing state controllers (Light-First default!)
   const workflowRef = useRef<StudioWorkflowController | null>(null);
   if (!workflowRef.current) {
+    const initialEffectiveTheme = resolveEffectiveTheme(globalSettings.appearance.theme);
     workflowRef.current = new StudioWorkflowController({
       projectStore: createBrowserLocalProjectStore(),
-      initialLocale: 'fa',
-      initialTheme: 'dark',
+      initialLocale: globalSettings.language.locale,
+      initialTheme: initialEffectiveTheme,
     });
   }
   const [workflowState, setWorkflowState] = useState<StudioWorkflowState>(() =>
@@ -795,12 +872,386 @@ export default function App() {
     }
   }, [activeProjectId, projectSessionNonce]);
 
+  const handleUpdateGlobalSettings = useCallback((next: GlobalSettingsV1) => {
+    setGlobalSettings(next);
+    setSettingsSaveStatus('saving');
+    const saved = saveGlobalSettings(next);
+    if (saved.ok) {
+      setSettingsSaveStatus('saved');
+      setSettingsSaveError(null);
+    } else {
+      setSettingsSaveStatus('error');
+      setSettingsSaveError(saved.error ?? 'Failed to persist settings');
+    }
+    const effectiveTheme = resolveEffectiveTheme(next.appearance.theme);
+    workflowRef.current?.setTheme(effectiveTheme);
+    workflowRef.current?.setLocale(next.language.locale);
+    setPlaybackRate(next.playback.defaultRate);
+  }, []);
+
+  const handleToggleThemeQuick = useCallback(() => {
+    const currentEffective = resolveEffectiveTheme(globalSettings.appearance.theme);
+    const nextTheme = currentEffective === 'dark' ? 'light' : 'dark';
+    handleUpdateGlobalSettings({
+      ...globalSettings,
+      appearance: {
+        ...globalSettings.appearance,
+        theme: nextTheme,
+      },
+    });
+  }, [globalSettings, handleUpdateGlobalSettings]);
+
+  const handleToggleLocaleQuick = useCallback(
+    (nextLocale?: WorkflowLocale) => {
+      const target: WorkflowLocale =
+        nextLocale ?? (globalSettings.language.locale === 'fa' ? 'en' : 'fa');
+      handleUpdateGlobalSettings({
+        ...globalSettings,
+        language: {
+          ...globalSettings.language,
+          locale: target,
+        },
+      });
+    },
+    [globalSettings, handleUpdateGlobalSettings],
+  );
+
   useEffect(() => {
     if (typeof document === 'undefined') return;
-    document.documentElement.classList.toggle('dark', workflowState.theme === 'dark');
-    document.documentElement.lang = workflowState.locale === 'fa' ? 'fa' : 'en';
-    document.documentElement.dir = workflowState.locale === 'fa' ? 'rtl' : 'ltr';
-  }, [workflowState.theme, workflowState.locale]);
+    const effectiveTheme = resolveEffectiveTheme(globalSettings.appearance.theme);
+    applyThemeToDocument(effectiveTheme);
+    applyAccessibilityAttributesToDocument({
+      fontScale: globalSettings.workspace.transcriptFontScale,
+      motionPreference: globalSettings.accessibility.motion,
+      highContrast: globalSettings.accessibility.highContrast,
+    });
+    document.documentElement.lang = globalSettings.language.locale === 'fa' ? 'fa' : 'en';
+    document.documentElement.dir = globalSettings.language.locale === 'fa' ? 'rtl' : 'ltr';
+  }, [
+    globalSettings.appearance.theme,
+    globalSettings.language.locale,
+    globalSettings.workspace.transcriptFontScale,
+    globalSettings.accessibility.motion,
+    globalSettings.accessibility.highContrast,
+    workflowState.theme,
+    workflowState.locale,
+  ]);
+
+  // Listen for OS theme changes ONLY when user explicitly selected 'system'
+  useEffect(() => {
+    if (globalSettings.appearance.theme !== 'system' || typeof window === 'undefined' || !window.matchMedia) {
+      return;
+    }
+    const mq = window.matchMedia('(prefers-color-scheme: dark)');
+    const onChange = () => {
+      const eff = resolveEffectiveTheme('system', mq.matches);
+      applyThemeToDocument(eff);
+      workflowRef.current?.setTheme(eff);
+    };
+    mq.addEventListener?.('change', onChange);
+    return () => mq.removeEventListener?.('change', onChange);
+  }, [globalSettings.appearance.theme]);
+
+  // Load persisted Projects Hub list from IndexedDB
+  const refreshProjectsHub = useCallback(async () => {
+    setHubLoading(true);
+    setHubError(null);
+    try {
+      const res = await projectLibraryStore.listProjects();
+      setHubProjects(res.projects);
+      setHubCorruptedCount(res.corruptedCount);
+    } catch (err) {
+      setHubError(
+        err instanceof Error
+          ? err.message
+          : 'بارگذاری فهرست پروژه‌های محلی با خطا مواجه شد.',
+      );
+    } finally {
+      setHubLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void refreshProjectsHub();
+  }, [refreshProjectsHub]);
+
+  const syncBrowserUrlForView = useCallback((view: 'projects' | 'studio', projectId?: string | null) => {
+    if (typeof window === 'undefined') return;
+    try {
+      const url = new URL(window.location.href);
+      if (view === 'projects') {
+        url.searchParams.delete('view');
+        url.searchParams.delete('project');
+      } else {
+        url.searchParams.set('view', 'studio');
+        if (projectId) url.searchParams.set('project', projectId);
+        else url.searchParams.delete('project');
+      }
+      window.history.replaceState({}, '', url.toString());
+    } catch {
+      // Ignore restricted history APIs
+    }
+  }, []);
+
+  const handleOpenHubProject = useCallback(
+    async (projectId: string) => {
+      try {
+        setStatusNotice('در حال بارگذاری پروژه از حافظه محلی...');
+        const loadedRec = await projectLibraryStore.getProjectWithAudio(projectId);
+        const imported = await importAudioProject(loadedRec.audioFile, {
+          broker: brokerRef.current,
+          brokerReady: brokerReadyPromiseRef.current,
+          memoryBudgetManager: getSharedMemoryBudgetManager(),
+          retainActivePcmMirror:
+            loadedRec.audioFile.size <= AVAPARDAZ_AUDIO_CACHE_SPLIT.mainThreadBytes,
+        });
+
+        transportRef.current?.stop();
+        setIsPlaying(false);
+        projectResourceLeaseRef.current.replaceWith(imported.runtimeResourceLease ?? null);
+        historyRef.current = new TimelineHistoryManager();
+
+        const hydratedProject: LoadedStudioProject = {
+          ...imported,
+          projectName: loadedRec.record.name,
+        };
+        const hydratedTracks =
+          loadedRec.record.tracks.length > 0
+            ? cloneTracks(loadedRec.record.tracks)
+            : cloneTracks(imported.tracks);
+        const hydratedTokens = cloneTokens(loadedRec.record.tokens);
+        const hydratedRecs = cloneRecommendations(loadedRec.record.recommendations);
+
+        setProject(hydratedProject);
+        setProjectSessionNonce((n) => n + 1);
+        setTracks(hydratedTracks);
+        setTokens(hydratedTokens);
+        setRecommendations(hydratedRecs);
+        setSelectedRecId(hydratedRecs[0]?.id ?? null);
+        setSelection(null);
+        setPlayheadSec(0);
+        setZoom(
+          globalSettings.workspace.resetZoomOnProjectOpen
+            ? 1
+            : loadedRec.record.projectPreferences?.zoomLevel || 1,
+        );
+        setCustomMarkers(
+          (loadedRec.record.projectPreferences?.markers ?? []).map((m) => ({
+            id: m.id,
+            label: m.label,
+            startSec: m.timeSec,
+          })),
+        );
+        setActivePersistedProjectId(loadedRec.record.id);
+        setProjectSaveStatus('saved');
+        setAppView('studio');
+        setActiveTab('studio');
+        syncBrowserUrlForView('studio', loadedRec.record.id);
+        setStatusNotice(`پروژه «${loadedRec.record.name}» بارگذاری شد.`);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : 'باز کردن پروژه ناموفق بود.';
+        setHubError(msg);
+        setStatusNotice(msg);
+      }
+    },
+    [globalSettings.workspace.resetZoomOnProjectOpen, syncBrowserUrlForView],
+  );
+
+  // Auto-open persisted project if URL contains ?project=<id>
+  const initialProjectLoadRef = useRef(false);
+  useEffect(() => {
+    if (initialProjectLoadRef.current) return;
+    initialProjectLoadRef.current = true;
+    if (activePersistedProjectId) {
+      void handleOpenHubProject(activePersistedProjectId);
+    }
+  }, [activePersistedProjectId, handleOpenHubProject]);
+
+  const handleCreateHubProject = useCallback(
+    async (params: { name: string; file: File; detectedContainer: string }) => {
+      const imported = await importAudioProject(params.file, {
+        broker: brokerRef.current,
+        brokerReady: brokerReadyPromiseRef.current,
+        memoryBudgetManager: getSharedMemoryBudgetManager(),
+        retainActivePcmMirror:
+          params.file.size <= AVAPARDAZ_AUDIO_CACHE_SPLIT.mainThreadBytes,
+      });
+
+      const primaryAsset = Object.values(imported.assets)[0];
+      const primaryPcm = primaryAsset ? imported.pcmSources[primaryAsset.id] : undefined;
+      const durationSec = primaryPcm
+        ? primaryPcm.length / Math.max(1, imported.sampleRate)
+        : flicksToSeconds(computeTimelineDurationFlicks(imported.tracks));
+      const previewPeaks = primaryPcm ? extractDownsampledWaveformPeaks(primaryPcm, 48) : null;
+
+      const created = await projectLibraryStore.createProjectFromImportedAudio({
+        name: params.name,
+        file: params.file,
+        detectedContainer: params.detectedContainer,
+        durationSec,
+        sampleRate: imported.sampleRate,
+        tracks: imported.tracks,
+        tokens: imported.tokens,
+        recommendations: imported.recommendations,
+        waveformPreviewPeaks: previewPeaks,
+      });
+
+      transportRef.current?.stop();
+      setIsPlaying(false);
+      projectResourceLeaseRef.current.replaceWith(imported.runtimeResourceLease ?? null);
+      historyRef.current = new TimelineHistoryManager();
+
+      setProject({ ...imported, projectName: created.name });
+      setProjectSessionNonce((n) => n + 1);
+      setTracks(cloneTracks(imported.tracks));
+      setTokens(cloneTokens(imported.tokens));
+      setRecommendations(cloneRecommendations(imported.recommendations));
+      setSelectedRecId(imported.recommendations[0]?.id ?? null);
+      setSelection(null);
+      setPlayheadSec(0);
+      setZoom(1);
+      setCustomMarkers([]);
+      setActivePersistedProjectId(created.id);
+      setProjectSaveStatus('saved');
+      setNewProjectModalOpen(false);
+      setAppView('studio');
+      setActiveTab('studio');
+      syncBrowserUrlForView('studio', created.id);
+      setStatusNotice(`پروژه «${created.name}» ایجاد و ذخیره شد.`);
+      void refreshProjectsHub();
+    },
+    [refreshProjectsHub, syncBrowserUrlForView],
+  );
+
+  const handleRenameHubProject = useCallback(
+    async (projectId: string, nextName: string) => {
+      await projectLibraryStore.renameProject(projectId, nextName);
+      if (activePersistedProjectId === projectId) {
+        setProject((prev) => ({ ...prev, projectName: nextName }));
+      }
+      await refreshProjectsHub();
+    },
+    [activePersistedProjectId, refreshProjectsHub],
+  );
+
+  const handleDuplicateHubProject = useCallback(
+    async (projectId: string) => {
+      await projectLibraryStore.duplicateProject(projectId);
+      await refreshProjectsHub();
+    },
+    [refreshProjectsHub],
+  );
+
+  const handleDeleteHubProject = useCallback(
+    async (projectId: string) => {
+      await projectLibraryStore.deleteProject(projectId);
+      if (activePersistedProjectId === projectId) {
+        setActivePersistedProjectId(null);
+        setProjectSaveStatus('sample');
+      }
+      await refreshProjectsHub();
+    },
+    [activePersistedProjectId, refreshProjectsHub],
+  );
+
+  const handleReturnToProjectsHub = useCallback(async () => {
+    transportRef.current?.stop();
+    setIsPlaying(false);
+    setPreviewingId(null);
+    if (activePersistedProjectId) {
+      try {
+        await projectLibraryStore.saveProjectEdits(activePersistedProjectId, {
+          name: project.projectName,
+          tracks,
+          tokens,
+          recommendations,
+          durationSec: flicksToSeconds(computeTimelineDurationFlicks(tracks)),
+          projectPreferences: {
+            zoomLevel: zoom,
+            selectedTrackId: tracks[0]?.id ?? null,
+            markers: customMarkers.map((m) => ({
+              id: m.id,
+              label: m.label,
+              timeSec: m.startSec,
+              kind: 'general' as const,
+              createdAtMs: Date.now(),
+            })),
+          },
+        });
+      } catch {
+        // Keep user navigable even if storage temporarily fails
+      }
+    }
+    setAppView('projects');
+    syncBrowserUrlForView('projects');
+    void refreshProjectsHub();
+  }, [
+    activePersistedProjectId,
+    customMarkers,
+    project.projectName,
+    recommendations,
+    refreshProjectsHub,
+    syncBrowserUrlForView,
+    tokens,
+    tracks,
+    zoom,
+  ]);
+
+  const handleOpenSampleStudio = useCallback(() => {
+    setActivePersistedProjectId(null);
+    setProjectSaveStatus('sample');
+    setAppView('studio');
+    setActiveTab('studio');
+    syncBrowserUrlForView('studio', null);
+  }, [syncBrowserUrlForView]);
+
+  // Debounced autosave to IndexedDB for persisted projects
+  const autosaveTimerRef = useRef<number | null>(null);
+  useEffect(() => {
+    if (!activePersistedProjectId || appView !== 'studio') return;
+    setProjectSaveStatus('saving');
+    if (autosaveTimerRef.current) window.clearTimeout(autosaveTimerRef.current);
+    autosaveTimerRef.current = window.setTimeout(() => {
+      void projectLibraryStore
+        .saveProjectEdits(activePersistedProjectId, {
+          name: project.projectName,
+          tracks,
+          tokens,
+          recommendations,
+          durationSec: flicksToSeconds(computeTimelineDurationFlicks(tracks)),
+          projectPreferences: {
+            zoomLevel: zoom,
+            selectedTrackId: tracks[0]?.id ?? null,
+            markers: customMarkers.map((m) => ({
+              id: m.id,
+              label: m.label,
+              timeSec: m.startSec,
+              kind: 'general' as const,
+              createdAtMs: Date.now(),
+            })),
+          },
+        })
+        .then(() => {
+          setProjectSaveStatus('saved');
+        })
+        .catch(() => {
+          setProjectSaveStatus('error');
+        });
+    }, 650);
+
+    return () => {
+      if (autosaveTimerRef.current) window.clearTimeout(autosaveTimerRef.current);
+    };
+  }, [
+    activePersistedProjectId,
+    appView,
+    project.projectName,
+    tracks,
+    tokens,
+    recommendations,
+    customMarkers,
+    zoom,
+  ]);
 
   const syncWorkflowTranscript = (
     nextTokens: readonly PersianWordToken[],
@@ -1889,6 +2340,12 @@ export default function App() {
               titleFa: 'نصب خودکار مدل فارسی محلی ناموفق بود',
               messageFa: msgFa,
             });
+            setActiveFailure(
+              buildUserFacingFailure(
+                classifyError(new Error('MODEL_NOT_INSTALLED'), { subsystem: 'ASR_MODEL' }),
+                workflowState.locale,
+              ),
+            );
             setStatusNotice(msgFa);
             return;
           }
@@ -3529,6 +3986,9 @@ export default function App() {
   };
 
   const auditionMarkers = useMemo(() => {
+    if (customMarkers.length > 0) {
+      return [...customMarkers].sort((a, b) => a.startSec - b.startSec);
+    }
     const chapters = prosodyAndChaptersReport?.chapters ?? [];
     if (chapters.length > 0) {
       return chapters.map((ch, idx) => ({
@@ -3545,7 +4005,141 @@ export default function App() {
         label: r.relatedText,
         startSec: flicksToSeconds(r.range.startFlicks),
       }));
-  }, [prosodyAndChaptersReport, recommendations]);
+  }, [customMarkers, prosodyAndChaptersReport, recommendations]);
+
+  const handleAddMarkerAtPlayhead = useCallback(() => {
+    const t = Number(playheadSec.toFixed(2));
+    const idx = customMarkers.length + 1;
+    const label =
+      globalSettings.language.locale === 'fa'
+        ? `نشانگر ${idx}`
+        : `Marker ${idx}`;
+    setCustomMarkers((prev) => [
+      ...prev,
+      { id: `mk_${Date.now()}_${idx}`, label, startSec: t },
+    ]);
+    setStatusNotice(
+      globalSettings.language.locale === 'fa'
+        ? `نشانگر «${label}» در ثانیه ${t.toFixed(2)} ثبت شد.`
+        : `Marker "${label}" added at ${t.toFixed(2)}s.`,
+    );
+  }, [customMarkers.length, globalSettings.language.locale, playheadSec]);
+
+  const handleRenameMarker = useCallback((markerId: string, nextLabel: string) => {
+    setCustomMarkers((prev) =>
+      prev.map((m) => (m.id === markerId ? { ...m, label: nextLabel } : m)),
+    );
+  }, []);
+
+  const handleDeleteMarker = useCallback((markerId: string) => {
+    setCustomMarkers((prev) => prev.filter((m) => m.id !== markerId));
+  }, []);
+
+  const handleStepBack = () => {
+    handleSeekSec(Math.max(0, playheadSec - globalSettings.playback.seekStepSec));
+  };
+
+  const handleStepForward = () => {
+    handleSeekSec(Math.min(totalDurationSec, playheadSec + globalSettings.playback.seekStepSec));
+  };
+
+  const handlePreviewSuggestionWithContext = (
+    rec: SmartRecommendation,
+    beforeSec: number,
+    afterSec: number,
+  ) => {
+    const startSec = Math.max(0, flicksToSeconds(rec.boundary.snappedRange.startFlicks) - beforeSec);
+    const endSec = Math.min(
+      totalDurationSec,
+      flicksToSeconds(rec.boundary.snappedRange.endFlicks) + afterSec,
+    );
+    if (endSec <= startSec + 0.05) {
+      handlePreviewRecommendation(rec, 'before');
+      return;
+    }
+    setPreviewingId(`${rec.id}-before`);
+    handlePlaySelectionRange({
+      startSec,
+      endSec,
+      trackId: rec.trackId,
+      scope: 'all',
+    });
+  };
+
+  const handleApplyApprovedBatch = (approvedRecs: readonly SmartRecommendation[]) => {
+    if (isReadOnlyLocked) {
+      setStatusNotice('ویرایش غیرفعال است: پروژه بدون قفل انحصاری در حالت فقط‌خواندنی قرار دارد.');
+      return;
+    }
+    if (approvedRecs.length === 0) return;
+
+    transportRef.current?.stop();
+    setIsPlaying(false);
+    setPreviewingId(null);
+
+    const beforeTracksSnapshot = cloneTracks(tracks);
+    const beforeTokensSnapshot = cloneTokens(tokens);
+    const beforeRecsSnapshot = cloneRecommendations(recommendations);
+
+    // Execute approved items in DESCENDING start timestamp order inside one undoable transaction
+    let curTracks = cloneTracks(tracks);
+    let curTokens = cloneTokens(tokens);
+    let curRecs = cloneRecommendations(recommendations);
+    let appliedCount = 0;
+
+    const sorted = [...approvedRecs].sort(
+      (a, b) => b.boundary.snappedRange.startFlicks - a.boundary.snappedRange.startFlicks,
+    );
+
+    for (const rec of sorted) {
+      const liveRec = curRecs.find((r) => r.id === rec.id);
+      if (!liveRec || (liveRec.status !== 'Pending' && liveRec.status !== 'Modified')) continue;
+      const cutRange = liveRec.boundary.snappedRange;
+      if (cutRange.endFlicks <= cutRange.startFlicks) continue;
+
+      const mode = liveRec.recommendedMode;
+      const tracksBeforeStep = curTracks;
+      curTracks = applySyncSafeCut(tracksBeforeStep, liveRec.trackId, cutRange, mode);
+      curTokens = projectTokensAfterCut(curTokens, tracksBeforeStep, liveRec.trackId, cutRange, mode);
+      curRecs = projectRecommendationsAfterCut(
+        curRecs,
+        tracksBeforeStep,
+        liveRec.trackId,
+        cutRange,
+        mode,
+        liveRec.id,
+      );
+      appliedCount++;
+    }
+
+    if (appliedCount === 0) {
+      setStatusNotice('هیچ پیشنهاد معتبری برای اعمال یافت نشد.');
+      return;
+    }
+
+    historyRef.current.commitTransaction({
+      coalescingKey: '',
+      type: 'sync-locked-ripple-cut',
+      description: `اعمال برنامه تدوین (${appliedCount} پیشنهاد تأییدشده)`,
+      beforeTracks: beforeTracksSnapshot,
+      afterTracks: curTracks,
+      beforeTokens: beforeTokensSnapshot,
+      afterTokens: curTokens,
+      beforeRecommendations: beforeRecsSnapshot,
+      afterRecommendations: curRecs,
+    });
+
+    setTracks(curTracks);
+    setTokens(curTokens);
+    setRecommendations(curRecs);
+    syncWorkflowTranscript(curTokens, `اعمال برنامه تدوین (${appliedCount} مورد)`, {
+      targetTracks: curTracks,
+    });
+    persistDirtyCheckpointForCurrentState(curTracks);
+    clampPlaybackAndSelectionToTracks(curTracks);
+    setHistoryTick((v) => v + 1);
+    setStatusNotice(`برنامه تدوین اعمال شد: ${appliedCount} پیشنهاد با قابلیت بازگشت (Undo).`);
+  };
 
   const handleJumpPrevMarker = () => {
     const prev = [...auditionMarkers].reverse().find((m) => m.startSec < playheadSec - 0.15);
@@ -3654,6 +4248,8 @@ export default function App() {
 
     const hasOpenModal =
       renderModalOpen ||
+      settingsModalOpen ||
+      newProjectModalOpen ||
       lifecycleModalOpen ||
       asrLabOpen ||
       devPortalOpen ||
@@ -3661,7 +4257,7 @@ export default function App() {
       dataFactoryOpen ||
       modelFactoryOpen ||
       securityOpen;
-    if (hasOpenModal) {
+    if (hasOpenModal || appView !== 'studio') {
       return;
     }
 
@@ -3698,6 +4294,9 @@ export default function App() {
     } else if (e.key === 'l' || e.key === 'L') {
       e.preventDefault();
       handleToggleLoopSelection();
+    } else if (e.key === 'm' || e.key === 'M') {
+      e.preventDefault();
+      handleAddMarkerAtPlayhead();
     } else if (e.key === 'Escape') {
       setSelection(null);
     }
@@ -3709,448 +4308,280 @@ export default function App() {
     return () => window.removeEventListener('keydown', onKeyDown);
   }, []);
 
-  return (
-    <div
-      dir={workflowState.locale === 'fa' ? 'rtl' : 'ltr'}
-      className="min-h-screen flex flex-col bg-slate-50 dark:bg-[#0B0F17] text-slate-900 dark:text-slate-100 overflow-x-hidden"
-    >
-      <HeaderNav
-        activeTab={activeTab}
-        onSelectTab={setActiveTab}
-        onOpenExport={() => setRenderModalOpen(true)}
-        locale={workflowState.locale}
-      />
+  const effectiveTheme = resolveEffectiveTheme(globalSettings.appearance.theme);
+  const currentLocale = globalSettings.language.locale;
+  const isFa = currentLocale === 'fa';
+  const showSuggestionsPanel = globalSettings.workspace.showSuggestionsPanel;
+  const showFilesPanel = globalSettings.workspace.showFilesPanel;
+  const hasAudioLoaded = tracks.length > 0 && totalDurationSec > 0;
+  const hasTranscriptWords = tokens.length > 0;
+  const pendingSuggestionsCount = recommendations.filter((r) => r.status === 'Pending').length;
+  const acceptedSuggestionsCount = recommendations.filter((r) => r.status === 'Accepted').length;
+  const asrStatusLabel = formatAsrShortStatus(workflowState.asrState, currentLocale);
+  const asrReady =
+    workflowState.asrState === 'MODEL_READY' ||
+    workflowState.asrState === 'MODEL_AVAILABLE' ||
+    workflowState.asrState === 'TRANSCRIPTION_COMPLETED' ||
+    hasBrowserInstalledModel ||
+    Boolean(shahabRuntimeStatus?.available);
 
-      <main className="flex-1 w-full max-w-[1440px] mx-auto px-3 sm:px-6 pt-4 pb-28 space-y-4">
-        {/* Local-First Lifecycle, Execution Mode (LOCAL default / CLOUD opt-in), Theme/Locale & Reliability Failure Banner */}
-        <WorkflowStageBar
-          workflowState={workflowState}
-          executionMode={executionMode}
-          cloudProviderStatusLabel={
-            workflowState.locale === 'fa'
-              ? 'سیاست ۱۰۰٪ محلی فعال (ابری غیرفعال)'
-              : '100% Local-Only Policy Enforced (Cloud Disabled)'
-          }
-          onChangeExecutionMode={handleChangeExecutionMode}
-          cloudAsrConfigured={cloudAsrConfigured}
-          activeFailure={activeFailure}
-          canInstallPwa={false}
-          onTriggerInstallPwa={() => {}}
-          onDismissFailure={() => setActiveFailure(null)}
-          onRecoverFailure={() => {
-            setLifecycleInitialTab('model');
+  const headerWorkflowSteps: HeaderWorkflowStepItem[] = [
+    {
+      id: 'file',
+      num: isFa ? '۱' : '1',
+      label: isFa ? 'صوت' : 'Audio',
+      done: hasAudioLoaded,
+    },
+    {
+      id: 'transcribe',
+      num: isFa ? '۲' : '2',
+      label: isFa ? 'متن' : 'Text',
+      done: hasTranscriptWords,
+    },
+    {
+      id: 'review',
+      num: isFa ? '۳' : '3',
+      label: isFa ? 'بازبینی' : 'Review',
+      done: acceptedSuggestionsCount > 0 && pendingSuggestionsCount === 0,
+    },
+    {
+      id: 'export',
+      num: isFa ? '۴' : '4',
+      label: isFa ? 'خروجی' : 'Export',
+      done: workflowState.exportStatus === 'SAVED_OR_DOWNLOADED',
+    },
+  ];
+
+  const handleSelectWorkflowStep = (step: StudioWorkflowStepId) => {
+    setActiveWorkflowStep(step);
+    if (step === 'file') {
+      setMobileStudioPane('files');
+      setLeftRailCollapsed(false);
+      setSideDockTab('files');
+      setTrackHeightPx(124);
+    } else if (step === 'transcribe') {
+      setMobileStudioPane('center');
+      setTrackHeightPx(50);
+    } else if (step === 'review') {
+      setMobileStudioPane('suggestions');
+      setTrackHeightPx(82);
+    } else if (step === 'export') {
+      setRenderModalOpen(true);
+    }
+  };
+
+  const handleOpenDeveloperViewFromSettings = (
+    target: 'graph' | 'storage' | 'shahab' | 'asr-lab' | 'security' | 'lifecycle' | 'companion',
+  ) => {
+    setSettingsModalOpen(false);
+    if (target === 'graph' || target === 'storage' || target === 'shahab') {
+      setAppView('studio');
+      setActiveTab(target);
+    } else if (target === 'asr-lab') {
+      setAsrLabOpen(true);
+    } else if (target === 'security') {
+      setSecurityOpen(true);
+    } else if (target === 'lifecycle' || target === 'companion') {
+      setLifecycleInitialTab('health');
+      setLifecycleModalOpen(true);
+    }
+  };
+
+  if (appView === 'projects') {
+    return (
+      <div
+        dir={isFa ? 'rtl' : 'ltr'}
+        className="min-h-screen flex flex-col bg-[var(--avp-bg)] text-[var(--avp-text)] overflow-x-hidden"
+      >
+        <ProjectsHubView
+          locale={currentLocale}
+          theme={effectiveTheme}
+          projects={hubProjects}
+          isLoading={hubLoading}
+          errorMessage={hubError}
+          corruptedCount={hubCorruptedCount}
+          onRetryLoad={() => void refreshProjectsHub()}
+          onOpenNewProjectModal={() => setNewProjectModalOpen(true)}
+          onOpenProject={(id) => void handleOpenHubProject(id)}
+          onOpenSampleStudio={handleOpenSampleStudio}
+          onRenameProject={handleRenameHubProject}
+          onDuplicateProject={handleDuplicateHubProject}
+          onDeleteProject={handleDeleteHubProject}
+          onToggleTheme={handleToggleThemeQuick}
+          onToggleLocale={() => handleToggleLocaleQuick()}
+          onOpenSettings={() => setSettingsModalOpen(true)}
+          onOpenLifecycleModal={() => {
+            setLifecycleInitialTab('health');
             setLifecycleModalOpen(true);
-          }}
-          onImportAudioClick={() => fileInputRef.current?.click()}
-          onOpenLifecycleModal={(tab) => {
-            setLifecycleInitialTab(tab ?? 'health');
-            setLifecycleModalOpen(true);
-          }}
-          onToggleTheme={() =>
-            workflowRef.current?.setTheme(workflowState.theme === 'dark' ? 'light' : 'dark')
-          }
-          onToggleLocale={(next: WorkflowLocale) => workflowRef.current?.setLocale(next)}
-          advancedLabs={{
-            onOpenAsrLab: () => setAsrLabOpen(true),
-            onOpenDevPortal: () => setDevPortalOpen(true),
-            onOpenSpeechIntel: () => setSpeechIntelOpen(true),
-            onOpenDataFactory: () => setDataFactoryOpen(true),
-            onOpenModelFactory: () => setModelFactoryOpen(true),
-            onOpenSpeechSecurity: () => setSecurityOpen(true),
           }}
         />
 
-        {/* Project & Transport Toolbar */}
-        <section
-          dir="rtl"
-          aria-label="نوار کنترل پروژه و پخش"
-          className="border border-slate-200 dark:border-[#252F42] bg-white dark:bg-[#131924] rounded-lg px-4 py-3 flex flex-wrap items-center justify-between gap-4"
+        <NewProjectModal
+          isOpen={newProjectModalOpen}
+          locale={currentLocale}
+          onClose={() => setNewProjectModalOpen(false)}
+          onCreateProject={handleCreateHubProject}
+        />
+
+        <SettingsCenterModal
+          isOpen={settingsModalOpen}
+          onClose={() => setSettingsModalOpen(false)}
+          settings={globalSettings}
+          onUpdateSettings={handleUpdateGlobalSettings}
+          saveStatus={settingsSaveStatus}
+          saveError={settingsSaveError}
+          onOpenDeveloperView={handleOpenDeveloperViewFromSettings}
+        />
+
+        <LifecycleManagementModal
+          isOpen={lifecycleModalOpen}
+          initialTab={lifecycleInitialTab}
+          onClose={() => setLifecycleModalOpen(false)}
+          workflowState={workflowState}
+          modelManager={modelManagerRef.current}
+          onModelStateChanged={syncModelSnapshotToWorkflow}
+        />
+      </div>
+    );
+  }
+
+  return (
+    <div
+      dir={isFa ? 'rtl' : 'ltr'}
+      className="min-h-screen lg:h-screen lg:overflow-hidden flex flex-col bg-[var(--avp-bg)] text-[var(--avp-text)] overflow-x-hidden"
+    >
+      {/* Hidden audio file input preserved for direct Studio import & E2E */}
+      <input
+        ref={fileInputRef}
+        data-testid="audio-file-input"
+        type="file"
+        accept="audio/*"
+        onChange={handleFileUpload}
+        className="hidden"
+        aria-label={isFa ? 'انتخاب فایل صوتی' : 'Select audio file'}
+      />
+
+      {/* 1. Unified 48px Studio Header (with embedded desktop 4-step stepper) */}
+      <HeaderNav
+        projectTitle={project.projectName}
+        sampleRate={project.sampleRate}
+        trackCount={tracks.length}
+        wordCount={tokens.length}
+        saveStatus={projectSaveStatus}
+        activeTab={activeTab}
+        onSelectTab={setActiveTab}
+        onBackToProjects={() => void handleReturnToProjectsHub()}
+        onOpenExport={() => setRenderModalOpen(true)}
+        onOpenSettings={() => setSettingsModalOpen(true)}
+        onOpenLifecycleModal={(tab) => {
+          setLifecycleInitialTab(tab ?? 'health');
+          setLifecycleModalOpen(true);
+        }}
+        onImportAudioClick={() => fileInputRef.current?.click()}
+        workflowSteps={headerWorkflowSteps}
+        activeWorkflowStep={activeWorkflowStep}
+        onSelectWorkflowStep={handleSelectWorkflowStep}
+        asrStatusLabel={asrStatusLabel}
+        asrReady={asrReady}
+        canUndo={historyRef.current.canUndo()}
+        canRedo={historyRef.current.canRedo()}
+        onUndo={handleUndo}
+        onRedo={handleRedo}
+        executionMode={executionMode}
+        onChangeExecutionMode={handleChangeExecutionMode}
+        theme={effectiveTheme}
+        onToggleTheme={handleToggleThemeQuick}
+        locale={currentLocale}
+        onToggleLocale={handleToggleLocaleQuick}
+      />
+
+      {/* 2. Mobile-only Compact Stepper + Honest Failure Banner (Zero desktop chrome tax) */}
+      <WorkflowStageBar
+        workflowState={workflowState}
+        executionMode={executionMode}
+        cloudProviderStatusLabel={
+          isFa ? 'سیاست ۱۰۰٪ محلی فعال' : '100% Local-Only Policy'
+        }
+        cloudAsrConfigured={cloudAsrConfigured}
+        hasAudioLoaded={hasAudioLoaded}
+        hasTranscriptWords={hasTranscriptWords}
+        pendingSuggestionsCount={pendingSuggestionsCount}
+        acceptedSuggestionsCount={acceptedSuggestionsCount}
+        activeStep={activeWorkflowStep}
+        onSelectStep={handleSelectWorkflowStep}
+        activeFailure={activeFailure}
+        canInstallPwa={false}
+        onTriggerInstallPwa={() => {}}
+        onDismissFailure={() => setActiveFailure(null)}
+        onRecoverFailure={() => {
+          setLifecycleInitialTab('model');
+          setLifecycleModalOpen(true);
+        }}
+        onImportAudioClick={() => fileInputRef.current?.click()}
+        onOpenLifecycleModal={(tab) => {
+          setLifecycleInitialTab(tab ?? 'health');
+          setLifecycleModalOpen(true);
+        }}
+      />
+
+      {/* Inline Full-Bleed Status Strip (only when active) */}
+      {statusNotice && (
+        <div
+          role="status"
+          data-testid="studio-status-notice"
+          className="px-4 py-1.5 border-b border-[var(--avp-accent)]/25 bg-[var(--avp-accent-soft)]/70 text-xs text-[var(--avp-text)] flex items-center justify-between gap-3 shrink-0"
         >
-          <div className="min-w-0">
-            <h1 className="text-base font-bold text-slate-900 dark:text-slate-100 truncate" data-testid="project-title">
-              {project.projectName}
-            </h1>
-            <div className="text-xs text-slate-500 dark:text-slate-400 mt-0.5 flex flex-wrap items-center gap-2 font-mono">
-              <span dir="ltr">{project.sampleRate} Hz</span>
-              <span aria-hidden="true">·</span>
-              <span className="font-sans">{tracks.length} ترک فعال</span>
-              <span aria-hidden="true">·</span>
-              <span>پردازش محلی ({capabilities.transportMode})</span>
-            </div>
-          </div>
-
-          <div className="flex flex-wrap items-center gap-2">
-            {/* Transport Buttons */}
-            <button
-              type="button"
-              data-testid="toolbar-btn-play-pause"
-              onClick={handleTogglePlay}
-              className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold rounded-md bg-emerald-500 text-slate-950 hover:bg-emerald-400 cursor-pointer"
-            >
-              {isPlaying ? (
-                <>
-                  <Pause className="w-3.5 h-3.5" aria-hidden="true" />
-                  <span>توقف</span>
-                </>
-              ) : (
-                <>
-                  <Play className="w-3.5 h-3.5" aria-hidden="true" />
-                  <span>پخش</span>
-                </>
-              )}
-            </button>
-
-            <button
-              type="button"
-              onClick={handleStopAndReset}
-              aria-label="بازگشت به ابتدا"
-              className="p-2 rounded-md border border-slate-300 dark:border-[#252F42] bg-slate-50 dark:bg-[#0E131D] text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-[#1E2738] cursor-pointer"
-            >
-              <RotateCcw className="w-3.5 h-3.5" />
-            </button>
-
-            <div
-              dir="ltr"
-              className="px-3 py-1.5 rounded-md border border-slate-300 dark:border-[#252F42] bg-slate-50 dark:bg-[#0B0F17] font-mono tabular-nums text-xs text-amber-700 dark:text-amber-400"
-              aria-label="زمان‌سنج پخش"
-            >
-              {formatTimecode(secondsToFlicks(playheadSec))} / {formatTimecode(totalDurationFlicks)}
-            </div>
-
-            <div className="h-5 w-px bg-slate-300 dark:bg-[#252F42] mx-1 hidden sm:block" aria-hidden="true" />
-
-            <button
-              type="button"
-              data-testid="btn-timeline-undo"
-              onClick={handleUndo}
-              disabled={!historyRef.current.canUndo()}
-              aria-label="بازگشت (Undo)"
-              className="inline-flex items-center gap-1 px-2.5 py-2 text-xs rounded-md border border-slate-300 dark:border-[#252F42] text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-[#1E2738] disabled:opacity-40 cursor-pointer disabled:cursor-not-allowed"
-            >
-              <Undo2 className="w-3.5 h-3.5" aria-hidden="true" />
-              <span>بازگشت</span>
-            </button>
-
-            <button
-              type="button"
-              data-testid="btn-timeline-redo"
-              onClick={handleRedo}
-              disabled={!historyRef.current.canRedo()}
-              aria-label="تکرار (Redo)"
-              className="inline-flex items-center gap-1 px-2.5 py-2 text-xs rounded-md border border-slate-300 dark:border-[#252F42] text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-[#1E2738] disabled:opacity-40 cursor-pointer disabled:cursor-not-allowed"
-            >
-              <Redo2 className="w-3.5 h-3.5" aria-hidden="true" />
-              <span>تکرار</span>
-            </button>
-
-            <input
-              ref={fileInputRef}
-              data-testid="audio-file-input"
-              type="file"
-              accept="audio/*"
-              onChange={handleFileUpload}
-              className="hidden"
-              aria-label="انتخاب فایل صوتی"
-            />
-            <button
-              type="button"
-              data-testid="btn-upload-audio"
-              disabled={isImportingAudio}
-              onClick={() => fileInputRef.current?.click()}
-              className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-medium rounded-md border border-slate-300 dark:border-[#252F42] bg-slate-50 dark:bg-[#0E131D] text-slate-800 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-[#1E2738] disabled:opacity-50 cursor-pointer disabled:cursor-not-allowed"
-            >
-              <Upload className="w-3.5 h-3.5" aria-hidden="true" />
-              <span>{isImportingAudio ? 'در حال ورود...' : 'ورود فایل صوتی'}</span>
-            </button>
-
-            <button
-              type="button"
-              data-testid="btn-record-studio-mic"
-              onClick={handleRecordStudioMicTake}
-              className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-medium rounded-md border border-rose-500/40 bg-rose-500/10 text-rose-700 dark:text-rose-200 hover:bg-rose-500/20 cursor-pointer"
-            >
-              <Mic className="w-3.5 h-3.5 text-rose-500 dark:text-rose-400" aria-hidden="true" />
-              <span>ضبط برداشت صوتی</span>
-            </button>
-
-            <button
-              type="button"
-              data-testid="btn-spectral-wiener-denoise"
-              onClick={handleApplySpectralWienerDenoise}
-              className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-medium rounded-md border border-cyan-500/40 bg-cyan-500/10 text-cyan-800 dark:text-cyan-200 hover:bg-cyan-500/20 cursor-pointer"
-            >
-              <Waves className="w-3.5 h-3.5 text-cyan-600 dark:text-cyan-300" aria-hidden="true" />
-              <span>حذف نویز طیفی</span>
-            </button>
-
-            <button
-              type="button"
-              data-testid="btn-reset-demo"
-              onClick={handleResetDemoProject}
-              className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-medium rounded-md border border-slate-300 dark:border-[#252F42] text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-[#1E2738] cursor-pointer"
-            >
-              <Sparkles className="w-3.5 h-3.5 text-amber-500 dark:text-amber-400" aria-hidden="true" />
-              <span>نمونه پادکست</span>
-            </button>
-          </div>
-        </section>
-
-        {!shahabRuntimeStatus?.available && (
-          <CompanionConnectionDiagnostic
-            endpoint={companionEndpoint}
-            onChangeEndpoint={handleChangeCompanionEndpoint}
-            locale={workflowState.locale}
-          />
-        )}
-
-        {statusNotice && (
-          <div
-            role="status"
-            dir="rtl"
-            data-testid="studio-status-notice"
-            className="px-4 py-2.5 rounded-md border border-sky-500/30 bg-sky-500/10 text-xs text-sky-900 dark:text-sky-200 flex items-center justify-between gap-3"
+          <span className="truncate">{statusNotice}</span>
+          <button
+            type="button"
+            onClick={() => setStatusNotice(null)}
+            className="text-[var(--avp-accent-text)] font-medium hover:underline cursor-pointer shrink-0"
           >
-            <span>{statusNotice}</span>
-            <button
-              type="button"
-              onClick={() => setStatusNotice(null)}
-              className="text-sky-700 dark:text-sky-300 hover:text-slate-950 dark:hover:text-white cursor-pointer shrink-0"
-            >
-              بستن
-            </button>
-          </div>
-        )}
+            {isFa ? 'بستن' : 'Dismiss'}
+          </button>
+        </div>
+      )}
 
+      {/* 3. Main Edge-to-Edge Split-Pane Studio Workspace (Reserved bottom space for 56px docked Transport) */}
+      <main className="flex-1 min-h-0 w-full flex flex-col pb-[76px] lg:pb-[56px]">
         {activeTab === 'studio' && (
-          <div className="space-y-4">
-            <ShahabLiveStatusWidget
-              status={shahabRuntimeStatus}
-              isTranscribing={isTranscribingAsr}
-              hasCheckedOnce={shahabStatusCheckedOnce}
-              isRefreshing={isRefreshingShahabStatus}
-              lastCheckedAtMs={shahabStatusLastCheckedMs}
-              locale={workflowState.locale}
-              onRefresh={() => {
-                void refreshShahabRuntimeStatus(true);
-              }}
-            />
-            {/* Adobe Audition DAW Split Workspace: Side Media/Effects/Markers Bin + Multi-Track Editor */}
-            <div className="grid grid-cols-1 xl:grid-cols-[290px_1fr] gap-4 items-start">
-              <AuditionSideDock
-                tracks={tracks}
-                assets={project.assets}
-                sampleRate={project.sampleRate}
-                history={historyRef.current.getHistory()}
-                markers={auditionMarkers}
-                onSeekSec={handleSeekSec}
-                onToggleTrackMute={handleToggleTrackMute}
-                onToggleTrackSolo={handleToggleTrackSolo}
-                onSelectTrackRange={(trackId, startSec, endSec) => {
-                  setSelection({
-                    startSec: Number(startSec.toFixed(2)),
-                    endSec: Number(endSec.toFixed(2)),
-                    trackId,
-                    scope: 'track',
-                  });
-                  handleSeekSec(startSec);
-                }}
-                dspRackNode={
-                  <div className="text-xs text-slate-300 space-y-2">
-                    <p className="text-slate-400 leading-relaxed">
-                      رک کامل DSP (HPF {ephemeralDsp.highPassHz}Hz · کمپرسور {ephemeralDsp.compressorThresholdDb}dB · گیت {ephemeralDsp.noiseGateThresholdDb}dB) به‌صورت زنده روی خروجی پخش و رندر فعال است.
-                    </p>
-                    <button
-                      type="button"
-                      onClick={handleApplyAcousticAdvisorPreset}
-                      className="w-full py-1.5 px-2.5 rounded bg-amber-400 text-slate-950 font-semibold hover:bg-amber-300 cursor-pointer"
-                    >
-                      کالیبراسیون خودکار DSP
-                    </button>
-                  </div>
-                }
-              />
+          <>
+            {/* Mobile/Tablet Compact Pane Switcher */}
+            <div className="flex lg:hidden items-center px-3 py-1.5 border-b border-[var(--avp-border)] bg-[var(--avp-surface)]">
+              <div className="avp-segmented w-full">
+                {(
+                  [
+                    { id: 'center', label: isFa ? 'تایملاین و متن' : 'Timeline & Text' },
+                    { id: 'suggestions', label: isFa ? 'پیشنهادها' : 'Suggestions' },
+                    { id: 'files', label: isFa ? 'فایل‌ها و افکت' : 'Files & DSP' },
+                  ] as const
+                ).map((tab) => (
+                  <button
+                    key={tab.id}
+                    type="button"
+                    onClick={() => setMobileStudioPane(tab.id)}
+                    aria-pressed={mobileStudioPane === tab.id}
+                    className="avp-segmented-item flex-1"
+                  >
+                    {tab.label}
+                  </button>
+                ))}
+              </div>
+            </div>
 
-              <div className="space-y-4 min-w-0">
-                <WaveformCanvas
-                  tracks={tracks}
-                  assets={project.assets}
-                  pcmSources={project.pcmSources}
-                  recommendations={recommendations}
-                  selectedRecId={selectedRecId}
-                  playheadSec={playheadSec}
-                  totalDurationSec={totalDurationSec}
-                  zoom={zoom}
-                  onZoomChange={setZoom}
-                  onSeekSec={handleSeekSec}
-                  onToggleTrackMute={handleToggleTrackMute}
-                  onToggleTrackSolo={handleToggleTrackSolo}
-                  onSelectRecommendation={(id) => setSelectedRecId(id)}
-                  onSplitAtPlayhead={handleSplitAtPlayhead}
-                  onCutWaveformRange={handleCutWaveformRange}
-                  detectedSyncOffsetMs={detectedSyncOffsetMs}
-                  detectedClockDriftPpm={detectedClockDriftPpm}
-                  onAutoAlignSyncedTracks={handleAutoAlignSyncedTracks}
-                  onNudgeSyncedTracksMs={handleNudgeSyncedTracksMs}
-                  selection={selection}
-                  onSelectionChange={(nextSel) => setSelection(clampSelectionRange(nextSel))}
-                  onPlaySelectionRange={(sel) => handlePlaySelectionRange(clampSelectionRange(sel))}
-                />
-
-                <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 items-start">
-                  <div className="lg:col-span-7 space-y-4 min-w-0">
-                    <TranscriptPanel
-                      tokens={tokens}
-                      tracks={tracks}
-                      pcmSources={project.pcmSources}
-                      sampleRate={project.sampleRate}
-                      playheadSec={playheadSec}
-                      totalDurationSec={totalDurationSec}
-                      isTranscribingAsr={isTranscribingAsr}
-                      hasBrowserInstalledModel={hasBrowserInstalledModel}
-                      shahabRuntimeStatus={shahabRuntimeStatus}
-                      isInstallingBrowserModel={isInstallingBrowserModel}
-                      browserModelInstallPct={browserModelInstallPct}
-                      executionMode={executionMode}
-                      cloudAsrConfigured={cloudAsrConfigured}
-                      projectSessionNonce={projectSessionNonce}
-                      asrInlineFeedback={asrInlineFeedback}
-                      onDismissAsrInlineFeedback={() => setAsrInlineFeedback(null)}
-                      onInstallBrowserPersianModel={handleInstallBrowserPersianModel}
-                      onLoadAndTranscribeSamplePersianAudio={handleLoadAndTranscribeSamplePersianAudio}
-                      onRunAcousticSegmentation={handleRunAcousticSegmentation}
-                      onOpenLocalModelInstaller={() => {
-                        setLifecycleInitialTab('model');
-                        setLifecycleModalOpen(true);
-                      }}
-                      onSwitchToLocalExecutionMode={() => handleChangeExecutionMode('LOCAL')}
-                      onSeekSec={handleSeekSec}
-                      onCutSelectedWords={handleCutSelectedWords}
-                      onUpdateTokenDisplayText={handleUpdateTokenDisplayText}
-                      onRunPersianAsr={handleRunPersianAsr}
-                      onRunForcedAlignment={handleRunForcedAlignment}
-                      onRestoreProsodicPunctuation={handleRestoreProsodicPunctuation}
-                      onConvertColloquialToFormal={handleConvertColloquialToFormal}
-                      onNormalizeNumbersAndCompounds={handleNormalizeNumbersAndCompounds}
-                      onRedactSelectedWords={handleRedactSelectedWords}
-                      prosodyAndChaptersReport={prosodyAndChaptersReport}
-                      onApplyCustomLexicon={handleApplyCustomLexicon}
-                      onWsolaTimeStretchSelectedWords={handleWsolaTimeStretchSelectedWords}
-                      onPunchInSpectralMatchSelectedWords={handlePunchInSpectralMatchSelectedWords}
-                      onOptimizeTrilingualAsr={handleOptimizeTrilingualAsr}
-                      englishRenderMode={englishRenderMode}
-                    />
-                    <DspControlRack
-                      ephemeralParams={ephemeralDsp}
-                      committedParams={committedDsp}
-                      isGestureActive={isGestureActive}
-                      sampleRate={project.sampleRate}
-                      history={historyRef.current.getHistory()}
-                      acousticAdvisor={acousticAdvisor}
-                      eqResponseCurveDb={eqResponseCurveDb}
-                      phaseDiagnostic={phaseDiagnostic}
-                      onEphemeralChange={handleEphemeralDspChange}
-                      onCommitGesture={handleCommitDspGesture}
-                      onResetDefaults={handleResetDsp}
-                      onApplyAcousticAdvisorPreset={handleApplyAcousticAdvisorPreset}
-                      onApply8BandPersianVoiceEq={handleApply8BandPersianVoiceEq}
-                    />
-                  </div>
-
-                  <div className="lg:col-span-5 space-y-4 min-w-0">
-                    <EdlReviewPanel
-                      locale={workflowState.locale}
-                      sampleRate={project.sampleRate}
-                      tokens={tokens}
-                      speechEventResult={workflowState.speechEventResult}
-                      edlSnapshot={workflowState.edlSnapshot}
-                      isAnalyzing={workflowState.isAnalyzingEvents}
-                      canUndoEdl={workflowState.edlUndoStack.length > 0}
-                      canRedoEdl={workflowState.edlRedoStack.length > 0}
-                      onRunAnalysis={handleRunMissionEdlAnalysis}
-                      onApproveProposal={(proposalId) => {
-                        if (isReadOnlyLocked) {
-                          setStatusNotice('ویرایش غیرفعال است: پروژه بدون قفل انحصاری در حالت فقط‌خواندنی قرار دارد.');
-                          return;
-                        }
-                        const r = workflowRef.current!.applyHumanDecision({
-                          action: 'APPROVE',
-                          proposalId,
-                        });
-                        if (!r.ok && r.failure) {
-                          setStatusNotice(`تأیید پیشنهاد مسدود شد: ${r.failure.message}`);
-                        }
-                      }}
-                      onRejectProposal={(proposalId) => {
-                        if (isReadOnlyLocked) {
-                          setStatusNotice('ویرایش غیرفعال است: پروژه بدون قفل انحصاری در حالت فقط‌خواندنی قرار دارد.');
-                          return;
-                        }
-                        const r = workflowRef.current!.applyHumanDecision({
-                          action: 'REJECT',
-                          proposalId,
-                        });
-                        if (!r.ok && r.failure) {
-                          setStatusNotice(`رد پیشنهاد ناموفق بود: ${r.failure.message}`);
-                        }
-                      }}
-                      onRequestReviewProposal={(proposalId) => {
-                        if (isReadOnlyLocked) {
-                          setStatusNotice('ویرایش غیرفعال است: پروژه بدون قفل انحصاری در حالت فقط‌خواندنی قرار دارد.');
-                          return;
-                        }
-                        const r = workflowRef.current!.applyHumanDecision({
-                          action: 'REQUEST_REVIEW',
-                          proposalId,
-                        });
-                        if (!r.ok && r.failure) {
-                          setStatusNotice(`ثبت درخواست بازبینی ناموفق بود: ${r.failure.message}`);
-                        }
-                      }}
-                      onReviseBoundaryMs={(proposalId, dStartMs, dEndMs) => {
-                        if (isReadOnlyLocked) {
-                          setStatusNotice('ویرایش غیرفعال است: پروژه بدون قفل انحصاری در حالت فقط‌خواندنی قرار دارد.');
-                          return;
-                        }
-                        const prop = workflowState.edlSnapshot?.proposals.find(
-                          (p) => p.proposalId === proposalId,
-                        );
-                        if (!prop) return;
-                        const activeRange = prop.proposedRange ?? prop.originalRange;
-                        if (!activeRange) return;
-                        const deltaStart = Math.round((dStartMs / 1000) * project.sampleRate);
-                        const deltaEnd = Math.round((dEndMs / 1000) * project.sampleRate);
-                        const r = workflowRef.current!.reviseProposalBoundaries({
-                          proposalId,
-                          newStartSample: Math.max(0, activeRange.startSample + deltaStart),
-                          newEndSample: Math.min(
-                            workflowState.sourceAudio?.totalSamples ?? activeRange.endSample + deltaEnd,
-                            activeRange.endSample + deltaEnd,
-                          ),
-                        });
-                        if (!r.ok && r.failure) {
-                          setStatusNotice(`تغییر مرز پیشنهاد مجاز نیست: ${r.failure.message}`);
-                        }
-                      }}
-                      onPreviewProposal={handlePreviewEdlProposal}
-                      onSeekSec={handleSeekSec}
-                      onUndoEdl={() => {
-                        if (isReadOnlyLocked) {
-                          setStatusNotice('ویرایش غیرفعال است: پروژه بدون قفل انحصاری در حالت فقط‌خواندنی قرار دارد.');
-                          return;
-                        }
-                        workflowRef.current!.undoEdlDecision();
-                      }}
-                      onRedoEdl={() => {
-                        if (isReadOnlyLocked) {
-                          setStatusNotice('ویرایش غیرفعال است: پروژه بدون قفل انحصاری در حالت فقط‌خواندنی قرار دارد.');
-                          return;
-                        }
-                        workflowRef.current!.redoEdlDecision();
-                      }}
-                      onApplyLinguisticReadableText={handleUpdateTokenDisplayText}
-                      onApplyLinguisticBatchUpdates={handleBatchUpdateTokenDisplayTexts}
-                    />
-
+            {/* Full-Bleed Native Desktop 3-Pane Split Workspace (Hairline 1px Dividers)
+                Start/Right (340px): Unified AI & Editorial Inspector (Suggestions + EDL Review + Speech Events + Persian Linguistics)
+                Center (flex-1 dominant): Locked Split Container -> Audio Timeline + 6px Interactive Split Sash + Editorial Transcript
+                End/Left (240px / 300px DSP adaptive / 48px collapsed): Files, Tracks, Effects & Markers */}
+            <div className="flex-1 min-h-0 flex flex-col lg:flex-row">
+              {/* Pane 1 (Right in RTL): 340px Unified AI & Editorial Inspector */}
+              {showSuggestionsPanel && (
+                <div
+                  className={`lg:w-[340px] xl:w-[348px] shrink-0 min-w-0 lg:h-full lg:border-e border-[var(--avp-border)] bg-[var(--avp-surface)] ${
+                    mobileStudioPane === 'suggestions' ? 'flex flex-col' : 'hidden lg:flex lg:flex-col'
+                  }`}
+                >
+                  <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
                     <SuggestionsPanel
                       recommendations={recommendations}
                       selectedRecId={selectedRecId}
@@ -4160,61 +4591,355 @@ export default function App() {
                       pcmSources={project.pcmSources}
                       tokens={tokens}
                       sampleRate={project.sampleRate}
+                      totalDurationSec={totalDurationSec}
+                      locale={currentLocale}
+                      contextBeforeSec={globalSettings.playback.contextBeforeSec}
+                      contextAfterSec={globalSettings.playback.contextAfterSec}
                       onSelect={(id) => setSelectedRecId(id)}
                       onPreview={handlePreviewRecommendation}
+                      onPreviewWithContext={handlePreviewSuggestionWithContext}
                       onAccept={handleAcceptRecommendation}
+                      onApplyApprovedBatch={handleApplyApprovedBatch}
                       onReject={handleRejectRecommendation}
                       onNudgeBoundary={handleNudgeBoundary}
+                      onJumpToRange={(startSec, endSec, trackId) => {
+                        setSelection(
+                          clampSelectionRange({
+                            startSec,
+                            endSec,
+                            trackId,
+                            scope: 'all',
+                          }),
+                        );
+                        handleSeekSec(startSec);
+                      }}
                       onBatchAcceptAllSafe={handleBatchAcceptAllSafe}
                       onRescanDeepDisfluencies={handleRescanDeepDisfluencies}
                       onSoftenBreathsAndCoughs={handleSoftenBreathsAndCoughs}
                       onScanMultiTrackCrosstalk={handleScanMultiTrackCrosstalk}
                     />
                   </div>
+
+                  {/* Unified Editorial Inspector Dock: EDL Review + Speech Events + Persian Linguistics (P0-1) */}
+                  <EdlReviewPanel
+                    locale={currentLocale}
+                    sampleRate={project.sampleRate}
+                    tokens={tokens}
+                    speechEventResult={workflowState.speechEventResult}
+                    edlSnapshot={workflowState.edlSnapshot}
+                    isAnalyzing={workflowState.isAnalyzingEvents}
+                    canUndoEdl={workflowState.edlUndoStack.length > 0}
+                    canRedoEdl={workflowState.edlRedoStack.length > 0}
+                    onRunAnalysis={handleRunMissionEdlAnalysis}
+                    onApproveProposal={(proposalId) => {
+                      if (isReadOnlyLocked) {
+                        setStatusNotice('ویرایش غیرفعال است: پروژه بدون قفل انحصاری در حالت فقط‌خواندنی قرار دارد.');
+                        return;
+                      }
+                      const r = workflowRef.current!.applyHumanDecision({
+                        action: 'APPROVE',
+                        proposalId,
+                      });
+                      if (!r.ok && r.failure) {
+                        setStatusNotice(`تأیید پیشنهاد مسدود شد: ${r.failure.message}`);
+                      }
+                    }}
+                    onRejectProposal={(proposalId) => {
+                      if (isReadOnlyLocked) {
+                        setStatusNotice('ویرایش غیرفعال است: پروژه بدون قفل انحصاری در حالت فقط‌خواندنی قرار دارد.');
+                        return;
+                      }
+                      const r = workflowRef.current!.applyHumanDecision({
+                        action: 'REJECT',
+                        proposalId,
+                      });
+                      if (!r.ok && r.failure) {
+                        setStatusNotice(`رد پیشنهاد ناموفق بود: ${r.failure.message}`);
+                      }
+                    }}
+                    onRequestReviewProposal={(proposalId) => {
+                      if (isReadOnlyLocked) {
+                        setStatusNotice('ویرایش غیرفعال است: پروژه بدون قفل انحصاری در حالت فقط‌خواندنی قرار دارد.');
+                        return;
+                      }
+                      const r = workflowRef.current!.applyHumanDecision({
+                        action: 'REQUEST_REVIEW',
+                        proposalId,
+                      });
+                      if (!r.ok && r.failure) {
+                        setStatusNotice(`ثبت درخواست بازبینی ناموفق بود: ${r.failure.message}`);
+                      }
+                    }}
+                    onReviseBoundaryMs={(proposalId, dStartMs, dEndMs) => {
+                      if (isReadOnlyLocked) {
+                        setStatusNotice('ویرایش غیرفعال است: پروژه بدون قفل انحصاری در حالت فقط‌خواندنی قرار دارد.');
+                        return;
+                      }
+                      const prop = workflowState.edlSnapshot?.proposals.find(
+                        (p) => p.proposalId === proposalId,
+                      );
+                      if (!prop) return;
+                      const activeRange = prop.proposedRange ?? prop.originalRange;
+                      if (!activeRange) return;
+                      const deltaStart = Math.round((dStartMs / 1000) * project.sampleRate);
+                      const deltaEnd = Math.round((dEndMs / 1000) * project.sampleRate);
+                      const r = workflowRef.current!.reviseProposalBoundaries({
+                        proposalId,
+                        newStartSample: Math.max(0, activeRange.startSample + deltaStart),
+                        newEndSample: Math.min(
+                          workflowState.sourceAudio?.totalSamples ?? activeRange.endSample + deltaEnd,
+                          activeRange.endSample + deltaEnd,
+                        ),
+                      });
+                      if (!r.ok && r.failure) {
+                        setStatusNotice(`تغییر مرز پیشنهاد مجاز نیست: ${r.failure.message}`);
+                      }
+                    }}
+                    onPreviewProposal={handlePreviewEdlProposal}
+                    onSeekSec={handleSeekSec}
+                    onUndoEdl={() => {
+                      if (isReadOnlyLocked) {
+                        setStatusNotice('ویرایش غیرفعال است: پروژه بدون قفل انحصاری در حالت فقط‌خواندنی قرار دارد.');
+                        return;
+                      }
+                      workflowRef.current!.undoEdlDecision();
+                    }}
+                    onRedoEdl={() => {
+                      if (isReadOnlyLocked) {
+                        setStatusNotice('ویرایش غیرفعال است: پروژه بدون قفل انحصاری در حالت فقط‌خواندنی قرار دارد.');
+                        return;
+                      }
+                      workflowRef.current!.redoEdlDecision();
+                    }}
+                    onApplyLinguisticReadableText={handleUpdateTokenDisplayText}
+                    onApplyLinguisticBatchUpdates={handleBatchUpdateTokenDisplayTexts}
+                  />
                 </div>
+              )}
+
+              {/* Pane 2 (Center Dominant): Locked Split Container -> Audio Timeline + 6px Split Sash + Editorial Transcript */}
+              <div
+                className={`flex-1 min-w-0 lg:h-full lg:overflow-hidden bg-[var(--avp-surface)] ${
+                  mobileStudioPane === 'center' ? 'flex flex-col' : 'hidden lg:flex lg:flex-col'
+                }`}
+              >
+                <WaveformCanvas
+                  tracks={tracks}
+                  assets={project.assets}
+                  pcmSources={project.pcmSources}
+                  recommendations={recommendations}
+                  selectedRecId={selectedRecId}
+                  playheadSec={playheadSec}
+                  totalDurationSec={totalDurationSec}
+                  zoom={zoom}
+                  locale={currentLocale}
+                  showGrid={globalSettings.appearance.showWaveformGrid}
+                  showRuler={globalSettings.workspace.showTimelineRuler}
+                  showMarkers={globalSettings.workspace.showTimelineMarkers}
+                  showEditRegions={globalSettings.workspace.showEditRegions}
+                  markers={auditionMarkers}
+                  onZoomChange={setZoom}
+                  onSeekSec={handleSeekSec}
+                  onToggleTrackMute={handleToggleTrackMute}
+                  onToggleTrackSolo={handleToggleTrackSolo}
+                  onSelectRecommendation={(id) => setSelectedRecId(id)}
+                  onAddMarkerAtPlayhead={handleAddMarkerAtPlayhead}
+                  onSplitAtPlayhead={handleSplitAtPlayhead}
+                  onCutWaveformRange={handleCutWaveformRange}
+                  detectedSyncOffsetMs={detectedSyncOffsetMs}
+                  detectedClockDriftPpm={detectedClockDriftPpm}
+                  onAutoAlignSyncedTracks={handleAutoAlignSyncedTracks}
+                  onNudgeSyncedTracksMs={handleNudgeSyncedTracksMs}
+                  selection={selection}
+                  onSelectionChange={(nextSel) => setSelection(clampSelectionRange(nextSel))}
+                  onPlaySelectionRange={(sel) => handlePlaySelectionRange(clampSelectionRange(sel))}
+                  trackHeightPx={trackHeightPx}
+                  onTrackHeightChange={setTrackHeightPx}
+                />
+
+                {/* 6px Interactive Horizontal Split Sash (P0-3) */}
+                <div
+                  role="separator"
+                  aria-orientation="horizontal"
+                  aria-label={isFa ? 'تغییر ارتفاع تایملاین و بوم متن' : 'Resize timeline and transcript split'}
+                  data-testid="center-split-sash"
+                  onMouseDown={handleStartSplitSashDrag}
+                  onDoubleClick={() => setTrackHeightPx(82)}
+                  title={
+                    isFa
+                      ? 'کشیدن برای تنظیم نسبت تایملاین و متن (دابل‌کلیک: بازنشانی به 30/70)'
+                      : 'Drag to resize timeline/transcript split (Double-click: reset 30/70)'
+                  }
+                  className="hidden lg:flex avp-split-sash"
+                >
+                  <span className="avp-split-sash-pill" />
+                </div>
+
+                <TranscriptPanel
+                  tokens={tokens}
+                  tracks={tracks}
+                  pcmSources={project.pcmSources}
+                  sampleRate={project.sampleRate}
+                  playheadSec={playheadSec}
+                  totalDurationSec={totalDurationSec}
+                  locale={currentLocale}
+                  showTimestamps={true}
+                  autoFollowPlayhead={true}
+                  timelineSelection={selection}
+                  onSyncTimelineSelection={(nextSel) => setSelection(clampSelectionRange(nextSel))}
+                  onPlaySelectionRange={(sel) => handlePlaySelectionRange(clampSelectionRange(sel))}
+                  isTranscribingAsr={isTranscribingAsr}
+                  hasBrowserInstalledModel={hasBrowserInstalledModel}
+                  shahabRuntimeStatus={shahabRuntimeStatus}
+                  isInstallingBrowserModel={isInstallingBrowserModel}
+                  browserModelInstallPct={browserModelInstallPct}
+                  executionMode={executionMode}
+                  cloudAsrConfigured={cloudAsrConfigured}
+                  projectSessionNonce={projectSessionNonce}
+                  asrInlineFeedback={asrInlineFeedback}
+                  onDismissAsrInlineFeedback={() => setAsrInlineFeedback(null)}
+                  onInstallBrowserPersianModel={handleInstallBrowserPersianModel}
+                  onLoadAndTranscribeSamplePersianAudio={handleLoadAndTranscribeSamplePersianAudio}
+                  onRunAcousticSegmentation={handleRunAcousticSegmentation}
+                  onOpenLocalModelInstaller={() => {
+                    setLifecycleInitialTab('model');
+                    setLifecycleModalOpen(true);
+                  }}
+                  onSwitchToLocalExecutionMode={() => handleChangeExecutionMode('LOCAL')}
+                  onSeekSec={handleSeekSec}
+                  onCutSelectedWords={handleCutSelectedWords}
+                  onUpdateTokenDisplayText={handleUpdateTokenDisplayText}
+                  onRunPersianAsr={handleRunPersianAsr}
+                  onRunForcedAlignment={handleRunForcedAlignment}
+                  onRestoreProsodicPunctuation={handleRestoreProsodicPunctuation}
+                  onConvertColloquialToFormal={handleConvertColloquialToFormal}
+                  onNormalizeNumbersAndCompounds={handleNormalizeNumbersAndCompounds}
+                  onRedactSelectedWords={handleRedactSelectedWords}
+                  prosodyAndChaptersReport={prosodyAndChaptersReport}
+                  onApplyCustomLexicon={handleApplyCustomLexicon}
+                  onWsolaTimeStretchSelectedWords={handleWsolaTimeStretchSelectedWords}
+                  onPunchInSpectralMatchSelectedWords={handlePunchInSpectralMatchSelectedWords}
+                  onOptimizeTrilingualAsr={handleOptimizeTrilingualAsr}
+                  englishRenderMode={englishRenderMode}
+                />
               </div>
+
+              {/* Pane 3 (Left in RTL): Collapsible & Adaptive Files (240px) / DSP Effects (300px) / History Rail */}
+              {showFilesPanel && (
+                <div
+                  className={`${
+                    leftRailCollapsed
+                      ? 'lg:w-[48px]'
+                      : sideDockTab === 'effects'
+                        ? 'lg:w-[300px] xl:w-[312px]'
+                        : 'lg:w-[240px] xl:w-[248px]'
+                  } shrink-0 min-w-0 lg:h-full lg:border-s border-[var(--avp-border)] bg-[var(--avp-surface)] transition-[width] duration-150 flex flex-col`}
+                >
+                  <AuditionSideDock
+                    tracks={tracks}
+                    assets={project.assets}
+                    sampleRate={project.sampleRate}
+                    history={historyRef.current.getHistory()}
+                    markers={auditionMarkers}
+                    locale={currentLocale}
+                    collapsed={leftRailCollapsed}
+                    activeDockTab={sideDockTab}
+                    onDockTabChange={setSideDockTab}
+                    onToggleCollapse={() => setLeftRailCollapsed((v) => !v)}
+                    onImportAudioClick={() => fileInputRef.current?.click()}
+                    onSeekSec={handleSeekSec}
+                    onToggleTrackMute={handleToggleTrackMute}
+                    onToggleTrackSolo={handleToggleTrackSolo}
+                    onAddMarker={handleAddMarkerAtPlayhead}
+                    onRenameMarker={handleRenameMarker}
+                    onDeleteMarker={handleDeleteMarker}
+                    onSelectTrackRange={(trackId, startSec, endSec) => {
+                      setSelection({
+                        startSec: Number(startSec.toFixed(2)),
+                        endSec: Number(endSec.toFixed(2)),
+                        trackId,
+                        scope: 'track',
+                      });
+                      handleSeekSec(startSec);
+                    }}
+                    dspRackNode={
+                      <DspControlRack
+                        ephemeralParams={ephemeralDsp}
+                        committedParams={committedDsp}
+                        isGestureActive={isGestureActive}
+                        sampleRate={project.sampleRate}
+                        history={historyRef.current.getHistory()}
+                        acousticAdvisor={acousticAdvisor}
+                        eqResponseCurveDb={eqResponseCurveDb}
+                        phaseDiagnostic={phaseDiagnostic}
+                        onEphemeralChange={handleEphemeralDspChange}
+                        onCommitGesture={handleCommitDspGesture}
+                        onResetDefaults={handleResetDsp}
+                        onApplyAcousticAdvisorPreset={handleApplyAcousticAdvisorPreset}
+                        onApply8BandPersianVoiceEq={handleApply8BandPersianVoiceEq}
+                      />
+                    }
+                  />
+                </div>
+              )}
             </div>
-          </div>
+          </>
         )}
 
         {activeTab === 'graph' && (
-          <ProcessingGraphView
-            nodes={graphNodes}
-            edges={defaultGraph.edges}
-            sampleRate={project.sampleRate}
-            resamplerStats={project.resamplerStats}
-            onToggleNodeBypass={handleToggleNodeBypass}
-          />
+          <div className="flex-1 min-h-0 overflow-y-auto max-w-[1440px] w-full mx-auto px-4 py-4">
+            <ProcessingGraphView
+              nodes={graphNodes}
+              edges={defaultGraph.edges}
+              sampleRate={project.sampleRate}
+              resamplerStats={project.resamplerStats}
+              onToggleNodeBypass={handleToggleNodeBypass}
+            />
+          </div>
         )}
 
         {activeTab === 'storage' && (
-          <StorageBrokerView
-            capabilities={capabilities}
-            telemetry={telemetry}
-            assets={project.assets}
-            isTestingLru={isTestingLru}
-            onRunBrokerConcurrencyTest={handleRunBrokerConcurrencyTest}
-            onSimulateLruCacheFill={handleSimulateLruCacheFill}
-          />
+          <div className="flex-1 min-h-0 overflow-y-auto max-w-[1440px] w-full mx-auto px-4 py-4">
+            <StorageBrokerView
+              capabilities={capabilities}
+              telemetry={telemetry}
+              assets={project.assets}
+              isTestingLru={isTestingLru}
+              onRunBrokerConcurrencyTest={handleRunBrokerConcurrencyTest}
+              onSimulateLruCacheFill={handleSimulateLruCacheFill}
+            />
+          </div>
         )}
 
-        {activeTab === 'shahab' && <ShahabLabView />}
+        {activeTab === 'shahab' && (
+          <div className="flex-1 min-h-0 overflow-y-auto max-w-[1440px] w-full mx-auto px-4 py-4">
+            <ShahabLabView />
+          </div>
+        )}
       </main>
 
-      {/* Docked Bottom Adobe Audition Transport & Player Deck */}
+      {/* 4. Docked Bottom Studio Audio Transport Bar */}
       <AuditionTransportBar
         isPlaying={isPlaying}
+        hasAudio={tracks.length > 0 && totalDurationSec > 0}
+        isPreviewMode={Boolean(previewingId)}
+        previewLabel={isFa ? 'پیش‌شنوایی پیشنهاد' : 'Previewing Suggestion'}
         playheadSec={playheadSec}
         totalDurationSec={totalDurationSec}
         selection={selection}
         loopSelection={loopSelection}
         playbackRate={playbackRate}
+        seekStepSec={globalSettings.playback.seekStepSec}
         peakDb={meterDb.peakDb}
         rmsDb={meterDb.rmsDb}
+        locale={currentLocale}
         onTogglePlay={handleTogglePlay}
         onPlaySelection={() => handlePlaySelectionRange(selection)}
         onStopAndReset={handleStopAndReset}
+        onExitPreview={handleStopAndReset}
         onSeekSec={handleSeekSec}
+        onStepBack={handleStepBack}
+        onStepForward={handleStepForward}
         onToggleLoop={handleToggleLoopSelection}
         onChangePlaybackRate={handleChangePlaybackRate}
         onJumpPrevMarker={handleJumpPrevMarker}
@@ -4227,12 +4952,40 @@ export default function App() {
         isOpen={renderModalOpen}
         onClose={() => setRenderModalOpen(false)}
         workflowState={workflowState}
+        projectTitle={project.projectName}
         projectSampleRate={(project.sampleRate as SampleRate) || 48000}
+        totalDurationSec={totalDurationSec}
+        tracks={tracks}
+        assets={project.assets}
         tokens={tokens}
+        markers={auditionMarkers}
+        defaultFormat={globalSettings.exportDefaults.format}
+        defaultSampleRate={
+          globalSettings.exportDefaults.sampleRate === 'source'
+            ? (project.sampleRate as SampleRate) || 48000
+            : globalSettings.exportDefaults.sampleRate
+        }
         onStartRender={handleStartMission06Render}
         onPauseRender={() => workflowRef.current?.requestPauseRender()}
         onCancelRender={() => workflowRef.current?.cancelRender()}
         onMarkDownloaded={(fileName) => workflowRef.current?.markExportSaved(fileName)}
+      />
+
+      <SettingsCenterModal
+        isOpen={settingsModalOpen}
+        onClose={() => setSettingsModalOpen(false)}
+        settings={globalSettings}
+        onUpdateSettings={handleUpdateGlobalSettings}
+        saveStatus={settingsSaveStatus}
+        saveError={settingsSaveError}
+        onOpenDeveloperView={handleOpenDeveloperViewFromSettings}
+      />
+
+      <NewProjectModal
+        isOpen={newProjectModalOpen}
+        locale={currentLocale}
+        onClose={() => setNewProjectModalOpen(false)}
+        onCreateProject={handleCreateHubProject}
       />
 
       <LifecycleManagementModal

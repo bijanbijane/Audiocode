@@ -1,8 +1,8 @@
 {
   "productName": "Avapardaz",
   "appVersion": "1.3.0",
-  "buildId": "build-2026-11-23T22-03-10-365Z",
-  "builtAtIso": "2026-11-23T22:03:10.366Z",
+  "buildId": "build-2026-11-24T12-08-21-135Z",
+  "builtAtIso": "2026-11-24T12:08:21.135Z",
   "projectSchemaVersion": 2,
   "edlSchemaVersion": 2,
   "backupSchemaVersion": 1,
@@ -13,7 +13,7 @@
   ],
   "serviceWorkerCacheVersion": "paudio-shell-v1.3.0",
   "assetCount": 43,
-  "totalBytes": 125794289,
+  "totalBytes": 124730877,
   "assets": [
     {
       "path": "/apple-touch-icon.png",
@@ -126,19 +126,19 @@
       "sha256": "0d6989676565523b0d78dd1e69aea44b1159505f7d7902d3995a1ed2ca8e49f1"
     },
     {
-      "path": "/assets/index-CTjWm3gQ.css",
-      "bytes": 114442,
-      "sha256": "6b4bc23ff8b77460a0d12be1e589f6835f5eb55162c8eb0da016a8c1d2fc13f5"
+      "path": "/assets/index-5yj3Qt2n.css",
+      "bytes": 138924,
+      "sha256": "40ca254ddb25360398204144778eb52e26c037bb60f6d32954a1bc022dc2cbac"
     },
     {
-      "path": "/assets/index-ZGBwLz4F.js",
-      "bytes": 3378200,
-      "sha256": "40d69eb041148de74661b4a164a4eab3db0d1938744854b5932c320361485d5c"
+      "path": "/assets/index-DS1PPkah.js",
+      "bytes": 2435823,
+      "sha256": "cf4b167ae34eee53799e02ff10bba7dad4f0934068c91124bdeec214e2eb3833"
     },
     {
-      "path": "/assets/ioBroker.worker-14ADASZz.js",
-      "bytes": 27727,
-      "sha256": "35bb0339657daeb8056c77d1084a62365cfc26bceadfa23bc312956b0765c921"
+      "path": "/assets/ioBroker.worker-e-P77Znb.js",
+      "bytes": 17499,
+      "sha256": "22213c0e8560e75445d554e92cd1422d8babc262608b03b022db200be10d2972"
     },
     {
       "path": "/assets/ort-wasm-simd-threaded.jsep-Dt5UNR3U.wasm",
@@ -146,14 +146,14 @@
       "sha256": "5ab8361783822d02a57d1e97cf2514bceb451a628f2b29ae0d7b6e618201ff8f"
     },
     {
-      "path": "/assets/ort.bundle.min-DT2luF-K.js",
-      "bytes": 511614,
-      "sha256": "81f45f95f744963b259f6c72ec9b75a7e758f92a00d4bfa5c75fdac0cdf19183"
+      "path": "/assets/ort.bundle.min-BfDg6Nni.js",
+      "bytes": 410411,
+      "sha256": "1faa69db77a7d5882949a2715ec038b567166244f561726481d12de76e19dfb1"
     },
     {
-      "path": "/assets/studio-asr.worker-__ENHFD3.js",
-      "bytes": 84777,
-      "sha256": "fe57ab6cb573869218e87fced11cafde285836fbcfc05bdf34946b5741d99aad"
+      "path": "/assets/studio-asr.worker-CjpriBzX.js",
+      "bytes": 49818,
+      "sha256": "615f34694cef36f665608dec5f6277082521d4e359a071b187a2811d9099156d"
     },
     {
       "path": "/icon.svg",
@@ -162,8 +162,8 @@
     },
     {
       "path": "/index.html",
-      "bytes": 1877,
-      "sha256": "a2ffa7daeee85d9786d0872f421729c6bfdfe0b0f23a3d444527900e59065b71"
+      "bytes": 2750,
+      "sha256": "33d58842f841cbcfd36de1a32fc8ada9aa7be92b93fffb85eeeed4684cf7e055"
     },
     {
       "path": "/manifest.webmanifest",

@@ -426,7 +426,7 @@ export class StudioWorkflowController {
       projectId: 'proj_empty',
       projectName: 'پروژه بدون عنوان',
       locale: options?.initialLocale ?? 'fa',
-      theme: options?.initialTheme ?? 'dark',
+      theme: options?.initialTheme ?? 'light',
       persistenceState: this.projectStore ? 'IN_MEMORY_ONLY' : 'PERSISTENCE_UNAVAILABLE',
       persistenceNote: 'ذخیره‌سازی محلی تا زمان ثبت پروژه در حافظه فعال است.',
       sourceAudio: null,

@@ -14512,113 +14512,6 @@ var require_util_inspect = __commonJS({
   }
 });
 
-// node_modules/object-inspect/stringWidthRanges.js
-var require_stringWidthRanges = __commonJS({
-  "node_modules/object-inspect/stringWidthRanges.js"(exports, module) {
-    var $join = Array.prototype.join;
-    module.exports = $join.call([
-      "00.v,02n.w,0gw.33,07n.6,07b.18,01.0,01.1,01.1,01.0,01k.5,0a.a,01.0,01a.k,0g.0,02t.7,01.5,02.1,01.3,",
-      "0x.0,01.0,0u.q,02j.a,01m.8,09.0,0o.3,01.8,01.2,01.4,017.2,01g.1,05.8,016.1k,01j.0,01.0,04.7,04.0,",
-      "03.6,0a.1,0t.0,01m.0,04.3,08.0,0k.1,0q.0,02.1,01l.0,04.1,04.1,02.2,03.0,0u.1,03.0,0b.1,01l.0,04.4,",
-      "01.1,04.0,0k.1,0m.5,01.0,01m.0,02.0,01.3,08.0,07.1,0b.1,0u.0,01p.0,0c.0,01e.0,03.0,01j.0,01.2,05.2,",
-      "01.3,07.1,0b.1,0t.0,01m.0,02.0,06.0,05.1,0k.1,0s.1,01l.1,04.3,08.0,0k.1,0t.0,020.0,07.2,01.0,02i.0,",
-      "02.6,0c.7,02q.0,02.8,0b.6,021.1,0r.0,01.0,01.0,01j.d,01.4,01.1,05.a,01.z,09.0,02u.3,01.5,01.1,02.1,",
-      "0p.1,04.2,0g.3,0d.0,02.1,06.0,0f.0,22q.2n,0e5.2,0qa.2,0t.1,0u.1,0u.1,01s.1,01.6,08.0,02.a,09.0,",
-      "019.4,039.1,0y.0,03a.2,04.1,09.0,06.2,063.1,02.0,01m.0,01.6,01.0,01.0,02.7,06.9,02.0,01c.19,02.b,",
-      "0k.3,01c.0,01.4,01.0,05.0,014.8,0c.1,0w.3,02.1,01.2,01k.0,01.1,03.0,01.2,01m.7,02.1,048.2,01.c,01.6,",
-      "04.0,06.0,03.1,05i.1r,0ej.4,0q.4,01d.4,01.9,02o.w,2fd.1,2d.1,25a.3,23.0,22.0,2eh.1,2l.1,2q.7,2g.b,",
-      "217.0,2a.5,23.0,2d.0,28.1,2h.1,25.1,28.0,25.0,2l.0,27.1,21.0,24.0,22.0,27.0,24.1,2s.0,2z.0,21.0,",
-      "24.2,21.0,21p.2,2o.0,2e.0,2nv.1,21f.0,24.0,0bd.2,03x.0,02o.v,23k.p,21.2g,2c.5x,2q.26,22.2d,22.2u,",
-      "25.16,21.2l,21.2d,29.1b,21.13,28.mkc,23.1i,0bs.3,01.9,0w.1,028.1,07k.0,03.0,04.0,0p.1,05.0,047.1,",
-      "0q.h,0d.0,012.7,0p.a,2e.s,03.2,01c.0,02.3,02.1,013.0,01v.5,02.1,02.1,0c.0,08.0,01b.0,01f.0,01.2,",
-      "02.1,05.1,01.0,016.1,08.0,06m.0,02.0,04.0,2i.8mb,26l8.e7,0u.0,0kh.f,20.9,06.f,20.y,21.i,21.3,043.0,",
-      "21.2n,23j.6,0i.2,0e9.0,06a.0,045.4,01ae.2,01.1,05.3,014.2,04.0,04l.1,0fx.3,01t.4,08t.1,025.5,01y.a,",
-      "01d.3,03f.0,01i.e,015.0,02.1,0a.2,01d.3,02.1,02.0,04.0,0a.0,01e.2,010.4,01.7,01q.0,0c.1,01g.8,0a.3,",
-      "02.0,02n.2,02.0,01.1,06.0,02.0,04d.0,03.7,0l.1,01l.1,03.0,011.6,03.4,01y.5,0d.0,01.0,01.0,0e.1,",
-      "02d.7,02.2,01.0,0n.0,02c.5,01.0,04.1,01.1,06m.3,06.1,01.1,0r.1,02d.7,02.0,01.1,02y.0,01.0,02.5,01.0,",
-      "02t.0,01.0,02.3,01.4,077.8,01.1,074.1,01.0,04.0,040.3,02.1,04.0,0w.9,014.5,02.3,08.0,09.5,02.2,",
-      "01a.c,01.1,05i.0,01.2,01.0,05l.6,01.5,01.0,02a.l,02.6,01.1,01.1,03e.5,03.0,01.1,01.6,01.0,020.1,",
-      "03.0,01.0,09n.1,0b.1,01g.4,05.0,01.0,0n.0,0445.g,06.e,08ug.b,03.2,01xc.4,01n.6,0t4.0,01r.3,225.4,",
-      "2b.6,29.5p1,215.v,22p.36,26pp.3,21.6,21.1,21.82,2f.0,2t.2,22.0,2e.3,28.az,01wh.1,01.3,03mk.19,02.m,",
-      "2ev.1,30.4,02.2,09.f,02.6,0u.3,2d.1,30.3,03l.2,257.2e,29.m,01ah.1i,04.1d,08.0,0e.0,0m.4,01.e,011s.6,",
-      "01.g,02.6,01.1,01.4,02s.0,04g.6,0af.0,01p.3,0e4.3,072.1,06r.0,02.0,07.1,05.0,0d6.6,031.6,21bt.0,",
-      "25m.0,25a.0,22.9,223.s,2d.17,24.8,27.1,2e.5,24a.w,2c.8,21.1x,21.l,2c.16,24.4,2c.g,23.0,23.1y,21.0,",
-      "21.56,22.1q,2d.3,21.n,2i.0,2q.1,2d.0,22e.2c,21c.1x,26.0,23.2,22.3,23.3,2b.1,27.8,26b.b,24.0,27v.1a,",
-      "21.9,21.54,234.c,23.a,23.1k,21.0,24.f,22.b,24.9,2zr.1ekd,22.1ekd,0e1oj.0,0u.2n,03k.6n"
-    ], "");
-  }
-});
-
-// node_modules/object-inspect/stringWidth.js
-var require_stringWidth = __commonJS({
-  "node_modules/object-inspect/stringWidth.js"(exports, module) {
-    var $charCodeAt = String.prototype.charCodeAt;
-    var $indexOf = String.prototype.indexOf;
-    var $normalize = String.prototype.normalize;
-    var $slice = String.prototype.slice;
-    var $split = String.prototype.split;
-    var $floor = Math.floor;
-    var $parseInt = parseInt;
-    var ranges = require_stringWidthRanges();
-    var starts = [];
-    var ends = [];
-    var widths = [];
-    var tokens = $split.call(ranges, ",");
-    var previousEnd = -1;
-    for (t = 0; t < tokens.length; t++) {
-      dot = $indexOf.call(tokens[t], ".");
-      starts[t] = previousEnd + 1 + $parseInt($slice.call(tokens[t], 1, dot), 36);
-      previousEnd = starts[t] + $parseInt($slice.call(tokens[t], dot + 1), 36);
-      ends[t] = previousEnd;
-      widths[t] = Number($slice.call(tokens[t], 0, 1));
-    }
-    var dot;
-    var t;
-    function codePointWidth(code) {
-      var low = 0;
-      var high = starts.length - 1;
-      while (low <= high) {
-        var mid = $floor((low + high) / 2);
-        if (code < starts[mid]) {
-          high = mid - 1;
-        } else if (code > ends[mid]) {
-          low = mid + 1;
-        } else {
-          return widths[mid];
-        }
-      }
-      return 1;
-    }
-    function unicodeWidth(str) {
-      var width = 0;
-      for (var i = 0; i < str.length; i++) {
-        var code = $charCodeAt.call(str, i);
-        if (code >= 55296 && code <= 56319 && i + 1 < str.length) {
-          var next = $charCodeAt.call(str, i + 1);
-          if (next >= 56320 && next <= 57343) {
-            code = (code - 55296) * 1024 + (next - 56320) + 65536;
-            i += 1;
-          }
-        }
-        width += codePointWidth(code);
-      }
-      return width;
-    }
-    module.exports = function getStringWidth(str) {
-      var width = 0;
-      for (var i = 0; i < str.length; i++) {
-        var code = $charCodeAt.call(str, i);
-        if (code >= 127) {
-          var rest = $slice.call(str, i);
-          return width + unicodeWidth($normalize ? $normalize.call(rest, "NFC") : rest);
-        }
-        width += code >= 32 ? 1 : 0;
-      }
-      return width;
-    };
-  }
-});
-
 // node_modules/object-inspect/index.js
 var require_object_inspect = __commonJS({
   "node_modules/object-inspect/index.js"(exports, module) {
@@ -14626,12 +14519,10 @@ var require_object_inspect = __commonJS({
     var mapSizeDescriptor = Object.getOwnPropertyDescriptor && hasMap ? Object.getOwnPropertyDescriptor(Map.prototype, "size") : null;
     var mapSize = hasMap && mapSizeDescriptor && typeof mapSizeDescriptor.get === "function" ? mapSizeDescriptor.get : null;
     var mapForEach = hasMap && Map.prototype.forEach;
-    var mapEntries = hasMap && Map.prototype.entries;
     var hasSet = typeof Set === "function" && Set.prototype;
     var setSizeDescriptor = Object.getOwnPropertyDescriptor && hasSet ? Object.getOwnPropertyDescriptor(Set.prototype, "size") : null;
     var setSize = hasSet && setSizeDescriptor && typeof setSizeDescriptor.get === "function" ? setSizeDescriptor.get : null;
     var setForEach = hasSet && Set.prototype.forEach;
-    var setValues = hasSet && Set.prototype.values;
     var hasWeakMap = typeof WeakMap === "function" && WeakMap.prototype;
     var weakMapHas = hasWeakMap ? WeakMap.prototype.has : null;
     var hasWeakSet = typeof WeakSet === "function" && WeakSet.prototype;
@@ -14651,50 +14542,15 @@ var require_object_inspect = __commonJS({
     var $join = Array.prototype.join;
     var $arrSlice = Array.prototype.slice;
     var $floor = Math.floor;
-    var $max = Math.max;
-    var $min = Math.min;
-    var $round = Math.round;
-    var $sqrt = Math.sqrt;
     var bigIntValueOf = typeof BigInt === "function" ? BigInt.prototype.valueOf : null;
     var gOPS = Object.getOwnPropertySymbols;
     var symToString = typeof Symbol === "function" && typeof Symbol.iterator === "symbol" ? Symbol.prototype.toString : null;
     var hasShammedSymbols = typeof Symbol === "function" && typeof Symbol.iterator === "object";
-    var toStringTag = typeof Symbol === "function" && Symbol.toStringTag && (hasShammedSymbols ? typeof Symbol.toStringTag === "object" : typeof Symbol.toStringTag === "symbol") ? Symbol.toStringTag : null;
+    var toStringTag = typeof Symbol === "function" && Symbol.toStringTag && (typeof Symbol.toStringTag === hasShammedSymbols ? "object" : "symbol") ? Symbol.toStringTag : null;
     var isEnumerable = Object.prototype.propertyIsEnumerable;
     var gPO = (typeof Reflect === "function" ? Reflect.getPrototypeOf : Object.getPrototypeOf) || ([].__proto__ === Array.prototype ? function(O) {
       return O.__proto__;
     } : null);
-    var mapIteratorNext = mapEntries && gPO ? gPO(mapEntries.call(/* @__PURE__ */ new Map())).next : null;
-    var setIteratorNext = setValues && gPO ? gPO(setValues.call(/* @__PURE__ */ new Set())).next : null;
-    var typedArrayProto = typeof Uint8Array === "function" && gPO ? gPO(Uint8Array.prototype) : null;
-    var typedArrayTag = typedArrayProto && toStringTag ? getterOf(typedArrayProto, toStringTag) : null;
-    var typedArrayLength = typedArrayProto ? getterOf(typedArrayProto, "length") : null;
-    var typedArrayToString = /^\[object (?:Int8|Uint8|Uint8Clamped|Int16|Uint16|Int32|Uint32|Float16|Float32|Float64|BigInt64|BigUint64)Array\]$/;
-    var typedArrayLengths = { __proto__: null };
-    if (!typedArrayLength) {
-      TypedArrays = [
-        typeof Int8Array === "function" && Int8Array,
-        typeof Uint8Array === "function" && Uint8Array,
-        typeof Uint8ClampedArray === "function" && Uint8ClampedArray,
-        typeof Int16Array === "function" && Int16Array,
-        typeof Uint16Array === "function" && Uint16Array,
-        typeof Int32Array === "function" && Int32Array,
-        typeof Uint32Array === "function" && Uint32Array,
-        typeof Float32Array === "function" && Float32Array,
-        typeof Float64Array === "function" && Float64Array
-      ];
-      for (ta = 0; ta < TypedArrays.length; ta++) {
-        TypedArray = TypedArrays[ta];
-        lengthGetter = TypedArray && getterOf(TypedArray.prototype, "length");
-        if (lengthGetter) {
-          typedArrayLengths[toStr(new TypedArray(0))] = lengthGetter;
-        }
-      }
-    }
-    var TypedArrays;
-    var TypedArray;
-    var lengthGetter;
-    var ta;
     function addNumericSeparator(num, str) {
       if (num === Infinity || num === -Infinity || num !== num || num && num > -1e3 && num < 1e3 || $test.call(/e/, str)) {
         return str;
@@ -14711,7 +14567,6 @@ var require_object_inspect = __commonJS({
       return $replace.call(str, sepRegex, "$&_");
     }
     var utilInspect = require_util_inspect();
-    var getStringWidth = require_stringWidth();
     var inspectCustom = utilInspect.custom;
     var inspectSymbol = isSymbol(inspectCustom) ? inspectCustom : null;
     var quotes = {
@@ -14724,18 +14579,14 @@ var require_object_inspect = __commonJS({
       "double": /(["\\])/g,
       single: /(['\\])/g
     };
-    module.exports = function inspect_(obj, options, depth, seen, breakState) {
+    module.exports = function inspect_(obj, options, depth, seen) {
       var opts = options || {};
       if (has(opts, "quoteStyle") && !has(quotes, opts.quoteStyle)) {
         throw new TypeError('option "quoteStyle" must be "single" or "double"');
       }
       if (has(opts, "maxStringLength") && (typeof opts.maxStringLength === "number" ? opts.maxStringLength < 0 && opts.maxStringLength !== Infinity : opts.maxStringLength !== null)) {
-        throw new TypeError('option "maxStringLength", if provided, must be a non-negative integer, Infinity, or `null`');
+        throw new TypeError('option "maxStringLength", if provided, must be a positive integer, Infinity, or `null`');
       }
-      if (has(opts, "maxCollectionLength") && opts.maxCollectionLength !== null && opts.maxCollectionLength !== Infinity && !(typeof opts.maxCollectionLength === "number" && opts.maxCollectionLength >= 0 && $floor(opts.maxCollectionLength) === opts.maxCollectionLength)) {
-        throw new TypeError('option "maxCollectionLength", if provided, must be a non-negative integer, Infinity, or `null`');
-      }
-      var maxCollectionLength = typeof opts.maxCollectionLength === "number" ? opts.maxCollectionLength : Infinity;
       var customInspect = has(opts, "customInspect") ? opts.customInspect : true;
       if (typeof customInspect !== "boolean" && customInspect !== "symbol") {
         throw new TypeError("option \"customInspect\", if provided, must be `true`, `false`, or `'symbol'`");
@@ -14747,13 +14598,6 @@ var require_object_inspect = __commonJS({
         throw new TypeError('option "numericSeparator", if provided, must be `true` or `false`');
       }
       var numericSeparator = opts.numericSeparator;
-      if (has(opts, "multilineStrings") && typeof opts.multilineStrings !== "boolean") {
-        throw new TypeError('option "multilineStrings", if provided, must be `true` or `false`');
-      }
-      var hasBreakLength = has(opts, "breakLength");
-      if (hasBreakLength && opts.breakLength !== Infinity && (typeof opts.breakLength !== "number" || opts.breakLength < 0 || parseInt(opts.breakLength, 10) !== opts.breakLength)) {
-        throw new TypeError('option "breakLength", if provided, must be a non-negative integer or `Infinity`');
-      }
       if (typeof obj === "undefined") {
         return "undefined";
       }
@@ -14784,60 +14628,31 @@ var require_object_inspect = __commonJS({
       if (depth >= maxDepth && maxDepth > 0 && typeof obj === "object") {
         return isArray(obj) ? "[Array]" : "[Object]";
       }
-      var indent = getIndent(hasBreakLength && (typeof opts.indent === "undefined" || opts.indent === null) ? { indent: 2 } : opts, depth);
-      var layout = hasBreakLength ? {
-        breakLength: opts.breakLength,
-        depth,
-        indent,
-        maxCollectionLength,
-        state: breakState || { currentDepth: depth }
-      } : null;
+      var indent = getIndent(opts, depth);
       if (typeof seen === "undefined") {
         seen = [];
       } else if (indexOf(seen, obj) >= 0) {
         return "[Circular]";
       }
       function inspect(value, from, noIndent) {
-        var nextSeen = seen;
         if (from) {
-          nextSeen = $arrSlice.call(seen);
-          nextSeen.push(from);
+          seen = $arrSlice.call(seen);
+          seen.push(from);
         }
-        if (noIndent && !layout) {
+        if (noIndent) {
           var newOpts = {
             depth: opts.depth
           };
           if (has(opts, "quoteStyle")) {
             newOpts.quoteStyle = opts.quoteStyle;
           }
-          if (has(opts, "maxCollectionLength")) {
-            newOpts.maxCollectionLength = opts.maxCollectionLength;
-          }
-          return inspect_(value, newOpts, depth + 1, nextSeen);
+          return inspect_(value, newOpts, depth + 1, seen);
         }
-        return inspect_(value, opts, depth + 1, nextSeen, layout ? layout.state : breakState);
-      }
-      function enter() {
-        if (layout) {
-          var previousDepth = layout.state.currentDepth;
-          layout.state.currentDepth = depth;
-          return previousDepth;
-        }
-        return null;
-      }
-      function leaveIfEmpty(entries, previousDepth) {
-        if (layout && entries.length === 0) {
-          layout.state.currentDepth = previousDepth;
-        }
+        return inspect_(value, opts, depth + 1, seen);
       }
       if (typeof obj === "function" && !isRegExp(obj)) {
         var name = nameOf(obj);
-        var fnDepth = enter();
         var keys = arrObjKeys(obj, inspect);
-        leaveIfEmpty(keys, fnDepth);
-        if (layout && keys.length > 0) {
-          return breakLines(keys, bracesOf("{", "}", "[Function" + (name ? ": " + name : " (anonymous)") + "]", " "), layout);
-        }
         return "[Function" + (name ? ": " + name : " (anonymous)") + "]" + (keys.length > 0 ? " { " + $join.call(keys, ", ") + " }" : "");
       }
       if (isSymbol(obj)) {
@@ -14861,28 +14676,19 @@ var require_object_inspect = __commonJS({
         if (obj.length === 0) {
           return "[]";
         }
-        enter();
-        var xs = arrObjKeys(obj, inspect, maxCollectionLength);
-        if (layout) {
-          return breakLines(xs, bracesOf("[", "]", "", " "), layout, obj);
-        }
+        var xs = arrObjKeys(obj, inspect);
         if (indent && !singleLineValues(xs)) {
           return "[" + indentedJoin(xs, indent) + "]";
         }
         return "[ " + $join.call(xs, ", ") + " ]";
       }
       if (isError(obj)) {
-        var errorDepth = enter();
         var parts = arrObjKeys(obj, inspect);
         if (!("cause" in Error.prototype) && "cause" in obj && !isEnumerable.call(obj, "cause")) {
-          parts = $concat.call(["[cause]: " + inspect(obj.cause)], parts);
+          return "{ [" + String(obj) + "] " + $join.call($concat.call("[cause]: " + inspect(obj.cause), parts), ", ") + " }";
         }
-        leaveIfEmpty(parts, errorDepth);
         if (parts.length === 0) {
           return "[" + String(obj) + "]";
-        }
-        if (layout) {
-          return breakLines(parts, bracesOf("{ [" + String(obj) + "]", "}", "", " "), layout);
         }
         return "{ [" + String(obj) + "] " + $join.call(parts, ", ") + " }";
       }
@@ -14895,55 +14701,21 @@ var require_object_inspect = __commonJS({
       }
       if (isMap(obj)) {
         var mapParts = [];
-        var mapDepth = enter();
-        if (mapIteratorNext && maxCollectionLength < mapSize.call(obj)) {
-          var mapIterator = mapEntries.call(obj);
-          var mapStep;
-          while (mapParts.length < maxCollectionLength && !(mapStep = mapIteratorNext.call(mapIterator)).done) {
-            mapParts.push(inspect(mapStep.value[0], obj, true) + " => " + inspect(mapStep.value[1], obj));
-          }
-        } else if (mapForEach) {
+        if (mapForEach) {
           mapForEach.call(obj, function(value, key) {
-            if (mapParts.length < maxCollectionLength) {
-              mapParts.push(inspect(key, obj, true) + " => " + inspect(value, obj));
-            }
+            mapParts.push(inspect(key, obj, true) + " => " + inspect(value, obj));
           });
         }
-        var mapLength = mapSize.call(obj);
-        if (maxCollectionLength !== Infinity && mapLength > mapParts.length) {
-          mapParts.push(moreItems(mapLength - mapParts.length));
-        }
-        leaveIfEmpty(mapParts, mapDepth);
-        if (layout) {
-          return breakLines(mapParts, bracesOf("Map (" + mapLength + ") {", "}", "", ""), layout);
-        }
-        return collectionOf("Map", mapLength, mapParts, indent);
+        return collectionOf("Map", mapSize.call(obj), mapParts, indent);
       }
       if (isSet(obj)) {
         var setParts = [];
-        var setDepth = enter();
-        if (setIteratorNext && maxCollectionLength < setSize.call(obj)) {
-          var setIterator = setValues.call(obj);
-          var setStep;
-          while (setParts.length < maxCollectionLength && !(setStep = setIteratorNext.call(setIterator)).done) {
-            setParts.push(inspect(setStep.value, obj));
-          }
-        } else if (setForEach) {
+        if (setForEach) {
           setForEach.call(obj, function(value) {
-            if (setParts.length < maxCollectionLength) {
-              setParts.push(inspect(value, obj));
-            }
+            setParts.push(inspect(value, obj));
           });
         }
-        var setLength = setSize.call(obj);
-        if (maxCollectionLength !== Infinity && setLength > setParts.length) {
-          setParts.push(moreItems(setLength - setParts.length));
-        }
-        leaveIfEmpty(setParts, setDepth);
-        if (layout) {
-          return breakLines(setParts, bracesOf("Set (" + setLength + ") {", "}", "", ""), layout);
-        }
-        return collectionOf("Set", setLength, setParts, indent);
+        return collectionOf("Set", setSize.call(obj), setParts, indent);
       }
       if (isWeakMap(obj)) {
         return weakCollectionOf("WeakMap");
@@ -14973,19 +14745,14 @@ var require_object_inspect = __commonJS({
         return "{ [object globalThis] }";
       }
       if (!isDate(obj) && !isRegExp(obj)) {
-        var objectDepth = enter();
-        var ys = arrObjKeys(obj, inspect, maxCollectionLength);
-        leaveIfEmpty(ys, objectDepth);
+        var ys = arrObjKeys(obj, inspect);
         var isPlainObject = gPO ? gPO(obj) === Object.prototype : obj instanceof Object || obj.constructor === Object;
-        var protoTag = (gPO ? gPO(obj) === null : !(obj instanceof Object)) ? "null prototype" : "";
+        var protoTag = obj instanceof Object ? "" : "null prototype";
         var stringTag = !isPlainObject && toStringTag && Object(obj) === obj && toStringTag in obj ? $slice.call(toStr(obj), 8, -1) : protoTag ? "Object" : "";
         var constructorTag = isPlainObject || typeof obj.constructor !== "function" ? "" : obj.constructor.name ? obj.constructor.name + " " : "";
         var tag = constructorTag + (stringTag || protoTag ? "[" + $join.call($concat.call([], stringTag || [], protoTag || []), ": ") + "] " : "");
         if (ys.length === 0) {
           return tag + "{}";
-        }
-        if (layout) {
-          return breakLines(ys, bracesOf(tag + "{", "}", "", " "), layout);
         }
         if (indent) {
           return tag + "{" + indentedJoin(ys, indent) + "}";
@@ -15062,26 +14829,6 @@ var require_object_inspect = __commonJS({
     }
     function toStr(obj) {
       return objectToString.call(obj);
-    }
-    function isTypedArray(obj) {
-      if (typedArrayTag) {
-        return !!typedArrayTag.call(obj);
-      }
-      return !toStringTag && $test.call(typedArrayToString, toStr(obj));
-    }
-    function getTypedArrayLength(obj) {
-      if (typedArrayLength) {
-        return typedArrayLength.call(obj);
-      }
-      var getter = typedArrayLengths[toStr(obj)];
-      return getter ? getter.call(obj) : obj.length;
-    }
-    function getterOf(obj, key) {
-      var descriptor = Object.getOwnPropertyDescriptor ? Object.getOwnPropertyDescriptor(obj, key) : null;
-      return descriptor && typeof descriptor.get === "function" ? descriptor.get : null;
-    }
-    function moreItems(count) {
-      return "... " + count + " more item" + (count > 1 ? "s" : "");
     }
     function nameOf(f) {
       if (f.name) {
@@ -15196,7 +14943,7 @@ var require_object_inspect = __commonJS({
       }
       var quoteRE = quoteREs[opts.quoteStyle || "single"];
       quoteRE.lastIndex = 0;
-      var s = $replace.call($replace.call(str, quoteRE, "\\$1"), opts.multilineStrings ? /[\x00-\x09\x0b-\x1f]/g : /[\x00-\x1f]/g, lowbyte);
+      var s = $replace.call($replace.call(str, quoteRE, "\\$1"), /[\x00-\x1f]/g, lowbyte);
       return wrapQuotes(s, "single", opts);
     }
     function lowbyte(c) {
@@ -15222,112 +14969,6 @@ var require_object_inspect = __commonJS({
     function collectionOf(type, size, entries, indent) {
       var joinedEntries = indent ? indentedJoin(entries, indent) : $join.call(entries, ", ");
       return type + " (" + size + ") {" + joinedEntries + "}";
-    }
-    function isBelowBreakLength(entries, start, breakLength) {
-      if (breakLength === Infinity) {
-        return singleLineValues(entries);
-      }
-      var totalLength = entries.length + start;
-      if (totalLength + entries.length > breakLength) {
-        return false;
-      }
-      for (var i = 0; i < entries.length; i++) {
-        totalLength += entries[i].length;
-        if (totalLength > breakLength) {
-          return false;
-        }
-      }
-      return true;
-    }
-    function padTo(str, width, atStart) {
-      var fill = width > str.length ? $join.call(Array(width - str.length + 1), " ") : "";
-      return atStart ? fill + str : str + fill;
-    }
-    function groupArrayElements(entries, layout, value) {
-      var separatorSpace = 2;
-      var totalLength = 0;
-      var maxLength = 0;
-      var outputLength = entries.length;
-      if (layout.maxCollectionLength < entries.length) {
-        outputLength -= 1;
-      }
-      var dataLen = [];
-      for (var i = 0; i < outputLength; i++) {
-        dataLen[i] = getStringWidth(entries[i]);
-        totalLength += dataLen[i] + separatorSpace;
-        if (maxLength < dataLen[i]) {
-          maxLength = dataLen[i];
-        }
-      }
-      var actualMax = maxLength + separatorSpace;
-      var indentationLvl = layout.indent.prev.length;
-      if (actualMax * 3 + indentationLvl >= layout.breakLength || totalLength / actualMax <= 5 && maxLength > 6) {
-        return entries;
-      }
-      var averageBias = $sqrt(actualMax - totalLength / entries.length);
-      var biasedMax = $max(actualMax - 3 - averageBias, 1);
-      var columns = $min(
-        $round($sqrt(2.5 * biasedMax * outputLength) / biasedMax),
-        $floor((layout.breakLength - indentationLvl) / actualMax),
-        12,
-        // `compact` * 4
-        15
-      );
-      if (columns <= 1) {
-        return entries;
-      }
-      var maxLineLength = [];
-      for (var c = 0; c < columns; c++) {
-        var lineMaxLength = 0;
-        for (var j = c; j < entries.length; j += columns) {
-          if (dataLen[j] > lineMaxLength) {
-            lineMaxLength = dataLen[j];
-          }
-        }
-        maxLineLength[c] = lineMaxLength + separatorSpace;
-      }
-      var numeric = true;
-      for (var k = 0; k < entries.length && numeric; k++) {
-        numeric = typeof value[k] === "number" || typeof value[k] === "bigint";
-      }
-      var grouped = [];
-      for (var row = 0; row < outputLength; row += columns) {
-        var max = $min(row + columns, outputLength);
-        var str = "";
-        var col = row;
-        for (; col < max - 1; col++) {
-          str += padTo(entries[col] + ", ", maxLineLength[col - row] + (entries[col].length - dataLen[col]), numeric);
-        }
-        var lastPadding = maxLineLength[col - row] + (entries[col].length - dataLen[col]) - separatorSpace;
-        str += numeric ? padTo(entries[col], lastPadding, true) : entries[col];
-        grouped.push(str);
-      }
-      if (outputLength < entries.length) {
-        grouped.push(entries[outputLength]);
-      }
-      return grouped;
-    }
-    function bracesOf(opening, closing, base, padding) {
-      return [
-        opening,
-        closing,
-        base,
-        padding
-      ];
-    }
-    function breakLines(entries, braces, layout, arrayValue) {
-      var output = arrayValue && entries.length > 6 ? groupArrayElements(entries, layout, arrayValue) : entries;
-      var base = braces[2] ? braces[2] + " " : "";
-      if (layout.state.currentDepth - layout.depth < 3 && output.length === entries.length) {
-        var start = output.length + layout.indent.prev.length + braces[0].length + braces[2].length + 10;
-        if (isBelowBreakLength(output, start, layout.breakLength)) {
-          var joined = $join.call(output, ", ");
-          if (indexOf(joined, "\n") < 0) {
-            return base + braces[0] + braces[3] + joined + braces[3] + braces[1];
-          }
-        }
-      }
-      return base + braces[0] + indentedJoin(output, layout.indent) + braces[1];
     }
     function singleLineValues(xs) {
       for (var i = 0; i < xs.length; i++) {
@@ -15358,27 +14999,14 @@ var require_object_inspect = __commonJS({
       var lineJoiner = "\n" + indent.prev + indent.base;
       return lineJoiner + $join.call(xs, "," + lineJoiner) + "\n" + indent.prev;
     }
-    function arrObjKeys(obj, inspect, maxLength) {
+    function arrObjKeys(obj, inspect) {
       var isArr = isArray(obj);
-      var limit = typeof maxLength === "number" ? maxLength : Infinity;
-      var typedLength = !isArr && limit !== Infinity && isTypedArray(obj) ? getTypedArrayLength(obj) : null;
-      if (typeof typedLength !== "number" || typedLength <= limit) {
-        typedLength = null;
-      }
       var xs = [];
       if (isArr) {
-        xs.length = obj.length < limit ? obj.length : limit;
-        for (var i = 0; i < obj.length && i < limit; i++) {
+        xs.length = obj.length;
+        for (var i = 0; i < obj.length; i++) {
           xs[i] = has(obj, i) ? inspect(obj[i], obj) : "";
         }
-        if (obj.length > limit) {
-          xs.push(moreItems(obj.length - limit));
-        }
-      } else if (typedLength !== null) {
-        for (var t = 0; t < limit; t++) {
-          xs.push(t + ": " + inspect(obj[t], obj));
-        }
-        xs.push(moreItems(typedLength - limit));
       }
       var syms = typeof gOPS === "function" ? gOPS(obj) : [];
       var symMap;
@@ -15393,9 +15021,6 @@ var require_object_inspect = __commonJS({
           continue;
         }
         if (isArr && String(Number(key)) === key && key < obj.length) {
-          continue;
-        }
-        if (typedLength !== null && String(Number(key)) === key && key < typedLength) {
           continue;
         }
         if (hasShammedSymbols && symMap["$" + key] instanceof Symbol) {

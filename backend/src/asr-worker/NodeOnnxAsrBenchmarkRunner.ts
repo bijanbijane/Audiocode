@@ -138,13 +138,17 @@ export class NodeOnnxAsrBenchmarkRunner {
       throw new Error('WAV_PARSE_ERROR: چانک صوتی data یافت نشد.');
     }
 
-    const bytesPerSample = bitsPerSample / 8;
-    const totalFrames = Math.floor(dataSize / (numChannels * bytesPerSample));
+    const bytesPerSample = Math.max(2, Math.floor(bitsPerSample / 8));
+    const safeAvailableBytes = Math.max(0, Math.min(dataSize, buf.byteLength - dataOffset));
+    const totalFrames = Math.floor(safeAvailableBytes / (numChannels * bytesPerSample));
     const channels = Array.from({ length: numChannels }, () => new Float32Array(totalFrames));
 
     let ptr = dataOffset;
+    const maxOffset = dataOffset + safeAvailableBytes;
     for (let f = 0; f < totalFrames; f++) {
       for (let c = 0; c < numChannels; c++) {
+        // P1 #9: Prevent RangeError if malformed WAV header declares oversized data chunk
+        if (ptr + bytesPerSample > maxOffset) break;
         let sampleVal = 0;
         if (audioFormat === 3 && bitsPerSample === 32) {
           sampleVal = view.getFloat32(ptr, true);

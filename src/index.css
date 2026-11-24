@@ -1,19 +1,188 @@
 @import "tailwindcss";
 @custom-variant dark (&:where(.dark, .dark *));
 
+/* ==========================================================================
+   AVAPARDAZ — UNIFIED DESIGN SYSTEM (Studio v2)
+   4-Layer Surface Architecture (L0 Shell -> L1 Canvas -> L2 Waveform -> L3 Float)
+   Strict 60-30-10 Color Discipline · Single-Elevation · 4-Tier Button System
+   ========================================================================== */
+
 @layer base {
   :root {
     --font-sans: 'Vazirmatn', 'Vazir', 'IRANSansX', 'Tahoma', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
     --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
     color-scheme: light;
+
+    /* --- 1. Surface Layers (Light-First, <5% cool neutral tint) --- */
+    --avp-bg: #F5F6F8;
+    --avp-surface-shell: #F5F6F8;       /* L0: Top bar, side rails, secondary chrome */
+    --avp-surface: #FFFFFF;             /* L1: Primary editorial canvas & active panels */
+    --avp-surface-2: #EEF1F4;           /* L1b: Subtle inset / segmented track */
+    --avp-surface-secondary: #EEF1F4;
+    --avp-hover: #E6EBF0;               /* Hover tint for borderless ghost controls */
+    --avp-surface-hover: #E6EBF0;
+    --avp-surface-floating: #FFFFFF;    /* L3: Popovers, menus, modals */
+
+    /* --- 2. Hairline Dividers & Borders --- */
+    --avp-border: #E2E7EC;
+    --avp-border-subtle: #EDF0F4;
+    --avp-border-strong: #C9D3DC;
+
+    /* --- 3. Typography & Ink Hierarchy (WCAG AA Verified) --- */
+    --avp-text: #141C24;
+    --avp-text-secondary: #4D5966;
+    --avp-text-muted: #707D8A;
+    --avp-text-faint: #94A0AC;
+
+    /* --- 4. Semantic Brand & State Tokens (10% Accent Budget) --- */
+    --avp-brand: #16816F;
+    --avp-brand-hover: #116D5D;
+    --avp-brand-soft: #E5F4F0;
+    --avp-accent: #16816F;
+    --avp-accent-hover: #116D5D;
+    --avp-accent-soft: #E5F4F0;
+    --avp-accent-text: #0F6254;
+    --avp-ready-bg: #DDF4E7;
+    --avp-ready-text: #0F6254;
+
+    --avp-warning: #D98A1C;
+    --avp-warning-soft: #FEF5E6;
+    --avp-warning-text: #925B0D;
+
+    --avp-error: #D44F58;
+    --avp-error-soft: #FDEEEF;
+    --avp-danger: #D44F58;
+    --avp-danger-soft: #FDEEEF;
+
+    /* --- 5. Acoustic Stage (L2: Always Deep Navy for Signal Precision) --- */
+    --avp-wave-bg: #0D1520;
+    --avp-waveform-bg: #0D1520;
+    --avp-wave-surface: #131E2D;
+    --avp-wave-stroke: #1FA38B;
+    --avp-wave-selection: #E5A13B;
+
+    /* --- 6. Elevation & Shadows (L3 Only) --- */
+    --avp-shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.05);
+    --avp-shadow-md: 0 8px 24px rgba(15, 23, 42, 0.10);
+
+    /* --- 7. Layout, Spacing, Control Heights & Radii --- */
+    --avp-header-h: 48px;
+    --avp-transport-h: 56px;
+    --avp-rail-w: 240px;
+    --avp-rail-dsp-w: 300px;
+    --avp-rail-collapsed-w: 48px;
+    --avp-inspector-w: 340px;
+    --avp-track-header-w: 120px;
+
+    --avp-space-1: 4px;
+    --avp-space-2: 8px;
+    --avp-space-3: 12px;
+    --avp-space-4: 16px;
+    --avp-space-5: 20px;
+    --avp-space-6: 24px;
+
+    --avp-ctrl-sm: 28px;
+    --avp-ctrl-md: 32px;
+    --avp-ctrl-lg: 36px;
+
+    --avp-radius-sm: 6px;
+    --avp-radius-md: 8px;
+    --avp-radius-lg: 10px;
+    --avp-radius-xl: 14px;
+
+    /* --- 8. Typography Scale --- */
+    --avp-transcript-size: 15.5px;
+    --avp-transcript-lh: 2.05;
   }
 
   html.dark {
     color-scheme: dark;
+
+    /* --- 1. Surface Layers (Dark Parity, Delta <= 12%) --- */
+    --avp-bg: #0E141C;
+    --avp-surface-shell: #0E141C;
+    --avp-surface: #131B24;
+    --avp-surface-2: #1B2531;
+    --avp-surface-secondary: #1B2531;
+    --avp-hover: #222F3E;
+    --avp-surface-hover: #222F3E;
+    --avp-surface-floating: #1A2430;
+
+    /* --- 2. Hairline Dividers & Borders --- */
+    --avp-border: #24303E;
+    --avp-border-subtle: #1C2632;
+    --avp-border-strong: #354556;
+
+    /* --- 3. Typography & Ink Hierarchy (Optical Dark Compensation) --- */
+    --avp-text: #EDF2F7;
+    --avp-text-secondary: #A6B4C2;
+    --avp-text-muted: #7F8E9D;
+    --avp-text-faint: #5F6E7D;
+
+    /* --- 4. Semantic Brand & State Tokens --- */
+    --avp-brand: #188E7A;
+    --avp-brand-hover: #1EA38C;
+    --avp-brand-soft: rgba(67, 199, 167, 0.15);
+    --avp-accent: #188E7A;
+    --avp-accent-hover: #1EA38C;
+    --avp-accent-soft: rgba(67, 199, 167, 0.15);
+    --avp-accent-text: #5EE0C0;
+    --avp-ready-bg: rgba(67, 199, 167, 0.16);
+    --avp-ready-text: #6EE0C3;
+
+    --avp-warning: #E8AB4A;
+    --avp-warning-soft: rgba(232, 171, 74, 0.15);
+    --avp-warning-text: #F2BE6A;
+
+    --avp-error: #E56F77;
+    --avp-error-soft: rgba(229, 111, 119, 0.16);
+    --avp-danger: #DC5C65;
+    --avp-danger-soft: rgba(229, 111, 119, 0.16);
+
+    /* --- 5. Acoustic Stage --- */
+    --avp-wave-bg: #090F17;
+    --avp-waveform-bg: #090F17;
+    --avp-wave-surface: #111A26;
+    --avp-wave-stroke: #43C7A7;
+    --avp-wave-selection: #E8AB4A;
+
+    /* --- 6. Elevation & Shadows --- */
+    --avp-shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.30);
+    --avp-shadow-md: 0 12px 32px rgba(0, 0, 0, 0.48);
+  }
+
+  html[data-font-scale="sm"] {
+    --avp-transcript-size: 14px;
+    --avp-transcript-lh: 1.95;
+  }
+  html[data-font-scale="md"] {
+    --avp-transcript-size: 16px;
+    --avp-transcript-lh: 2.1;
+  }
+  html[data-font-scale="lg"] {
+    --avp-transcript-size: 18px;
+    --avp-transcript-lh: 2.15;
+  }
+
+  html.avp-high-contrast {
+    --avp-border: #66727E;
+    --avp-text-secondary: #2B3742;
+  }
+  html.dark.avp-high-contrast {
+    --avp-border: #7B8A97;
+    --avp-text-secondary: #D3DCE6;
   }
 
   html {
     font-family: var(--font-sans);
+    background-color: var(--avp-bg);
+    color: var(--avp-text);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  body {
+    overflow-x: hidden;
   }
 
   .font-mono {
@@ -25,15 +194,344 @@
     font-variant-numeric: tabular-nums;
   }
 
+  button,
+  a,
+  input,
+  select,
+  textarea {
+    transition-property: color, background-color, border-color, opacity, box-shadow;
+    transition-duration: 140ms;
+    transition-timing-function: cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
   button:focus-visible,
   a:focus-visible,
   input:focus-visible,
   select:focus-visible,
   textarea:focus-visible,
   [tabindex]:focus-visible {
-    outline: 2px solid #f59e0b;
+    outline: 2px solid var(--avp-accent);
     outline-offset: 2px;
   }
+}
+
+/* ==========================================================================
+   DESIGN SYSTEM COMPONENT PRIMITIVES (@layer components)
+   Single Source of Truth for Buttons, Inputs, Segmented Controls & Panes
+   ========================================================================== */
+
+@layer components {
+  /* --- Surface Primitives --- */
+  .avp-pane {
+    background-color: var(--avp-surface);
+  }
+
+  .avp-pane-shell {
+    background-color: var(--avp-surface-shell);
+  }
+
+  .avp-panel {
+    background-color: var(--avp-surface);
+    border: 1px solid var(--avp-border);
+    border-radius: var(--avp-radius-xl);
+    box-shadow: var(--avp-shadow-sm);
+  }
+
+  .avp-divider-v {
+    width: 1px;
+    height: 18px;
+    background-color: var(--avp-border);
+    flex-shrink: 0;
+  }
+
+  .avp-divider-h {
+    height: 1px;
+    width: 100%;
+    background-color: var(--avp-border);
+  }
+
+  /* --- Interactive Horizontal Split Sash (6px Resize Handle between Timeline & Transcript) --- */
+  .avp-split-sash {
+    position: relative;
+    height: 6px;
+    width: 100%;
+    background-color: var(--avp-surface-shell);
+    border-top: 1px solid var(--avp-border);
+    border-bottom: 1px solid var(--avp-border);
+    cursor: row-resize;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    user-select: none;
+    z-index: 20;
+    transition: background-color 140ms ease, border-color 140ms ease;
+  }
+  .avp-split-sash:hover,
+  .avp-split-sash[data-dragging="true"] {
+    background-color: var(--avp-accent-soft);
+    border-color: var(--avp-accent);
+  }
+  .avp-split-sash-pill {
+    width: 36px;
+    height: 2px;
+    border-radius: 9999px;
+    background-color: var(--avp-border-strong);
+    transition: background-color 140ms ease, width 140ms ease;
+  }
+  .avp-split-sash:hover .avp-split-sash-pill,
+  .avp-split-sash[data-dragging="true"] .avp-split-sash-pill {
+    width: 48px;
+    background-color: var(--avp-accent);
+  }
+
+  /* --- BiDi-Isolated Tabular Number Wrapper (Hz, dB, ms, Timecodes) --- */
+  .avp-bidi-num {
+    direction: ltr;
+    unicode-bidi: isolate;
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* --- 4-Tier Button System --- */
+  .avp-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    height: var(--avp-ctrl-md);
+    padding: 0 12px;
+    border-radius: var(--avp-radius-md);
+    font-size: 12.5px;
+    font-weight: 500;
+    line-height: 1;
+    white-space: nowrap;
+    flex-shrink: 0;
+    cursor: pointer;
+    user-select: none;
+  }
+  .avp-btn:disabled {
+    opacity: 0.38;
+    cursor: not-allowed;
+    pointer-events: none;
+  }
+
+  .avp-btn-sm {
+    height: var(--avp-ctrl-sm);
+    padding: 0 9px;
+    border-radius: var(--avp-radius-sm);
+    font-size: 11.5px;
+    gap: 5px;
+  }
+
+  .avp-btn-lg {
+    height: var(--avp-ctrl-lg);
+    padding: 0 16px;
+    border-radius: var(--avp-radius-lg);
+    font-size: 13px;
+    font-weight: 600;
+    gap: 7px;
+  }
+
+  /* Tier 1: Primary Solid — STRICT BUDGET (Max 2 visible in Studio: Play & Export) */
+  .avp-btn-primary {
+    background-color: var(--avp-accent);
+    color: #FFFFFF;
+    font-weight: 600;
+    border: 1px solid transparent;
+    box-shadow: var(--avp-shadow-sm);
+  }
+  .avp-btn-primary:hover:not(:disabled) {
+    background-color: var(--avp-accent-hover);
+  }
+
+  /* Tier 2: Tonal Active — Soft accent surface, zero border noise */
+  .avp-btn-tonal {
+    background-color: var(--avp-accent-soft);
+    color: var(--avp-accent-text);
+    font-weight: 600;
+    border: 1px solid transparent;
+  }
+  .avp-btn-tonal:hover:not(:disabled) {
+    filter: brightness(0.96);
+  }
+  html.dark .avp-btn-tonal:hover:not(:disabled) {
+    filter: brightness(1.12);
+  }
+
+  /* Tier 3: Borderless Ghost — Default for ALL toolbar/header/icon actions */
+  .avp-btn-ghost {
+    background-color: transparent;
+    color: var(--avp-text-secondary);
+    border: 1px solid transparent;
+  }
+  .avp-btn-ghost:hover:not(:disabled) {
+    background-color: var(--avp-surface-hover);
+    color: var(--avp-text);
+  }
+
+  /* Tier 4: Subtle Outline — Reserved for deliberate secondary actions & batch bars */
+  .avp-btn-outline {
+    background-color: var(--avp-surface);
+    color: var(--avp-text);
+    border: 1px solid var(--avp-border);
+  }
+  .avp-btn-outline:hover:not(:disabled) {
+    background-color: var(--avp-surface-hover);
+    border-color: var(--avp-border-strong);
+  }
+
+  /* Semantic Danger & Warning Buttons */
+  .avp-btn-danger {
+    background-color: var(--avp-danger);
+    color: #FFFFFF;
+    font-weight: 600;
+    border: 1px solid transparent;
+  }
+  .avp-btn-danger:hover:not(:disabled) {
+    opacity: 0.92;
+  }
+
+  .avp-btn-danger-ghost {
+    background-color: transparent;
+    color: var(--avp-text-muted);
+    border: 1px solid transparent;
+  }
+  .avp-btn-danger-ghost:hover:not(:disabled) {
+    background-color: var(--avp-danger-soft);
+    color: var(--avp-danger);
+  }
+
+  .avp-btn-warning-tonal {
+    background-color: var(--avp-warning-soft);
+    color: var(--avp-warning-text);
+    font-weight: 600;
+    border: 1px solid color-mix(in srgb, var(--avp-warning) 35%, transparent);
+  }
+  html.dark .avp-btn-warning-tonal {
+    color: var(--avp-warning-text);
+  }
+
+  /* Square Icon Buttons (Ghost by default) */
+  .avp-btn-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: var(--avp-ctrl-md);
+    height: var(--avp-ctrl-md);
+    padding: 0;
+    border-radius: var(--avp-radius-md);
+    background-color: transparent;
+    color: var(--avp-text-secondary);
+    border: 1px solid transparent;
+    flex-shrink: 0;
+    cursor: pointer;
+  }
+  .avp-btn-icon:hover:not(:disabled) {
+    background-color: var(--avp-surface-hover);
+    color: var(--avp-text);
+  }
+  .avp-btn-icon:disabled {
+    opacity: 0.35;
+    cursor: not-allowed;
+    pointer-events: none;
+  }
+
+  .avp-btn-icon-sm {
+    width: var(--avp-ctrl-sm);
+    height: var(--avp-ctrl-sm);
+    border-radius: var(--avp-radius-sm);
+  }
+
+  /* --- Neutral Segmented Control (Never competes with Primary Green!) --- */
+  .avp-segmented {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+    padding: 2px;
+    height: var(--avp-ctrl-md);
+    border-radius: var(--avp-radius-md);
+    background-color: var(--avp-surface-secondary);
+    border: 1px solid var(--avp-border-subtle);
+  }
+  .avp-segmented-sm {
+    height: var(--avp-ctrl-sm);
+  }
+  .avp-segmented-item {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    height: 100%;
+    padding: 0 9px;
+    border-radius: calc(var(--avp-radius-md) - 2px);
+    font-size: 11.5px;
+    font-weight: 500;
+    color: var(--avp-text-secondary);
+    white-space: nowrap;
+    cursor: pointer;
+  }
+  .avp-segmented-item:hover {
+    color: var(--avp-text);
+  }
+  .avp-segmented-item[aria-pressed="true"],
+  .avp-segmented-item[aria-selected="true"] {
+    background-color: var(--avp-surface);
+    color: var(--avp-text);
+    font-weight: 600;
+    box-shadow: var(--avp-shadow-sm);
+  }
+
+  /* --- Unified Input & Select Controls --- */
+  .avp-input {
+    height: var(--avp-ctrl-md);
+    border-radius: var(--avp-radius-md);
+    border: 1px solid var(--avp-border);
+    background-color: var(--avp-surface);
+    color: var(--avp-text);
+    font-size: 12px;
+    padding: 0 10px;
+  }
+  .avp-input::placeholder {
+    color: var(--avp-text-faint);
+  }
+  .avp-input:hover {
+    border-color: var(--avp-border-strong);
+  }
+  .avp-input:focus {
+    border-color: var(--avp-accent);
+  }
+
+  .avp-select {
+    height: var(--avp-ctrl-sm);
+    border-radius: var(--avp-radius-sm);
+    border: 1px solid var(--avp-border);
+    background-color: var(--avp-surface);
+    color: var(--avp-text-secondary);
+    font-size: 11.5px;
+    padding: 0 8px;
+    cursor: pointer;
+  }
+  .avp-select:hover {
+    border-color: var(--avp-border-strong);
+    color: var(--avp-text);
+  }
+
+  /* --- Editorial Transcript Typography --- */
+  .avp-transcript-body {
+    font-size: var(--avp-transcript-size);
+    line-height: var(--avp-transcript-lh);
+  }
+}
+
+/* Reduced Motion Accessibility */
+html[data-motion="reduced"] *,
+html[data-motion="reduced"] *::before,
+html[data-motion="reduced"] *::after {
+  animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.01ms !important;
+  scroll-behavior: auto !important;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -47,7 +545,7 @@
   }
 }
 
-/* Custom subtle scrollbars for studio panels */
+/* Subtle studio scrollbars */
 ::-webkit-scrollbar {
   width: 6px;
   height: 6px;
@@ -56,15 +554,9 @@
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: #cbd5e1;
-  border-radius: 3px;
+  background: var(--avp-border-strong);
+  border-radius: 9999px;
 }
-html.dark ::-webkit-scrollbar-track {
-  background: #0b0f17;
-}
-html.dark ::-webkit-scrollbar-thumb {
-  background: #252f42;
-}
-html.dark ::-webkit-scrollbar-thumb:hover {
-  background: #374561;
+::-webkit-scrollbar-thumb:hover {
+  background: var(--avp-text-muted);
 }

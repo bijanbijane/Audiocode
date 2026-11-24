@@ -1,8 +1,10 @@
 import React, { useEffect, useRef, useState } from 'react';
 import {
   Activity,
+  BookmarkPlus,
   Lock,
   Maximize2,
+  Minimize2,
   Play,
   Scissors,
   SplitSquareVertical,
@@ -24,6 +26,12 @@ import { selectPeakLevel } from '../engine/peakPyramid';
 import { flicksToSeconds, formatTimecode, secondsToFlicks } from '../engine/timebase';
 import type { WaveformSelectionState } from './AuditionTransportBar';
 
+export interface TimelineMarkerItem {
+  id: string;
+  label: string;
+  startSec: number;
+}
+
 interface WaveformCanvasProps {
   tracks: Track[];
   assets: Record<string, AudioAsset>;
@@ -33,11 +41,18 @@ interface WaveformCanvasProps {
   playheadSec: number;
   totalDurationSec: number;
   zoom: number;
+  locale?: 'fa' | 'en';
+  showGrid?: boolean;
+  showRuler?: boolean;
+  showMarkers?: boolean;
+  showEditRegions?: boolean;
+  markers?: TimelineMarkerItem[];
   onZoomChange: (nextZoom: number) => void;
   onSeekSec: (sec: number) => void;
   onToggleTrackMute: (trackId: string) => void;
   onToggleTrackSolo: (trackId: string) => void;
   onSelectRecommendation: (recId: string) => void;
+  onAddMarkerAtPlayhead?: () => void;
   onSplitAtPlayhead?: () => void;
   onCutWaveformRange?: (
     range: FlickRange,
@@ -52,6 +67,8 @@ interface WaveformCanvasProps {
   selection?: WaveformSelectionState | null;
   onSelectionChange?: (next: WaveformSelectionState | null) => void;
   onPlaySelectionRange?: (sel: WaveformSelectionState) => void;
+  trackHeightPx?: number;
+  onTrackHeightChange?: (nextTrackHeightPx: number) => void;
 }
 
 export const WaveformCanvas: React.FC<WaveformCanvasProps> = ({
@@ -63,11 +80,18 @@ export const WaveformCanvas: React.FC<WaveformCanvasProps> = ({
   playheadSec,
   totalDurationSec,
   zoom,
+  locale = 'fa',
+  showGrid = true,
+  showRuler = true,
+  showMarkers = true,
+  showEditRegions = true,
+  markers = [],
   onZoomChange,
   onSeekSec,
   onToggleTrackMute,
   onToggleTrackSolo,
   onSelectRecommendation,
+  onAddMarkerAtPlayhead,
   onSplitAtPlayhead,
   onCutWaveformRange,
   detectedSyncOffsetMs = 0,
@@ -77,13 +101,30 @@ export const WaveformCanvas: React.FC<WaveformCanvasProps> = ({
   selection: controlledSelection,
   onSelectionChange,
   onPlaySelectionRange,
+  trackHeightPx = 82,
+  onTrackHeightChange,
 }) => {
+  const isFa = locale === 'fa';
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
-  const [containerWidth, setContainerWidth] = useState(900);
+  const [containerWidth, setContainerWidth] = useState(820);
   const [viewMode, setViewMode] = useState<'waveform' | 'spectral'>('waveform');
+  const [showSyncPopover, setShowSyncPopover] = useState(false);
   const [internalSelection, setInternalSelection] = useState<WaveformSelectionState | null>(null);
   const [selectionScope, setSelectionScope] = useState<'track' | 'all'>('all');
+  const [isDarkTheme, setIsDarkTheme] = useState<boolean>(() =>
+    typeof document !== 'undefined' && document.documentElement.classList.contains('dark'),
+  );
+
+  useEffect(() => {
+    if (typeof document === 'undefined') return;
+    const htmlEl = document.documentElement;
+    const syncTheme = () => setIsDarkTheme(htmlEl.classList.contains('dark'));
+    syncTheme();
+    const obs = new MutationObserver(syncTheme);
+    obs.observe(htmlEl, { attributes: true, attributeFilter: ['class'] });
+    return () => obs.disconnect();
+  }, []);
 
   const selectedRangeSec =
     controlledSelection !== undefined ? controlledSelection : internalSelection;
@@ -118,7 +159,7 @@ export const WaveformCanvas: React.FC<WaveformCanvasProps> = ({
     const el = containerRef.current;
     if (!el) return;
     const update = () => {
-      const next = Math.max(320, el.clientWidth);
+      const next = Math.max(280, el.clientWidth);
       setContainerWidth(next);
     };
     update();
@@ -127,14 +168,15 @@ export const WaveformCanvas: React.FC<WaveformCanvasProps> = ({
     return () => ro.disconnect();
   }, []);
 
+  const rulerHeight = showRuler ? 24 : 0;
+  const trackHeight = Math.max(46, Math.min(180, Math.round(trackHeightPx)));
+
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
 
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
     const width = containerWidth;
-    const trackHeight = 104;
-    const rulerHeight = 28;
     const height = rulerHeight + Math.max(1, tracks.length) * trackHeight;
 
     canvas.width = Math.floor(width * dpr);
@@ -148,8 +190,8 @@ export const WaveformCanvas: React.FC<WaveformCanvasProps> = ({
     ctx.save();
     ctx.scale(dpr, dpr);
 
-    // Adobe Audition Charcoal Canvas Background
-    ctx.fillStyle = '#14161B';
+    // Theme-Adaptive Studio Waveform Surface: Crisp Studio Slate in Light Mode, Deep Navy in Dark Mode
+    ctx.fillStyle = isDarkTheme ? '#0D1520' : '#F1F5F9';
     ctx.fillRect(0, 0, width, height);
 
     const safeTotalSec = Math.max(0.5, totalDurationSec);
@@ -161,52 +203,69 @@ export const WaveformCanvas: React.FC<WaveformCanvasProps> = ({
     const secToX = (sec: number) => ((sec - viewStartSec) / visibleSec) * width;
 
     // 1. Time Ruler
-    ctx.fillStyle = '#1A1D24';
-    ctx.fillRect(0, 0, width, rulerHeight);
-    ctx.strokeStyle = '#2B303C';
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.moveTo(0, rulerHeight);
-    ctx.lineTo(width, rulerHeight);
-    ctx.stroke();
-
-    const tickStep = visibleSec <= 4 ? 0.5 : visibleSec <= 15 ? 1 : 2;
-    ctx.font = '11px "JetBrains Mono", monospace';
-    ctx.fillStyle = '#9CA3AF';
-    for (
-      let t = Math.ceil(viewStartSec / tickStep) * tickStep;
-      t <= viewStartSec + visibleSec;
-      t += tickStep
-    ) {
-      const x = secToX(t);
-      ctx.strokeStyle = '#313746';
+    if (showRuler) {
+      ctx.fillStyle = isDarkTheme ? '#131E2D' : '#E2E8F0';
+      ctx.fillRect(0, 0, width, rulerHeight);
+      ctx.strokeStyle = isDarkTheme ? '#243447' : '#CBD5E1';
+      ctx.lineWidth = 1;
       ctx.beginPath();
-      ctx.moveTo(x, rulerHeight - 7);
-      ctx.lineTo(x, rulerHeight);
+      ctx.moveTo(0, rulerHeight);
+      ctx.lineTo(width, rulerHeight);
       ctx.stroke();
-      ctx.fillText(`${t.toFixed(1)}s`, x + 4, 17);
+
+      const tickStep = visibleSec <= 4 ? 0.5 : visibleSec <= 15 ? 1 : visibleSec <= 60 ? 5 : 10;
+      ctx.font = '10.5px ui-monospace, SFMono-Regular, Menlo, monospace';
+      ctx.fillStyle = isDarkTheme ? '#8EA3B8' : '#475569';
+      for (
+        let t = Math.ceil(viewStartSec / tickStep) * tickStep;
+        t <= viewStartSec + visibleSec;
+        t += tickStep
+      ) {
+        const x = secToX(t);
+        ctx.strokeStyle = isDarkTheme ? '#293B4F' : '#94A3B8';
+        ctx.beginPath();
+        ctx.moveTo(x, rulerHeight - 6);
+        ctx.lineTo(x, rulerHeight);
+        ctx.stroke();
+        ctx.fillText(`${t.toFixed(tickStep < 1 ? 1 : 0)}s`, x + 4, 16);
+
+        if (showGrid) {
+          ctx.strokeStyle = isDarkTheme ? 'rgba(142, 163, 184, 0.06)' : 'rgba(100, 116, 139, 0.10)';
+          ctx.beginPath();
+          ctx.moveTo(x, rulerHeight);
+          ctx.lineTo(x, height);
+          ctx.stroke();
+        }
+      }
     }
 
-    // 2. Render Each Track (Waveform OR Spectral Frequency Heatmap)
+    // 2. Render Each Track
     tracks.forEach((track, tIdx) => {
       const top = rulerHeight + tIdx * trackHeight;
       const midY = top + trackHeight / 2;
 
-      ctx.fillStyle = tIdx % 2 === 0 ? '#14161B' : '#181B22';
+      ctx.fillStyle = isDarkTheme
+        ? tIdx % 2 === 0
+          ? '#0D1520'
+          : '#101A27'
+        : tIdx % 2 === 0
+          ? '#F8FAFC'
+          : '#F1F5F9';
       ctx.fillRect(0, top, width, trackHeight);
 
-      ctx.strokeStyle = '#252A36';
+      ctx.strokeStyle = isDarkTheme ? '#1E2D3E' : '#CBD5E1';
       ctx.beginPath();
       ctx.moveTo(0, top + trackHeight);
       ctx.lineTo(width, top + trackHeight);
       ctx.stroke();
 
-      // Horizontal dB / center reference grid lines
-      ctx.strokeStyle = 'rgba(156, 163, 175, 0.14)';
-      ctx.beginPath();
-      ctx.moveTo(0, midY);
-      ctx.lineTo(width, midY);
-      ctx.stroke();
+      if (showGrid) {
+        ctx.strokeStyle = isDarkTheme ? 'rgba(148, 163, 184, 0.14)' : 'rgba(100, 116, 139, 0.22)';
+        ctx.beginPath();
+        ctx.moveTo(0, midY);
+        ctx.lineTo(width, midY);
+        ctx.stroke();
+      }
 
       for (const clip of track.clips) {
         const clipStartSec = flicksToSeconds(clip.timelineRange.startFlicks);
@@ -218,12 +277,12 @@ export const WaveformCanvas: React.FC<WaveformCanvasProps> = ({
         const clipW = Math.max(1, x1 - x0);
 
         if (clip.kind === 'room-tone-fill') {
-          ctx.fillStyle = 'rgba(46, 229, 157, 0.12)';
+          ctx.fillStyle = 'rgba(31, 163, 139, 0.14)';
           ctx.fillRect(x0, top + 8, clipW, trackHeight - 16);
-          ctx.strokeStyle = 'rgba(46, 229, 157, 0.55)';
+          ctx.strokeStyle = 'rgba(67, 199, 167, 0.5)';
           ctx.strokeRect(x0 + 0.5, top + 8.5, Math.max(1, clipW - 1), trackHeight - 17);
-          ctx.fillStyle = '#2EE59D';
-          ctx.font = '10px "Vazirmatn", sans-serif';
+          ctx.fillStyle = isDarkTheme ? '#43C7A7' : '#0D7A66';
+          ctx.font = '10px sans-serif';
           if (clipW > 48) {
             ctx.fillText('Room Tone', x0 + 6, top + 22);
           }
@@ -231,7 +290,7 @@ export const WaveformCanvas: React.FC<WaveformCanvasProps> = ({
         }
 
         if (clipStartSec > 0.02 && x0 > 1 && x0 < width - 1) {
-          ctx.strokeStyle = 'rgba(56, 189, 248, 0.5)';
+          ctx.strokeStyle = 'rgba(67, 199, 167, 0.45)';
           ctx.lineWidth = 1;
           ctx.beginPath();
           ctx.moveTo(x0, top + 6);
@@ -252,20 +311,27 @@ export const WaveformCanvas: React.FC<WaveformCanvasProps> = ({
         const barColor = track.muted
           ? 'rgba(100, 116, 139, 0.45)'
           : tIdx === 0
-            ? '#2EE59D'
-            : '#38BDF8';
+            ? isDarkTheme
+              ? '#43C7A7'
+              : '#0D9488'
+            : isDarkTheme
+              ? '#38BDF8'
+              : '#0284C7';
         const rmsColor = track.muted
           ? 'rgba(100, 116, 139, 0.25)'
           : tIdx === 0
-            ? 'rgba(46, 229, 157, 0.30)'
-            : 'rgba(56, 189, 248, 0.28)';
+            ? isDarkTheme
+              ? 'rgba(31, 163, 139, 0.45)'
+              : 'rgba(13, 148, 136, 0.35)'
+            : isDarkTheme
+              ? 'rgba(56, 189, 248, 0.34)'
+              : 'rgba(2, 132, 199, 0.28)';
 
-        const amp = (trackHeight - 20) * 0.5;
+        const amp = (trackHeight - 18) * 0.5;
         const pxStart = Math.floor(x0);
         const pxEnd = Math.ceil(x1);
 
         if (viewMode === 'spectral' && pcm) {
-          // Adobe Audition Spectral Frequency Heatmap (8 frequency bands per pixel column)
           const bands = 8;
           const bandH = (trackHeight - 12) / bands;
           const colStep = 3;
@@ -277,7 +343,6 @@ export const WaveformCanvas: React.FC<WaveformCanvasProps> = ({
             if (centerSample < 0 || centerSample + win >= pcm.length) continue;
 
             for (let b = 0; b < bands; b++) {
-              // Goertzel-like 2-point band energy proxy across low->high frequencies
               const hz = 160 * Math.pow(6400 / 160, b / (bands - 1));
               const w = (2 * Math.PI * hz) / sr;
               let re = 0;
@@ -288,7 +353,12 @@ export const WaveformCanvas: React.FC<WaveformCanvasProps> = ({
                 im += s * Math.sin(w * n);
               }
               const mag = Math.min(1, Math.log1p(Math.sqrt(re * re + im * im) * 0.8) / 2.6);
-              const hue = mag > 0.65 ? `rgba(251, 191, 36, ${0.2 + mag * 0.78})` : mag > 0.35 ? `rgba(244, 63, 94, ${0.15 + mag * 0.7})` : `rgba(56, 189, 248, ${0.08 + mag * 0.55})`;
+              const hue =
+                mag > 0.65
+                  ? `rgba(229, 161, 59, ${0.22 + mag * 0.75})`
+                  : mag > 0.35
+                    ? `rgba(67, 199, 167, ${0.18 + mag * 0.7})`
+                    : `rgba(56, 189, 248, ${0.08 + mag * 0.55})`;
               ctx.fillStyle = hue;
               const bandY = top + trackHeight - 6 - (b + 1) * bandH;
               ctx.fillRect(px, bandY, colStep, bandH - 0.5);
@@ -330,30 +400,32 @@ export const WaveformCanvas: React.FC<WaveformCanvasProps> = ({
         }
       }
 
-      // 3. Draw Pending Smart Recommendation Overlays on this Track
-      for (const rec of recommendations) {
-        if (rec.trackId !== track.id || rec.status !== 'Pending') continue;
-        const rStart = flicksToSeconds(rec.range.startFlicks);
-        const rEnd = flicksToSeconds(rec.range.endFlicks);
-        const rx0 = secToX(rStart);
-        const rx1 = secToX(rEnd);
-        if (rx1 < 0 || rx0 > width) continue;
+      // 3. Pending Smart Suggestion Edit Region Overlays
+      if (showEditRegions) {
+        for (const rec of recommendations) {
+          if (rec.trackId !== track.id || rec.status !== 'Pending') continue;
+          const rStart = flicksToSeconds(rec.range.startFlicks);
+          const rEnd = flicksToSeconds(rec.range.endFlicks);
+          const rx0 = secToX(rStart);
+          const rx1 = secToX(rEnd);
+          if (rx1 < 0 || rx0 > width) continue;
 
-        const isSelected = rec.id === selectedRecId;
-        const isWarning = rec.boundary.trailingEzafeRisk;
-        ctx.fillStyle = isWarning
-          ? 'rgba(244, 63, 94, 0.22)'
-          : isSelected
-            ? 'rgba(245, 158, 11, 0.28)'
-            : 'rgba(245, 158, 11, 0.14)';
-        ctx.fillRect(rx0, top + 4, Math.max(2, rx1 - rx0), trackHeight - 8);
+          const isSelected = rec.id === selectedRecId;
+          const isWarning = rec.boundary.trailingEzafeRisk;
+          ctx.fillStyle = isWarning
+            ? 'rgba(216, 93, 101, 0.24)'
+            : isSelected
+              ? 'rgba(229, 161, 59, 0.30)'
+              : 'rgba(229, 161, 59, 0.14)';
+          ctx.fillRect(rx0, top + 4, Math.max(2, rx1 - rx0), trackHeight - 8);
 
-        ctx.strokeStyle = isWarning ? '#F43F5E' : '#F59E0B';
-        ctx.lineWidth = isSelected ? 2 : 1;
-        ctx.strokeRect(rx0, top + 4, Math.max(2, rx1 - rx0), trackHeight - 8);
+          ctx.strokeStyle = isWarning ? '#D85D65' : '#E5A13B';
+          ctx.lineWidth = isSelected ? 1.8 : 1;
+          ctx.strokeRect(rx0, top + 4, Math.max(2, rx1 - rx0), trackHeight - 8);
+        }
       }
 
-      // 3b. Adobe Audition Selection Overlay with Bright Trim Handles
+      // 3b. Active Selection Overlay (Amber Accent)
       if (
         selectedRangeSec &&
         (selectedRangeSec.scope === 'all' || selectedRangeSec.trackId === track.id)
@@ -361,47 +433,54 @@ export const WaveformCanvas: React.FC<WaveformCanvasProps> = ({
         const sx0 = secToX(selectedRangeSec.startSec);
         const sx1 = secToX(selectedRangeSec.endSec);
         if (sx1 >= 0 && sx0 <= width) {
-          ctx.fillStyle = 'rgba(226, 232, 240, 0.17)';
+          ctx.fillStyle = 'rgba(229, 161, 59, 0.22)';
           ctx.fillRect(sx0, top + 1, Math.max(2, sx1 - sx0), trackHeight - 2);
-          ctx.strokeStyle = '#E2E8F0';
+          ctx.strokeStyle = '#E5A13B';
           ctx.lineWidth = 1.5;
           ctx.strokeRect(sx0, top + 1, Math.max(2, sx1 - sx0), trackHeight - 2);
 
-          // Left '[' & Right ']' trim bracket handles
-          ctx.fillStyle = '#38BDF8';
+          // Left & Right trim handles
+          ctx.fillStyle = '#F6C26B';
           ctx.fillRect(sx0 - 2, top + 2, 4, trackHeight - 4);
           ctx.fillRect(sx1 - 2, top + 2, 4, trackHeight - 4);
         }
       }
-
-      if (tIdx > 0 && track.syncGroupId && Math.abs(detectedSyncOffsetMs) > 0.1) {
-        ctx.fillStyle = 'rgba(245, 158, 11, 0.16)';
-        ctx.fillRect(8, top + 6, 148, 20);
-        ctx.strokeStyle = 'rgba(245, 158, 11, 0.65)';
-        ctx.lineWidth = 1;
-        ctx.strokeRect(8, top + 6, 148, 20);
-        ctx.fillStyle = '#FCD34D';
-        ctx.font = '11px "JetBrains Mono", monospace';
-        const sign = detectedSyncOffsetMs > 0 ? '+' : '';
-        ctx.fillText(`Δ Sync: ${sign}${detectedSyncOffsetMs.toFixed(1)}ms`, 14, top + 20);
-      }
     });
 
-    // 4. Playhead Cursor
+    // 3c. Markers Overlay
+    if (showMarkers && markers.length > 0) {
+      for (const m of markers) {
+        const mx = secToX(m.startSec);
+        if (mx < 0 || mx > width) continue;
+        ctx.strokeStyle = 'rgba(56, 189, 248, 0.75)';
+        ctx.lineWidth = 1;
+        ctx.setLineDash([3, 3]);
+        ctx.beginPath();
+        ctx.moveTo(mx, rulerHeight);
+        ctx.lineTo(mx, height);
+        ctx.stroke();
+        ctx.setLineDash([]);
+
+        ctx.fillStyle = '#38BDF8';
+        ctx.fillRect(mx - 3, Math.max(0, rulerHeight - 8), 6, 6);
+      }
+    }
+
+    // 4. Crisp High-Contrast Playhead
     const playX = secToX(playheadSec);
     if (playX >= 0 && playX <= width) {
-      ctx.strokeStyle = '#F59E0B';
-      ctx.lineWidth = 2;
+      ctx.strokeStyle = isDarkTheme ? '#FFFFFF' : '#0F172A';
+      ctx.lineWidth = 1.75;
       ctx.beginPath();
       ctx.moveTo(playX, 0);
       ctx.lineTo(playX, height);
       ctx.stroke();
 
-      ctx.fillStyle = '#F59E0B';
+      ctx.fillStyle = isDarkTheme ? '#E5A13B' : '#0D9488';
       ctx.beginPath();
-      ctx.moveTo(playX - 6, 0);
-      ctx.lineTo(playX + 6, 0);
-      ctx.lineTo(playX, 10);
+      ctx.moveTo(playX - 5.5, 0);
+      ctx.lineTo(playX + 5.5, 0);
+      ctx.lineTo(playX, 9);
       ctx.closePath();
       ctx.fill();
     }
@@ -420,6 +499,14 @@ export const WaveformCanvas: React.FC<WaveformCanvasProps> = ({
     detectedSyncOffsetMs,
     selectedRangeSec,
     viewMode,
+    showGrid,
+    showRuler,
+    showMarkers,
+    showEditRegions,
+    markers,
+    rulerHeight,
+    trackHeight,
+    isDarkTheme,
   ]);
 
   const clientXToTimelineSec = (clientX: number): number => {
@@ -441,8 +528,8 @@ export const WaveformCanvas: React.FC<WaveformCanvasProps> = ({
     const canvas = canvasRef.current;
     if (!canvas) return tracks[0]?.id ?? 'track-host';
     const rect = canvas.getBoundingClientRect();
-    const y = clientY - rect.top - 28;
-    const trackIdx = Math.max(0, Math.min(tracks.length - 1, Math.floor(y / 104)));
+    const y = clientY - rect.top - rulerHeight;
+    const trackIdx = Math.max(0, Math.min(tracks.length - 1, Math.floor(y / trackHeight)));
     return tracks[trackIdx]?.id ?? tracks[0]?.id ?? 'track-host';
   };
 
@@ -450,7 +537,6 @@ export const WaveformCanvas: React.FC<WaveformCanvasProps> = ({
     const sec = clientXToTimelineSec(e.clientX);
     const trackId = clientYToTrackId(e.clientY);
 
-    // Check if user grabbed left/right trim edge handle of current selection
     if (selectedRangeSec) {
       const safeTotal = Math.max(0.5, totalDurationSec);
       const handleToleranceSec = Math.max(0.06, (safeTotal / Math.max(1, zoom)) * 0.014);
@@ -524,9 +610,7 @@ export const WaveformCanvas: React.FC<WaveformCanvasProps> = ({
     dragModeRef.current = null;
     const clickedSec = clientXToTimelineSec(e.clientX);
 
-    if (mode && (mode.kind === 'resize-start' || mode.kind === 'resize-end')) {
-      return;
-    }
+    if (mode && (mode.kind === 'resize-start' || mode.kind === 'resize-end')) return;
 
     if (mode && mode.kind === 'new' && Math.abs(clickedSec - mode.sec) >= 0.06) {
       const lo = Math.min(mode.sec, clickedSec);
@@ -578,6 +662,40 @@ export const WaveformCanvas: React.FC<WaveformCanvasProps> = ({
     }
   };
 
+  const handleWheelZoom = (e: React.WheelEvent<HTMLCanvasElement>) => {
+    if (!e.ctrlKey && !e.altKey && !e.metaKey) return;
+    e.preventDefault();
+    const factor = e.deltaY < 0 ? 1.25 : 0.8;
+    const nextZoom = Math.max(1, Math.min(12, Number((zoom * factor).toFixed(2))));
+    onZoomChange(nextZoom);
+  };
+
+  const handleCanvasKeyDown = (e: React.KeyboardEvent<HTMLCanvasElement>) => {
+    const step = e.shiftKey ? 0.5 : 0.25;
+    if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') {
+      e.preventDefault();
+      const dir = e.key === 'ArrowRight' ? 1 : -1;
+      const nextSec = Math.max(0, Math.min(totalDurationSec, playheadSec + dir * step));
+      if (e.shiftKey) {
+        const baseStart = selectedRangeSec ? selectedRangeSec.startSec : playheadSec;
+        const lo = Math.min(baseStart, nextSec);
+        const hi = Math.max(baseStart, nextSec);
+        if (hi - lo >= 0.05) {
+          setSelectedRangeSec({
+            startSec: lo,
+            endSec: hi,
+            trackId: tracks[0]?.id ?? 'track-host',
+            scope: effectiveSelectionScope,
+          });
+        }
+      }
+      onSeekSec(nextSec);
+    } else if (e.key === 'Escape' && selectedRangeSec) {
+      e.preventDefault();
+      setSelectedRangeSec(null);
+    }
+  };
+
   const handleSelectWindowAroundPlayhead = () => {
     const safeTotal = Math.max(0.5, totalDurationSec);
     const center = Math.min(safeTotal - 0.25, Math.max(0.25, playheadSec || 1.2));
@@ -610,7 +728,7 @@ export const WaveformCanvas: React.FC<WaveformCanvasProps> = ({
   const handleZoomToSelection = () => {
     if (!selectedRangeSec) return;
     const len = Math.max(0.25, selectedRangeSec.endSec - selectedRangeSec.startSec);
-    const nextZoom = Math.max(1, Math.min(8, totalDurationSec / (len * 1.4)));
+    const nextZoom = Math.max(1, Math.min(12, totalDurationSec / (len * 1.4)));
     onSeekSec(selectedRangeSec.startSec + len * 0.35);
     onZoomChange(nextZoom);
   };
@@ -622,45 +740,107 @@ export const WaveformCanvas: React.FC<WaveformCanvasProps> = ({
 
   return (
     <section
-      dir="rtl"
-      aria-label="نوار زمان و شکل‌موج چندترک ادیشن"
-      className="border border-[#2A2F3B] bg-[#16181D] rounded-lg overflow-hidden"
+      data-testid="waveform-timeline-panel"
+      aria-label={isFa ? 'تایملاین و شکل‌موج صوتی' : 'Audio Waveform & Timeline'}
+      className="border-b border-[var(--avp-border)] bg-[var(--avp-surface)] shrink-0 overflow-hidden"
     >
-      {/* Adobe Audition Studio Editor Ribbon */}
-      <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-2.5 border-b border-[#2A2F3B] bg-[#1D2028]">
-        <div className="flex flex-wrap items-center gap-3 text-xs text-slate-300">
-          <span className="font-semibold text-slate-100 whitespace-nowrap">ویرایشگر چندترک ادیشن</span>
-          <span aria-hidden="true" className="text-slate-600">·</span>
-          <span className="inline-flex items-center gap-1 text-[#2EE59D] whitespace-nowrap">
-            <Lock className="w-3.5 h-3.5" aria-hidden="true" />
-            <span>قفل همگام‌سازی ترک‌ها (Sync-Lock)</span>
+      {/* Strictly Single-Line 36px Timeline Toolbar — 3 Segmented Studio Clusters */}
+      <div className="h-[36px] flex items-center justify-between gap-1 sm:gap-1.5 px-2 sm:px-3 border-b border-[var(--avp-border)] bg-[var(--avp-surface)] overflow-x-auto">
+        {/* Cluster 1 (Right/Start): Timeline Identity + Unified Sync & Drift Capsule */}
+        <div className="flex items-center gap-1.5 sm:gap-2 text-xs min-w-0 shrink-0">
+          <span className="font-bold text-[12px] sm:text-[12.5px] text-[var(--avp-text)] whitespace-nowrap">
+            {isFa ? 'تایملاین' : 'Timeline'}
           </span>
-          <span aria-hidden="true" className="text-slate-600">·</span>
-          <span data-testid="waveform-clips-count" className="font-mono tabular-nums text-slate-400 whitespace-nowrap">
-            {totalClipsCount} کلیپ صوتی
+          <span data-testid="waveform-clips-count" className="sr-only">
+            ({totalClipsCount} {isFa ? 'کلیپ' : 'clips'})
           </span>
+
+          {hasSyncedPeerTrack ? (
+            <button
+              type="button"
+              data-testid="btn-toggle-sync-drift"
+              aria-expanded={showSyncPopover}
+              onClick={() => setShowSyncPopover((v) => !v)}
+              title={
+                isFa
+                  ? 'قفل همگام‌سازی فعال — بررسی و تنظیم انحراف زمانی ترک‌ها'
+                  : 'Sync-Lock active — Inspect & align multi-track sync offset'
+              }
+              className={`inline-flex items-center gap-1 sm:gap-1.5 h-[22px] sm:h-[24px] px-1.5 sm:px-2 rounded-md border text-[10px] sm:text-[10.5px] font-medium cursor-pointer transition-colors ${
+                showSyncPopover || hasDetectedDrift
+                  ? 'border-[var(--avp-warning)]/40 bg-[var(--avp-warning-soft)]/70 text-[var(--avp-warning-text)]'
+                  : 'border-[var(--avp-border)] bg-[var(--avp-surface-secondary)] text-[var(--avp-accent-text)]'
+              }`}
+            >
+              <Lock className="w-3 h-3 text-[var(--avp-accent-text)] shrink-0" strokeWidth={1.75} aria-hidden="true" />
+              <span className="hidden xl:inline text-[var(--avp-text-secondary)]">
+                {isFa ? 'همگام' : 'Sync'}
+              </span>
+              <span className="hidden xl:inline text-[var(--avp-border-strong)]" aria-hidden="true">·</span>
+              <bdi dir="ltr" className="avp-bidi-num font-mono font-semibold">
+                {hasDetectedDrift
+                  ? `Δ ${detectedSyncOffsetMs >= 0 ? '+' : ''}${detectedSyncOffsetMs.toFixed(1)}ms`
+                  : '0.0ms'}
+              </bdi>
+            </button>
+          ) : (
+            <span
+              className="inline-flex items-center gap-1 h-[22px] px-1.5 rounded border border-[var(--avp-border)] bg-[var(--avp-surface-secondary)] text-[10.5px] text-[var(--avp-accent-text)] font-medium whitespace-nowrap"
+              title={isFa ? 'قفل همگام‌سازی چندترکی فعال' : 'Multi-track Sync-Lock active'}
+            >
+              <Lock className="w-3 h-3" strokeWidth={1.75} aria-hidden="true" />
+              <span className="hidden xl:inline">{isFa ? 'همگام' : 'Sync'}</span>
+            </span>
+          )}
         </div>
 
-        {/* Direct Editing, Spectral View & Selection Tools */}
-        <div className="flex flex-wrap items-center gap-2 text-xs">
-          {/* Audition Waveform / Spectral Display Toggle */}
-          <button
-            type="button"
-            data-testid="btn-toggle-spectral-view"
-            onClick={() => setViewMode((m) => (m === 'waveform' ? 'spectral' : 'waveform'))}
-            className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded border font-medium whitespace-nowrap cursor-pointer ${
-              viewMode === 'spectral'
-                ? 'border-amber-400/60 bg-amber-400/20 text-amber-200'
-                : 'border-[#2D323E] bg-[#14161B] hover:bg-[#232732] text-slate-200'
-            }`}
-          >
-            {viewMode === 'spectral' ? (
-              <Waves className="w-3.5 h-3.5 text-amber-300" aria-hidden="true" />
-            ) : (
-              <Activity className="w-3.5 h-3.5 text-[#2EE59D]" aria-hidden="true" />
+        {/* Cluster 2 & 3 (Left/End): Framed Editing Tools + View & Zoom Deck */}
+        <div className="flex items-center gap-1 sm:gap-1.5 text-xs shrink-0">
+          {/* Cluster 2: Framed Action Tool Group [Marker | Split | Range] */}
+          <div className="inline-flex items-center rounded-lg border border-[var(--avp-border)] bg-[var(--avp-surface-secondary)]/60 p-0.5">
+            {onAddMarkerAtPlayhead && (
+              <button
+                type="button"
+                data-testid="btn-add-timeline-marker"
+                onClick={onAddMarkerAtPlayhead}
+                title={isFa ? 'ثبت نشانگر در مکان‌نما (M)' : 'Add marker at playhead (M)'}
+                className="inline-flex items-center gap-1 h-[22px] px-1.5 sm:px-2 rounded-[5px] text-[11px] font-medium text-[var(--avp-text-secondary)] hover:text-[var(--avp-text)] hover:bg-[var(--avp-surface)] cursor-pointer transition-colors"
+              >
+                <BookmarkPlus className="w-3 h-3 text-[var(--avp-accent)]" strokeWidth={1.75} aria-hidden="true" />
+                <span className="hidden xl:inline">{isFa ? 'نشانگر' : 'Marker'}</span>
+              </button>
             )}
-            <span>{viewMode === 'spectral' ? 'طیف فرکانسی (Spectral)' : 'نمایش شکل‌موج'}</span>
-          </button>
+
+            {onAddMarkerAtPlayhead && onSplitAtPlayhead && (
+              <span className="w-px h-3 bg-[var(--avp-border)]" aria-hidden="true" />
+            )}
+
+            {onSplitAtPlayhead && (
+              <button
+                type="button"
+                data-testid="btn-split-at-playhead"
+                onClick={onSplitAtPlayhead}
+                title={isFa ? 'برش غیرمخرب در مکان‌نما' : 'Non-destructive split at playhead'}
+                className="inline-flex items-center gap-1 h-[22px] px-1.5 sm:px-2 rounded-[5px] text-[11px] font-medium text-[var(--avp-text-secondary)] hover:text-[var(--avp-text)] hover:bg-[var(--avp-surface)] cursor-pointer transition-colors"
+              >
+                <SplitSquareVertical className="w-3 h-3" strokeWidth={1.75} aria-hidden="true" />
+                <span className="hidden xl:inline">{isFa ? 'برش' : 'Split'}</span>
+              </button>
+            )}
+
+            <span className="w-px h-3 bg-[var(--avp-border)]" aria-hidden="true" />
+
+            <button
+              type="button"
+              data-testid="btn-select-playhead-window"
+              onClick={handleSelectWindowAroundPlayhead}
+              title={isFa ? 'انتخاب بازه ۰.۷ ثانیه‌ای اطراف مکان‌نما' : 'Select 0.7s range around playhead'}
+              className="inline-flex items-center gap-1 h-[22px] px-1.5 sm:px-2 rounded-[5px] text-[11px] font-medium text-[var(--avp-text-secondary)] hover:text-[var(--avp-text)] hover:bg-[var(--avp-surface)] cursor-pointer transition-colors"
+            >
+              <Scissors className="w-3 h-3 text-[var(--avp-warning)]" strokeWidth={1.75} aria-hidden="true" />
+              <span className="hidden xl:inline">{isFa ? 'بازه' : 'Range'}</span>
+            </button>
+          </div>
 
           <button
             type="button"
@@ -672,273 +852,426 @@ export const WaveformCanvas: React.FC<WaveformCanvasProps> = ({
                 setSelectedRangeSec({ ...selectedRangeSec, scope: nextScope });
               }
             }}
-            className="px-2.5 py-1 rounded border border-[#2D323E] bg-[#14161B] hover:bg-[#232732] text-slate-200 font-medium whitespace-nowrap cursor-pointer"
+            className="hidden 2xl:inline-flex avp-btn avp-btn-sm avp-btn-ghost h-[24px] px-2"
           >
-            محدوده: {effectiveSelectionScope === 'all' ? 'همه ترک‌ها' : 'فقط ترک فعال'}
+            {effectiveSelectionScope === 'all'
+              ? isFa
+                ? 'همه ترک‌ها'
+                : 'All Tracks'
+              : isFa
+                ? 'ترک فعال'
+                : 'Active Track'}
           </button>
 
-          {onSplitAtPlayhead && (
-            <button
-              type="button"
-              data-testid="btn-split-at-playhead"
-              onClick={onSplitAtPlayhead}
-              title="برش غیرمخرب کلیپ در محل مکان‌نما با Micro-Crossfade 10ms"
-              className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded border border-[#2D323E] bg-[#14161B] hover:bg-[#232732] text-slate-200 font-medium whitespace-nowrap cursor-pointer"
-            >
-              <SplitSquareVertical className="w-3.5 h-3.5 text-sky-400" aria-hidden="true" />
-              <span>برش در مکان‌نما (Split)</span>
-            </button>
-          )}
-
-          <button
-            type="button"
-            data-testid="btn-select-playhead-window"
-            onClick={handleSelectWindowAroundPlayhead}
-            title="انتخاب بازه ۰.۷ ثانیه‌ای اطراف مکان‌نما برای برش یا پخش انتخابی"
-            className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded border border-[#2D323E] bg-[#14161B] hover:bg-[#232732] text-slate-200 font-medium whitespace-nowrap cursor-pointer"
-          >
-            <Scissors className="w-3.5 h-3.5 text-amber-400" aria-hidden="true" />
-            <span>انتخاب بازه برش</span>
-          </button>
-
-          {selectedRangeSec && (
+          {/* Desktop Split Ratio Quick Presets [Mini | 30/70 | 50/50] */}
+          {onTrackHeightChange && (
             <div
-              data-testid="waveform-range-action-bar"
-              className="inline-flex flex-wrap items-center gap-1.5 px-2 py-0.5 rounded border border-sky-500/40 bg-sky-500/15"
+              role="group"
+              aria-label={isFa ? 'نسبت ارتفاع تایم‌لاین و متن' : 'Timeline split ratio'}
+              className="hidden lg:inline-flex items-center rounded-lg border border-[var(--avp-border)] bg-[var(--avp-surface-secondary)]/60 p-0.5"
             >
-              <span dir="ltr" className="font-mono tabular-nums text-[11px] text-sky-200">
-                [{selectedRangeSec.startSec.toFixed(2)}s .. {selectedRangeSec.endSec.toFixed(2)}s · Δ{' '}
-                {(selectedRangeSec.endSec - selectedRangeSec.startSec).toFixed(2)}s]
-              </span>
-
-              {onPlaySelectionRange && (
-                <button
-                  type="button"
-                  data-testid="btn-play-waveform-selection"
-                  onClick={() => onPlaySelectionRange(selectedRangeSec)}
-                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-[#2EE59D] text-slate-950 font-semibold text-[11px] hover:bg-[#52EEB0] cursor-pointer"
-                >
-                  <Play className="w-3 h-3" aria-hidden="true" />
-                  <span>پخش بازه</span>
-                </button>
-              )}
-
-              <button
-                type="button"
-                data-testid="btn-zoom-to-selection"
-                onClick={handleZoomToSelection}
-                title="بزرگ‌نمایی روی بازه انتخابی"
-                className="p-1 rounded bg-[#14161B] text-sky-200 hover:bg-[#232732] cursor-pointer"
-              >
-                <Maximize2 className="w-3 h-3" />
-              </button>
-
-              <button
-                type="button"
-                data-testid="btn-waveform-ripple-cut"
-                onClick={() => handleExecuteWaveformRangeCut('sync-locked-ripple-cut')}
-                className="px-2 py-0.5 rounded bg-amber-400 text-slate-950 font-semibold text-[11px] hover:bg-amber-300 cursor-pointer"
-              >
-                حذف بازه (Ripple)
-              </button>
-              <button
-                type="button"
-                data-testid="btn-waveform-roomtone-cut"
-                onClick={() => handleExecuteWaveformRangeCut('in-place-room-tone-suppression')}
-                className="px-2 py-0.5 rounded bg-emerald-500/20 border border-emerald-500/40 text-emerald-200 font-medium text-[11px] hover:bg-emerald-500/30 cursor-pointer"
-              >
-                Room Tone درجا
-              </button>
-              <button
-                type="button"
-                data-testid="btn-clear-waveform-selection"
-                onClick={() => setSelectedRangeSec(null)}
-                aria-label="لغو انتخاب بازه موج صوت"
-                className="p-0.5 text-slate-300 hover:text-white cursor-pointer"
-              >
-                <X className="w-3.5 h-3.5" />
-              </button>
+              {(
+                [
+                  { id: 'mini', px: 48, label: isFa ? 'مینی' : 'Mini' },
+                  { id: 'balanced', px: 82, label: '30/70' },
+                  { id: 'expanded', px: 132, label: '50/50' },
+                ] as const
+              ).map((preset) => {
+                const isActive = Math.abs(trackHeight - preset.px) <= 10;
+                return (
+                  <button
+                    key={preset.id}
+                    type="button"
+                    data-testid={`btn-split-preset-${preset.id}`}
+                    aria-pressed={isActive}
+                    onClick={() => onTrackHeightChange(preset.px)}
+                    title={
+                      isFa
+                        ? `تنظیم نسبت ارتفاع تایم‌لاین (${preset.label})`
+                        : `Set timeline split ratio (${preset.label})`
+                    }
+                    className={`inline-flex items-center justify-center h-[22px] px-1.5 rounded-[5px] text-[10px] font-mono font-medium cursor-pointer transition-colors ${
+                      isActive
+                        ? 'bg-[var(--avp-surface)] text-[var(--avp-accent-text)] font-semibold shadow-2xs'
+                        : 'text-[var(--avp-text-secondary)] hover:text-[var(--avp-text)]'
+                    }`}
+                  >
+                    {preset.label}
+                  </button>
+                );
+              })}
             </div>
           )}
-        </div>
 
-        {/* Sync Drift / Temporal Offset Detection & Zoom */}
-        <div className="flex flex-wrap items-center gap-3 text-xs">
-          <div
-            data-testid="waveform-sync-drift-bar"
-            className="flex flex-wrap items-center gap-2 text-xs"
-          >
-            <span
-              data-testid="waveform-sync-drift-status"
-              className={`px-2.5 py-1 rounded border font-medium tabular-nums ${
-                hasDetectedDrift
-                  ? 'bg-amber-500/15 border-amber-500/40 text-amber-300'
-                  : 'bg-emerald-500/15 border-emerald-500/40 text-emerald-300'
+          {/* Cluster 3: View Mode & Zoom Capsule */}
+          <div className="inline-flex items-center rounded-lg border border-[var(--avp-border)] bg-[var(--avp-surface-secondary)]/60 p-0.5">
+            <button
+              type="button"
+              data-testid="btn-toggle-spectral-view"
+              onClick={() => setViewMode((m) => (m === 'waveform' ? 'spectral' : 'waveform'))}
+              className={`inline-flex items-center gap-1 h-[22px] px-2 rounded-[5px] text-[11px] font-medium cursor-pointer transition-colors ${
+                viewMode === 'spectral'
+                  ? 'bg-[var(--avp-warning-soft)] text-[var(--avp-warning-text)] font-semibold'
+                  : 'text-[var(--avp-text-secondary)] hover:text-[var(--avp-text)] hover:bg-[var(--avp-surface)]'
               }`}
             >
-              {hasDetectedDrift ? (
-                <>
-                  <span>انحراف زمانی شناسایی‌شده: </span>
-                  <span dir="ltr" className="font-mono font-semibold">
-                    {detectedSyncOffsetMs >= 0 ? '+' : ''}
-                    {detectedSyncOffsetMs.toFixed(1)} ms
-                  </span>
-                  {Math.abs(detectedClockDriftPpm) > 0.5 && (
-                    <>
-                      <span className="mx-1.5 text-amber-500/60">·</span>
-                      <span>دریفت کلاک: </span>
-                      <span dir="ltr" className="font-mono">
-                        {detectedClockDriftPpm >= 0 ? '+' : ''}
-                        {detectedClockDriftPpm.toFixed(1)} ppm
-                      </span>
-                    </>
-                  )}
-                </>
+              {viewMode === 'spectral' ? (
+                <Waves className="w-3 h-3 text-[var(--avp-warning)]" strokeWidth={1.75} aria-hidden="true" />
               ) : (
-                <span>هم‌تراز شده: ۰.۰ ms</span>
+                <Activity className="w-3 h-3 text-[var(--avp-accent)]" strokeWidth={1.75} aria-hidden="true" />
               )}
-            </span>
+              <span>{viewMode === 'spectral' ? (isFa ? 'طیف' : 'Spectral') : isFa ? 'موج' : 'Wave'}</span>
+            </button>
 
-            {onNudgeSyncedTracksMs && (
-              <div
-                className="inline-flex items-center gap-1"
-                role="group"
-                aria-label="جابجایی دقیق زمانی ترک همگام"
-              >
-                <button
-                  type="button"
-                  data-testid="btn-nudge-sync-minus"
-                  disabled={!hasSyncedPeerTrack}
-                  title={
-                    hasSyncedPeerTrack
-                      ? 'عقب بردن ترک همگام به میزان ۵ میلی‌ثانیه'
-                      : 'در پروژه تک‌ترک، ترک همگام دومی وجود ندارد'
-                  }
-                  onClick={() => onNudgeSyncedTracksMs(-5)}
-                  className="px-2 py-1 rounded border border-[#2D323E] bg-[#14161B] hover:bg-[#232732] disabled:opacity-40 disabled:hover:bg-[#14161B] text-slate-200 font-mono text-[11px] cursor-pointer disabled:cursor-not-allowed"
-                >
-                  <span dir="ltr">-5ms</span>
-                </button>
-                <button
-                  type="button"
-                  data-testid="btn-nudge-sync-plus"
-                  disabled={!hasSyncedPeerTrack}
-                  title={
-                    hasSyncedPeerTrack
-                      ? 'جلو بردن ترک همگام به میزان ۵ میلی‌ثانیه'
-                      : 'در پروژه تک‌ترک، ترک همگام دومی وجود ندارد'
-                  }
-                  onClick={() => onNudgeSyncedTracksMs(5)}
-                  className="px-2 py-1 rounded border border-[#2D323E] bg-[#14161B] hover:bg-[#232732] disabled:opacity-40 disabled:hover:bg-[#14161B] text-slate-200 font-mono text-[11px] cursor-pointer disabled:cursor-not-allowed"
-                >
-                  <span dir="ltr">+5ms</span>
-                </button>
-              </div>
-            )}
+            <span className="w-px h-3 bg-[var(--avp-border)] mx-0.5" aria-hidden="true" />
 
-            {onAutoAlignSyncedTracks && (
+            <div dir="ltr" className="inline-flex items-center">
               <button
                 type="button"
-                data-testid="btn-auto-align-sync"
-                disabled={!hasDetectedDrift}
-                onClick={onAutoAlignSyncedTracks}
-                className="px-3 py-1 rounded bg-amber-500 hover:bg-amber-400 disabled:bg-slate-800 disabled:text-slate-500 text-slate-950 font-semibold text-xs cursor-pointer disabled:cursor-not-allowed transition-colors"
+                data-testid="btn-waveform-zoom-out"
+                onClick={() => onZoomChange(Math.max(1, Number((zoom / 1.5).toFixed(2))))}
+                aria-label={isFa ? 'کوچک‌نمایی' : 'Zoom out'}
+                className="inline-flex items-center justify-center w-[22px] h-[22px] rounded-[5px] text-[var(--avp-text-secondary)] hover:text-[var(--avp-text)] hover:bg-[var(--avp-surface)] cursor-pointer"
               >
-                هم‌ترازسازی (Align)
+                <ZoomOut className="w-3 h-3" strokeWidth={1.75} />
               </button>
-            )}
-          </div>
-
-          <div className="flex items-center gap-1.5">
-            <button
-              type="button"
-              onClick={() => onZoomChange(Math.max(1, zoom / 1.5))}
-              aria-label="کوچک‌نمایی شکل‌موج"
-              className="p-1.5 rounded border border-[#2D323E] text-slate-300 hover:bg-[#232732] cursor-pointer"
-            >
-              <ZoomOut className="w-3.5 h-3.5" />
-            </button>
-            <span className="text-xs font-mono tabular-nums text-slate-400 min-w-[44px] text-center">
-              {zoom.toFixed(1)}x
-            </span>
-            <button
-              type="button"
-              onClick={() => onZoomChange(Math.min(8, zoom * 1.5))}
-              aria-label="بزرگ‌نمایی شکل‌موج"
-              className="p-1.5 rounded border border-[#2D323E] text-slate-300 hover:bg-[#232732] cursor-pointer"
-            >
-              <ZoomIn className="w-3.5 h-3.5" />
-            </button>
+              <button
+                type="button"
+                data-testid="btn-waveform-zoom-fit"
+                onClick={() => onZoomChange(1)}
+                title={isFa ? 'نمایش کامل (Fit)' : 'Fit to view'}
+                className="inline-flex items-center justify-center h-[22px] px-1.5 rounded-[5px] font-mono tabular-nums text-[10.5px] font-semibold text-[var(--avp-text)] hover:bg-[var(--avp-surface)] cursor-pointer"
+              >
+                {zoom.toFixed(1)}x
+              </button>
+              <button
+                type="button"
+                data-testid="btn-waveform-zoom-in"
+                onClick={() => onZoomChange(Math.min(12, Number((zoom * 1.5).toFixed(2))))}
+                aria-label={isFa ? 'بزرگ‌نمایی' : 'Zoom in'}
+                className="inline-flex items-center justify-center w-[22px] h-[22px] rounded-[5px] text-[var(--avp-text-secondary)] hover:text-[var(--avp-text)] hover:bg-[var(--avp-surface)] cursor-pointer"
+              >
+                <ZoomIn className="w-3 h-3" strokeWidth={1.75} />
+              </button>
+              {zoom > 1.05 && (
+                <button
+                  type="button"
+                  onClick={() => onZoomChange(1)}
+                  aria-label={isFa ? 'بازنشانی بزرگ‌نمایی' : 'Reset zoom'}
+                  className="inline-flex items-center justify-center w-[22px] h-[22px] rounded-[5px] text-[var(--avp-text-secondary)] hover:text-[var(--avp-text)] hover:bg-[var(--avp-surface)] cursor-pointer"
+                >
+                  <Minimize2 className="w-3 h-3" strokeWidth={1.75} />
+                </button>
+              )}
+            </div>
           </div>
         </div>
       </div>
 
-      {/* Track Headers + Interactive Audition Waveform/Spectral Canvas */}
-      <div className="grid grid-cols-1 lg:grid-cols-[210px_1fr]">
-        <div className="border-b lg:border-b-0 lg:border-e border-[#2A2F3B] bg-[#191C23] flex flex-col">
-          <div className="h-[28px] px-3 flex items-center text-[11px] text-[#2EE59D] border-b border-[#2A2F3B] font-mono tabular-nums">
-            {formatTimecode(secondsToFlicks(playheadSec))}
-          </div>
-          {tracks.map((track) => (
-            <div
-              key={track.id}
-              className="h-[104px] px-3 py-2.5 border-b border-[#252A36] last:border-b-0 flex flex-col justify-between"
+      {/* Contextual Selection Action Strip (only when user selects a range) */}
+      {selectedRangeSec && (
+        <div
+          data-testid="waveform-range-action-bar"
+          className="px-3 py-1.5 border-b border-[var(--avp-border)] bg-[var(--avp-warning-soft)]/70 flex flex-wrap items-center justify-between gap-2 text-xs"
+        >
+          <span className="text-[11px] font-semibold text-[var(--avp-text)] flex items-center gap-1.5">
+            <span>{isFa ? 'بازه انتخاب:' : 'Selection:'}</span>
+            <bdi dir="ltr" className="avp-bidi-num">
+              {selectedRangeSec.startSec.toFixed(2)}s – {selectedRangeSec.endSec.toFixed(2)}s (Δ{' '}
+              {(selectedRangeSec.endSec - selectedRangeSec.startSec).toFixed(2)}s)
+            </bdi>
+          </span>
+
+          <div className="flex flex-wrap items-center gap-1.5">
+            {onPlaySelectionRange && (
+              <button
+                type="button"
+                data-testid="btn-play-waveform-selection"
+                onClick={() => onPlaySelectionRange(selectedRangeSec)}
+                className="avp-btn avp-btn-sm avp-btn-tonal"
+              >
+                <Play className="w-3 h-3" strokeWidth={2} aria-hidden="true" />
+                <span>{isFa ? 'پخش بازه' : 'Play Range'}</span>
+              </button>
+            )}
+
+            <button
+              type="button"
+              data-testid="btn-zoom-to-selection"
+              onClick={handleZoomToSelection}
+              title={isFa ? 'بزرگ‌نمایی روی بازه انتخابی' : 'Zoom to selection'}
+              className="avp-btn avp-btn-sm avp-btn-outline"
             >
-              <div className="flex items-center justify-between gap-2">
-                <span className="text-xs font-semibold text-slate-100 truncate">{track.name}</span>
-                <span className="text-[10px] font-mono text-slate-500 shrink-0">
-                  {track.syncGroupId ? 'SYNC' : 'TRK'}
-                </span>
-              </div>
-              <div className="text-[11px] text-slate-400">
-                <span>گوینده: {track.speakerLabel}</span>
-              </div>
-              <div className="flex items-center gap-1.5">
+              <Maximize2 className="w-3 h-3" strokeWidth={1.75} />
+              <span>{isFa ? 'بزرگ‌نمایی انتخاب' : 'Zoom Sel'}</span>
+            </button>
+
+            <button
+              type="button"
+              data-testid="btn-waveform-ripple-cut"
+              onClick={() => handleExecuteWaveformRangeCut('sync-locked-ripple-cut')}
+              className="avp-btn avp-btn-sm bg-[var(--avp-warning)] text-slate-950 font-semibold hover:opacity-90"
+            >
+              {isFa ? 'حذف بازه (Ripple)' : 'Ripple Cut'}
+            </button>
+
+            <button
+              type="button"
+              data-testid="btn-waveform-roomtone-cut"
+              onClick={() => handleExecuteWaveformRangeCut('in-place-room-tone-suppression')}
+              className="avp-btn avp-btn-sm avp-btn-tonal"
+            >
+              {isFa ? 'Room Tone درجا' : 'Room Tone'}
+            </button>
+
+            <button
+              type="button"
+              data-testid="btn-clear-waveform-selection"
+              onClick={() => setSelectedRangeSec(null)}
+              aria-label={isFa ? 'لغو انتخاب بازه' : 'Clear selection'}
+              className="avp-btn-icon-sm"
+            >
+              <X className="w-3.5 h-3.5" strokeWidth={1.75} />
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Collapsible Multi-Track Sync Drift Drawer (opened via Δ badge in toolbar) */}
+      {hasSyncedPeerTrack && showSyncPopover && (
+        <div
+          data-testid="waveform-sync-drift-bar"
+          className="px-3 py-1.5 border-b border-[var(--avp-border)] bg-[var(--avp-surface-secondary)] flex flex-wrap items-center justify-between gap-2 text-[11px]"
+        >
+          <span
+            data-testid="waveform-sync-drift-status"
+            className={`font-medium flex items-center gap-1.5 ${
+              hasDetectedDrift ? 'text-[var(--avp-warning-text)]' : 'text-[var(--avp-accent-text)]'
+            }`}
+          >
+            {hasDetectedDrift ? (
+              <>
+                <span>{isFa ? 'انحراف همگام‌سازی:' : 'Sync Offset:'}</span>
+                <bdi dir="ltr" className="avp-bidi-num">
+                  {detectedSyncOffsetMs >= 0 ? '+' : ''}
+                  {detectedSyncOffsetMs.toFixed(1)} ms
+                </bdi>
+              </>
+            ) : (
+              <span>
+                {isFa
+                  ? 'ترک‌های همگام هم‌تراز هستند (0.0 ms)'
+                  : 'Synced Tracks Aligned (0.0 ms)'}
+              </span>
+            )}
+          </span>
+          <div className="flex items-center gap-1.5">
+            {onNudgeSyncedTracksMs && (
+              <>
                 <button
                   type="button"
-                  onClick={() => onToggleTrackMute(track.id)}
-                  aria-label={`قطع صدای ${track.name}`}
-                  aria-pressed={track.muted}
-                  className={`px-2 py-0.5 text-[11px] rounded border cursor-pointer transition-colors ${
-                    track.muted
-                      ? 'bg-rose-500/20 border-rose-500/50 text-rose-300'
-                      : 'bg-[#14161B] border-[#2D323E] text-slate-300 hover:bg-[#232732]'
-                  }`}
+                  data-testid="btn-nudge-sync-minus"
+                  onClick={() => onNudgeSyncedTracksMs(-5)}
+                  className="avp-btn avp-btn-sm avp-btn-outline"
                 >
-                  {track.muted ? (
-                    <VolumeX className="w-3 h-3 inline" />
-                  ) : (
-                    <Volume2 className="w-3 h-3 inline" />
-                  )}
-                  <span className="mr-1">M</span>
+                  <bdi dir="ltr" className="avp-bidi-num">-5ms</bdi>
                 </button>
                 <button
                   type="button"
-                  onClick={() => onToggleTrackSolo(track.id)}
-                  aria-label={`تک‌صدایی ${track.name}`}
-                  aria-pressed={track.solo}
-                  className={`px-2 py-0.5 text-[11px] rounded border cursor-pointer transition-colors ${
-                    track.solo
-                      ? 'bg-amber-500/20 border-amber-500/50 text-amber-300'
-                      : 'bg-[#14161B] border-[#2D323E] text-slate-300 hover:bg-[#232732]'
-                  }`}
+                  data-testid="btn-nudge-sync-plus"
+                  onClick={() => onNudgeSyncedTracksMs(5)}
+                  className="avp-btn avp-btn-sm avp-btn-outline"
                 >
-                  S
+                  <bdi dir="ltr" className="avp-bidi-num">+5ms</bdi>
                 </button>
-              </div>
+              </>
+            )}
+            {onAutoAlignSyncedTracks && hasDetectedDrift && (
+              <button
+                type="button"
+                data-testid="btn-auto-align-sync"
+                onClick={onAutoAlignSyncedTracks}
+                className="avp-btn avp-btn-sm bg-[var(--avp-warning)] text-slate-950 font-semibold hover:opacity-90"
+              >
+                {isFa ? 'هم‌ترازسازی' : 'Auto Align'}
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => setShowSyncPopover(false)}
+              aria-label={isFa ? 'بستن تنظیم همگام‌سازی' : 'Close sync alignment'}
+              className="avp-btn-icon-sm"
+            >
+              <X className="w-3.5 h-3.5" strokeWidth={1.75} />
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Mobile (<md) Compact Horizontal Track Strip — Saves 160px vertical space on 390px screens */}
+      <div className="flex md:hidden items-center justify-between gap-2 px-3 py-1 border-b border-[var(--avp-border)] bg-[var(--avp-surface-secondary)] overflow-x-auto">
+        {tracks.map((track, idx) => {
+          const isHost = idx === 0;
+          return (
+            <div key={track.id} className="inline-flex items-center gap-1.5 shrink-0 text-[11px]">
+              <span
+                className={`w-2 h-2 rounded-full shrink-0 ${
+                  isHost ? 'bg-emerald-500' : 'bg-sky-400'
+                }`}
+                aria-hidden="true"
+              />
+              <span className="font-semibold text-[var(--avp-text)]">
+                {track.speakerLabel || track.name}
+              </span>
+              <button
+                type="button"
+                onClick={() => onToggleTrackMute(track.id)}
+                aria-label={`${isFa ? 'قطع صدا' : 'Mute'} ${track.name}`}
+                aria-pressed={track.muted}
+                className={`h-5 px-1.5 rounded text-[10px] font-mono font-semibold cursor-pointer ${
+                  track.muted
+                    ? 'bg-[var(--avp-danger-soft)] text-[var(--avp-danger)]'
+                    : 'bg-[var(--avp-surface)] text-[var(--avp-text-secondary)]'
+                }`}
+              >
+                M
+              </button>
+              <button
+                type="button"
+                onClick={() => onToggleTrackSolo(track.id)}
+                aria-label={`${isFa ? 'تک‌صدایی' : 'Solo'} ${track.name}`}
+                aria-pressed={track.solo}
+                className={`h-5 px-1.5 rounded text-[10px] font-mono font-semibold cursor-pointer ${
+                  track.solo
+                    ? 'bg-[var(--avp-warning-soft)] text-[var(--avp-warning-text)]'
+                    : 'bg-[var(--avp-surface)] text-[var(--avp-text-secondary)]'
+                }`}
+              >
+                S
+              </button>
             </div>
-          ))}
+          );
+        })}
+      </div>
+
+      {/* Desktop Track Headers (120px LEFT axis, aligned with Transcript left column) + Theme-Adaptive Waveform Canvas */}
+      <div dir="ltr" className="grid grid-cols-1 md:grid-cols-[120px_1fr]">
+        <div className="hidden md:flex border-r border-[var(--avp-border)] bg-[var(--avp-surface-secondary)] flex-col">
+          {showRuler && (
+            <div className="h-[24px] px-2 flex items-center justify-between text-[10.5px] text-[var(--avp-accent-text)] border-b border-[var(--avp-border)] avp-bidi-num font-semibold">
+              <span>{formatTimecode(secondsToFlicks(playheadSec))}</span>
+              <span className="text-[9px] uppercase tracking-wider text-[var(--avp-text-faint)] font-sans">
+                0s →
+              </span>
+            </div>
+          )}
+          {tracks.map((track, idx) => {
+            const isHost = idx === 0;
+            const roleLabel = isHost ? (isFa ? 'میزبان' : 'Host') : isFa ? 'مهمان' : 'Guest';
+            const isCompactTrack = trackHeight < 62;
+            return (
+              <div
+                key={track.id}
+                dir={isFa ? 'rtl' : 'ltr'}
+                style={{ height: `${trackHeight}px` }}
+                className={`px-2 py-1.5 border-b border-[var(--avp-border)] last:border-b-0 border-l-[3px] flex flex-col justify-between overflow-hidden ${
+                  isHost ? 'border-l-emerald-500' : 'border-l-sky-400'
+                }`}
+              >
+                {/* Row 1: Color Dot + Speaker Identity (Start) + Segmented [M|S] Studio Pill (End) */}
+                <div className="flex items-center justify-between gap-1.5 min-w-0">
+                  <div className="min-w-0 flex items-center gap-1.5">
+                    <span
+                      className={`w-2 h-2 rounded-full shrink-0 ${
+                        isHost ? 'bg-emerald-500' : 'bg-sky-400'
+                      }`}
+                      aria-hidden="true"
+                    />
+                    <span
+                      className="text-xs font-bold text-[var(--avp-text)] truncate"
+                      title={track.name}
+                    >
+                      {track.speakerLabel || track.name}
+                    </span>
+                  </div>
+
+                  {/* Unified Segmented [M | S] Control Pill */}
+                  <div
+                    className="inline-flex items-center rounded-md border border-[var(--avp-border)] bg-[var(--avp-surface)] overflow-hidden shrink-0"
+                    dir="ltr"
+                  >
+                    <button
+                      type="button"
+                      onClick={() => onToggleTrackMute(track.id)}
+                      aria-label={`${isFa ? 'قطع صدا' : 'Mute'} ${track.name}`}
+                      aria-pressed={track.muted}
+                      className={`inline-flex items-center justify-center w-[22px] h-[20px] text-[10px] font-mono font-bold cursor-pointer transition-colors ${
+                        track.muted
+                          ? 'bg-[var(--avp-danger-soft)] text-[var(--avp-danger)]'
+                          : 'text-[var(--avp-text-secondary)] hover:bg-[var(--avp-surface-hover)] hover:text-[var(--avp-text)]'
+                      }`}
+                    >
+                      M
+                    </button>
+                    <span className="w-px h-3.5 bg-[var(--avp-border)]" aria-hidden="true" />
+                    <button
+                      type="button"
+                      onClick={() => onToggleTrackSolo(track.id)}
+                      aria-label={`${isFa ? 'تک‌صدایی' : 'Solo'} ${track.name}`}
+                      aria-pressed={track.solo}
+                      className={`inline-flex items-center justify-center w-[22px] h-[20px] text-[10px] font-mono font-bold cursor-pointer transition-colors ${
+                        track.solo
+                          ? 'bg-[var(--avp-warning-soft)] text-[var(--avp-warning-text)]'
+                          : 'text-[var(--avp-text-secondary)] hover:bg-[var(--avp-surface-hover)] hover:text-[var(--avp-text)]'
+                      }`}
+                    >
+                      S
+                    </button>
+                  </div>
+                </div>
+
+                {/* Row 2: Role + Channel Telemetry & Segmented Gain Strip (hidden in Mini compact mode) */}
+                {!isCompactTrack && (
+                  <div className="space-y-1">
+                    <div className="flex items-center justify-between text-[9.5px]">
+                      <span className="text-[var(--avp-text-muted)] font-medium truncate">
+                        {roleLabel} · <bdi dir="ltr" className="font-mono text-[9px]">{`CH${idx + 1}`}</bdi>
+                      </span>
+                      <bdi dir="ltr" className="font-mono text-[9px] text-[var(--avp-text-secondary)] font-semibold">
+                        {track.muted ? 'MUTE' : '0.0 dB'}
+                      </bdi>
+                    </div>
+                    <div className="h-[3px] w-full rounded-full bg-[var(--avp-border)] overflow-hidden" dir="ltr">
+                      <div
+                        className={`h-full rounded-full transition-all ${
+                          track.muted
+                            ? 'w-0'
+                            : isHost
+                              ? 'w-[78%] bg-emerald-500/80'
+                              : 'w-[72%] bg-sky-400/80'
+                        }`}
+                      />
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })}
         </div>
 
-        <div ref={containerRef} className="w-full overflow-hidden select-none" dir="ltr">
+        <div ref={containerRef} className="w-full overflow-hidden select-none bg-slate-100 dark:bg-[#0D1520]">
           <canvas
             ref={canvasRef}
+            tabIndex={0}
             data-testid="waveform-canvas"
+            aria-label={isFa ? 'بوم شکل‌موج صوتی تعاملی' : 'Interactive audio waveform canvas'}
             onMouseDown={handleMouseDown}
             onMouseMove={handleMouseMove}
             onMouseUp={handleMouseUp}
             onDoubleClick={handleDoubleClick}
-            className="block w-full cursor-crosshair"
+            onWheel={handleWheelZoom}
+            onKeyDown={handleCanvasKeyDown}
+            className="block w-full cursor-crosshair focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--avp-accent)]"
           />
         </div>
       </div>

@@ -1,18 +1,18 @@
 {
-  "generatedAt": "2026-11-23T22:06:13.862Z",
+  "generatedAt": "2026-11-24T12:08:36.061Z",
   "version": "2.0.0-beta.1",
   "nextUpdateVersion": "2.0.0-beta.2",
   "buildId": "avp-20261123-phase1ci-beta1",
   "packageDirectory": "/app/applet/dist-release/avapardaz-v2.0.0-beta.1",
   "installerTarball": {
     "path": "/app/applet/dist-release/avapardaz-installer-v2.0.0-beta.1.tar.gz",
-    "sha256": "c26a243b56203896ff862de1fd255e32bc7a3bc25d53086418380cf987022793",
-    "sizeBytes": 72873023
+    "sha256": "9a7c4e13263622a534a86f8b15c8e3d3761344ef5eaf2b56a8da4a0aec0a5695",
+    "sizeBytes": 30895718
   },
   "updateTarball": {
     "path": "/app/applet/dist-release/avapardaz-update-v2.0.0-beta.2.tar.gz",
-    "sha256": "19038b01adff28a50e3b8a5976d8fbc473e0dca4764a0d5431befd2c63f2c9ad",
-    "sizeBytes": 72875216
+    "sha256": "29a2d393d0c8b1d852a6d715d97f8a6592ab1cf382a9d2af714fb882666ef68b",
+    "sizeBytes": 30895606
   },
   "docs": [
     {
@@ -86,19 +86,19 @@
       "companion": {
         "path": "payload/companion/avapardaz-companion.mjs",
         "version": "2.0.0-beta.1",
-        "sha256": "7715e6e8b558399e08676c2488f1fef0fb309e210b36283362b34d60080fb079",
-        "sizeBytes": 1426092
+        "sha256": "364a3afee0e0c3eba95315dda0f099880075cf146ec101ead8beb7c098be63ef",
+        "sizeBytes": 1408621
       },
       "nativeRuntime": {
         "sherpaOfflineBinary": {
           "path": "payload/runtime/bin/sherpa-onnx-offline",
-          "sha256": "3d20a501fbebc495e37d1271558403ffb157319d19019e52e944812a3eef48c6",
-          "sizeBytes": 2640648
+          "sha256": null,
+          "sizeBytes": 0
         },
         "sherpaStreamingBridgeBinary": {
           "path": "payload/runtime/bin/sherpa-onnx-streaming-bridge",
-          "sha256": "3904afc2b736b12bc226bea565d24704a923af2acb341b2e603e54d221ab03a5",
-          "sizeBytes": 27184
+          "sha256": null,
+          "sizeBytes": 0
         }
       },
       "persianAsrModel": {
@@ -106,13 +106,13 @@
         "architecture": "NeMo FastConformer-CTC INT8",
         "modelOnnx": {
           "path": "payload/models/shenava-rizeh-int8/model.int8.onnx",
-          "sha256": "6bdd4ab80626ddfe0b19338a5c96fcc4f2021ad78899cece20a805a48dc5250d",
-          "sizeBytes": 38183269
+          "sha256": null,
+          "sizeBytes": 0
         },
         "tokensTxt": {
           "path": "payload/models/shenava-rizeh-int8/tokens.txt",
-          "sha256": "8e192963f6e666dfa5721e5cbd4710bc1ef592460a45f08cefc94b2db16a6954",
-          "sizeBytes": 12236
+          "sha256": null,
+          "sizeBytes": 0
         }
       },
       "cepPlugin": {

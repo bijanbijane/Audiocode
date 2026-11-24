@@ -1,5 +1,5 @@
 import fs from 'node:fs';
-import type { PgPoolLike } from '../PlatformBackendServices';
+import { type PgPoolLike, runInTransaction } from '../PlatformBackendServices';
 import { DevOpsModelChunkerAndSigner } from './model-chunker-signer-cli';
 import type { OrtTensorLike } from '../../../src/ai-engine/asr/UnifiedOnnxPersianAsrEngine';
 
@@ -160,10 +160,9 @@ export class BackendModelGateValidatorAndPublisher {
 
     const manifestChunks = pkgResult.envelope.decodedPreview?.chunks ?? [];
 
-    // 5. Atomic PostgreSQL Transaction Commit (ai_models_catalog + ai_model_chunks)
-    await this.db.query('BEGIN');
-    try {
-      await this.db.query(
+    // 5. Atomic PostgreSQL Transaction Commit (ai_models_catalog + ai_model_chunks) on a single dedicated client (P0 #2)
+    await runInTransaction(this.db, async (tx) => {
+      await tx.query(
         `INSERT INTO ai_models_catalog
          (model_id, version, task_type, tier_group, release_status, spdx_license, quantization_format, min_ram_mb, recommended_ram_mb, total_size_bytes, manifest_ed25519_signature)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
@@ -183,7 +182,7 @@ export class BackendModelGateValidatorAndPublisher {
       );
 
       for (const ch of manifestChunks) {
-        await this.db.query(
+        await tx.query(
           `INSERT INTO ai_model_chunks
            (model_id, version, chunk_index, sha256_hex, byte_length, cdn_path)
            VALUES ($1, $2, $3, $4, $5, $6)`,
@@ -197,12 +196,7 @@ export class BackendModelGateValidatorAndPublisher {
           ],
         );
       }
-
-      await this.db.query('COMMIT');
-    } catch (dbErr) {
-      await this.db.query('ROLLBACK');
-      throw dbErr;
-    }
+    });
 
     return {
       passed: true,

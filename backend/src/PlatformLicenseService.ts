@@ -122,7 +122,7 @@ export class PlatformLicenseService {
       plan === 'FREE' ? ['GROUP_A'] : ['GROUP_A', 'GROUP_B'];
 
     const payload: OfflineLicenseLeasePayload = {
-      licenseId: `lic_${crypto.randomUUID().slice(0, 8)}`,
+      licenseId: crypto.randomUUID(),
       userId: cleanUserId,
       displayName: (req.displayName ?? 'کاربر استودیو آواپرداز').trim(),
       plan,

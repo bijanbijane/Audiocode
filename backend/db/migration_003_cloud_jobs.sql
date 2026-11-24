@@ -2,7 +2,7 @@
 
 CREATE TABLE IF NOT EXISTS cloud_asr_jobs (
     job_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    user_id VARCHAR(128) NOT NULL,
     model_id VARCHAR(64) NOT NULL,
     audio_duration_seconds DOUBLE PRECISION NOT NULL,
     remote_storage_ref TEXT NOT NULL,

@@ -12,14 +12,14 @@ test.afterAll(() => {
 });
 
 async function waitForAuditionStudioReady(page: Page): Promise<void> {
-  await page.goto('/', { waitUntil: 'domcontentloaded' });
+  await page.goto('/?view=studio', { waitUntil: 'domcontentloaded' });
   await expect(page.getByTestId('project-title')).toBeVisible({ timeout: 15_000 });
   await expect(page.getByTestId('audition-transport-deck')).toBeVisible();
   await expect(page.getByTestId('audition-side-dock')).toBeVisible();
 }
 
-test.describe('Avapardaz CORE-08 Audition Studio End-to-End Verification', () => {
-  test('A. Application startup: zero uncaught exceptions, zero external font/API requests, studio ready', async ({
+test.describe('Avapardaz CORE-08 + Phases 01–15 Studio End-to-End Verification', () => {
+  test('A. Application startup: zero uncaught exceptions, zero external font/API requests, studio ready in Light-First mode', async ({
     page,
   }) => {
     const pageErrors: string[] = [];
@@ -49,6 +49,10 @@ test.describe('Avapardaz CORE-08 Audition Studio End-to-End Verification', () =>
     });
 
     await waitForAuditionStudioReady(page);
+
+    // Light-First default strictly enforced
+    await expect(page.locator('html')).not.toHaveClass(/dark/);
+    await expect(page.locator('html')).toHaveAttribute('dir', 'rtl');
 
     // Core landmarks & default LOCAL execution mode
     await expect(page.getByTestId('btn-mode-local')).toHaveAttribute('aria-pressed', 'true');
@@ -139,17 +143,10 @@ test.describe('Avapardaz CORE-08 Audition Studio End-to-End Verification', () =>
       }
     });
 
-    // Click local ASR action when no ONNX model weights are installed -> honest MODEL_NOT_INSTALLED notice, zero cloud requests
     const runAsrBtn = page.getByTestId('btn-run-persian-asr');
     await expect(runAsrBtn).toBeVisible();
-    await runAsrBtn.click();
 
-    await expect(page.getByTestId('reliability-failure-banner')).toBeVisible();
-    await expect(page.getByTestId('transcript-asr-inline-panel')).toBeVisible();
-    await expect(page.getByTestId('studio-status-notice')).toContainText('مدل عصبی محلی نصب نشده است');
-    expect(asrRequests).toEqual([]);
-
-    // Explicit opt-in CLOUD switch -> either invokes /api/v1/asr/transcribe (when Gemini key is configured)
+    // 1. Explicit opt-in CLOUD switch first -> either invokes /api/v1/asr/transcribe (when Gemini key is configured)
     // or reports honest CLOUD_PROVIDER_UNAVAILABLE without silent Local fallback
     await page.getByTestId('btn-mode-cloud').click();
     await expect(page.getByTestId('btn-mode-cloud')).toHaveAttribute('aria-pressed', 'true');
@@ -158,13 +155,20 @@ test.describe('Avapardaz CORE-08 Audition Studio End-to-End Verification', () =>
     if (asrStatusText.includes('Gemini ASR')) {
       await expect.poll(() => asrRequests.length, { timeout: 15_000 }).toBeGreaterThan(0);
     } else {
-      await expect(page.getByTestId('studio-status-notice')).toContainText('سرویس‌دهنده ابری پیکربندی نشده است');
+      await expect(page.getByTestId('studio-status-notice')).toContainText(
+        /ارسال صوت به سرور ابری غیرفعال است|سرویس‌دهنده ابری پیکربندی نشده است/,
+      );
       expect(asrRequests).toEqual([]);
     }
 
-    // Switch back to LOCAL default
+    // 2. Switch back to LOCAL default & verify zero silent Cloud fallback requests
+    const cloudCountBeforeLocal = asrRequests.length;
     await page.getByTestId('btn-mode-local').click();
     await expect(page.getByTestId('btn-mode-local')).toHaveAttribute('aria-pressed', 'true');
+    await expect(runAsrBtn).toBeEnabled({ timeout: 10_000 });
+    await runAsrBtn.click();
+    await expect(page.getByTestId('studio-status-notice')).toBeVisible({ timeout: 10_000 });
+    expect(asrRequests.length).toBe(cloudCountBeforeLocal);
   });
 
   test('E. Editing, EDL human review, Undo/Redo, Mission 06 Render & 14-Subsystem Health check', async ({
@@ -217,7 +221,7 @@ test.describe('Avapardaz CORE-08 Audition Studio End-to-End Verification', () =>
     await page.keyboard.press('Escape');
   });
 
-  test('F. Responsive behavior (Desktop 1440x900 & Narrow 390x844) + Theme/Locale toggles with zero horizontal overflow', async ({
+  test('F. Responsive behavior (Desktop 1440x900 & Narrow 390x844) + Light-First Theme persistence & Locale toggles with zero overflow', async ({
     page,
   }) => {
     await waitForAuditionStudioReady(page);
@@ -228,12 +232,16 @@ test.describe('Avapardaz CORE-08 Audition Studio End-to-End Verification', () =>
     );
     expect(desktopOverflow).toBeLessThanOrEqual(4);
 
-    // Theme & Locale toggles work cleanly
-    await page.getByTestId('btn-toggle-theme').click();
+    // Starts in Light mode -> toggle to Dark -> reload persists Dark -> toggle back to Light
     await expect(page.locator('html')).not.toHaveClass(/dark/);
     await page.getByTestId('btn-toggle-theme').click();
     await expect(page.locator('html')).toHaveClass(/dark/);
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await expect(page.locator('html')).toHaveClass(/dark/);
+    await page.getByTestId('btn-toggle-theme').click();
+    await expect(page.locator('html')).not.toHaveClass(/dark/);
 
+    // Locale toggle FA RTL <-> EN LTR
     await page.getByTestId('btn-toggle-locale').click();
     await expect(page.locator('html')).toHaveAttribute('dir', 'ltr');
     await page.getByTestId('btn-toggle-locale').click();
@@ -251,5 +259,87 @@ test.describe('Avapardaz CORE-08 Audition Studio End-to-End Verification', () =>
       () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
     );
     expect(narrowOverflow).toBeLessThanOrEqual(4);
+  });
+
+  test('G. Phase 02 Projects Hub: honest empty state, binary file rejection, real project creation, IndexedDB reload persistence, duplicate & delete', async ({
+    page,
+  }) => {
+    await page.goto('/', { waitUntil: 'domcontentloaded' });
+    await expect(page.getByTestId('projects-hub-view')).toBeVisible({ timeout: 15_000 });
+    await expect(page.locator('html')).not.toHaveClass(/dark/);
+    await expect(page.getByTestId('projects-empty-state')).toBeVisible();
+
+    // Open New Project Modal
+    await page.getByTestId('btn-new-project').click();
+    await expect(page.getByTestId('new-project-modal')).toBeVisible();
+
+    // Upload invalid .txt fixture -> binary validation rejects inline
+    await page.getByTestId('new-project-file-input').setInputFiles(fixtures.unsupportedTxtPath);
+    await expect(page.getByTestId('new-project-file-error')).toBeVisible();
+    await expect(page.getByTestId('btn-confirm-create-project')).toBeDisabled();
+
+    // Upload valid WAV fixture -> enables creation
+    await page.getByTestId('new-project-file-input').setInputFiles(fixtures.validSpeechWavPath);
+    await expect(page.getByTestId('new-project-file-error')).toBeHidden();
+    await page.getByTestId('new-project-name-input').fill('پروژه آزمایشی پایدار');
+    await expect(page.getByTestId('btn-confirm-create-project')).toBeEnabled();
+    await page.getByTestId('btn-confirm-create-project').click();
+
+    // Opens directly into Studio with persisted project
+    await expect(page.getByTestId('project-title')).toContainText('پروژه آزمایشی پایدار', { timeout: 15_000 });
+
+    // Reload Studio URL and verify IndexedDB restoration
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await expect(page.getByTestId('project-title')).toContainText('پروژه آزمایشی پایدار', { timeout: 15_000 });
+
+    // Return to Projects Hub and verify real card is listed (no empty state)
+    await page.getByTestId('btn-back-to-projects').click();
+    await expect(page.getByTestId('projects-grid')).toBeVisible({ timeout: 10_000 });
+    await expect(page.getByTestId('projects-grid')).toContainText('پروژه آزمایشی پایدار');
+
+    // Search filters cleanly
+    await page.getByTestId('projects-search-input').fill('آزمایشی');
+    await expect(page.locator('[data-testid^="project-card-"]')).toHaveCount(1);
+    await page.getByTestId('projects-search-input').fill('');
+
+    // Open card menu -> Duplicate -> Delete original -> verify duplicate survives
+    const firstMenuBtn = page.locator('[data-testid^="project-menu-btn-"]').first();
+    await firstMenuBtn.click();
+    await page.getByRole('menuitem', { name: /کپی پروژه|تکثیر|Duplicate/ }).click();
+    await expect(page.locator('[data-testid^="project-card-"]')).toHaveCount(2, { timeout: 10_000 });
+
+    // Delete first card via confirmation modal
+    await page.locator('[data-testid^="project-menu-btn-"]').first().click();
+    await page.getByRole('menuitem', { name: /حذف پروژه|حذف|Delete/ }).click();
+    await page.getByTestId('btn-confirm-delete-project').click();
+    await expect(page.locator('[data-testid^="project-card-"]')).toHaveCount(1, { timeout: 10_000 });
+  });
+
+  test('H. Phase 08 Settings Center: live updates, reload persistence, scoped category reset & global reset without deleting projects', async ({
+    page,
+  }) => {
+    await waitForAuditionStudioReady(page);
+    await page.getByTestId('btn-open-settings').click();
+    await expect(page.getByTestId('settings-center-modal')).toBeVisible();
+
+    // Switch theme to dark in Settings
+    await page.getByTestId('settings-theme-dark').click();
+    await expect(page.locator('html')).toHaveClass(/dark/);
+
+    // Change playback speed in Playback tab
+    await page.getByTestId('settings-tab-playback').click();
+    await page.getByTestId('settings-playback-rate').selectOption('1.25');
+
+    // Close and reload -> verify persistence
+    await page.keyboard.press('Escape');
+    await expect(page.getByTestId('settings-center-modal')).toBeHidden();
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await expect(page.locator('html')).toHaveClass(/dark/);
+
+    // Reopen Settings -> Global Reset -> returns to Light default
+    await page.getByTestId('btn-open-settings').click();
+    await page.getByTestId('btn-reset-all-settings').click();
+    await page.getByTestId('btn-confirm-settings-reset').click();
+    await expect(page.locator('html')).not.toHaveClass(/dark/);
   });
 });

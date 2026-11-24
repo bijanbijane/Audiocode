@@ -19,6 +19,7 @@ export interface SuggestionWaveformMiniCardProps {
   pcmSources?: Record<string, Float32Array>;
   tokens: PersianWordToken[];
   sampleRate: number;
+  locale?: 'fa' | 'en';
 }
 
 const SVG_W = 360;
@@ -40,7 +41,6 @@ function renderWaveformBars(
   return bins.map((bin, idx) => {
     const ratio = (idx + 0.5) / bins.length;
     const x = xStart + idx * step + (step - barW) * 0.5;
-    // Keep a subtle 1.5px baseline so genuine silence stays visibly readable as a flat quiet floor
     const halfH = Math.max(1.2, Math.min(MAX_HALF_H, bin.peak * MAX_HALF_H));
     const y = MID_Y - halfH;
     const h = halfH * 2;
@@ -66,7 +66,9 @@ export const SuggestionWaveformMiniCard: React.FC<SuggestionWaveformMiniCardProp
   pcmSources,
   tokens,
   sampleRate,
+  locale = 'fa',
 }) => {
+  const isFa = locale === 'fa';
   const [viewMode, setViewMode] = useState<MiniCardPreviewMode>('compare');
   const rawId = useId();
   const hatchPatternId = `saved-hatch-${rawId.replace(/[^a-zA-Z0-9_-]/g, '')}`;
@@ -94,8 +96,12 @@ export const SuggestionWaveformMiniCard: React.FC<SuggestionWaveformMiniCardProp
   const savedTailW = Math.max(0, SVG_W - afterFillW);
 
   const impactSummaryText = isRipple
-    ? `حذف ${preview.cutDurationSec.toFixed(2)}s و بستن فاصله (برش Ripple)`
-    : `جایگزینی ${preview.cutDurationSec.toFixed(2)}s با Room Tone (حفظ سینک چندترک)`;
+    ? isFa
+      ? `حذف ${preview.cutDurationSec.toFixed(2)}s و بستن فاصله (Ripple)`
+      : `Remove ${preview.cutDurationSec.toFixed(2)}s (Ripple Cut)`
+    : isFa
+      ? `جایگزینی ${preview.cutDurationSec.toFixed(2)}s با Room Tone (حفظ سینک)`
+      : `Replace ${preview.cutDurationSec.toFixed(2)}s with Room Tone (Sync Safe)`;
 
   return (
     <div
@@ -103,25 +109,23 @@ export const SuggestionWaveformMiniCard: React.FC<SuggestionWaveformMiniCardProp
       data-rec-id={recommendation.id}
       data-effective-mode={preview.effectiveMode}
       data-view-mode={viewMode}
-      className="px-4 py-3 border-b border-[#252F42] bg-[#0E131D]"
+      className="px-3.5 py-3 border-b border-[var(--avp-border)] bg-[var(--avp-surface-secondary)]"
     >
-      {/* Top Row: Title + Segmented Mode Toggle */}
       <div className="flex items-center justify-between gap-2">
-        <span className="text-xs font-semibold text-slate-100 whitespace-nowrap">
-          پیش‌نمایش موجی اثر حذف
+        <span className="text-xs font-semibold text-[var(--avp-text)] whitespace-nowrap">
+          {isFa ? 'پیش‌نمایش موجی اثر حذف' : 'Edit Impact Waveform'}
         </span>
 
-        {/* Interactive Segmented Control (Compare / Before / After) */}
         <div
           role="group"
-          aria-label="حالت نمایش نمودار موجی پیش‌نمایش"
-          className="inline-flex items-center gap-0.5 p-0.5 rounded bg-[#131924] border border-[#252F42] shrink-0"
+          aria-label={isFa ? 'حالت نمایش نمودار موجی' : 'Mini waveform preview mode'}
+          className="inline-flex items-center gap-0.5 p-0.5 rounded-lg bg-[var(--avp-surface)] border border-[var(--avp-border)] shrink-0"
         >
           {(
             [
-              { id: 'compare', label: 'مقایسه' },
-              { id: 'before', label: 'قبل' },
-              { id: 'after', label: 'بعد' },
+              { id: 'compare', label: isFa ? 'مقایسه' : 'Compare' },
+              { id: 'before', label: isFa ? 'قبل' : 'Before' },
+              { id: 'after', label: isFa ? 'بعد' : 'After' },
             ] as const
           ).map((opt) => {
             const active = viewMode === opt.id;
@@ -132,10 +136,10 @@ export const SuggestionWaveformMiniCard: React.FC<SuggestionWaveformMiniCardProp
                 data-testid={`minicard-mode-${opt.id}`}
                 aria-pressed={active}
                 onClick={() => setViewMode(opt.id)}
-                className={`px-2 py-1 text-[11px] font-medium rounded transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
+                className={`px-2 py-0.5 text-[11px] font-medium rounded-md transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
                   active
-                    ? 'bg-[#223049] text-slate-100'
-                    : 'text-slate-400 hover:text-slate-200'
+                    ? 'bg-[var(--avp-accent)] text-white'
+                    : 'text-[var(--avp-text-secondary)] hover:text-[var(--avp-text)]'
                 }`}
               >
                 {opt.label}
@@ -145,108 +149,74 @@ export const SuggestionWaveformMiniCard: React.FC<SuggestionWaveformMiniCardProp
         </div>
       </div>
 
-      {/* Selected Suggestion Title & Quantitative Impact Metadata */}
       <div className="mt-1.5 space-y-0.5">
-        <p className="text-xs text-slate-200 font-medium truncate">
+        <p className="text-xs text-[var(--avp-text)] font-medium truncate">
           {recommendation.relatedText}
         </p>
         <div
           data-testid="minicard-impact-summary"
-          className="flex flex-wrap items-center justify-between gap-x-2 gap-y-0.5 text-[11px] text-slate-400"
+          className="flex flex-wrap items-center justify-between gap-x-2 gap-y-0.5 text-[11px] text-[var(--avp-text-muted)]"
         >
-          <span className={isRipple ? 'text-emerald-400' : 'text-sky-300'}>
+          <span className="text-[var(--avp-accent-text)] font-medium">
             {impactSummaryText}
           </span>
-          <span className="inline-flex items-center gap-1.5 text-slate-400">
-            <span dir="ltr" className="font-mono tabular-nums">
-              {preview.cutStartSec.toFixed(2)}s – {preview.cutEndSec.toFixed(2)}s
-            </span>
-            <span className="text-slate-600" aria-hidden="true">
-              ·
-            </span>
-            <span className="text-slate-500">{preview.trackName}</span>
+          <span dir="ltr" className="font-mono tabular-nums">
+            {preview.cutStartSec.toFixed(2)}s – {preview.cutEndSec.toFixed(2)}s
           </span>
         </div>
       </div>
 
-      {/* Status Notice if Already Applied or Rejected */}
-      {recommendation.status !== 'Pending' && (
-        <p className="mt-2 text-[11px] text-amber-300/90">
-          {recommendation.status === 'Accepted'
-            ? 'این پیشنهاد قبلاً روی تایم‌لاین اعمال شده است (نمایش مرجع بازه انتخابی).'
-            : recommendation.status === 'Superseded'
-              ? 'این بازه توسط برش قبلی پوشش داده شده است.'
-              : 'این پیشنهاد رد شده و تغییری روی موج صوتی اعمال نشده است.'}
-        </p>
-      )}
-
-      {/* Mini Waveform Strips */}
-      <div className="mt-2.5 space-y-2">
+      <div className="mt-2 space-y-2">
         {(viewMode === 'compare' || viewMode === 'before') && (
           <div>
             <div className="flex items-center justify-between text-[11px] mb-1">
-              <span className="text-slate-300 font-medium">قبل از اعمال (بخش حذفی مشخص‌شده)</span>
-              <span className="text-rose-300/90 inline-flex items-center gap-1">
-                <span>بازه حذف:</span>
-                <span dir="ltr" className="font-mono tabular-nums">
-                  {preview.cutDurationSec.toFixed(2)}s
-                </span>
+              <span className="text-[var(--avp-text-secondary)] font-medium">
+                {isFa ? 'قبل از اعمال' : 'Before Edit'}
+              </span>
+              <span className="text-[var(--avp-danger)] font-mono tabular-nums" dir="ltr">
+                {preview.cutDurationSec.toFixed(2)}s
               </span>
             </div>
             <div
               dir="ltr"
-              className="rounded border border-[#1E293B] bg-[#090D14] px-1.5 py-1 overflow-hidden"
+              className="rounded-lg border border-slate-800 bg-[var(--avp-waveform-bg)] px-1.5 py-1 overflow-hidden"
             >
               <svg
                 data-testid="minicard-svg-before"
                 viewBox={`0 0 ${SVG_W} ${SVG_H}`}
-                className="w-full h-11 block"
+                className="w-full h-10 block"
                 role="img"
-                aria-label={`نمودار موجی قبل از اعمال پیشنهاد ${recommendation.relatedText} با نمایش بازه حذف از ${preview.cutStartSec.toFixed(2)} تا ${preview.cutEndSec.toFixed(2)} ثانیه`}
+                aria-label={`${isFa ? 'موج قبل از اعمال' : 'Before waveform'} ${recommendation.relatedText}`}
               >
-                {/* Center reference axis */}
-                <line
-                  x1={0}
-                  y1={MID_Y}
-                  x2={SVG_W}
-                  y2={MID_Y}
-                  stroke="#1E293B"
-                  strokeWidth={1}
-                />
-
-                {/* Highlighted cut zone */}
+                <line x1={0} y1={MID_Y} x2={SVG_W} y2={MID_Y} stroke="#1E2B3A" strokeWidth={1} />
                 <rect
                   data-testid="minicard-cut-zone"
                   x={cutStartX.toFixed(2)}
                   y={1}
                   width={cutWidthX.toFixed(2)}
                   height={SVG_H - 2}
-                  fill="#F43F5E"
-                  fillOpacity={0.16}
+                  fill="#D85D65"
+                  fillOpacity={0.22}
                 />
-
-                {/* Waveform bars */}
                 {renderWaveformBars(
                   preview.beforeBins,
                   0,
                   SVG_W,
                   (_bin, _idx, ratio) => {
                     const inCut = ratio >= preview.cutStartRatio && ratio <= preview.cutEndRatio;
-                    return inCut ? '#FB7185' : '#38BDF8';
+                    return inCut ? '#F2747C' : '#43C7A7';
                   },
                   (_bin, _idx, ratio) => {
                     const inCut = ratio >= preview.cutStartRatio && ratio <= preview.cutEndRatio;
-                    return inCut ? 0.88 : 0.78;
+                    return inCut ? 0.92 : 0.82;
                   },
                 )}
-
-                {/* Crisp dashed boundary markers */}
                 <line
                   x1={cutStartX.toFixed(2)}
                   y1={0}
                   x2={cutStartX.toFixed(2)}
                   y2={SVG_H}
-                  stroke="#F43F5E"
+                  stroke="#F2747C"
                   strokeWidth={1.25}
                   strokeDasharray="3 2"
                 />
@@ -255,7 +225,7 @@ export const SuggestionWaveformMiniCard: React.FC<SuggestionWaveformMiniCardProp
                   y1={0}
                   x2={cutEndX.toFixed(2)}
                   y2={SVG_H}
-                  stroke="#F43F5E"
+                  stroke="#F2747C"
                   strokeWidth={1.25}
                   strokeDasharray="3 2"
                 />
@@ -267,27 +237,29 @@ export const SuggestionWaveformMiniCard: React.FC<SuggestionWaveformMiniCardProp
         {(viewMode === 'compare' || viewMode === 'after') && (
           <div>
             <div className="flex items-center justify-between text-[11px] mb-1">
-              <span className="text-slate-300 font-medium">
+              <span className="text-[var(--avp-text-secondary)] font-medium">
                 {isRipple
-                  ? 'پس از حذف (بخش پس از سکوت به محل برش متصل می‌شود)'
-                  : 'پس از جایگزینی (سطح صدا به کف Room Tone کاهش می‌یابد)'}
+                  ? isFa
+                    ? 'پس از حذف (Ripple)'
+                    : 'After Ripple Cut'
+                  : isFa
+                    ? 'پس از Room Tone'
+                    : 'After Room Tone'}
               </span>
-              <span dir="ltr" className="font-mono tabular-nums text-emerald-400">
-                {isRipple
-                  ? `-${preview.savedDurationSec.toFixed(2)}s`
-                  : 'Sync 0.00s'}
+              <span dir="ltr" className="font-mono tabular-nums text-[var(--avp-accent-text)]">
+                {isRipple ? `-${preview.savedDurationSec.toFixed(2)}s` : 'Sync 0.00s'}
               </span>
             </div>
             <div
               dir="ltr"
-              className="rounded border border-[#1E293B] bg-[#090D14] px-1.5 py-1 overflow-hidden"
+              className="rounded-lg border border-slate-800 bg-[var(--avp-waveform-bg)] px-1.5 py-1 overflow-hidden"
             >
               <svg
                 data-testid="minicard-svg-after"
                 viewBox={`0 0 ${SVG_W} ${SVG_H}`}
-                className="w-full h-11 block"
+                className="w-full h-10 block"
                 role="img"
-                aria-label={`نمودار موجی پیش‌بینی‌شده پس از اعمال پیشنهاد ${recommendation.relatedText}`}
+                aria-label={`${isFa ? 'موج پس از اعمال' : 'After waveform'} ${recommendation.relatedText}`}
               >
                 <defs>
                   <pattern
@@ -304,22 +276,11 @@ export const SuggestionWaveformMiniCard: React.FC<SuggestionWaveformMiniCardProp
                       y2="6"
                       stroke="#334155"
                       strokeWidth="1.2"
-                      strokeOpacity="0.55"
+                      strokeOpacity="0.6"
                     />
                   </pattern>
                 </defs>
-
-                {/* Center reference axis */}
-                <line
-                  x1={0}
-                  y1={MID_Y}
-                  x2={SVG_W}
-                  y2={MID_Y}
-                  stroke="#1E293B"
-                  strokeWidth={1}
-                />
-
-                {/* Room-tone replacement band when in-place suppression is active */}
+                <line x1={0} y1={MID_Y} x2={SVG_W} y2={MID_Y} stroke="#1E2B3A" strokeWidth={1} />
                 {!isRipple && (
                   <rect
                     data-testid="minicard-roomtone-zone"
@@ -327,12 +288,10 @@ export const SuggestionWaveformMiniCard: React.FC<SuggestionWaveformMiniCardProp
                     y={1}
                     width={cutWidthX.toFixed(2)}
                     height={SVG_H - 2}
-                    fill="#10B981"
-                    fillOpacity={0.12}
+                    fill="#1FA38B"
+                    fillOpacity={0.14}
                   />
                 )}
-
-                {/* Reclaimed / shortened timeline tail when ripple cut collapses duration */}
                 {isRipple && savedTailW > 1 && (
                   <g data-testid="minicard-saved-tail">
                     <rect
@@ -353,23 +312,13 @@ export const SuggestionWaveformMiniCard: React.FC<SuggestionWaveformMiniCardProp
                     />
                   </g>
                 )}
-
-                {/* After-edit waveform bars */}
                 {renderWaveformBars(
                   preview.afterBins,
                   0,
                   afterFillW,
-                  (bin, _idx, ratio) => {
-                    if (!isRipple && bin.isRoomTone) return '#10B981';
-                    if (isRipple && ratio * preview.afterFillRatio >= preview.spliceRatio) {
-                      return '#34D399';
-                    }
-                    return '#38BDF8';
-                  },
-                  (bin) => (bin.isRoomTone ? 0.72 : 0.88),
+                  (bin) => (bin.isRoomTone ? '#1FA38B' : '#43C7A7'),
+                  (bin) => (bin.isRoomTone ? 0.65 : 0.88),
                 )}
-
-                {/* Emerald splice seam marker */}
                 {isRipple ? (
                   <g data-testid="minicard-splice-seam">
                     <line
@@ -377,12 +326,12 @@ export const SuggestionWaveformMiniCard: React.FC<SuggestionWaveformMiniCardProp
                       y1={0}
                       x2={spliceX.toFixed(2)}
                       y2={SVG_H}
-                      stroke="#10B981"
+                      stroke="#E5A13B"
                       strokeWidth={1.6}
                     />
                     <polygon
                       points={`${spliceX.toFixed(2)},1 ${(spliceX - 3.5).toFixed(2)},6 ${(spliceX + 3.5).toFixed(2)},6`}
-                      fill="#10B981"
+                      fill="#E5A13B"
                     />
                   </g>
                 ) : (
@@ -392,7 +341,7 @@ export const SuggestionWaveformMiniCard: React.FC<SuggestionWaveformMiniCardProp
                       y1={0}
                       x2={cutStartX.toFixed(2)}
                       y2={SVG_H}
-                      stroke="#10B981"
+                      stroke="#43C7A7"
                       strokeWidth={1}
                       strokeDasharray="2 2"
                     />
@@ -401,7 +350,7 @@ export const SuggestionWaveformMiniCard: React.FC<SuggestionWaveformMiniCardProp
                       y1={0}
                       x2={cutEndX.toFixed(2)}
                       y2={SVG_H}
-                      stroke="#10B981"
+                      stroke="#43C7A7"
                       strokeWidth={1}
                       strokeDasharray="2 2"
                     />
@@ -411,23 +360,6 @@ export const SuggestionWaveformMiniCard: React.FC<SuggestionWaveformMiniCardProp
             </div>
           </div>
         )}
-      </div>
-
-      {/* Compact Footer Axis & Legend (Zero-pill clean inline metadata) */}
-      <div className="mt-2 flex flex-wrap items-center justify-between gap-2 text-[10.5px] text-slate-400">
-        <div className="flex flex-wrap items-center gap-x-2.5 gap-y-0.5">
-          <span className="inline-flex items-center gap-1">
-            <span className="inline-block w-2 h-2 rounded-[2px] bg-rose-400/80" aria-hidden="true" />
-            <span>بخش حذفی</span>
-          </span>
-          <span className="inline-flex items-center gap-1">
-            <span className="inline-block w-2 h-2 rounded-[2px] bg-emerald-400" aria-hidden="true" />
-            <span>{isRipple ? 'نقطه اتصال و بخش جابه‌جاشده' : 'کف Room Tone'}</span>
-          </span>
-        </div>
-        <span dir="ltr" className="font-mono tabular-nums text-slate-500">
-          {preview.windowStartSec.toFixed(2)}s → {preview.windowEndSec.toFixed(2)}s
-        </span>
       </div>
     </div>
   );

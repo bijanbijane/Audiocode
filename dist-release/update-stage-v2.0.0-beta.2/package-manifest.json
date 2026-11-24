@@ -14,19 +14,19 @@
     "companion": {
       "path": "payload/companion/avapardaz-companion.mjs",
       "version": "2.0.0-beta.1",
-      "sha256": "7715e6e8b558399e08676c2488f1fef0fb309e210b36283362b34d60080fb079",
-      "sizeBytes": 1426092
+      "sha256": "364a3afee0e0c3eba95315dda0f099880075cf146ec101ead8beb7c098be63ef",
+      "sizeBytes": 1408621
     },
     "nativeRuntime": {
       "sherpaOfflineBinary": {
         "path": "payload/runtime/bin/sherpa-onnx-offline",
-        "sha256": "3d20a501fbebc495e37d1271558403ffb157319d19019e52e944812a3eef48c6",
-        "sizeBytes": 2640648
+        "sha256": null,
+        "sizeBytes": 0
       },
       "sherpaStreamingBridgeBinary": {
         "path": "payload/runtime/bin/sherpa-onnx-streaming-bridge",
-        "sha256": "3904afc2b736b12bc226bea565d24704a923af2acb341b2e603e54d221ab03a5",
-        "sizeBytes": 27184
+        "sha256": null,
+        "sizeBytes": 0
       }
     },
     "persianAsrModel": {
@@ -34,13 +34,13 @@
       "architecture": "NeMo FastConformer-CTC INT8",
       "modelOnnx": {
         "path": "payload/models/shenava-rizeh-int8/model.int8.onnx",
-        "sha256": "6bdd4ab80626ddfe0b19338a5c96fcc4f2021ad78899cece20a805a48dc5250d",
-        "sizeBytes": 38183269
+        "sha256": null,
+        "sizeBytes": 0
       },
       "tokensTxt": {
         "path": "payload/models/shenava-rizeh-int8/tokens.txt",
-        "sha256": "8e192963f6e666dfa5721e5cbd4710bc1ef592460a45f08cefc94b2db16a6954",
-        "sizeBytes": 12236
+        "sha256": null,
+        "sizeBytes": 0
       }
     },
     "cepPlugin": {
