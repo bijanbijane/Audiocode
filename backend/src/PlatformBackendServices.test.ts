@@ -1,20 +1,36 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
+import { OfflineCryptoVerifier } from '../../src/security/OfflineCryptoVerifier';
 import {
   FastifyInstanceLike,
   FastifyReplyLike,
   PgPoolLike,
   PlatformBackendServices,
+  verifyModelChunkBytes,
 } from './PlatformBackendServices';
 
 const VALID_FP_1 = '1'.repeat(64);
+
+test('model chunk bytes must match the authoritative SHA-256 and exact byte length', () => {
+  const content = Buffer.from('avapardaz-model-chunk', 'utf8');
+  const correctHash = crypto.createHash('sha256').update(content).digest('hex');
+
+  assert.equal(verifyModelChunkBytes(content, content.byteLength, correctHash), true);
+  assert.equal(verifyModelChunkBytes(content, content.byteLength, '0'.repeat(64)), false);
+  assert.equal(verifyModelChunkBytes(content, content.byteLength + 1, correctHash), false);
+  assert.equal(verifyModelChunkBytes(content, 0, correctHash), false);
+  assert.equal(verifyModelChunkBytes(content, 17 * 1024 * 1024, correctHash), false);
+});
 
 test('Section 100: PlatformBackendServices issues Ed25519-signed license leases using authenticatedUserId inside a pinned transaction and enforces V1 local-only ASR policy', async () => {
   const { privateKey, publicKey } = crypto.generateKeyPairSync('ed25519');
   const privatePem = privateKey.export({ type: 'pkcs8', format: 'pem' }).toString();
 
   const txLog: string[] = [];
+  let catalogTotalBytes = '6';
+  let catalogStatus = 'ACTIVE';
+  let catalogChunkExists = true;
   const runQuery = async <TRow>(
     sql: string,
   ): Promise<{ rows: TRow[]; rowCount: number | null }> => {
@@ -38,6 +54,36 @@ test('Section 100: PlatformBackendServices issues Ed25519-signed license leases 
     if (sql.includes('SELECT lease_id, device_fingerprint_hash')) {
       return { rows: [], rowCount: 0 };
     }
+    if (sql.includes('LEFT JOIN ai_model_chunks')) {
+      return {
+        rows: [{
+          release_status: catalogStatus,
+          chunk_sha256_hex: catalogChunkExists ? 'a'.repeat(64) : null,
+          chunk_byte_length: catalogChunkExists ? 4 : null,
+        } as unknown as TRow],
+        rowCount: 1,
+      };
+    }
+    if (sql.includes('FROM ai_models_catalog')) {
+      return {
+        rows: [{
+          version: '1.0.0',
+          release_status: catalogStatus,
+          tier_group: 'GROUP_B',
+          total_size_bytes: catalogTotalBytes,
+        } as unknown as TRow],
+        rowCount: 1,
+      };
+    }
+    if (sql.includes('FROM ai_model_chunks')) {
+      return {
+        rows: [
+          { chunk_index: 0, sha256_hex: 'a'.repeat(64), byte_length: 4 },
+          { chunk_index: 1, sha256_hex: 'b'.repeat(64), byte_length: 2 },
+        ] as unknown as TRow[],
+        rowCount: 2,
+      };
+    }
     return { rows: [], rowCount: 1 };
   };
 
@@ -58,7 +104,7 @@ test('Section 100: PlatformBackendServices issues Ed25519-signed license leases 
     modelStorageRootDir: '/tmp',
     ed25519PrivateKeyPem: privatePem,
     keyId: 'ed25519_prod_k1',
-    cdnBaseUrl: 'https://cdn.avapardaz.ir',
+    cdnBaseUrl: 'https://cdn.avapardaz.ir/',
     enableServerSideAsrInference: false,
   });
 
@@ -73,9 +119,12 @@ test('Section 100: PlatformBackendServices issues Ed25519-signed license leases 
       reply: FastifyReplyLike,
     ) => Promise<unknown>
   >();
+  const getRoutes = new Map<string, (req: any, reply: FastifyReplyLike) => Promise<unknown>>();
 
   const mockFastify: FastifyInstanceLike = {
-    get: () => {},
+    get: (url, handler) => {
+      getRoutes.set(url, handler as never);
+    },
     post: (url, handler) => {
       postRoutes.set(url, handler as never);
     },
@@ -99,6 +148,21 @@ test('Section 100: PlatformBackendServices issues Ed25519-signed license leases 
     },
   };
 
+  // Public key discovery uses the same SPKI base64 format as the current browser verifier.
+  await getRoutes.get('/api/v1/crypto/public-key')!(
+    { params: {}, query: {}, headers: {} },
+    mockReply,
+  );
+  const publicKeyInfo = sentBody as {
+    publicKeySpkiBase64: string;
+    algorithm: string;
+    keyVersion: number;
+    keyId: string;
+  };
+  assert.equal(publicKeyInfo.algorithm, 'Ed25519');
+  assert.equal(publicKeyInfo.keyVersion, 1);
+  assert.equal(publicKeyInfo.keyId, 'ed25519_prod_k1');
+
   // Reject unauthenticated call directly (defense-in-depth)
   await postRoutes.get('/api/v1/license/lease')!(
     {
@@ -121,12 +185,36 @@ test('Section 100: PlatformBackendServices issues Ed25519-signed license leases 
   );
   assert.equal(statusCode, 403);
 
-  // Succeed for authenticated user inside pinned transaction
+  // A raw legacy fingerprint must match its supplied SHA-256 digest.
   statusCode = 200;
   await postRoutes.get('/api/v1/license/lease')!(
     {
       authenticatedUserId: 'usr_100',
-      body: { deviceFingerprintHash: VALID_FP_1 },
+      body: {
+        deviceFingerprint: 'legacy-device-fingerprint-01',
+        deviceFingerprintHash: VALID_FP_1,
+      },
+      headers: {},
+    },
+    mockReply,
+  );
+  assert.equal(statusCode, 403);
+  assert.equal((sentBody as { error: string }).error, 'DEVICE_FINGERPRINT_HASH_MISMATCH');
+
+  // Succeed for authenticated user with the real hash of the legacy raw fingerprint.
+  const legacyDeviceFingerprint = 'legacy-device-fingerprint-01';
+  const legacyDeviceFingerprintHash = crypto
+    .createHash('sha256')
+    .update(legacyDeviceFingerprint, 'utf8')
+    .digest('hex');
+  statusCode = 200;
+  await postRoutes.get('/api/v1/license/lease')!(
+    {
+      authenticatedUserId: 'usr_100',
+      body: {
+        deviceFingerprint: legacyDeviceFingerprint,
+        deviceFingerprintHash: legacyDeviceFingerprintHash,
+      },
       headers: {},
     },
     mockReply,
@@ -138,12 +226,37 @@ test('Section 100: PlatformBackendServices issues Ed25519-signed license leases 
   assert.equal(txLog[txLog.length - 1], 'COMMIT');
 
   const env = sentBody as {
-    payload: { userId: string; planTier: string };
+    payload: {
+      licenseId: string;
+      userId: string;
+      planTier: string;
+      plan: string;
+      issuedAtMs: number;
+      offlineGraceExpiresAtMs: number;
+      offlineGraceExpiresAtUnixSec: number;
+      subscriptionExpiresAtUnixSec: number;
+      allowedModelTiers: readonly string[];
+      deviceFingerprint: string;
+    };
     payloadCanonicalBase64: string;
     ed25519SignatureHex: string;
+    payloadBase64: string;
+    signatureBase64: string;
+    algorithm: 'Ed25519';
+    keyVersion: number;
+    decodedPreview: unknown;
   };
   assert.equal(env.payload.userId, 'usr_100');
   assert.equal(env.payload.planTier, 'PRO_MONTHLY');
+  assert.equal(env.payload.plan, 'PRO');
+  assert.equal(env.payload.deviceFingerprint, legacyDeviceFingerprint);
+  assert.match(env.payload.licenseId, /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i);
+  assert.deepEqual(env.payload.allowedModelTiers, ['GROUP_A', 'GROUP_B']);
+
+  // The old 72-hour offline_grace_hours value must not truncate a paid 7-day subscription.
+  assert.equal(env.payload.offlineGraceExpiresAtUnixSec, env.payload.subscriptionExpiresAtUnixSec);
+  assert.equal(env.payload.offlineGraceExpiresAtMs, env.payload.subscriptionExpiresAtUnixSec * 1000);
+
   const verified = crypto.verify(
     null,
     Buffer.from(env.payloadCanonicalBase64, 'utf8'),
@@ -151,6 +264,131 @@ test('Section 100: PlatformBackendServices issues Ed25519-signed license leases 
     Buffer.from(env.ed25519SignatureHex, 'hex'),
   );
   assert.equal(verified, true);
+  assert.equal(env.payloadBase64, env.payloadCanonicalBase64);
+  assert.equal(env.algorithm, 'Ed25519');
+  assert.equal(env.signatureBase64, Buffer.from(env.ed25519SignatureHex, 'hex').toString('base64'));
+
+  // Verify the exact response with the existing browser OfflineCryptoVerifier four days later.
+  const verifyAtMs = Date.now();
+  const clientResult = await OfflineCryptoVerifier.verifyOfflineLicense(
+    {
+      payloadBase64: env.payloadBase64,
+      signatureBase64: env.signatureBase64,
+      algorithm: env.algorithm,
+      keyVersion: env.keyVersion,
+      decodedPreview: env.decodedPreview as never,
+    },
+    publicKeyInfo.publicKeySpkiBase64,
+    verifyAtMs,
+    verifyAtMs + 4 * 24 * 60 * 60 * 1000,
+  );
+  assert.equal(clientResult.isValid, true);
+  assert.equal(clientResult.reason, 'VALID');
+  assert.equal(clientResult.payload?.plan, 'PRO');
+  assert.deepEqual(clientResult.allowedModelTiers, ['GROUP_A', 'GROUP_B']);
+
+  // The legacy path and envelope are also preserved for the existing client verifier.
+  await getRoutes.get('/api/v1/models/:modelId/manifest')!(
+    { params: { modelId: 'model-test' }, query: {}, headers: {} },
+    mockReply,
+  );
+  const manifestEnvelope = sentBody as {
+    payloadBase64: string;
+    signatureBase64: string;
+    algorithm: 'Ed25519';
+    keyVersion: number;
+    decodedPreview: {
+      modelId: string;
+      version: string;
+      status: string;
+      tier: string;
+      totalBytes: number;
+      chunkSizeBytes: number;
+      chunks: { index: number; url: string; byteOffset: number; byteLength: number; sha256Hex: string }[];
+      issuedAtMs: number;
+    };
+  };
+  const manifestResult = await OfflineCryptoVerifier.verifyModelManifest(
+    manifestEnvelope,
+    publicKeyInfo.publicKeySpkiBase64,
+  );
+  assert.equal(manifestResult.isValid, true);
+  assert.equal(manifestResult.manifest?.modelId, 'model-test');
+  assert.equal(manifestResult.manifest?.tier, 'GROUP_B');
+  assert.equal(manifestResult.manifest?.totalBytes, 6);
+  assert.equal(manifestResult.manifest?.chunks[1].byteOffset, 4);
+  assert.equal(
+    manifestResult.manifest?.chunks[0].url,
+    'https://cdn.avapardaz.ir/api/v1/models/model-test/1.0.0/chunks/0',
+  );
+
+  // Revocation is enforced at byte-delivery time, even when a client keeps an older manifest URL.
+  catalogStatus = 'REVOKED';
+  statusCode = 200;
+  await getRoutes.get('/api/v1/models/:modelId/:version/chunks/:chunkIndex')!(
+    { params: { modelId: 'model-test', version: '1.0.0', chunkIndex: '0' }, query: {}, headers: {} },
+    mockReply,
+  );
+  assert.equal(statusCode, 410);
+  assert.equal((sentBody as { error: string }).error, 'MODEL_VERSION_REVOKED');
+
+  // A path for a chunk not present in PostgreSQL is rejected before filesystem lookup.
+  catalogChunkExists = false;
+  statusCode = 200;
+  await getRoutes.get('/api/v1/models/:modelId/:version/chunks/:chunkIndex')!(
+    { params: { modelId: 'model-test', version: '1.0.0', chunkIndex: '0' }, query: {}, headers: {} },
+    mockReply,
+  );
+  assert.equal(statusCode, 404);
+  assert.equal((sentBody as { error: string }).error, 'MODEL_CHUNK_NOT_REGISTERED');
+  catalogChunkExists = true;
+
+  // Strict path parameters reject encoded or malformed values before any file access.
+  statusCode = 200;
+  await getRoutes.get('/api/v1/models/:modelId/:version/chunks/:chunkIndex')!(
+    { params: { modelId: '../model-test', version: '1.0.0', chunkIndex: '0junk' }, query: {}, headers: {} },
+    mockReply,
+  );
+  assert.equal(statusCode, 400);
+  assert.equal((sentBody as { error: string }).error, 'INVALID_MODEL_ID');
+
+  statusCode = 200;
+  await getRoutes.get('/api/v1/models/:modelId/:version/chunks/:chunkIndex')!(
+    { params: { modelId: 'model-test', version: '..', chunkIndex: '0' }, query: {}, headers: {} },
+    mockReply,
+  );
+  assert.equal(statusCode, 400);
+  assert.equal((sentBody as { error: string }).error, 'INVALID_MODEL_VERSION');
+
+  // Candidate/archived releases must not become public merely because a caller knows the URL.
+  catalogStatus = 'CANDIDATE';
+  statusCode = 200;
+  await getRoutes.get('/api/v1/models/:modelId/:version/manifest')!(
+    { params: { modelId: 'model-test', version: '1.0.0' }, query: {}, headers: {} },
+    mockReply,
+  );
+  assert.equal(statusCode, 404);
+  assert.equal((sentBody as { error: string }).error, 'MODEL_VERSION_NOT_AVAILABLE');
+
+  statusCode = 200;
+  await getRoutes.get('/api/v1/models/:modelId/:version/chunks/:chunkIndex')!(
+    { params: { modelId: 'model-test', version: '1.0.0', chunkIndex: '0' }, query: {}, headers: {} },
+    mockReply,
+  );
+  assert.equal(statusCode, 404);
+  assert.equal((sentBody as { error: string }).error, 'MODEL_VERSION_NOT_AVAILABLE');
+
+  catalogStatus = 'ACTIVE';
+
+  // Never sign a manifest whose declared catalogue size disagrees with the verified chunk set.
+  catalogTotalBytes = '7';
+  statusCode = 200;
+  await getRoutes.get('/api/v1/models/:modelId/manifest')!(
+    { params: { modelId: 'model-test' }, query: {}, headers: {} },
+    mockReply,
+  );
+  assert.equal(statusCode, 409);
+  assert.equal((sentBody as { error: string }).error, 'MODEL_MANIFEST_INTEGRITY_MISMATCH');
 
   await postRoutes.get('/api/v1/asr/transcribe-chunk')!(
     { body: {}, headers: {} },

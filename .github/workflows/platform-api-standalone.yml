@@ -1,0 +1,69 @@
+name: Standalone Platform API Readiness
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'backend/package.json'
+      - 'backend/tsconfig.json'
+      - 'backend/src/**'
+      - 'backend/db/**'
+      - 'backend/Dockerfile.platform-api'
+  push:
+    branches: [refactor/separate-web-platform-local-runtime]
+    paths:
+      - 'backend/package.json'
+      - 'backend/tsconfig.json'
+      - 'backend/src/**'
+      - 'backend/db/**'
+      - 'backend/Dockerfile.platform-api'
+
+permissions:
+  contents: read
+
+jobs:
+  platform-api:
+    name: Install, typecheck, test and build Platform API
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Generate isolated npm lockfile
+        run: |
+          mkdir -p ci-logs
+          set -o pipefail
+          npm install --prefix backend --package-lock-only --ignore-scripts --no-audit --no-fund 2>&1 | tee ci-logs/lock-generation.log
+
+      - name: Install exact dependency graph
+        run: |
+          set -o pipefail
+          npm ci --prefix backend --ignore-scripts --no-audit --no-fund 2>&1 | tee ci-logs/npm-ci.log
+
+      - name: TypeScript check
+        run: |
+          set -o pipefail
+          npm run --prefix backend typecheck 2>&1 | tee ci-logs/typecheck.log
+
+      - name: Platform API tests
+        run: |
+          set -o pipefail
+          npm run --prefix backend test 2>&1 | tee ci-logs/tests.log
+
+      - name: Build standalone Platform API image
+        run: |
+          set -o pipefail
+          docker build --progress=plain -f backend/Dockerfile.platform-api -t avapardaz-platform-api:ci . 2>&1 | tee ci-logs/docker-build.log
+
+      - name: Upload lockfile and diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: platform-api-lock-and-diagnostics
+          path: |
+            backend/package-lock.json
+            ci-logs/
+          if-no-files-found: warn
+          retention-days: 7

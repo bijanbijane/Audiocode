@@ -28,6 +28,12 @@ export interface BackendOfflineLicenseLeasePayload {
   readonly offlineGraceExpiresAtUnixSec: number;
   readonly subscriptionExpiresAtUnixSec: number;
   readonly allowedModelTiers: readonly ('GROUP_A' | 'GROUP_B')[];
+  // Compatibility fields consumed by src/security/OfflineCryptoVerifier.ts.
+  readonly displayName: string;
+  readonly plan: 'FREE' | 'PRO' | 'ENTERPRISE';
+  readonly issuedAtMs: number;
+  readonly offlineGraceExpiresAtMs: number;
+  readonly deviceFingerprint: string;
 }
 
 export interface BackendSignedEnvelope<T> {
@@ -35,6 +41,75 @@ export interface BackendSignedEnvelope<T> {
   readonly payloadCanonicalBase64: string;
   readonly ed25519SignatureHex: string;
   readonly keyId: string;
+}
+
+export interface BackendSignedOfflineLicenseEnvelope
+  extends BackendSignedEnvelope<BackendOfflineLicenseLeasePayload> {
+  readonly payloadBase64: string;
+  readonly signatureBase64: string;
+  readonly algorithm: 'Ed25519';
+  readonly keyVersion: number;
+  readonly decodedPreview: BackendOfflineLicenseLeasePayload;
+}
+
+export interface BackendLegacySignedEnvelope<T> {
+  readonly payloadBase64: string;
+  readonly signatureBase64: string;
+  readonly algorithm: 'Ed25519';
+  readonly keyVersion: number;
+  readonly decodedPreview: T;
+}
+
+export type BackendModelTier = 'GROUP_A' | 'GROUP_B';
+export type BackendModelLifecycleStatus = 'ACTIVE' | 'SUPPORTED' | 'DEPRECATED' | 'REVOKED';
+
+const MAX_MODEL_CHUNK_BYTES = 16 * 1024 * 1024;
+const PUBLIC_MODEL_RELEASE_STATUSES = new Set([
+  'ACTIVE',
+  'SUPPORTED',
+  'LIMITED_RELEASE',
+  'DEPRECATED',
+]);
+
+/** Verify bytes against the signed PostgreSQL chunk metadata before serving them. */
+export function verifyModelChunkBytes(
+  bytes: Buffer,
+  expectedByteLength: number | null,
+  expectedSha256Hex: string | null,
+): boolean {
+  if (
+    !Buffer.isBuffer(bytes) ||
+    typeof expectedByteLength !== 'number' ||
+    !Number.isSafeInteger(expectedByteLength) ||
+    expectedByteLength <= 0 ||
+    expectedByteLength > MAX_MODEL_CHUNK_BYTES ||
+    bytes.byteLength !== expectedByteLength ||
+    typeof expectedSha256Hex !== 'string' ||
+    !/^[a-f0-9]{64}$/i.test(expectedSha256Hex)
+  ) {
+    return false;
+  }
+
+  const actual = crypto.createHash('sha256').update(bytes).digest();
+  const expected = Buffer.from(expectedSha256Hex, 'hex');
+  return actual.byteLength === expected.byteLength && crypto.timingSafeEqual(actual, expected);
+}
+
+export interface BackendLegacySignedModelManifest {
+  readonly modelId: string;
+  readonly version: string;
+  readonly status: BackendModelLifecycleStatus;
+  readonly tier: BackendModelTier;
+  readonly totalBytes: number;
+  readonly chunkSizeBytes: number;
+  readonly chunks: readonly {
+    readonly index: number;
+    readonly url: string;
+    readonly byteOffset: number;
+    readonly byteLength: number;
+    readonly sha256Hex: string;
+  }[];
+  readonly issuedAtMs: number;
 }
 
 export interface PgPoolLike {
@@ -109,21 +184,44 @@ export interface FastifyInstanceLike {
 
 export class PlatformBackendServices {
   private readonly privateKeyObj: crypto.KeyObject;
+  private readonly publicKeySpkiBase64: string;
 
   constructor(
     private readonly db: PgPoolLike,
     private readonly config: BackendRuntimeConfig,
   ) {
     this.privateKeyObj = crypto.createPrivateKey(config.ed25519PrivateKeyPem);
+    const publicKey = crypto.createPublicKey(this.privateKeyObj);
+    this.publicKeySpkiBase64 = Buffer.from(
+      publicKey.export({ type: 'spki', format: 'der' }),
+    ).toString('base64');
+  }
+
+  public getPublicKeyInfo(): {
+    publicKeySpkiBase64: string;
+    algorithm: 'Ed25519';
+    keyVersion: number;
+    keyId: string;
+  } {
+    return {
+      publicKeySpkiBase64: this.publicKeySpkiBase64,
+      algorithm: 'Ed25519',
+      keyVersion: 1,
+      keyId: this.config.keyId,
+    };
   }
 
   /**
    * ثبت تمام مسیرهای رسمی API سرور Backend روی Fastify
    */
   public registerAllRoutes(fastify: FastifyInstanceLike): void {
+    fastify.get('/api/v1/crypto/public-key', async (_request, reply) => {
+      return reply.send(this.getPublicKeyInfo());
+    });
+
     // ۱. صدور و تمدید گواهی اجاره آفلاین (Ed25519 Offline License Lease) بر اساس هویت احراز‌شده و تراکنش اتمی
     fastify.post<{
-      Body: { deviceFingerprintHash: string; userId?: string };
+      Body: { deviceFingerprintHash: string; userId?: string; displayName?: string; deviceFingerprint?: string };
     }>('/api/v1/license/lease', async (request, reply) => {
       const authenticatedUserId =
         typeof request.authenticatedUserId === 'string' &&
@@ -141,6 +239,8 @@ export class PlatformBackendServices {
       const body = (request.body ?? {}) as {
         deviceFingerprintHash?: unknown;
         userId?: unknown;
+        displayName?: unknown;
+        deviceFingerprint?: unknown;
       };
 
       if (body.userId !== undefined) {
@@ -161,6 +261,30 @@ export class PlatformBackendServices {
         return sendClassifiedLicenseError(reply, err);
       }
 
+      let legacyDeviceFingerprint: string | null = null;
+      if (body.deviceFingerprint !== undefined) {
+        if (
+          typeof body.deviceFingerprint !== 'string' ||
+          body.deviceFingerprint.trim().length === 0 ||
+          body.deviceFingerprint.trim().length > 512
+        ) {
+          return reply.status(400).send({ error: 'INVALID_DEVICE_FINGERPRINT' });
+        }
+        legacyDeviceFingerprint = body.deviceFingerprint.trim();
+        const derivedHash = crypto
+          .createHash('sha256')
+          .update(legacyDeviceFingerprint, 'utf8')
+          .digest('hex');
+        const expectedBytes = Buffer.from(normalizedFingerprint, 'utf8');
+        const derivedBytes = Buffer.from(derivedHash, 'utf8');
+        if (
+          expectedBytes.byteLength !== derivedBytes.byteLength ||
+          !crypto.timingSafeEqual(expectedBytes, derivedBytes)
+        ) {
+          return reply.status(403).send({ error: 'DEVICE_FINGERPRINT_HASH_MISMATCH' });
+        }
+      }
+
       try {
         const leasePayload = await withPinnedPostgresTransaction(this.db, async (txClient) => {
           const seatResult = await enforceDeviceSeatsForAuthenticatedUser(
@@ -171,8 +295,21 @@ export class PlatformBackendServices {
           const sub = seatResult.subscription;
           const nowSec = Math.floor(Date.now() / 1000);
           const subEndSec = Math.floor(sub.currentPeriodEnd.getTime() / 1000);
-          const graceEndSec = Math.min(subEndSec, nowSec + sub.offlineGraceHours * 3600);
-          const leaseId = `lic_${crypto.randomUUID()}`;
+          // A paid offline entitlement remains valid for the full paid period.
+          // offline_grace_hours is not used to truncate already-paid local access.
+          const offlineEntitlementEndSec = subEndSec;
+          // The PostgreSQL lease_id column is UUID; do not prefix the stored value.
+          const leaseId = crypto.randomUUID();
+          const legacyPlan =
+            sub.planTier === 'FREE_TRIAL'
+              ? 'FREE'
+              : sub.planTier === 'STUDIO_ENTERPRISE'
+                ? 'ENTERPRISE'
+                : 'PRO';
+          const displayName =
+            typeof body.displayName === 'string' && body.displayName.trim().length > 0
+              ? body.displayName.trim().slice(0, 128)
+              : authenticatedUserId;
 
           await txClient.query(
             `INSERT INTO offline_license_leases
@@ -184,24 +321,33 @@ export class PlatformBackendServices {
               sub.id,
               seatResult.normalizedDeviceFingerprintHash,
               this.config.keyId,
-              graceEndSec,
+              offlineEntitlementEndSec,
             ],
           );
 
+          const issuedAtMs = Date.now();
+          const offlineEntitlementEndMs = offlineEntitlementEndSec * 1000;
+          const allowedModelTiers: readonly ('GROUP_A' | 'GROUP_B')[] =
+            legacyPlan === 'FREE' ? ['GROUP_A'] : ['GROUP_A', 'GROUP_B'];
           const payload: BackendOfflineLicenseLeasePayload = {
             licenseId: leaseId,
             userId: authenticatedUserId,
             planTier: sub.planTier,
             issuedAtUnixSec: nowSec,
-            offlineGraceExpiresAtUnixSec: graceEndSec,
+            offlineGraceExpiresAtUnixSec: offlineEntitlementEndSec,
             subscriptionExpiresAtUnixSec: subEndSec,
-            allowedModelTiers: ['GROUP_A', 'GROUP_B'],
+            allowedModelTiers,
+            displayName,
+            plan: legacyPlan,
+            issuedAtMs,
+            offlineGraceExpiresAtMs: offlineEntitlementEndMs,
+            deviceFingerprint: legacyDeviceFingerprint ?? seatResult.normalizedDeviceFingerprintHash,
           };
           return payload;
         });
 
         // Ed25519 envelope signing runs strictly after COMMIT succeeds.
-        return reply.send(this.signEnvelope(leasePayload));
+        return reply.send(this.signOfflineLicenseLeaseEnvelope(leasePayload));
       } catch (err) {
         return sendClassifiedLicenseError(reply, err);
       }
@@ -218,6 +364,115 @@ export class PlatformBackendServices {
       );
       return reply.send({ models: res.rows });
     });
+
+    // Legacy browser-compatible manifest route backed by the PostgreSQL catalog.
+    fastify.get<{ Params: { modelId: string } }>(
+      '/api/v1/models/:modelId/manifest',
+      async (request, reply) => {
+        const modelId = request.params.modelId.trim();
+        if (!modelId || !/^[a-zA-Z0-9_-]{1,64}$/.test(modelId)) {
+          return reply.status(400).send({ error: 'INVALID_MODEL_ID' });
+        }
+
+        const catalogResult = await this.db.query<{
+          version: string;
+          release_status: string;
+          tier_group: string;
+          total_size_bytes: string | number;
+        }>(
+          `SELECT version, release_status, tier_group, total_size_bytes
+           FROM ai_models_catalog
+           WHERE model_id = $1
+             AND release_status IN ('ACTIVE', 'SUPPORTED', 'DEPRECATED', 'REVOKED')
+           ORDER BY created_at DESC
+           LIMIT 1`,
+          [modelId],
+        );
+
+        if (catalogResult.rows.length === 0) {
+          return reply.status(404).send({ error: 'MODEL_NOT_FOUND', modelId });
+        }
+
+        const entry = catalogResult.rows[0];
+        if (!['GROUP_A', 'GROUP_B'].includes(entry.tier_group)) {
+          return reply.status(409).send({ error: 'MODEL_TIER_UNSUPPORTED_BY_LEGACY_CLIENT', modelId });
+        }
+        if (!['ACTIVE', 'SUPPORTED', 'DEPRECATED', 'REVOKED'].includes(entry.release_status)) {
+          return reply.status(409).send({ error: 'MODEL_STATUS_UNSUPPORTED_BY_LEGACY_CLIENT', modelId });
+        }
+
+        const chunkResult = await this.db.query<{
+          chunk_index: number;
+          sha256_hex: string;
+          byte_length: number;
+        }>(
+          `SELECT chunk_index, sha256_hex, byte_length
+           FROM ai_model_chunks
+           WHERE model_id = $1 AND version = $2
+           ORDER BY chunk_index ASC`,
+          [modelId, entry.version],
+        );
+        if (chunkResult.rows.length === 0) {
+          return reply.status(404).send({
+            error: 'MODEL_MANIFEST_CHUNKS_NOT_FOUND',
+            modelId,
+            version: entry.version,
+          });
+        }
+
+        const expectedTotalBytes = Number(entry.total_size_bytes);
+        const hasInvalidChunk = chunkResult.rows.some((chunk, index) =>
+          !Number.isSafeInteger(chunk.chunk_index) ||
+          chunk.chunk_index !== index ||
+          !Number.isSafeInteger(chunk.byte_length) ||
+          chunk.byte_length <= 0 ||
+          chunk.byte_length > MAX_MODEL_CHUNK_BYTES ||
+          !/^[a-f0-9]{64}$/i.test(chunk.sha256_hex),
+        );
+        const actualTotalBytes = chunkResult.rows.reduce(
+          (sum, chunk) => sum + chunk.byte_length,
+          0,
+        );
+        if (
+          !Number.isSafeInteger(expectedTotalBytes) ||
+          expectedTotalBytes <= 0 ||
+          hasInvalidChunk ||
+          !Number.isSafeInteger(actualTotalBytes) ||
+          actualTotalBytes !== expectedTotalBytes
+        ) {
+          return reply.status(409).send({
+            error: 'MODEL_MANIFEST_INTEGRITY_MISMATCH',
+            modelId,
+            version: entry.version,
+          });
+        }
+
+        let byteOffset = 0;
+        const chunks = chunkResult.rows.map((chunk) => {
+          const offset = byteOffset;
+          byteOffset += chunk.byte_length;
+          return {
+            index: chunk.chunk_index,
+            url: `${this.config.cdnBaseUrl.replace(/\/+$/, '')}/api/v1/models/${encodeURIComponent(modelId)}/${encodeURIComponent(entry.version)}/chunks/${chunk.chunk_index}`,
+            byteOffset: offset,
+            byteLength: chunk.byte_length,
+            sha256Hex: chunk.sha256_hex,
+          };
+        });
+
+        const payload: BackendLegacySignedModelManifest = {
+          modelId,
+          version: entry.version,
+          status: entry.release_status as BackendModelLifecycleStatus,
+          tier: entry.tier_group as BackendModelTier,
+          totalBytes: Number(entry.total_size_bytes),
+          chunkSizeBytes: Math.max(...chunks.map((chunk) => chunk.byteLength)),
+          chunks,
+          issuedAtMs: Date.now(),
+        };
+        return reply.send(this.signLegacyEnvelope(payload));
+      },
+    );
 
     // ۳. دریافت مانیفست امضاشده یک مدل همراه با فهرست قطعات 8MB (بخش ۴۰)
     fastify.get<{ Params: { modelId: string; version: string } }>(
@@ -248,6 +503,9 @@ export class PlatformBackendServices {
             messageFa: 'این نسخه از مدل به دلایل امنیتی یا کیفی ابطال شده است.',
           });
         }
+        if (!PUBLIC_MODEL_RELEASE_STATUSES.has(meta.release_status)) {
+          return reply.status(404).send({ error: 'MODEL_VERSION_NOT_AVAILABLE' });
+        }
 
         const chunksRes = await this.db.query<{
           chunk_index: number;
@@ -271,7 +529,7 @@ export class PlatformBackendServices {
           totalBytes: Number(meta.total_size_bytes),
           chunks: chunksRes.rows.map((c) => ({
             index: c.chunk_index,
-            url: `${this.config.cdnBaseUrl}/api/v1/models/${modelId}/${version}/chunks/${c.chunk_index}`,
+            url: `${this.config.cdnBaseUrl.replace(/\/+$/, '')}/api/v1/models/${modelId}/${version}/chunks/${c.chunk_index}`,
             sha256Hex: c.sha256_hex,
             byteLength: c.byte_length,
           })),
@@ -286,28 +544,96 @@ export class PlatformBackendServices {
       '/api/v1/models/:modelId/:version/chunks/:chunkIndex',
       async (request, reply) => {
         const { modelId, version, chunkIndex } = request.params;
-        const safeIdx = parseInt(chunkIndex, 10);
-        if (!Number.isInteger(safeIdx) || safeIdx < 0) {
+        if (!/^[a-zA-Z0-9_-]{1,64}$/.test(modelId)) {
+          return reply.status(400).send({ error: 'INVALID_MODEL_ID' });
+        }
+        if (!/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,31}$/.test(version)) {
+          return reply.status(400).send({ error: 'INVALID_MODEL_VERSION' });
+        }
+        if (!/^(0|[1-9][0-9]{0,8})$/.test(chunkIndex)) {
+          return reply.status(400).send({ error: 'INVALID_CHUNK_INDEX' });
+        }
+        const safeIdx = Number(chunkIndex);
+        if (!Number.isSafeInteger(safeIdx)) {
           return reply.status(400).send({ error: 'INVALID_CHUNK_INDEX' });
         }
 
-        // جلوگیری از Path Traversal
-        const safeModel = modelId.replace(/[^a-zA-Z0-9_-]/g, '');
-        const safeVer = version.replace(/[^a-zA-Z0-9._-]/g, '');
-        const fileName = `chunk_${String(safeIdx).padStart(4, '0')}.bin`;
-        const fullPath = path.join(
-          this.config.modelStorageRootDir,
-          safeModel,
-          safeVer,
-          fileName,
+        // Re-check both the authoritative model state and the exact chunk registration
+        // at download time. A caller must not be able to guess an orphan file path.
+        const modelState = await this.db.query<{
+          release_status: string;
+          chunk_sha256_hex: string | null;
+          chunk_byte_length: number | null;
+        }>(
+          `SELECT catalog.release_status,
+                  chunk.sha256_hex AS chunk_sha256_hex,
+                  chunk.byte_length AS chunk_byte_length
+           FROM ai_models_catalog AS catalog
+           LEFT JOIN ai_model_chunks AS chunk
+             ON chunk.model_id = catalog.model_id
+            AND chunk.version = catalog.version
+            AND chunk.chunk_index = $3
+           WHERE catalog.model_id = $1 AND catalog.version = $2`,
+          [modelId, version, safeIdx],
         );
+        if (modelState.rows.length === 0) {
+          return reply.status(404).send({ error: 'MODEL_VERSION_NOT_FOUND' });
+        }
+        const modelChunk = modelState.rows[0];
+        if (modelChunk.release_status === 'REVOKED') {
+          return reply.status(410).send({ error: 'MODEL_VERSION_REVOKED' });
+        }
+        if (!PUBLIC_MODEL_RELEASE_STATUSES.has(modelChunk.release_status)) {
+          return reply.status(404).send({ error: 'MODEL_VERSION_NOT_AVAILABLE' });
+        }
+        if (
+          !modelChunk.chunk_sha256_hex ||
+          !/^[a-f0-9]{64}$/i.test(modelChunk.chunk_sha256_hex) ||
+          typeof modelChunk.chunk_byte_length !== 'number' ||
+          !Number.isSafeInteger(modelChunk.chunk_byte_length) ||
+          modelChunk.chunk_byte_length <= 0 ||
+          modelChunk.chunk_byte_length > MAX_MODEL_CHUNK_BYTES
+        ) {
+          return reply.status(404).send({ error: 'MODEL_CHUNK_NOT_REGISTERED' });
+        }
 
-        if (!fs.existsSync(fullPath)) {
+        // Both path segments have strict allow-list validation before joining.
+        const safeModel = modelId;
+        const safeVer = version;
+        const fileName = `chunk_${String(safeIdx).padStart(4, '0')}.bin`;
+        const storageRoot = this.config.modelStorageRootDir;
+        const fullPath = path.join(storageRoot, safeModel, safeVer, fileName);
+
+        if (!fs.existsSync(storageRoot) || !fs.existsSync(fullPath)) {
           return reply.status(404).send({ error: 'CHUNK_FILE_NOT_FOUND' });
         }
 
-        const stat = fs.statSync(fullPath);
-        const totalSize = stat.size;
+        // Reject symlinks escaping the model root and files whose byte count
+        // differs from the signed PostgreSQL manifest metadata.
+        const realRoot = fs.realpathSync(storageRoot);
+        const realFile = fs.realpathSync(fullPath);
+        const relativeFile = path.relative(realRoot, realFile);
+        if (relativeFile.startsWith('..') || path.isAbsolute(relativeFile)) {
+          return reply.status(403).send({ error: 'MODEL_CHUNK_PATH_OUTSIDE_STORAGE_ROOT' });
+        }
+        const stat = fs.statSync(realFile);
+        if (!stat.isFile() || stat.size !== modelChunk.chunk_byte_length) {
+          return reply.status(409).send({ error: 'MODEL_CHUNK_FILE_SIZE_MISMATCH' });
+        }
+
+        // Verify the actual content-addressed bytes before setting immutable cache headers.
+        // Model chunks are bounded to 16 MiB, so using one verified buffer also avoids a
+        // TOCTOU gap between hashing a file and later opening a second stream for delivery.
+        const verifiedChunkBytes = fs.readFileSync(realFile);
+        if (!verifyModelChunkBytes(
+          verifiedChunkBytes,
+          modelChunk.chunk_byte_length,
+          modelChunk.chunk_sha256_hex,
+        )) {
+          return reply.status(409).send({ error: 'MODEL_CHUNK_SHA256_MISMATCH' });
+        }
+
+        const totalSize = verifiedChunkBytes.byteLength;
         const rangeHeader = request.headers.range;
 
         reply.header('Accept-Ranges', 'bytes');
@@ -331,11 +657,11 @@ export class PlatformBackendServices {
           reply.status(206);
           reply.header('Content-Range', `bytes ${start}-${end}/${totalSize}`);
           reply.header('Content-Length', end - start + 1);
-          return reply.send(fs.createReadStream(fullPath, { start, end }));
+          return reply.send(verifiedChunkBytes.subarray(start, end + 1));
         }
 
         reply.header('Content-Length', totalSize);
-        return reply.send(fs.createReadStream(fullPath));
+        return reply.send(verifiedChunkBytes);
       },
     );
 
@@ -378,6 +704,41 @@ export class PlatformBackendServices {
       }
       return reply.status(200).send({ ready: true });
     });
+  }
+
+  public signLegacyEnvelope<T>(payload: T): BackendLegacySignedEnvelope<T> {
+    const payloadBase64 = Buffer.from(JSON.stringify(payload), 'utf8').toString('base64');
+    const signature = crypto.sign(null, Buffer.from(payloadBase64, 'utf8'), this.privateKeyObj);
+    return {
+      payloadBase64,
+      signatureBase64: signature.toString('base64'),
+      algorithm: 'Ed25519',
+      keyVersion: 1,
+      decodedPreview: payload,
+    };
+  }
+
+  public signOfflineLicenseLeaseEnvelope(
+    payload: BackendOfflineLicenseLeasePayload,
+  ): BackendSignedOfflineLicenseEnvelope {
+    const payloadBase64 = Buffer.from(JSON.stringify(payload), 'utf8').toString('base64');
+    const signature = crypto.sign(
+      null,
+      Buffer.from(payloadBase64, 'utf8'),
+      this.privateKeyObj,
+    );
+    return {
+      payload,
+      payloadCanonicalBase64: payloadBase64,
+      ed25519SignatureHex: signature.toString('hex'),
+      keyId: this.config.keyId,
+      // Exact envelope fields expected by the current OfflineCryptoVerifier.
+      payloadBase64,
+      signatureBase64: signature.toString('base64'),
+      algorithm: 'Ed25519',
+      keyVersion: 1,
+      decodedPreview: payload,
+    };
   }
 
   public signEnvelope<T>(payload: T): BackendSignedEnvelope<T> {

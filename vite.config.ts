@@ -22,7 +22,30 @@ function collectDistAssets(baseDir: string, currentDir: string): Array<{path: st
   return results.sort((a, b) => a.path.localeCompare(b.path));
 }
 
-export default defineConfig(() => {
+export default defineConfig(({mode}) => {
+  // In separate mode, the browser UI runs on its own Vite origin while API
+  // requests are reverse-proxied to the independently running local/API server.
+  // Keep this disabled in the legacy embedded-Vite mode to prevent proxy loops.
+  const apiProxy = mode === 'separate'
+    ? {
+        '/api': {
+          target: process.env.API_PROXY_TARGET ?? 'http://127.0.0.1:3000',
+          changeOrigin: false,
+        },
+        '/v1': {
+          target: process.env.API_PROXY_TARGET ?? 'http://127.0.0.1:3000',
+          changeOrigin: false,
+        },
+        // The Fastify/PostgreSQL platform API gets a dedicated prefix.
+        // Strip only this prefix; legacy /api and /v1 continue going to Express.
+        '/platform-api': {
+          target: process.env.PLATFORM_API_PROXY_TARGET ?? 'http://127.0.0.1:4000',
+          changeOrigin: false,
+          rewrite: (requestPath) => requestPath.replace(/^\/platform-api/, ''),
+        },
+      }
+    : undefined;
+
   return {
     plugins: [
       react(),
@@ -134,10 +157,17 @@ export default defineConfig(() => {
       hmr: process.env.DISABLE_HMR !== 'true',
       // Disable file watching when DISABLE_HMR is true to save CPU during agent edits.
       watch: process.env.DISABLE_HMR === 'true' ? null : {},
+      ...(apiProxy ? {proxy: apiProxy} : {}),
       headers: {
         'Cross-Origin-Opener-Policy': 'same-origin',
         'Cross-Origin-Embedder-Policy': 'credentialless',
       },
+    },
+    preview: {
+      host: '0.0.0.0',
+      port: 4173,
+      strictPort: true,
+      ...(apiProxy ? {proxy: apiProxy} : {}),
     },
     worker: {
       format: 'es' as const,

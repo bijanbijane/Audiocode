@@ -1,0 +1,136 @@
+# Local three-runtime deployment.
+# Web/Nginx and Express remain separate containers/processes but share a network namespace
+# so the local-only Express API sees Nginx as 127.0.0.1 and retains its loopback security guard.
+# Fastify/PostgreSQL remains a separately networked Platform API behind /platform-api/.
+#
+# Copy deploy/.env.separated.example to deploy/.env.separated and provide real secrets.
+# Run: docker compose --env-file deploy/.env.separated -f deploy/docker-compose.separated.yml up --build -d
+#
+# Public local-only Web -> Nginx
+#   /api/*, /v1/*        -> Express on shared loopback :3000
+#   /platform-api/*      -> Fastify/PostgreSQL Platform API (prefix stripped)
+#
+# Keep the currently deployed Ed25519 key pair identical in Express Local compatibility
+# and Fastify until a versioned key-rotation rollout updates every client.
+# Local-mode legacy clients may continue to use Express demo compatibility routes.
+# Hosted subscription issuance is blocked on Express and belongs to Fastify only.
+
+services:
+  avapardaz-web:
+    build:
+      context: ..
+      dockerfile: deploy/web/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      avapardaz-platform-api:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:${WEB_PORT:-8080}:8080"
+      # Do not publish the containerized Companion/Local API port. CompanionIpcBridge
+      # intentionally accepts only true loopback socket peers; Docker host-port NAT
+      # would change the peer address and must not be treated as a trusted loopback client.
+    networks:
+      - avapardaz-runtime
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:8080/ || exit 1"]
+      interval: 15s
+      timeout: 3s
+      retries: 5
+
+  avapardaz-api:
+    build:
+      context: ..
+      dockerfile: backend/Dockerfile.api
+    restart: unless-stopped
+    # Sharing the Web container network namespace preserves true loopback
+    # semantics for AudioApiSecurityGuard; it does not merge the containers.
+    network_mode: "service:avapardaz-web"
+    depends_on:
+      avapardaz-web:
+        condition: service_started
+    environment:
+      NODE_ENV: "production"
+      PORT: "3000"
+      AVAPARDAZ_DEPLOYMENT_MODE: "local"
+      AVAPARDAZ_BIND_HOST: "127.0.0.1"
+      DISABLE_WEB_HOST: "true"
+      DISABLE_EMBEDDED_VITE: "true"
+      ENABLE_CLOUD_ASR: "false"
+      PLATFORM_API_INTERNAL_ORIGIN: "http://avapardaz-platform-api:4000"
+      ED25519_PRIVATE_KEY_PEM: ${LOCAL_ED25519_PRIVATE_KEY_PEM:?Set LOCAL_ED25519_PRIVATE_KEY_PEM}
+      ED25519_PUBLIC_KEY_PEM: ${LOCAL_ED25519_PUBLIC_KEY_PEM:?Set LOCAL_ED25519_PUBLIC_KEY_PEM}
+      MODEL_STORAGE_DIR: "/var/lib/paudio/models"
+    volumes:
+      - model_chunks_storage:/var/lib/paudio/models
+    healthcheck:
+      test: ["CMD", "bun", "-e", "fetch('http://127.0.0.1:3000/healthz').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      start_period: 20s
+      retries: 5
+
+  avapardaz-platform-api:
+    build:
+      context: ..
+      dockerfile: backend/Dockerfile.platform-api
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      NODE_ENV: "production"
+      HOST: "0.0.0.0"
+      TRUST_PROXY: "true"
+      PORT: "4000"
+      DATABASE_URL: ${PLATFORM_DATABASE_URL:?Set PLATFORM_DATABASE_URL}
+      ED25519_PRIVATE_KEY_PEM: ${PLATFORM_ED25519_PRIVATE_KEY_PEM:?Set PLATFORM_ED25519_PRIVATE_KEY_PEM}
+      ED25519_PUBLIC_KEY_PEM: ${PLATFORM_ED25519_PUBLIC_KEY_PEM:?Set PLATFORM_ED25519_PUBLIC_KEY_PEM}
+      PAYMENT_WEBHOOK_HMAC_SECRET: ${PAYMENT_WEBHOOK_HMAC_SECRET:?Set PAYMENT_WEBHOOK_HMAC_SECRET}
+      ADMIN_API_SECRET_KEY: ${ADMIN_API_SECRET_KEY:?Set ADMIN_API_SECRET_KEY}
+      ED25519_KEY_ID: ${PLATFORM_ED25519_KEY_ID:?Set PLATFORM_ED25519_KEY_ID to the existing production key ID}
+      PUBLIC_CDN_BASE_URL: ${PUBLIC_CDN_BASE_URL:?Set PUBLIC_CDN_BASE_URL to the public /platform-api base URL}
+      MODEL_STORAGE_DIR: "/var/lib/paudio/platform-models"
+      ENABLE_CLOUD_ASR: "false"
+    volumes:
+      - platform_model_chunks:/var/lib/paudio/platform-models:ro
+    networks:
+      - avapardaz-runtime
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:4000/readyz').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      start_period: 20s
+      retries: 5
+
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: "paudio_platform"
+      POSTGRES_USER: "paudio_app"
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+      # Bootstrap a new empty database in deterministic dependency order.
+      - ../backend/db/schema.sql:/docker-entrypoint-initdb.d/001_schema.sql:ro
+      - ../backend/db/migration_002_payments.sql:/docker-entrypoint-initdb.d/002_payments.sql:ro
+      - ../backend/db/migration_004_model_rollout.sql:/docker-entrypoint-initdb.d/004_model_rollout.sql:ro
+      - ../backend/db/migration_005_outbox.sql:/docker-entrypoint-initdb.d/005_outbox.sql:ro
+      - ../backend/db/migration_006_enterprise_keys.sql:/docker-entrypoint-initdb.d/006_enterprise_keys.sql:ro
+      - ../backend/db/migration_007_billing_invoices.sql:/docker-entrypoint-initdb.d/007_billing_invoices.sql:ro
+    networks:
+      - avapardaz-runtime
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U paudio_app -d paudio_platform"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+networks:
+  avapardaz-runtime:
+    driver: bridge
+
+volumes:
+  pg_data:
+  model_chunks_storage:
+  platform_model_chunks:

@@ -1,0 +1,83 @@
+name: Separated Web and API Container Build
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'package.json'
+      - 'bun.lock'
+      - 'server.ts'
+      - 'vite.config.ts'
+      - 'scripts/start-api.ts'
+      - 'scripts/audit-runtime-dependencies.mjs'
+      - 'scripts/audit-express-route-ownership.mjs'
+      - 'backend/Dockerfile.api'
+      - 'backend/src/SeparatedRuntimeRoutingContract.test.ts'
+      - 'backend/src/PlatformBackendServices.ts'
+      - 'backend/src/PlatformBackendServices.test.ts'
+      - 'src/platform/PlatformApiClient.ts'
+      - 'src/platform/PlatformApiCompatibilityProxy.ts'
+      - 'src/platform/PlatformApiCompatibilityProxy.test.ts'
+      - 'src/platform/PlatformApiClient.test.ts'
+      - 'src/platform/LocalExpressLoopbackContract.test.ts'
+      - 'deploy/docker-compose.separated.yml'
+      - 'deploy/.env.separated.example'
+      - 'deploy/web/**'
+      - 'src/**'
+      - 'packages/**'
+
+permissions:
+  contents: read
+
+jobs:
+  build-separated-containers:
+    name: Build independent web and API images
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Validate frozen root dependency lock
+        run: |
+          mkdir -p ci-logs
+          set -o pipefail
+          bun install --frozen-lockfile 2>&1 | tee ci-logs/bun-install.log
+
+      - name: Audit Web, Local Runtime and Platform API dependency boundaries
+        run: |
+          mkdir -p ci-logs
+          set -o pipefail
+          npm run audit:runtime-deps 2>&1 | tee ci-logs/runtime-dependency-inventory.json
+
+      - name: Inventory Express routes and mounted routers
+        run: |
+          mkdir -p ci-logs
+          set -o pipefail
+          npm run audit:express-routes 2>&1 | tee ci-logs/express-route-ownership.json
+
+      - name: Test separated routing and Platform API client contracts
+        run: |
+          set -o pipefail
+          bun run test:separation 2>&1 | tee ci-logs/separation-contract-tests.log
+
+      - name: Build independent static web image
+        run: |
+          set -o pipefail
+          docker build --progress=plain -f deploy/web/Dockerfile -t avapardaz-web:ci . 2>&1 | tee ci-logs/web-image-build.log
+
+      - name: Build API/local-runtime image without web hosting
+        run: |
+          set -o pipefail
+          docker build --progress=plain -f backend/Dockerfile.api -t avapardaz-api:ci . 2>&1 | tee ci-logs/api-image-build.log
+
+      - name: Preserve diagnostics for review
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: separated-runtime-build-logs
+          path: ci-logs/
+          if-no-files-found: warn
+          retention-days: 7

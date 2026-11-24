@@ -3,7 +3,6 @@ import fs from 'node:fs';
 import crypto from 'node:crypto';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { createServer as createViteServer } from 'vite';
 import {
   ModelLifecycleStatus,
   PlatformLicenseService,
@@ -94,6 +93,10 @@ import {
   resolveServerBindHost,
 } from './src/security/AudioApiSecurityGuard.ts';
 import { createLocalModelArtifactHttpRouter } from './src/lifecycle/LocalModelArtifactHttpRouter.ts';
+import {
+  forwardPlatformApiCompatibilityRequest,
+  normalizeLegacyPlatformLeaseRequestBody,
+} from './src/platform/PlatformApiCompatibilityProxy.ts';
 
 interface SandboxStudioScope {
   readonly tenantId: string;
@@ -155,12 +158,6 @@ const PORT =
 async function startServer() {
   const app = express();
 
-  const licenseService = new PlatformLicenseService({
-    privateKeyPem: process.env.ED25519_PRIVATE_KEY_PEM,
-    publicKeyPem: process.env.ED25519_PUBLIC_KEY_PEM,
-    keyVersion: 1,
-  });
-
   // Fail-closed startup guard: production with ENABLE_INTELLIGENCE_SANDBOX_ROUTES=true throws immediately
   const sandboxPolicy = resolveSandboxRuntimePolicy({
     NODE_ENV: process.env.NODE_ENV,
@@ -191,6 +188,24 @@ async function startServer() {
   const localCompanionService = new LocalCompanionService();
   const shahabZipformerRuntime = new ShahabZipformerAsrRuntime();
   const audioApiSecurityGuard = new AudioApiSecurityGuard();
+
+  // The legacy Express signer belongs to Local compatibility only.
+  // Hosted mode must not require or load the Local Ed25519 private key;
+  // the Fastify Platform API is the sole Hosted signing authority.
+  const localLicenseService =
+    audioApiSecurityGuard.config.mode === 'local'
+      ? new PlatformLicenseService({
+          privateKeyPem: process.env.ED25519_PRIVATE_KEY_PEM,
+          publicKeyPem: process.env.ED25519_PUBLIC_KEY_PEM,
+          keyVersion: 1,
+        })
+      : null;
+  const getLocalLicenseService = (): PlatformLicenseService => {
+    if (!localLicenseService) {
+      throw new Error('LOCAL_LICENSE_SIGNER_UNAVAILABLE_IN_HOSTED_MODE');
+    }
+    return localLicenseService;
+  };
   const unifiedProcessingOrchestrator = new UnifiedProcessingOrchestrator({
     localAdapter: new LocalExecutionAdapter({
       coreRouter: coreAsrRouter,
@@ -212,6 +227,16 @@ async function startServer() {
     res.setHeader('Cross-Origin-Opener-Policy', 'same-origin');
     res.setHeader('Cross-Origin-Embedder-Policy', 'credentialless');
     next();
+  });
+
+  // Process liveness only. Do not report local ASR readiness from this endpoint.
+  app.get('/healthz', (_req, res) => {
+    res.status(200).json({
+      status: 'LIVE',
+      service: 'avapardaz-local-audio-runtime',
+      localOnlyEnforced: true,
+      cloudAsrEnabled: false,
+    });
   });
 
   // Mount binary-streaming public transcription route BEFORE global express.json() so raw audio streams
@@ -360,13 +385,34 @@ async function startServer() {
 
   app.use(express.json({ limit: '16mb' }));
 
-  // Public Ed25519 SPKI key endpoint for offline client verification
-  app.get('/api/v1/crypto/public-key', (_req, res) => {
-    res.json(licenseService.getPublicKeyInfo());
+  // In Hosted mode the Fastify Platform API is the sole key-discovery owner.
+  // Keep the local demo signer only in Local mode for backward compatibility.
+  app.get('/api/v1/crypto/public-key', (req, res) => {
+    if (audioApiSecurityGuard.config.mode !== 'local') {
+      void forwardPlatformApiCompatibilityRequest(req, res, {
+        path: '/api/v1/crypto/public-key',
+        method: 'GET',
+      });
+      return;
+    }
+    res.json(getLocalLicenseService().getPublicKeyInfo());
   });
 
-  // Issue cryptographically signed Ed25519 offline license lease
+  // Local/demo lease endpoint only. Hosted subscription issuance must use the
+  // authenticated PostgreSQL Platform API; never trust a client-supplied plan/userId
+  // on the legacy Express route in Hosted mode.
   app.post('/api/v1/license/lease', (req, res) => {
+    if (audioApiSecurityGuard.config.mode !== 'local') {
+      // Compatibility adapter: Fastify still performs the real Bearer/JWT,
+      // PostgreSQL subscription, device-seat, and Ed25519 checks.
+      req.body = normalizeLegacyPlatformLeaseRequestBody(req.body);
+      void forwardPlatformApiCompatibilityRequest(req, res, {
+        path: '/api/v1/license/lease',
+        method: 'POST',
+      });
+      return;
+    }
+
     const body = req.body as {
       userId?: unknown;
       displayName?: unknown;
@@ -401,7 +447,7 @@ async function startServer() {
         ? body.graceDays
         : 14;
 
-    const envelope = licenseService.issueOfflineLicenseLease({
+    const envelope = getLocalLicenseService().issueOfflineLicenseLease({
       userId: body.userId,
       displayName: typeof body.displayName === 'string' ? body.displayName : undefined,
       deviceFingerprint: body.deviceFingerprint,
@@ -415,6 +461,13 @@ async function startServer() {
   // Signed chunked model registry manifest (supports ACTIVE, SUPPORTED, DEPRECATED, REVOKED)
   app.get('/api/v1/models/:modelId/manifest', (req, res) => {
     const { modelId } = req.params;
+    if (audioApiSecurityGuard.config.mode !== 'local') {
+      void forwardPlatformApiCompatibilityRequest(req, res, {
+        path: `/api/v1/models/${encodeURIComponent(modelId)}/manifest`,
+        method: 'GET',
+      });
+      return;
+    }
     const override = req.query.status as ModelLifecycleStatus | undefined;
     const allowedStatuses: ModelLifecycleStatus[] = [
       'ACTIVE',
@@ -425,7 +478,7 @@ async function startServer() {
     const validOverride =
       override && allowedStatuses.includes(override) ? override : undefined;
 
-    const envelope = licenseService.issueSignedModelManifestEnvelope(modelId, validOverride);
+    const envelope = getLocalLicenseService().issueSignedModelManifestEnvelope(modelId, validOverride);
     if (!envelope) {
       res.status(404).json({ error: 'MODEL_NOT_FOUND', modelId });
       return;
@@ -496,15 +549,36 @@ async function startServer() {
 
   app.get('/api/v1/asr/health', (_req, res) => {
     const activeCheckpoint = GLOBAL_PHASE4_CHECKPOINT_MANAGER.getActiveCheckpoint();
-    res.json({
-      status: 'OK',
+    const neuralRuntime = localCompanionService.neuralEngine.getStatus();
+    const verifiedModelCount = neuralRuntime.installedModels.filter((model) => model.integrityVerified).length;
+    const provisioningBlockers = [
+      ...(neuralRuntime.binaryPath ? [] : ['SHERPA_RUNTIME_BINARY_NOT_INSTALLED']),
+      ...(verifiedModelCount > 0 ? [] : ['VERIFIED_LOCAL_MODEL_NOT_INSTALLED']),
+    ];
+
+    res.status(200).json({
+      // Keep HTTP liveness at 200, but never report the ASR subsystem as healthy
+      // until an executable runtime and at least one integrity-verified local model exist.
+      status: neuralRuntime.available ? 'OK' : 'DEGRADED',
+      apiStatus: 'LIVE',
+      localInferenceProvisioningStatus: neuralRuntime.available ? 'PROVISIONED' : 'NOT_PROVISIONED',
+      localInferenceProvisioned: neuralRuntime.available,
+      localOnlyEnforced: true,
+      cloudGeminiAsrConfigured: false,
+      cloudAsrEnabled: false,
+      neuralRuntime: {
+        runtimeName: neuralRuntime.runtimeName,
+        binaryAvailable: Boolean(neuralRuntime.binaryPath),
+        verifiedModelCount,
+        installedModelCount: neuralRuntime.installedModels.length,
+        cpuThreads: neuralRuntime.cpuThreads,
+        offlineOnlyEnforced: neuralRuntime.offlineOnlyEnforced,
+        provisioningBlockers,
+      },
       hardwareProfile: 'G0_CPU_ONLY',
       activeCheckpointId: activeCheckpoint.checkpointId,
       globalStep: activeCheckpoint.globalStep,
       releaseStatus: 'PHASE_01_LOCAL_FOUNDATION',
-      localOnlyEnforced: true,
-      cloudGeminiAsrConfigured: false,
-      cloudAsrEnabled: false,
     });
   });
 
@@ -1743,15 +1817,23 @@ async function startServer() {
   );
 
   if (!IS_PROD) {
-    const vite = await createViteServer({
+    // The API can run independently of the browser app. In that mode, Vite
+    // owns the web origin and proxies /api and /v1 requests to this server.
+    if (process.env.DISABLE_EMBEDDED_VITE !== 'true') {
+      // Load Vite only for the legacy combined dev server. API-only mode must
+      // not resolve or initialize any frontend development-server dependency.
+      const { createServer: createViteServer } = await import('vite');
+      const vite = await createViteServer({
       server: {
         middlewareMode: true,
         hmr: process.env.DISABLE_HMR !== 'true',
       },
       appType: 'spa',
     });
-    app.use(vite.middlewares);
-  } else {
+      app.use(vite.middlewares);
+    }
+  } else if (process.env.DISABLE_WEB_HOST !== 'true') {
+    // Production API-only deployments leave static asset hosting to the web tier.
     const distDir = path.resolve(__dirname, 'dist');
     app.use(
       express.static(distDir, {
@@ -1784,9 +1866,12 @@ async function startServer() {
   }
 
   const bindHost = resolveServerBindHost(process.env, audioApiSecurityGuard.config);
+  const webServingEnabled = IS_PROD
+    ? process.env.DISABLE_WEB_HOST !== 'true'
+    : process.env.DISABLE_EMBEDDED_VITE !== 'true';
   app.listen(PORT, bindHost, () => {
     console.log(
-      `Avapardaz Express+Vite server listening on http://${bindHost}:${PORT} (mode=${audioApiSecurityGuard.config.mode})`,
+      `Avapardaz Express API listening on http://${bindHost}:${PORT} (mode=${audioApiSecurityGuard.config.mode}, webServing=${webServingEnabled})`,
     );
   });
 }

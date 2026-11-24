@@ -1,0 +1,40 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "lib": [
+      "ES2022",
+      "DOM"
+    ],
+    "types": [
+      "node"
+    ],
+    "skipLibCheck": true,
+    "isolatedModules": true,
+    "moduleDetection": "force",
+    "experimentalDecorators": true,
+    "useDefineForClassFields": false,
+    "allowImportingTsExtensions": true,
+    "noEmit": true,
+    "esModuleInterop": true,
+    "allowSyntheticDefaultImports": true
+  },
+  "include": [
+    "src/main.ts",
+    "src/server.ts",
+    "src/PlatformBackendServices.ts",
+    "src/BackendAuthAndPaymentService.ts",
+    "src/BackendLicenseAndModelRevocationService.ts",
+    "src/license/DeviceSeatEnforcementService.ts",
+    "src/db/PinnedPostgresTransaction.ts",
+    "src/BackendAuthAndPaymentService.test.ts",
+    "src/BackendLicenseAndModelRevocationService.test.ts",
+    "src/server.test.ts",
+    "src/PlatformBackendServices.smoke.test.ts"
+  ],
+  "exclude": [
+    "node_modules",
+    "dist"
+  ]
+}
