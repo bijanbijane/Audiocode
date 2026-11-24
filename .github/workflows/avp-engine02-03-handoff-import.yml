@@ -255,6 +255,7 @@ jobs:
           E03: ${{ steps.checks.outputs.engine03_exit_code }}
           TSC: ${{ steps.checks.outputs.typecheck_exit_code }}
           BUILD: ${{ steps.checks.outputs.build_exit_code }}
+          EXPECTED_SHA256: ${{ inputs.bundle_sha256 }}
         run: |
           set -euo pipefail
           BODY="$(cat <<EOF
@@ -262,7 +263,7 @@ jobs:
           Imports the pinned AVP Engine 02 + Engine 03 handoff archive into an isolated branch.
 
           - Source scope: exactly 20 allowlisted files.
-          - Archive SHA-256: ${{ inputs.bundle_sha256 }}
+          - Archive SHA-256: ${EXPECTED_SHA256}
           - Engine 02 test exit code: ${E02}
           - Engine 03 test exit code: ${E03}
           - TypeScript exit code: ${TSC}
