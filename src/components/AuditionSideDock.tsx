@@ -14,6 +14,7 @@ import {
   Volume2,
   VolumeX,
 } from 'lucide-react';
+import { getNextRovingTabIndex } from '../studio/layoutUtils';
 
 export interface AuditionChapterMarker {
   id: string;
@@ -85,7 +86,7 @@ export const AuditionSideDock: React.FC<AuditionSideDockProps> = ({
       <aside
         data-testid="audition-side-dock"
         aria-label={isFa ? 'نوار کناری جمع‌شده' : 'Collapsed studio rail'}
-        className="avp-pane-shell h-full flex flex-col items-center py-2 gap-1.5"
+        className="avp-pane-shell w-full lg:h-full flex flex-row lg:flex-col items-center justify-around lg:justify-start px-2 py-1 lg:px-0 lg:py-2 gap-1.5"
       >
         {onToggleCollapse && (
           <button
@@ -94,7 +95,7 @@ export const AuditionSideDock: React.FC<AuditionSideDockProps> = ({
             onClick={onToggleCollapse}
             title={isFa ? 'باز کردن پنل فایل‌ها و افکت‌ها' : 'Expand Files & Effects rail'}
             aria-label={isFa ? 'باز کردن پنل' : 'Expand rail'}
-            className="avp-btn-icon avp-btn-icon-sm mb-1"
+            className="hidden lg:inline-flex avp-btn-icon avp-btn-icon-sm avp-touch-icon mb-1"
           >
             <PanelLeftOpen className="w-4 h-4" strokeWidth={1.75} aria-hidden="true" />
           </button>
@@ -109,7 +110,7 @@ export const AuditionSideDock: React.FC<AuditionSideDockProps> = ({
           }}
           title={isFa ? 'فایل‌ها و ترک‌ها' : 'Files & Tracks'}
           aria-label={isFa ? 'فایل‌ها' : 'Files'}
-          className={`avp-btn-icon ${dockTab === 'files' ? 'avp-btn-tonal' : ''}`}
+          className={`avp-btn-icon avp-touch-icon ${dockTab === 'files' ? 'avp-btn-tonal' : ''}`}
         >
           <FileAudio className="w-4 h-4" strokeWidth={1.75} aria-hidden="true" />
         </button>
@@ -123,7 +124,7 @@ export const AuditionSideDock: React.FC<AuditionSideDockProps> = ({
           }}
           title={isFa ? 'افکت‌ها و پردازش صوت' : 'Effects & DSP'}
           aria-label={isFa ? 'افکت‌ها' : 'Effects'}
-          className={`avp-btn-icon ${dockTab === 'effects' ? 'avp-btn-tonal' : ''}`}
+          className={`avp-btn-icon avp-touch-icon ${dockTab === 'effects' ? 'avp-btn-tonal' : ''}`}
         >
           <Sliders className="w-4 h-4" strokeWidth={1.75} aria-hidden="true" />
         </button>
@@ -137,7 +138,7 @@ export const AuditionSideDock: React.FC<AuditionSideDockProps> = ({
           }}
           title={isFa ? 'نشانگرها و تاریخچه' : 'Markers & History'}
           aria-label={isFa ? 'نشانگرها' : 'Markers'}
-          className={`avp-btn-icon ${dockTab === 'history' ? 'avp-btn-tonal' : ''}`}
+          className={`avp-btn-icon avp-touch-icon ${dockTab === 'history' ? 'avp-btn-tonal' : ''}`}
         >
           <History className="w-4 h-4" strokeWidth={1.75} aria-hidden="true" />
         </button>
@@ -151,14 +152,30 @@ export const AuditionSideDock: React.FC<AuditionSideDockProps> = ({
       aria-label={isFa ? 'فایل‌ها، ترک‌ها، افکت‌ها و نشانگرها' : 'Files, Tracks, Effects & Markers'}
       className="avp-pane-shell flex flex-col h-full min-h-0"
     >
-      {/* Slim Native Tab Strip (36px — Unified Inset Segmented Capsule aligned with 36px Horizon Line) */}
-      <div className="h-[36px] px-1.5 xl:px-2 border-b border-[var(--avp-border)] flex items-center justify-between gap-1 xl:gap-1.5 shrink-0">
-        <div className="flex items-center gap-0.5 flex-1 min-w-0 p-0.5 rounded-lg border border-[var(--avp-border)] bg-[var(--avp-surface-secondary)]/85">
+      {/* Slim Native Tab Strip */}
+      <div className="min-h-[44px] sm:min-h-[36px] sm:h-[36px] px-1.5 xl:px-2 border-b border-[var(--avp-border)] flex items-center justify-between gap-1 xl:gap-1.5 shrink-0">
+        <div
+          role="tablist"
+          aria-label={isFa ? 'تب‌های پنل کناری' : 'Side dock sections'}
+          onKeyDown={(e) => {
+            const tabs: AuditionDockTabId[] = ['files', 'effects', 'history'];
+            const idx = tabs.indexOf(dockTab);
+            const nextIdx = getNextRovingTabIndex(idx, tabs.length, e.key, isFa, 'horizontal');
+            if (nextIdx !== null) {
+              e.preventDefault();
+              setDockTab(tabs[nextIdx]);
+            }
+          }}
+          className="flex items-center gap-0.5 flex-1 min-w-0 p-0.5 rounded-lg border border-[var(--avp-border)] bg-[var(--avp-surface-secondary)]/85"
+        >
           <button
             type="button"
+            role="tab"
+            aria-selected={dockTab === 'files'}
+            tabIndex={dockTab === 'files' ? 0 : -1}
             data-testid="audition-dock-tab-files"
             onClick={() => setDockTab('files')}
-            className={`flex-1 h-[22px] px-1 xl:px-1.5 rounded-[5px] inline-flex items-center justify-center gap-0.5 xl:gap-1 text-[10px] xl:text-[10.5px] font-medium whitespace-nowrap transition-colors cursor-pointer ${
+            className={`flex-1 min-h-[40px] sm:min-h-[26px] sm:h-[26px] px-1 xl:px-1.5 rounded-[5px] inline-flex items-center justify-center gap-0.5 xl:gap-1 text-[11px] font-medium whitespace-nowrap transition-colors cursor-pointer ${
               dockTab === 'files'
                 ? 'bg-[var(--avp-surface)] text-[var(--avp-accent-text)] font-semibold shadow-2xs'
                 : 'text-[var(--avp-text-secondary)] hover:text-[var(--avp-text)]'
@@ -170,9 +187,12 @@ export const AuditionSideDock: React.FC<AuditionSideDockProps> = ({
 
           <button
             type="button"
+            role="tab"
+            aria-selected={dockTab === 'effects'}
+            tabIndex={dockTab === 'effects' ? 0 : -1}
             data-testid="audition-dock-tab-effects"
             onClick={() => setDockTab('effects')}
-            className={`flex-1 h-[22px] px-1 xl:px-1.5 rounded-[5px] inline-flex items-center justify-center gap-0.5 xl:gap-1 text-[10px] xl:text-[10.5px] font-medium whitespace-nowrap transition-colors cursor-pointer ${
+            className={`flex-1 min-h-[40px] sm:min-h-[26px] sm:h-[26px] px-1 xl:px-1.5 rounded-[5px] inline-flex items-center justify-center gap-0.5 xl:gap-1 text-[11px] font-medium whitespace-nowrap transition-colors cursor-pointer ${
               dockTab === 'effects'
                 ? 'bg-[var(--avp-surface)] text-[var(--avp-accent-text)] font-semibold shadow-2xs'
                 : 'text-[var(--avp-text-secondary)] hover:text-[var(--avp-text)]'
@@ -184,9 +204,12 @@ export const AuditionSideDock: React.FC<AuditionSideDockProps> = ({
 
           <button
             type="button"
+            role="tab"
+            aria-selected={dockTab === 'history'}
+            tabIndex={dockTab === 'history' ? 0 : -1}
             data-testid="audition-dock-tab-history"
             onClick={() => setDockTab('history')}
-            className={`flex-1 h-[22px] px-1 xl:px-1.5 rounded-[5px] inline-flex items-center justify-center gap-0.5 xl:gap-1 text-[10px] xl:text-[10.5px] font-medium whitespace-nowrap transition-colors cursor-pointer ${
+            className={`flex-1 min-h-[40px] sm:min-h-[26px] sm:h-[26px] px-1 xl:px-1.5 rounded-[5px] inline-flex items-center justify-center gap-0.5 xl:gap-1 text-[11px] font-medium whitespace-nowrap transition-colors cursor-pointer ${
               dockTab === 'history'
                 ? 'bg-[var(--avp-surface)] text-[var(--avp-accent-text)] font-semibold shadow-2xs'
                 : 'text-[var(--avp-text-secondary)] hover:text-[var(--avp-text)]'
@@ -204,7 +227,7 @@ export const AuditionSideDock: React.FC<AuditionSideDockProps> = ({
             onClick={onToggleCollapse}
             title={isFa ? 'جمع‌کردن پنل برای فضای بیشتر' : 'Collapse side rail'}
             aria-label={isFa ? 'جمع‌کردن پنل' : 'Collapse rail'}
-            className="hidden lg:inline-flex items-center justify-center w-[24px] h-[24px] rounded-md border border-[var(--avp-border)] bg-[var(--avp-surface)] text-[var(--avp-text-secondary)] hover:text-[var(--avp-text)] hover:bg-[var(--avp-surface-hover)] shrink-0 cursor-pointer transition-colors"
+            className="hidden lg:inline-flex items-center justify-center w-[26px] h-[26px] rounded-md border border-[var(--avp-border)] bg-[var(--avp-surface)] text-[var(--avp-text-secondary)] hover:text-[var(--avp-text)] hover:bg-[var(--avp-surface-hover)] shrink-0 cursor-pointer transition-colors"
           >
             <PanelLeftClose className="w-3.5 h-3.5" strokeWidth={1.75} aria-hidden="true" />
           </button>
@@ -215,13 +238,13 @@ export const AuditionSideDock: React.FC<AuditionSideDockProps> = ({
       <div className="p-2.5 space-y-2.5 overflow-y-auto flex-1 min-h-0">
         {dockTab === 'files' && (
           <div className="space-y-2">
-            <div className="px-1 flex items-center justify-between text-[10.5px] text-[var(--avp-text-muted)]">
+            <div className="px-1 flex items-center justify-between text-[11px] text-[var(--avp-text-muted)]">
               <span className="font-semibold text-[var(--avp-text-secondary)]">
                 {isFa ? 'منابع صوتی پروژه' : 'Project Audio Assets'}
               </span>
               <bdi
                 dir="ltr"
-                className="avp-bidi-num text-[9.5px] px-1.5 py-0.5 rounded bg-[var(--avp-surface-secondary)] border border-[var(--avp-border-subtle)] text-[var(--avp-text-secondary)]"
+                className="avp-bidi-num text-[11px] px-1.5 py-0.5 rounded bg-[var(--avp-surface-secondary)] border border-[var(--avp-border-subtle)] text-[var(--avp-text-secondary)]"
               >
                 {formatNumberForLocale(Number((sampleRate / 1000).toFixed(1)), { persianDigits })}kHz · PCM
               </bdi>
@@ -275,7 +298,7 @@ export const AuditionSideDock: React.FC<AuditionSideDockProps> = ({
                         <span className="text-xs font-bold text-[var(--avp-text)] truncate">
                           {track.speakerLabel || track.name}
                         </span>
-                        <span className="text-[10px] text-[var(--avp-text-muted)] shrink-0">
+                        <span className="text-[11px] text-[var(--avp-text-muted)] shrink-0">
                           · {roleLabel}
                         </span>
                       </div>
@@ -283,7 +306,7 @@ export const AuditionSideDock: React.FC<AuditionSideDockProps> = ({
                       {endSec > startSec && (
                         <bdi
                           dir="ltr"
-                          className="avp-bidi-num text-[10px] font-medium px-1.5 py-0.5 rounded bg-[var(--avp-surface-secondary)] text-[var(--avp-text-secondary)] shrink-0"
+                          className="avp-bidi-num text-[11px] font-medium px-1.5 py-0.5 rounded bg-[var(--avp-surface-secondary)] text-[var(--avp-text-secondary)] shrink-0"
                         >
                           {formatNumberForLocale(endSec - startSec, { persianDigits, maximumFractionDigits: 1 })}s
                         </bdi>
@@ -291,14 +314,14 @@ export const AuditionSideDock: React.FC<AuditionSideDockProps> = ({
                     </div>
 
                     {/* Bottom Row: Technical Filename (LTR) | Clip Count */}
-                    <div className="flex items-center justify-between gap-1.5 text-[10.5px] text-[var(--avp-text-muted)]">
+                    <div className="flex items-center justify-between gap-1.5 text-[11px] text-[var(--avp-text-muted)]">
                       <bdi
                         dir="ltr"
-                        className="avp-bidi-num text-[10.5px] text-[var(--avp-text-secondary)] truncate group-hover:text-[var(--avp-accent-text)]"
+                        className="avp-bidi-num text-[11px] text-[var(--avp-text-secondary)] truncate group-hover:text-[var(--avp-accent-text)]"
                       >
                         {asset ? asset.name : `Track_${idx + 1}.wav`}
                       </bdi>
-                      <span className="text-[10px] shrink-0">
+                      <span className="text-[11px] shrink-0">
                         {formatNumberForLocale(speechClipsCount, { persianDigits })} {isFa ? 'کلیپ' : 'clip'}
                       </span>
                     </div>
@@ -368,11 +391,12 @@ export const AuditionSideDock: React.FC<AuditionSideDockProps> = ({
                           <input
                             type="text"
                             autoFocus
+                            aria-label={isFa ? 'نام جدید نشانگر' : 'New marker label'}
                             value={editingMarkerLabel}
                             onChange={(e) => setEditingMarkerLabel(e.target.value)}
-                            className="avp-input h-[26px] flex-1 min-w-0 text-xs"
+                            className="avp-input min-h-[44px] sm:min-h-[26px] sm:h-[26px] flex-1 min-w-0 text-xs"
                           />
-                          <button type="submit" className="avp-btn avp-btn-sm avp-btn-tonal">
+                          <button type="submit" className="avp-btn avp-btn-sm avp-btn-tonal min-h-[44px] sm:min-h-[26px]">
                             {isFa ? 'ثبت' : 'Save'}
                           </button>
                         </form>
@@ -381,12 +405,12 @@ export const AuditionSideDock: React.FC<AuditionSideDockProps> = ({
                           <button
                             type="button"
                             onClick={() => onSeekSec(m.startSec)}
-                            className="flex-1 min-w-0 flex items-center justify-between gap-2 text-start text-[var(--avp-text)] hover:text-[var(--avp-accent-text)] cursor-pointer"
+                            className="flex-1 min-w-0 min-h-[44px] sm:min-h-[28px] flex items-center justify-between gap-2 text-start text-[var(--avp-text)] hover:text-[var(--avp-accent-text)] cursor-pointer"
                           >
                             <span className="truncate font-medium">{m.label}</span>
                             <bdi
                               dir="ltr"
-                              className="avp-bidi-num text-[10.5px] text-[var(--avp-text-muted)] shrink-0"
+                              className="avp-bidi-num text-[11px] text-[var(--avp-text-muted)] shrink-0"
                             >
                               {formatStudioTimecode(m.startSec, timecodeFormat, persianDigits)}
                             </bdi>
@@ -400,7 +424,7 @@ export const AuditionSideDock: React.FC<AuditionSideDockProps> = ({
                                   setEditingMarkerLabel(m.label);
                                 }}
                                 aria-label={isFa ? `تغییر نام ${m.label}` : `Rename ${m.label}`}
-                                className="avp-btn-icon avp-btn-icon-sm"
+                                className="avp-btn-icon avp-btn-icon-sm avp-touch-icon"
                               >
                                 <Edit3 className="w-3 h-3" strokeWidth={1.75} />
                               </button>
@@ -410,7 +434,7 @@ export const AuditionSideDock: React.FC<AuditionSideDockProps> = ({
                                 type="button"
                                 onClick={() => onDeleteMarker(m.id)}
                                 aria-label={isFa ? `حذف ${m.label}` : `Delete ${m.label}`}
-                                className="avp-btn-icon avp-btn-icon-sm avp-btn-danger-ghost"
+                                className="avp-btn-icon avp-btn-icon-sm avp-btn-danger-ghost avp-touch-icon"
                               >
                                 <Trash2 className="w-3 h-3" strokeWidth={1.75} />
                               </button>
@@ -444,7 +468,7 @@ export const AuditionSideDock: React.FC<AuditionSideDockProps> = ({
                         className="py-1.5 px-1.5 text-[11px] text-[var(--avp-text-secondary)] flex items-center justify-between gap-2"
                       >
                         <span className="truncate">{tx.description}</span>
-                        <span className="font-mono text-[10px] text-[var(--avp-text-faint)] shrink-0">
+                        <span className="font-mono text-[11px] text-[var(--avp-text-faint)] shrink-0">
                           {tx.type}
                         </span>
                       </li>

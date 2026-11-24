@@ -114,19 +114,19 @@ export const MobileCompanionWorkspace: React.FC<MobileCompanionProps> = ({
     return (
       <div
         dir="rtl"
-        className="min-h-screen bg-slate-950 text-slate-100 p-5 flex flex-col justify-center items-center text-center"
+        className="min-h-screen bg-[var(--avp-bg)] text-[var(--avp-text)] p-5 flex flex-col justify-center items-center text-center"
       >
-        <div className="w-16 h-16 rounded-full bg-emerald-900/40 border border-emerald-600 flex items-center justify-center mb-4">
-          <Check className="w-7 h-7 text-emerald-400" aria-hidden="true" />
+        <div className="w-16 h-16 rounded-full bg-[var(--avp-success-soft)] border border-[var(--avp-success)]/50 flex items-center justify-center mb-4">
+          <Check className="w-7 h-7 text-[var(--avp-success-text)]" aria-hidden="true" />
         </div>
-        <h2 className="text-lg font-bold mb-2">تمام پیشنهادهای هوشمند بررسی شدند</h2>
-        <p className="text-xs text-slate-400 mb-6">
+        <h1 className="text-lg font-bold mb-2">تمام پیشنهادهای هوشمند بررسی شدند</h1>
+        <p className="text-xs text-[var(--avp-text-secondary)] mb-6">
           پروژه «{projectName}» آماده خروجی گرفتن یا ادامه میکس پیشرفته در نسخه دسکتاپ است.
         </p>
         <button
           type="button"
           onClick={onUndo}
-          className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs cursor-pointer"
+          className="avp-btn avp-btn-outline min-h-[44px] px-4 text-xs"
         >
           <Undo2 className="w-3.5 h-3.5" aria-hidden="true" />
           <span>بازگشت به آخرین تصمیم (Undo)</span>
@@ -159,23 +159,23 @@ export const MobileCompanionWorkspace: React.FC<MobileCompanionProps> = ({
           }
         }
       }}
-      className="min-h-screen bg-slate-950 text-slate-100 flex flex-col justify-between p-4 select-none"
+      className="min-h-screen bg-[var(--avp-bg)] text-[var(--avp-text)] flex flex-col justify-between p-4 select-none"
     >
       {/* Resource Budget & Review Progress Header */}
-      <header className="flex flex-col gap-2 bg-slate-900 border border-slate-800 rounded-xl p-3">
+      <header className="flex flex-col gap-2 bg-[var(--avp-surface)] border border-[var(--avp-border)] rounded-xl p-3">
         <div className="flex items-center justify-between gap-2">
-          <span className="font-bold text-sm truncate">{projectName} (حالت همراه موبایل)</span>
+          <h1 className="font-bold text-sm truncate">{projectName} (حالت همراه موبایل)</h1>
           <div className="flex items-center gap-1 shrink-0">
             <button
               type="button"
               aria-label="پیشنهاد قبلی"
               disabled={safeIndex === 0}
               onClick={() => setCurrentIndex((i) => Math.max(0, i - 1))}
-              className="p-1 rounded bg-slate-800 text-slate-300 disabled:opacity-35 cursor-pointer disabled:cursor-not-allowed"
+              className="avp-touch-icon rounded bg-[var(--avp-bg-subtle)] border border-[var(--avp-border)] text-[var(--avp-text)] disabled:opacity-35 cursor-pointer disabled:cursor-not-allowed"
             >
-              <ChevronRight className="w-3.5 h-3.5" aria-hidden="true" />
+              <ChevronRight className="w-4 h-4" aria-hidden="true" />
             </button>
-            <span className="text-xs bg-slate-800 px-2 py-0.5 rounded text-sky-300 font-mono">
+            <span className="text-xs bg-[var(--avp-bg-subtle)] border border-[var(--avp-border)] px-2.5 py-1 rounded text-[var(--avp-accent-text)] font-mono">
               {safeIndex + 1} / {pendingRecommendations.length}
             </span>
             <button
@@ -185,22 +185,22 @@ export const MobileCompanionWorkspace: React.FC<MobileCompanionProps> = ({
               onClick={() =>
                 setCurrentIndex((i) => Math.min(pendingRecommendations.length - 1, i + 1))
               }
-              className="p-1 rounded bg-slate-800 text-slate-300 disabled:opacity-35 cursor-pointer disabled:cursor-not-allowed"
+              className="avp-touch-icon rounded bg-[var(--avp-bg-subtle)] border border-[var(--avp-border)] text-[var(--avp-text)] disabled:opacity-35 cursor-pointer disabled:cursor-not-allowed"
             >
-              <ChevronLeft className="w-3.5 h-3.5" aria-hidden="true" />
+              <ChevronLeft className="w-4 h-4" aria-hidden="true" />
             </button>
           </div>
         </div>
 
-        <div className="flex items-center justify-between text-[11px] text-slate-400">
-          <span className={memoryCritical ? 'text-rose-400 font-medium' : ''}>
+        <div className="flex items-center justify-between text-[11px] text-[var(--avp-text-secondary)]">
+          <span className={memoryCritical ? 'text-[var(--avp-danger-text)] font-medium' : ''}>
             بودجه حافظه:{' '}
             <span dir="ltr" className="inline-block font-mono">
               {estimatedMemoryUsageMb}MB / {maxSafeMemoryMb}MB ({memoryPercent}%)
             </span>
           </span>
           {batteryPowerSaver && (
-            <span className="inline-flex items-center gap-1 text-amber-400 font-medium">
+            <span className="inline-flex items-center gap-1 text-[var(--avp-warning-text)] font-medium">
               <BatteryWarning className="w-3.5 h-3.5" aria-hidden="true" />
               <span>ذخیره باتری فعال</span>
             </span>
@@ -209,23 +209,23 @@ export const MobileCompanionWorkspace: React.FC<MobileCompanionProps> = ({
       </header>
 
       {/* Center Review Card & A/B Audition Controls */}
-      <main className="my-4 bg-slate-900 border border-slate-800 rounded-2xl p-4 flex flex-col gap-4 shadow-lg">
+      <main className="my-4 bg-[var(--avp-surface)] border border-[var(--avp-border)] rounded-2xl p-4 flex flex-col gap-4 shadow-lg">
         <div className="flex items-center justify-between text-xs">
-          <span dir="ltr" className="px-2.5 py-1 rounded-md bg-rose-950 text-rose-300 border border-rose-800 font-mono font-semibold">
+          <span dir="ltr" className="px-2.5 py-1 rounded-md bg-[var(--avp-danger-soft)] text-[var(--avp-danger-text)] border border-[var(--avp-danger)]/40 font-mono font-semibold">
             {currentRec.disfluencyType}
           </span>
-          <span className="text-slate-400">
+          <span className="text-[var(--avp-text-secondary)]">
             <span dir="ltr" className="inline-block font-mono">
               {startSec}s - {endSec}s ({cutDurationMs} ms)
             </span>
           </span>
         </div>
 
-        <div className="bg-slate-950 border border-slate-800/80 rounded-xl p-4 text-center">
-          <p className="text-base font-medium text-slate-100 leading-8">
+        <div className="bg-[var(--avp-bg-subtle)] border border-[var(--avp-border)] rounded-xl p-4 text-center">
+          <p className="text-base font-medium text-[var(--avp-text)] leading-8">
             «{currentRec.associatedText}»
           </p>
-          <p className="text-xs text-slate-400 mt-1">
+          <p className="text-xs text-[var(--avp-text-secondary)] mt-1">
             اطمینان تشخیص:{' '}
             <span dir="ltr" className="inline-block font-mono">
               {Math.round(currentRec.spliceDescriptor.confidence * 100)}%
@@ -241,10 +241,10 @@ export const MobileCompanionWorkspace: React.FC<MobileCompanionProps> = ({
               setActiveAuditionMode('AFTER_SPLICED');
               onAuditionPreview(currentRec.id, 'AFTER_SPLICED');
             }}
-            className={`inline-flex items-center justify-center gap-1.5 py-2.5 px-3 rounded-xl text-xs font-semibold border transition cursor-pointer ${
+            className={`inline-flex items-center justify-center gap-1.5 min-h-[44px] px-3 rounded-xl text-xs font-semibold border transition cursor-pointer ${
               activeAuditionMode === 'AFTER_SPLICED'
-                ? 'bg-sky-600 border-sky-400 text-white'
-                : 'bg-slate-950 border-slate-800 text-slate-300'
+                ? 'bg-[var(--avp-brand)] border-[var(--avp-brand)] text-[var(--avp-on-brand)]'
+                : 'bg-[var(--avp-bg-subtle)] border-[var(--avp-border)] text-[var(--avp-text-secondary)]'
             }`}
           >
             <Volume2 className="w-3.5 h-3.5" aria-hidden="true" />
@@ -256,10 +256,10 @@ export const MobileCompanionWorkspace: React.FC<MobileCompanionProps> = ({
               setActiveAuditionMode('BEFORE_ORIGINAL');
               onAuditionPreview(currentRec.id, 'BEFORE_ORIGINAL');
             }}
-            className={`inline-flex items-center justify-center gap-1.5 py-2.5 px-3 rounded-xl text-xs font-semibold border transition cursor-pointer ${
+            className={`inline-flex items-center justify-center gap-1.5 min-h-[44px] px-3 rounded-xl text-xs font-semibold border transition cursor-pointer ${
               activeAuditionMode === 'BEFORE_ORIGINAL'
-                ? 'bg-amber-600 border-amber-400 text-white'
-                : 'bg-slate-950 border-slate-800 text-slate-300'
+                ? 'bg-[var(--avp-warning)] border-[var(--avp-warning)] text-[var(--avp-on-brand)]'
+                : 'bg-[var(--avp-bg-subtle)] border-[var(--avp-border)] text-[var(--avp-text-secondary)]'
             }`}
           >
             <Headphones className="w-3.5 h-3.5" aria-hidden="true" />
@@ -268,46 +268,50 @@ export const MobileCompanionWorkspace: React.FC<MobileCompanionProps> = ({
         </div>
 
         {/* Fine-Grained ±10ms Boundary Nudging */}
-        <div className="bg-slate-950 rounded-xl p-3 border border-slate-800/70 flex flex-col gap-2">
-          <span className="text-[11px] text-slate-400 text-center">
+        <div className="bg-[var(--avp-bg-subtle)] rounded-xl p-3 border border-[var(--avp-border)] flex flex-col gap-2">
+          <span className="text-[11px] text-[var(--avp-text-secondary)] text-center">
             اصلاح دستی مرز برش (با حفظ خودکار Zero-Crossing)
           </span>
           <div className="grid grid-cols-2 gap-3 text-xs">
-            <div className="flex items-center justify-between bg-slate-900 rounded-lg p-1.5">
+            <div className="flex items-center justify-between bg-[var(--avp-surface)] rounded-lg p-1.5 border border-[var(--avp-border-subtle)]">
               <button
                 type="button"
                 dir="ltr"
+                aria-label="کاهش شروع برش ۱۰ میلی‌ثانیه"
                 onClick={() => onNudgeCutBoundary(currentRec.id, 'START', -10)}
-                className="px-2 py-1 bg-slate-800 hover:bg-slate-700 rounded font-mono cursor-pointer"
+                className="min-h-[44px] min-w-[44px] px-2 py-1 bg-[var(--avp-bg-subtle)] border border-[var(--avp-border)] rounded font-mono cursor-pointer text-[var(--avp-text)]"
               >
                 -10ms
               </button>
-              <span className="text-[11px] text-slate-300">شروع</span>
+              <span className="text-[11px] text-[var(--avp-text-secondary)]">شروع</span>
               <button
                 type="button"
                 dir="ltr"
+                aria-label="افزایش شروع برش ۱۰ میلی‌ثانیه"
                 onClick={() => onNudgeCutBoundary(currentRec.id, 'START', 10)}
-                className="px-2 py-1 bg-slate-800 hover:bg-slate-700 rounded font-mono cursor-pointer"
+                className="min-h-[44px] min-w-[44px] px-2 py-1 bg-[var(--avp-bg-subtle)] border border-[var(--avp-border)] rounded font-mono cursor-pointer text-[var(--avp-text)]"
               >
                 +10ms
               </button>
             </div>
 
-            <div className="flex items-center justify-between bg-slate-900 rounded-lg p-1.5">
+            <div className="flex items-center justify-between bg-[var(--avp-surface)] rounded-lg p-1.5 border border-[var(--avp-border-subtle)]">
               <button
                 type="button"
                 dir="ltr"
+                aria-label="کاهش پایان برش ۱۰ میلی‌ثانیه"
                 onClick={() => onNudgeCutBoundary(currentRec.id, 'END', -10)}
-                className="px-2 py-1 bg-slate-800 hover:bg-slate-700 rounded font-mono cursor-pointer"
+                className="min-h-[44px] min-w-[44px] px-2 py-1 bg-[var(--avp-bg-subtle)] border border-[var(--avp-border)] rounded font-mono cursor-pointer text-[var(--avp-text)]"
               >
                 -10ms
               </button>
-              <span className="text-[11px] text-slate-300">پایان</span>
+              <span className="text-[11px] text-[var(--avp-text-secondary)]">پایان</span>
               <button
                 type="button"
                 dir="ltr"
+                aria-label="افزایش پایان برش ۱۰ میلی‌ثانیه"
                 onClick={() => onNudgeCutBoundary(currentRec.id, 'END', 10)}
-                className="px-2 py-1 bg-slate-800 hover:bg-slate-700 rounded font-mono cursor-pointer"
+                className="min-h-[44px] min-w-[44px] px-2 py-1 bg-[var(--avp-bg-subtle)] border border-[var(--avp-border)] rounded font-mono cursor-pointer text-[var(--avp-text)]"
               >
                 +10ms
               </button>
@@ -321,7 +325,7 @@ export const MobileCompanionWorkspace: React.FC<MobileCompanionProps> = ({
         <button
           type="button"
           onClick={() => onReject(currentRec.id)}
-          className="inline-flex items-center justify-center gap-1.5 py-3.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold text-sm cursor-pointer"
+          className="avp-btn avp-btn-outline min-h-[48px] rounded-xl font-semibold text-sm"
         >
           <X className="w-4 h-4" aria-hidden="true" />
           <span>رد پیشنهاد</span>
@@ -329,7 +333,7 @@ export const MobileCompanionWorkspace: React.FC<MobileCompanionProps> = ({
         <button
           type="button"
           onClick={onUndo}
-          className="inline-flex items-center justify-center gap-1.5 py-3.5 rounded-xl bg-slate-900 border border-slate-800 hover:bg-slate-800 text-slate-300 text-xs font-medium cursor-pointer"
+          className="avp-btn avp-btn-tonal min-h-[48px] rounded-xl text-xs font-medium"
         >
           <Undo2 className="w-3.5 h-3.5" aria-hidden="true" />
           <span>واگرد</span>
@@ -337,7 +341,7 @@ export const MobileCompanionWorkspace: React.FC<MobileCompanionProps> = ({
         <button
           type="button"
           onClick={() => onAccept(currentRec.id)}
-          className="inline-flex items-center justify-center gap-1.5 py-3.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-sm shadow-md cursor-pointer"
+          className="avp-btn min-h-[48px] rounded-xl bg-[var(--avp-success)] text-[var(--avp-on-brand)] font-bold text-sm shadow-md"
         >
           <Check className="w-4 h-4" aria-hidden="true" />
           <span>تأیید و برش</span>

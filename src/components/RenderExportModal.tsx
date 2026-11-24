@@ -30,6 +30,7 @@ import {
 import { ExportDefaultFormat } from '../settings/settingsStore';
 import { AuditionChapterMarker } from './AuditionSideDock';
 import { AccessibleModal } from './AccessibleModal';
+import { ExportProgressIndicator } from './ExportProgressIndicator';
 import {
   formatNumberForLocale,
   mapExportDefaultFormatToRenderConfig,
@@ -421,12 +422,13 @@ export const RenderExportModal: React.FC<RenderExportModalProps> = ({
   const activeWordsCount = tokens.length;
   const approvedCutsCount =
     workflowState.edlSnapshot?.proposals.filter((p) => p.status === 'APPROVED').length ?? 0;
-  const progressPct = Math.round(progress?.progressPercent ?? (isCompleted ? 100 : 0));
 
   return (
     <AccessibleModal
       isOpen={isOpen}
       onClose={onClose}
+      closeOnBackdropClick={!isRunning}
+      disableEscape={isRunning}
       dir={isFa ? 'rtl' : 'ltr'}
       labelledBy="render-export-modal-title"
       dataTestId="render-export-modal"
@@ -453,7 +455,7 @@ export const RenderExportModal: React.FC<RenderExportModalProps> = ({
           type="button"
           onClick={onClose}
           aria-label={isFa ? 'بستن پنجره خروجی' : 'Close export dialog'}
-          className="w-8 h-8 rounded-lg text-[var(--avp-text-secondary)] hover:text-[var(--avp-text)] hover:bg-[var(--avp-hover)] inline-flex items-center justify-center transition-colors cursor-pointer"
+          className="avp-touch-icon rounded-lg text-[var(--avp-text-secondary)] hover:text-[var(--avp-text)] hover:bg-[var(--avp-hover)] inline-flex items-center justify-center transition-colors cursor-pointer"
         >
           <X className="w-4 h-4" />
         </button>
@@ -472,8 +474,8 @@ export const RenderExportModal: React.FC<RenderExportModalProps> = ({
               <Volume2 className="w-4 h-4 text-[var(--avp-brand)]" />
               <span>{isFa ? 'پایپ‌لاین رندر و مسترینگ فایل صوتی' : 'Audio Render & Mastering Pipeline'}</span>
             </span>
-            <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-[var(--avp-brand-soft)] text-[var(--avp-brand)]">
-              Non-Destructive DSP
+            <span className="text-[11px] font-medium px-2 py-0.5 rounded bg-[var(--avp-brand-soft)] text-[var(--avp-accent-text)]">
+              {isFa ? 'پردازش غیرمخرب' : 'Non-Destructive DSP'}
             </span>
           </div>
 
@@ -524,7 +526,7 @@ export const RenderExportModal: React.FC<RenderExportModalProps> = ({
                   disabled={isRunning}
                   onChange={(e) => setCustomFileName(e.target.value)}
                   dir="auto"
-                  className="flex-1 h-9 px-3 rounded-xl border border-[var(--avp-border)] bg-[var(--avp-bg)] text-xs text-[var(--avp-text)] focus:outline-none focus:border-[var(--avp-brand)]"
+                  className="flex-1 min-h-[44px] sm:min-h-[36px] sm:h-9 px-3 rounded-xl border border-[var(--avp-border)] bg-[var(--avp-bg)] text-xs text-[var(--avp-text)] focus:outline-none focus:border-[var(--avp-brand)]"
                 />
                 <span
                   className="text-xs font-mono text-[var(--avp-text-secondary)] px-2.5 py-1.5 rounded-lg bg-[var(--avp-surface-2)] border border-[var(--avp-border-subtle)]"
@@ -537,15 +539,19 @@ export const RenderExportModal: React.FC<RenderExportModalProps> = ({
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
-                <label className="block text-xs font-semibold text-[var(--avp-text)] mb-1.5">
+                <label
+                  htmlFor="select-export-format"
+                  className="block text-xs font-semibold text-[var(--avp-text)] mb-1.5"
+                >
                   {isFa ? 'فرمت فایل صوتی' : 'Audio Encoding'}
                 </label>
                 <select
+                  id="select-export-format"
                   data-testid="select-export-format"
                   value={encoding}
                   disabled={isRunning}
                   onChange={(e) => setEncoding(e.target.value as RenderExportEncoding)}
-                  className="w-full h-9 rounded-xl bg-[var(--avp-bg)] border border-[var(--avp-border)] px-3 text-xs text-[var(--avp-text)] focus:outline-none focus:border-[var(--avp-brand)] cursor-pointer"
+                  className="w-full min-h-[44px] sm:min-h-[36px] sm:h-9 rounded-xl bg-[var(--avp-bg)] border border-[var(--avp-border)] px-3 text-xs text-[var(--avp-text)] focus:outline-none focus:border-[var(--avp-brand)] cursor-pointer"
                 >
                   <option value="pcm16">
                     {isFa ? 'WAV · 16-bit PCM (استاندارد)' : 'WAV · 16-bit PCM (Standard)'}
@@ -560,15 +566,19 @@ export const RenderExportModal: React.FC<RenderExportModalProps> = ({
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-[var(--avp-text)] mb-1.5">
+                <label
+                  htmlFor="select-export-samplerate"
+                  className="block text-xs font-semibold text-[var(--avp-text)] mb-1.5"
+                >
                   {isFa ? 'نرخ نمونه‌برداری' : 'Sample Rate'}
                 </label>
                 <select
+                  id="select-export-samplerate"
                   data-testid="select-export-samplerate"
                   value={targetSampleRate}
                   disabled={isRunning}
                   onChange={(e) => setTargetSampleRate(Number(e.target.value) as SampleRate)}
-                  className="w-full h-9 rounded-xl bg-[var(--avp-bg)] border border-[var(--avp-border)] px-3 text-xs text-[var(--avp-text)] focus:outline-none focus:border-[var(--avp-brand)] cursor-pointer"
+                  className="w-full min-h-[44px] sm:min-h-[36px] sm:h-9 rounded-xl bg-[var(--avp-bg)] border border-[var(--avp-border)] px-3 text-xs text-[var(--avp-text)] focus:outline-none focus:border-[var(--avp-brand)] cursor-pointer"
                 >
                   <option value={48000}>
                     {isFa ? '48 kHz · استودیو و پادکست' : '48 kHz · Studio / Podcast'}
@@ -591,8 +601,9 @@ export const RenderExportModal: React.FC<RenderExportModalProps> = ({
           <div className="rounded-xl border border-[var(--avp-border)] bg-[var(--avp-bg)] overflow-hidden">
             <button
               type="button"
+              aria-expanded={showAdvancedMastering}
               onClick={() => setShowAdvancedMastering((v) => !v)}
-              className="w-full px-3.5 py-2.5 flex items-center justify-between text-xs font-semibold text-[var(--avp-text-secondary)] hover:text-[var(--avp-text)] hover:bg-[var(--avp-hover)] transition-colors cursor-pointer"
+              className="w-full min-h-[44px] sm:min-h-[40px] px-3.5 py-2.5 flex items-center justify-between text-xs font-semibold text-[var(--avp-text-secondary)] hover:text-[var(--avp-text)] hover:bg-[var(--avp-hover)] transition-colors cursor-pointer"
             >
               <span className="inline-flex items-center gap-2">
                 <Sliders className="w-3.5 h-3.5 text-[var(--avp-brand)]" />
@@ -608,15 +619,19 @@ export const RenderExportModal: React.FC<RenderExportModalProps> = ({
             {showAdvancedMastering && (
               <div className="p-3.5 pt-2 border-t border-[var(--avp-border-subtle)] grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <div>
-                  <label className="block text-[11px] font-medium text-[var(--avp-text-secondary)] mb-1">
+                  <label
+                    htmlFor="select-export-container"
+                    className="block text-[11px] font-medium text-[var(--avp-text-secondary)] mb-1"
+                  >
                     {isFa ? 'کانتینر خروجی' : 'Container'}
                   </label>
                   <select
+                    id="select-export-container"
                     data-testid="select-export-container"
                     value={container}
                     disabled={isRunning}
                     onChange={(e) => setContainer(e.target.value as RenderExportContainer)}
-                    className="w-full h-8 rounded-lg bg-[var(--avp-surface)] border border-[var(--avp-border)] px-2.5 text-xs text-[var(--avp-text)]"
+                    className="w-full min-h-[44px] sm:min-h-[34px] sm:h-8 rounded-lg bg-[var(--avp-surface)] border border-[var(--avp-border)] px-2.5 text-xs text-[var(--avp-text)]"
                   >
                     <option value="wav">{isFa ? 'RIFF WAV استاندارد' : 'Standard RIFF WAV'}</option>
                     <option value="rf64">{isFa ? 'RF64 (فایل +4GB)' : 'RF64 (>4GB Long Audio)'}</option>
@@ -624,15 +639,19 @@ export const RenderExportModal: React.FC<RenderExportModalProps> = ({
                 </div>
 
                 <div>
-                  <label className="block text-[11px] font-medium text-[var(--avp-text-secondary)] mb-1">
+                  <label
+                    htmlFor="select-export-crossfade"
+                    className="block text-[11px] font-medium text-[var(--avp-text-secondary)] mb-1"
+                  >
                     {isFa ? 'طول Crossfade برش‌ها' : 'Splice Crossfade'}
                   </label>
                   <select
+                    id="select-export-crossfade"
                     data-testid="select-export-crossfade"
                     value={crossfadeMs}
                     disabled={isRunning}
                     onChange={(e) => setCrossfadeMs(Number(e.target.value))}
-                    className="w-full h-8 rounded-lg bg-[var(--avp-surface)] border border-[var(--avp-border)] px-2.5 text-xs text-[var(--avp-text)]"
+                    className="w-full min-h-[44px] sm:min-h-[34px] sm:h-8 rounded-lg bg-[var(--avp-surface)] border border-[var(--avp-border)] px-2.5 text-xs text-[var(--avp-text)]"
                   >
                     <option value={0}>{isFa ? '0ms (بدون محوشدگی)' : '0ms (Hard Cut)'}</option>
                     <option value={5}>{isFa ? '5ms (برش تند)' : '5ms (Tight)'}</option>
@@ -643,13 +662,17 @@ export const RenderExportModal: React.FC<RenderExportModalProps> = ({
                 </div>
 
                 <div className="flex items-end pb-1">
-                  <label className="flex items-center gap-2 text-xs text-[var(--avp-text)] cursor-pointer">
+                  <label
+                    htmlFor="checkbox-export-limiter"
+                    className="min-h-[44px] sm:min-h-0 flex items-center gap-2 text-xs text-[var(--avp-text)] cursor-pointer"
+                  >
                     <input
+                      id="checkbox-export-limiter"
                       type="checkbox"
                       checked={enableLimiter}
                       disabled={isRunning}
                       onChange={(e) => setEnableLimiter(e.target.checked)}
-                      className="accent-[var(--avp-brand)]"
+                      className="w-4 h-4 accent-[var(--avp-brand)]"
                     />
                     <span>{isFa ? 'محافظ پیک صدا (Limiter)' : 'Peak Limiter'}</span>
                   </label>
@@ -658,42 +681,19 @@ export const RenderExportModal: React.FC<RenderExportModalProps> = ({
             )}
           </div>
 
-          {/* Render Progress & Post-Render Summary */}
-          {(progress || isCompleted) && (
-            <div
-              data-testid="render-progress-panel"
-              className="rounded-xl border border-[var(--avp-border)] bg-[var(--avp-bg)] p-3.5 space-y-2.5"
-            >
-              <div className="flex items-center justify-between text-xs">
-                <span className="text-[var(--avp-text)] font-semibold flex items-center gap-1.5">
-                  <Volume2 className="w-3.5 h-3.5 text-[var(--avp-brand)]" />
-                  {isFa ? 'وضعیت آماده‌سازی فایل صوتی:' : 'Audio Render Status:'}{' '}
-                  {isCompleted
-                    ? isFa
-                      ? 'آماده دانلود'
-                      : 'Ready to Download'
-                    : isRunning
-                      ? progress?.currentOperation || (isFa ? 'در حال پردازش...' : 'Rendering...')
-                      : renderState}
-                </span>
-                <span className="font-mono text-[var(--avp-brand)] font-bold tabular-nums">
-                  {formatNumberForLocale(progressPct, { persianDigits })}%
-                </span>
-              </div>
-              <div className="h-2 w-full rounded-full bg-[var(--avp-surface-2)] overflow-hidden">
-                <div
-                  className={`h-full transition-all duration-200 ${
-                    renderState === 'FAILED' || renderState === 'FAILED_VALIDATION'
-                      ? 'bg-[var(--avp-error)]'
-                      : isCompleted
-                        ? 'bg-[var(--avp-success)]'
-                        : 'bg-[var(--avp-brand)]'
-                  }`}
-                  style={{ width: `${progressPct}%` }}
-                />
-              </div>
-            </div>
-          )}
+          {/* Export Progress Bar & Live Status Indicator (always visible across all lifecycle states) */}
+          <ExportProgressIndicator
+            testId="render-progress-panel"
+            state={renderState}
+            progressPercent={progress?.progressPercent ?? (isCompleted ? 100 : 0)}
+            currentOperation={progress?.currentOperation ?? null}
+            errorMessage={workflowState.exportError ?? null}
+            currentSegmentIndex={progress?.currentSegmentIndex ?? null}
+            totalSegments={progress?.totalSegments ?? null}
+            elapsedMs={progress?.elapsedMs ?? null}
+            locale={effectiveLocale}
+            persianDigits={persianDigits}
+          />
 
           {/* Post-Render Verification Result */}
           {isCompleted && result && result.output && (
@@ -760,8 +760,8 @@ export const RenderExportModal: React.FC<RenderExportModalProps> = ({
                   {isFa ? 'خروجی‌های فوری متن، زیرنویس و پروژه' : 'Instant Text, Subtitle & Project Files'}
                 </span>
               </span>
-              <span className="text-[10px] text-[var(--avp-text-muted)] font-mono">
-                1-Click Export
+              <span className="text-[11px] text-[var(--avp-text-muted)] font-mono">
+                {isFa ? 'خروجی فوری' : '1-Click Export'}
               </span>
             </div>
 
@@ -776,7 +776,7 @@ export const RenderExportModal: React.FC<RenderExportModalProps> = ({
                 type="button"
                 data-testid="btn-export-audition-sesx"
                 onClick={handleExportAuditionSesx}
-                className="w-full p-2.5 rounded-xl border border-[var(--avp-brand)]/35 bg-[var(--avp-brand-soft)]/50 hover:bg-[var(--avp-brand-soft)] text-start transition-colors flex items-center justify-between gap-2.5 cursor-pointer"
+                className="w-full min-h-[44px] p-2.5 rounded-xl border border-[var(--avp-brand)]/35 bg-[var(--avp-brand-soft)]/50 hover:bg-[var(--avp-brand-soft)] text-start transition-colors flex items-center justify-between gap-2.5 cursor-pointer"
               >
                 <div className="flex items-center gap-2.5 min-w-0">
                   <div className="w-8 h-8 rounded-lg bg-[var(--avp-surface)] border border-[var(--avp-brand)]/30 flex items-center justify-center text-[var(--avp-brand)] shrink-0">
@@ -786,21 +786,26 @@ export const RenderExportModal: React.FC<RenderExportModalProps> = ({
                     <div className="text-xs font-bold text-[var(--avp-text)]">
                       {isFa ? 'پروژه Adobe Audition (.sesx)' : 'Adobe Audition Session (.sesx)'}
                     </div>
-                    <div className="text-[10px] text-[var(--avp-text-secondary)] truncate">
+                    <div className="text-[11px] text-[var(--avp-text-secondary)] truncate">
                       {isFa
                         ? 'شامل تمام برش‌های کلیپ، Crossfade و مارکرها'
                         : 'Includes all clip cuts, crossfades & markers'}
                     </div>
                   </div>
                 </div>
-                <Download className="w-3.5 h-3.5 text-[var(--avp-brand)] shrink-0" />
+                <Download className="w-3.5 h-3.5 text-[var(--avp-brand)] shrink-0" aria-hidden="true" />
               </button>
+              <p className="text-[11px] text-[var(--avp-text-muted)] px-1 leading-relaxed">
+                {isFa
+                  ? 'نکته Adobe Audition: فایل صوتی خروجی را در پوشه media/ کنار فایل .sesx قرار دهید تا مسیر ترک‌ها خودکار بارگذاری شود.'
+                  : 'Adobe Audition tip: Place your exported audio inside a sibling media/ folder next to the .sesx file so tracks relink automatically.'}
+              </p>
 
               <button
                 type="button"
                 data-testid="btn-export-srt"
                 onClick={handleExportSrt}
-                className="w-full p-2.5 rounded-xl border border-[var(--avp-border)] bg-[var(--avp-surface)] hover:bg-[var(--avp-hover)] text-start transition-colors flex items-center justify-between gap-2.5 cursor-pointer"
+                className="w-full min-h-[44px] p-2.5 rounded-xl border border-[var(--avp-border)] bg-[var(--avp-surface)] hover:bg-[var(--avp-hover)] text-start transition-colors flex items-center justify-between gap-2.5 cursor-pointer"
               >
                 <div className="flex items-center gap-2.5 min-w-0">
                   <div className="w-8 h-8 rounded-lg bg-[var(--avp-surface-2)] border border-[var(--avp-border-subtle)] flex items-center justify-center text-[var(--avp-brand)] shrink-0">
@@ -810,7 +815,7 @@ export const RenderExportModal: React.FC<RenderExportModalProps> = ({
                     <div className="text-xs font-bold text-[var(--avp-text)]">
                       {isFa ? 'زیرنویس زمان‌بندی‌شده (.srt)' : 'Timed Subtitles (.srt)'}
                     </div>
-                    <div className="text-[10px] text-[var(--avp-text-secondary)] truncate">
+                    <div className="text-[11px] text-[var(--avp-text-secondary)] truncate">
                       {isFa ? 'هماهنگ با تایم‌کد کلمات فعال' : 'Synchronized to active word timestamps'}
                     </div>
                   </div>
@@ -822,7 +827,7 @@ export const RenderExportModal: React.FC<RenderExportModalProps> = ({
                 type="button"
                 data-testid="btn-export-clean-txt"
                 onClick={handleExportCleanText}
-                className="w-full p-2.5 rounded-xl border border-[var(--avp-border)] bg-[var(--avp-surface)] hover:bg-[var(--avp-hover)] text-start transition-colors flex items-center justify-between gap-2.5 cursor-pointer"
+                className="w-full min-h-[44px] p-2.5 rounded-xl border border-[var(--avp-border)] bg-[var(--avp-surface)] hover:bg-[var(--avp-hover)] text-start transition-colors flex items-center justify-between gap-2.5 cursor-pointer"
               >
                 <div className="flex items-center gap-2.5 min-w-0">
                   <div className="w-8 h-8 rounded-lg bg-[var(--avp-surface-2)] border border-[var(--avp-border-subtle)] flex items-center justify-center text-[var(--avp-brand)] shrink-0">
@@ -832,7 +837,7 @@ export const RenderExportModal: React.FC<RenderExportModalProps> = ({
                     <div className="text-xs font-bold text-[var(--avp-text)]">
                       {isFa ? 'متن تمیز تدوین‌شده (.txt)' : 'Clean Edited Transcript (.txt)'}
                     </div>
-                    <div className="text-[10px] text-[var(--avp-text-secondary)] truncate">
+                    <div className="text-[11px] text-[var(--avp-text-secondary)] truncate">
                       {isFa ? 'متن پاکیزه تفکیک‌شده بر اساس گوینده' : 'Speaker-separated clean transcript'}
                     </div>
                   </div>
@@ -844,7 +849,7 @@ export const RenderExportModal: React.FC<RenderExportModalProps> = ({
                 type="button"
                 data-testid="btn-export-project-json"
                 onClick={handleExportProjectJson}
-                className="w-full p-2.5 rounded-xl border border-[var(--avp-border)] bg-[var(--avp-surface)] hover:bg-[var(--avp-hover)] text-start transition-colors flex items-center justify-between gap-2.5 cursor-pointer"
+                className="w-full min-h-[44px] p-2.5 rounded-xl border border-[var(--avp-border)] bg-[var(--avp-surface)] hover:bg-[var(--avp-hover)] text-start transition-colors flex items-center justify-between gap-2.5 cursor-pointer"
               >
                 <div className="flex items-center gap-2.5 min-w-0">
                   <div className="w-8 h-8 rounded-lg bg-[var(--avp-surface-2)] border border-[var(--avp-border-subtle)] flex items-center justify-center text-[var(--avp-brand)] shrink-0">
@@ -854,7 +859,7 @@ export const RenderExportModal: React.FC<RenderExportModalProps> = ({
                     <div className="text-xs font-bold text-[var(--avp-text)]">
                       {isFa ? 'خلاصه پروژه (.json)' : 'Project Metadata Summary (.json)'}
                     </div>
-                    <div className="text-[10px] text-[var(--avp-text-secondary)] truncate">
+                    <div className="text-[11px] text-[var(--avp-text-secondary)] truncate">
                       {isFa ? 'تایم‌کد کامل کلمات و آمار برش‌ها' : 'Word timestamps & edit cut statistics'}
                     </div>
                   </div>
@@ -864,15 +869,14 @@ export const RenderExportModal: React.FC<RenderExportModalProps> = ({
             </div>
           </div>
 
-          {exportedArtifactNotice && (
-            <div
-              role="status"
-              className="px-3 py-2 rounded-lg bg-[var(--avp-brand-soft)] text-[var(--avp-brand)] text-xs font-medium flex items-center gap-1.5"
-            >
-              <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
-              <span>{exportedArtifactNotice}</span>
-            </div>
-          )}
+          <div role="status" aria-live="polite" aria-atomic="true">
+            {exportedArtifactNotice && (
+              <div className="px-3 py-2 rounded-lg bg-[var(--avp-brand-soft)] text-[var(--avp-accent-text)] text-xs font-medium flex items-center gap-1.5">
+                <CheckCircle2 className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
+                <span>{exportedArtifactNotice}</span>
+              </div>
+            )}
+          </div>
         </div>
       </div>
 
@@ -884,7 +888,7 @@ export const RenderExportModal: React.FC<RenderExportModalProps> = ({
               <button
                 type="button"
                 onClick={onPauseRender}
-                className="avp-btn avp-btn-warning-tonal"
+                className="avp-btn avp-btn-warning-tonal min-h-[44px] sm:min-h-[36px]"
               >
                 <Pause className="w-3.5 h-3.5" />
                 {isFa ? 'مکث' : 'Pause'}
@@ -892,7 +896,7 @@ export const RenderExportModal: React.FC<RenderExportModalProps> = ({
               <button
                 type="button"
                 onClick={onCancelRender}
-                className="avp-btn avp-btn-danger-ghost border border-[var(--avp-error)]/40"
+                className="avp-btn avp-btn-danger-ghost border border-[var(--avp-error)]/40 min-h-[44px] sm:min-h-[36px]"
               >
                 <XCircle className="w-3.5 h-3.5" />
                 {isFa ? 'لغو' : 'Cancel'}
@@ -905,7 +909,7 @@ export const RenderExportModal: React.FC<RenderExportModalProps> = ({
           <button
             type="button"
             onClick={onClose}
-            className="avp-btn avp-btn-outline"
+            className="avp-btn avp-btn-outline min-h-[44px] sm:min-h-[36px]"
           >
             {isFa ? 'بستن' : 'Close'}
           </button>
@@ -915,7 +919,7 @@ export const RenderExportModal: React.FC<RenderExportModalProps> = ({
               type="button"
               data-testid="btn-download-validated-audio"
               onClick={() => void handleDownloadValidatedAudio()}
-              className="avp-btn bg-[var(--avp-success)] hover:opacity-95 text-white font-bold shadow-[var(--avp-shadow-xs)]"
+              className="avp-btn min-h-[44px] sm:min-h-[36px] bg-[var(--avp-success)] hover:opacity-95 text-white font-bold shadow-[var(--avp-shadow-xs)]"
             >
               <Download className="w-3.5 h-3.5" />
               <span>
@@ -940,7 +944,7 @@ export const RenderExportModal: React.FC<RenderExportModalProps> = ({
                 false,
               )
             }
-            className="avp-btn avp-btn-primary px-5 shadow-[var(--avp-shadow-xs)]"
+            className="avp-btn avp-btn-primary px-5 min-h-[44px] sm:min-h-[36px] shadow-[var(--avp-shadow-xs)]"
           >
             {isCompleted ? (
               <>

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   AlertTriangle,
   Check,
@@ -12,6 +12,7 @@ import {
   Sliders,
   Undo2,
   Waves,
+  XCircle,
 } from 'lucide-react';
 import { PersianTranscriptWorkspace } from '../workspace/PersianTranscriptWorkspace';
 import { TimedPersianToken } from '../../ai-engine/PersianTextNormalizer';
@@ -27,6 +28,9 @@ import {
   DiagnosticLogEntry,
   ProvenanceAndSupportAuditPanel,
 } from '../governance/ProvenanceAndSupportAuditPanel';
+import { getNextRovingTabIndex } from '../../studio/layoutUtils';
+import { ExportProgressIndicator } from '../../components/ExportProgressIndicator';
+import { ExportUiLifecycleState, isActiveExportState } from '../../utils/exportProgress';
 
 export type DesktopBottomTab = 'TIMELINE' | 'PROCESSING' | 'EXPORT' | 'PROVENANCE';
 
@@ -90,16 +94,20 @@ export interface DesktopStudioProps {
   onUpdateDisplayTranscript: (tokenId: string, newText: string) => void;
   onApplyAutoAcousticFix: () => void;
   onTriggerExport: (profileId: string) => void;
+  onCancelExport?: () => void;
+  initialBottomTab?: DesktopBottomTab;
+  exportState?: ExportUiLifecycleState;
+  exportProgressPercent?: number;
+  exportOperationLabel?: string | null;
+  exportError?: string | null;
   provenanceItems?: AnalysisProvenanceItem[];
   diagnosticLogs?: DiagnosticLogEntry[];
   onSendApprovedDiagnosticBundle?: (sanitizedJsonPayload: string) => void;
 }
 
 /**
- * Unified Desktop Audio Studio Shell (Architecture Doc Sections 50-53)
- * Integrates Project Header (OPFS persistence + local AI state + Undo/Redo),
- * Acoustic Advisor Bar (50Hz mains hum / plosive / sibilance alerts),
- * Persian Transcript Workspace, and the Bottom Dock (Waveform Canvas, DSP Graph Advisor, LUFS Export).
+ * Standalone Experimental v1.2 Desktop Audio Studio Shell (`useV12DesktopShell`).
+ * Aligned with shared `--avp-*` design tokens and ARIA controls for parity with root `App.tsx`.
  */
 export const DesktopAudioStudioApp: React.FC<DesktopStudioProps> = ({
   project,
@@ -123,6 +131,12 @@ export const DesktopAudioStudioApp: React.FC<DesktopStudioProps> = ({
   onUpdateDisplayTranscript,
   onApplyAutoAcousticFix,
   onTriggerExport,
+  onCancelExport,
+  initialBottomTab = 'TIMELINE',
+  exportState,
+  exportProgressPercent,
+  exportOperationLabel = null,
+  exportError = null,
   provenanceItems = DEFAULT_STUDIO_PROVENANCE_ITEMS,
   diagnosticLogs = DEFAULT_DIAGNOSTIC_LOGS,
   onSendApprovedDiagnosticBundle = () => {},
@@ -130,31 +144,117 @@ export const DesktopAudioStudioApp: React.FC<DesktopStudioProps> = ({
   const [selectedExportProfileId, setSelectedExportProfileId] = useState<string>(
     'PODCAST_STEREO_STANDARD',
   );
-  const [activeBottomTab, setActiveBottomTab] = useState<DesktopBottomTab>('TIMELINE');
+  const [activeBottomTab, setActiveBottomTab] = useState<DesktopBottomTab>(initialBottomTab);
   const [syncOffsetMs, setSyncOffsetMs] = useState<number>(38.5);
   const [clockDriftPpm, setClockDriftPpm] = useState<number>(14.2);
+
+  // Local fallback export progress state when parent does not supply controlled exportState
+  const [localExportState, setLocalExportState] = useState<ExportUiLifecycleState>('IDLE');
+  const [localExportPercent, setLocalExportPercent] = useState<number>(0);
+  const [localExportOp, setLocalExportOp] = useState<string | null>(null);
+  const exportTimersRef = useRef<number[]>([]);
+
+  const clearLocalExportTimers = () => {
+    for (const id of exportTimersRef.current) {
+      window.clearTimeout(id);
+    }
+    exportTimersRef.current = [];
+  };
+
+  useEffect(() => () => clearLocalExportTimers(), []);
+
+  const effectiveExportState: ExportUiLifecycleState = exportState ?? localExportState;
+  const effectiveExportPercent =
+    typeof exportProgressPercent === 'number' ? exportProgressPercent : localExportPercent;
+  const effectiveExportOp = exportOperationLabel ?? localExportOp;
+  const isExportRunning = isActiveExportState(effectiveExportState);
+
+  const handleStartDesktopExport = () => {
+    onTriggerExport(selectedExportProfileId);
+    if (exportState !== undefined) return;
+    clearLocalExportTimers();
+    const profileName =
+      STANDARD_EXPORT_PROFILES[selectedExportProfileId]?.nameFa ?? selectedExportProfileId;
+    setLocalExportState('VALIDATING');
+    setLocalExportPercent(12);
+    setLocalExportOp(`اعتبارسنجی پروفایل «${profileName}» و ترک‌های صوتی...`);
+
+    const stages: Array<{ delayMs: number; state: ExportUiLifecycleState; pct: number; op: string }> = [
+      { delayMs: 280, state: 'RENDERING', pct: 48, op: 'رندر جریانی صوت و اعمال برش‌های تاییدشده...' },
+      { delayMs: 620, state: 'VALIDATING_OUTPUT', pct: 86, op: 'اندازه‌گیری LUFS و اعتبارسنجی True-Peak...' },
+      { delayMs: 960, state: 'COMPLETED', pct: 100, op: `فایل خروجی با پروفایل «${profileName}» آماده است.` },
+    ];
+    exportTimersRef.current = stages.map((step) =>
+      window.setTimeout(() => {
+        setLocalExportState(step.state);
+        setLocalExportPercent(step.pct);
+        setLocalExportOp(step.op);
+      }, step.delayMs),
+    );
+  };
+
+  const handleCancelDesktopExport = () => {
+    onCancelExport?.();
+    if (exportState !== undefined) return;
+    clearLocalExportTimers();
+    setLocalExportState('CANCELLED');
+    setLocalExportPercent(0);
+    setLocalExportOp('فرآیند خروجی توسط کاربر لغو شد.');
+  };
 
   const sampleRateKhz = (project.canonicalSampleRate / 1000).toFixed(
     project.canonicalSampleRate % 1000 === 0 ? 0 : 1,
   );
   const hasSyncDrift = Math.abs(syncOffsetMs) > 0.1 || Math.abs(clockDriftPpm) > 1.0;
 
+  const bottomTabs: Array<{
+    id: DesktopBottomTab;
+    label: string;
+    icon: React.ReactNode;
+    activeClass: string;
+  }> = [
+    {
+      id: 'TIMELINE',
+      label: `موج صوتی و تایم‌لاین (${project.tracks.length} ترک)`,
+      icon: <Waves className="w-3.5 h-3.5" aria-hidden="true" />,
+      activeClass: 'bg-[var(--avp-surface)] text-[var(--avp-accent-text)] border border-[var(--avp-border)]',
+    },
+    {
+      id: 'PROCESSING',
+      label: 'گراف پردازش و ترمیم صدا (DSP)',
+      icon: <Sliders className="w-3.5 h-3.5" aria-hidden="true" />,
+      activeClass: 'bg-[var(--avp-surface)] text-[var(--avp-accent-text)] border border-[var(--avp-border)]',
+    },
+    {
+      id: 'EXPORT',
+      label: 'خروجی نهایی و مسترینگ (Export)',
+      icon: <HardDrive className="w-3.5 h-3.5" aria-hidden="true" />,
+      activeClass: 'bg-[var(--avp-success)] text-[var(--avp-on-brand)]',
+    },
+    {
+      id: 'PROVENANCE',
+      label: 'منشأ AI و ممیزی گزارش',
+      icon: <ShieldCheck className="w-3.5 h-3.5" aria-hidden="true" />,
+      activeClass: 'bg-[var(--avp-surface)] text-[var(--avp-accent-text)] border border-[var(--avp-border)]',
+    },
+  ];
+
   return (
-    <div dir="rtl" className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans">
+    <div dir="rtl" className="min-h-screen bg-[var(--avp-bg)] text-[var(--avp-text)] flex flex-col font-sans">
       {/* 1. Three-zone Project Header (OPFS persistence, Local AI readiness, Undo/Redo) */}
-      <header className="h-14 px-6 bg-slate-900 border-b border-slate-800 flex items-center justify-between gap-8">
+      <header className="h-14 px-6 bg-[var(--avp-surface-shell)] border-b border-[var(--avp-border)] flex items-center justify-between gap-8">
         <div className="flex items-center gap-3 min-w-0">
-          <span className="font-bold text-base text-slate-100 tracking-tight whitespace-nowrap shrink-0">
+          <span className="font-bold text-base text-[var(--avp-text)] tracking-tight whitespace-nowrap shrink-0">
             آواپرداز
           </span>
-          <span aria-hidden="true" className="text-slate-600">
+          <span aria-hidden="true" className="text-[var(--avp-text-muted)]">
             /
           </span>
-          <span className="text-sm text-slate-200 font-medium truncate">{project.name}</span>
-          <span aria-hidden="true" className="text-slate-700 hidden md:inline">
+          <h1 className="text-sm text-[var(--avp-text)] font-medium truncate">{project.name}</h1>
+          <span aria-hidden="true" className="text-[var(--avp-text-muted)] hidden md:inline">
             ·
           </span>
-          <span className="text-xs text-slate-400 tabular-nums whitespace-nowrap hidden md:inline">
+          <span className="text-xs text-[var(--avp-text-secondary)] tabular-nums whitespace-nowrap hidden md:inline">
             نسخه ویرایش #{project.revision} ·{' '}
             <span dir="ltr" className="font-mono">
               {sampleRateKhz}kHz
@@ -162,32 +262,32 @@ export const DesktopAudioStudioApp: React.FC<DesktopStudioProps> = ({
           </span>
         </div>
 
-        <div className="hidden lg:flex items-center gap-3 text-xs text-slate-300 whitespace-nowrap">
+        <div className="hidden lg:flex items-center gap-3 text-xs text-[var(--avp-text-secondary)] whitespace-nowrap">
           <span className="inline-flex items-center gap-1.5">
             {opfsPersisted ? (
-              <ShieldCheck className="w-3.5 h-3.5 text-emerald-400 shrink-0" aria-hidden="true" />
+              <ShieldCheck className="w-3.5 h-3.5 text-[var(--avp-success-text)] shrink-0" aria-hidden="true" />
             ) : (
-              <AlertTriangle className="w-3.5 h-3.5 text-amber-400 shrink-0" aria-hidden="true" />
+              <AlertTriangle className="w-3.5 h-3.5 text-[var(--avp-warning-text)] shrink-0" aria-hidden="true" />
             )}
-            <span className={opfsPersisted ? 'text-emerald-300' : 'text-amber-300'}>
+            <span className={opfsPersisted ? 'text-[var(--avp-success-text)]' : 'text-[var(--avp-warning-text)]'}>
               {opfsPersisted ? 'فضای محلی پایدار' : 'فضای موقت مرورگر'}
             </span>
-            <span className="text-slate-500 tabular-nums font-mono" dir="ltr">
+            <span className="text-[var(--avp-text-muted)] tabular-nums font-mono" dir="ltr">
               ({opfsUsedMb} MB)
             </span>
           </span>
 
-          <span aria-hidden="true" className="text-slate-700">
+          <span aria-hidden="true" className="text-[var(--avp-text-muted)]">
             ·
           </span>
 
           <span className="inline-flex items-center gap-1.5">
             {aiModelReady ? (
-              <Check className="w-3.5 h-3.5 text-sky-400 shrink-0" aria-hidden="true" />
+              <Check className="w-3.5 h-3.5 text-[var(--avp-accent-text)] shrink-0" aria-hidden="true" />
             ) : (
-              <Loader2 className="w-3.5 h-3.5 text-sky-400 animate-spin shrink-0" aria-hidden="true" />
+              <Loader2 className="w-3.5 h-3.5 text-[var(--avp-accent-text)] animate-spin shrink-0" aria-hidden="true" />
             )}
-            <span className="text-slate-200 tabular-nums">
+            <span className="text-[var(--avp-text)] tabular-nums">
               {aiModelReady
                 ? 'موتور AI فارسی آماده (محلی)'
                 : `دریافت مدل در پس‌زمینه (${aiModelDownloadProgressPercent}٪)`}
@@ -201,7 +301,7 @@ export const DesktopAudioStudioApp: React.FC<DesktopStudioProps> = ({
             onClick={onUndo}
             title="واگرد (Ctrl+Z)"
             aria-label="واگرد تغییرات (Ctrl+Z)"
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-slate-700 bg-slate-800 hover:bg-slate-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-sky-400 text-slate-200 text-xs font-medium whitespace-nowrap shrink-0 cursor-pointer"
+            className="avp-btn avp-btn-outline min-h-[44px] sm:min-h-[32px] text-xs font-medium whitespace-nowrap shrink-0"
           >
             <Undo2 className="w-3.5 h-3.5" aria-hidden="true" />
             <span>واگرد</span>
@@ -211,7 +311,7 @@ export const DesktopAudioStudioApp: React.FC<DesktopStudioProps> = ({
             onClick={onRedo}
             title="بازانجام (Ctrl+Shift+Z)"
             aria-label="بازانجام تغییرات (Ctrl+Shift+Z)"
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-slate-700 bg-slate-800 hover:bg-slate-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-sky-400 text-slate-200 text-xs font-medium whitespace-nowrap shrink-0 cursor-pointer"
+            className="avp-btn avp-btn-outline min-h-[44px] sm:min-h-[32px] text-xs font-medium whitespace-nowrap shrink-0"
           >
             <Redo2 className="w-3.5 h-3.5" aria-hidden="true" />
             <span>بازانجام</span>
@@ -224,17 +324,17 @@ export const DesktopAudioStudioApp: React.FC<DesktopStudioProps> = ({
         <div
           role="region"
           aria-label="مشاور آکوستیک ضبط"
-          className="bg-amber-950/35 border-b border-amber-800/60 px-6 py-2.5 flex items-center justify-between gap-4 text-xs"
+          className="bg-[var(--avp-warning-soft)] border-b border-[var(--avp-warning)]/40 px-6 py-2.5 flex items-center justify-between gap-4 text-xs"
         >
-          <div className="flex items-center gap-2 text-amber-200 min-w-0">
-            <Mic className="w-4 h-4 text-amber-400 shrink-0" aria-hidden="true" />
+          <div className="flex items-center gap-2 text-[var(--avp-warning-text)] min-w-0">
+            <Mic className="w-4 h-4 shrink-0" aria-hidden="true" />
             <span className="font-semibold shrink-0">مشاور آکوستیک ضبط:</span>
-            <span className="truncate">{acousticDiagnostic.summaryAdviceFa[0]}</span>
+            <span className="truncate text-[var(--avp-text)]">{acousticDiagnostic.summaryAdviceFa[0]}</span>
           </div>
           <button
             type="button"
             onClick={onApplyAutoAcousticFix}
-            className="px-4 py-1.5 rounded-md bg-amber-500 hover:bg-amber-400 focus-visible:outline focus-visible:outline-2 focus-visible:outline-amber-300 text-slate-950 font-semibold whitespace-nowrap shrink-0 cursor-pointer"
+            className="avp-btn avp-btn-tonal min-h-[44px] sm:min-h-[32px] font-semibold whitespace-nowrap shrink-0"
           >
             افزودن خودکار فیلترهای ترمیم
           </button>
@@ -258,14 +358,14 @@ export const DesktopAudioStudioApp: React.FC<DesktopStudioProps> = ({
       {/* 4. Bottom Studio Dock: Transport Controls, Waveform Canvas, DSP Processing Advisor, LUFS Export */}
       <section
         aria-label="پنل کنترل پخش و تایم‌لاین"
-        className="bg-slate-900 border-t border-slate-800 px-6 py-4 flex flex-col gap-3"
+        className="bg-[var(--avp-surface-shell)] border-t border-[var(--avp-border)] px-6 py-4 flex flex-col gap-3"
       >
         <div className="flex flex-wrap items-center justify-between gap-4">
           <div className="flex items-center gap-3">
             <button
               type="button"
               onClick={onTogglePlayPause}
-              className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-sky-500 hover:bg-sky-400 focus-visible:outline focus-visible:outline-2 focus-visible:outline-sky-300 text-slate-950 font-bold text-xs whitespace-nowrap shrink-0 cursor-pointer"
+              className="avp-btn avp-btn-primary min-h-[44px] sm:min-h-[36px] px-4 font-bold text-xs whitespace-nowrap shrink-0"
             >
               {isPlaying ? (
                 <>
@@ -279,9 +379,9 @@ export const DesktopAudioStudioApp: React.FC<DesktopStudioProps> = ({
                 </>
               )}
             </button>
-            <span className="text-xs text-slate-400 tabular-nums whitespace-nowrap">
+            <span className="text-xs text-[var(--avp-text-secondary)] tabular-nums whitespace-nowrap">
               سرعت مرور (L):{' '}
-              <span dir="ltr" className="font-mono text-slate-200">
+              <span dir="ltr" className="font-mono text-[var(--avp-text)]">
                 {shuttleSpeed.toFixed(1)}x
               </span>
             </span>
@@ -290,81 +390,52 @@ export const DesktopAudioStudioApp: React.FC<DesktopStudioProps> = ({
           <div
             role="tablist"
             aria-label="بخش‌های پنل پایین استودیو"
-            className="flex items-center gap-1 p-1 bg-slate-950 border border-slate-800 rounded-lg text-xs"
+            className="flex items-center gap-1 p-1 bg-[var(--avp-bg-subtle)] border border-[var(--avp-border)] rounded-lg text-xs"
           >
-            <button
-              type="button"
-              role="tab"
-              aria-selected={activeBottomTab === 'TIMELINE'}
-              onClick={() => setActiveBottomTab('TIMELINE')}
-              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md font-medium whitespace-nowrap shrink-0 cursor-pointer transition-colors ${
-                activeBottomTab === 'TIMELINE'
-                  ? 'bg-slate-800 text-sky-300'
-                  : 'text-slate-400 hover:text-slate-200'
-              }`}
-            >
-              <Waves className="w-3.5 h-3.5" aria-hidden="true" />
-              <span className="tabular-nums">موج صوتی و تایم‌لاین ({project.tracks.length} ترک)</span>
-            </button>
-            <button
-              type="button"
-              role="tab"
-              aria-selected={activeBottomTab === 'PROCESSING'}
-              onClick={() => setActiveBottomTab('PROCESSING')}
-              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md font-medium whitespace-nowrap shrink-0 cursor-pointer transition-colors ${
-                activeBottomTab === 'PROCESSING'
-                  ? 'bg-slate-800 text-sky-300'
-                  : 'text-slate-400 hover:text-slate-200'
-              }`}
-            >
-              <Sliders className="w-3.5 h-3.5" aria-hidden="true" />
-              <span>گراف پردازش و ترمیم صدا (DSP)</span>
-            </button>
-            <button
-              type="button"
-              role="tab"
-              aria-selected={activeBottomTab === 'EXPORT'}
-              onClick={() => setActiveBottomTab('EXPORT')}
-              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md font-medium whitespace-nowrap shrink-0 cursor-pointer transition-colors ${
-                activeBottomTab === 'EXPORT'
-                  ? 'bg-emerald-700 text-white'
-                  : 'text-slate-400 hover:text-slate-200'
-              }`}
-            >
-              <HardDrive className="w-3.5 h-3.5" aria-hidden="true" />
-              <span>خروجی نهایی و مسترینگ (Export)</span>
-            </button>
-            <button
-              type="button"
-              role="tab"
-              aria-selected={activeBottomTab === 'PROVENANCE'}
-              onClick={() => setActiveBottomTab('PROVENANCE')}
-              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md font-medium whitespace-nowrap shrink-0 cursor-pointer transition-colors ${
-                activeBottomTab === 'PROVENANCE'
-                  ? 'bg-slate-800 text-sky-300'
-                  : 'text-slate-400 hover:text-slate-200'
-              }`}
-            >
-              <ShieldCheck className="w-3.5 h-3.5" aria-hidden="true" />
-              <span>منشأ AI و ممیزی گزارش</span>
-            </button>
+            {bottomTabs.map((tab, idx) => {
+              const isSelected = activeBottomTab === tab.id;
+              return (
+                <button
+                  key={tab.id}
+                  type="button"
+                  role="tab"
+                  aria-selected={isSelected}
+                  tabIndex={isSelected ? 0 : -1}
+                  onClick={() => setActiveBottomTab(tab.id)}
+                  onKeyDown={(e) => {
+                    const nextIdx = getNextRovingTabIndex(idx, bottomTabs.length, e.key, true, 'horizontal');
+                    if (nextIdx === null) return;
+                    e.preventDefault();
+                    setActiveBottomTab(bottomTabs[nextIdx].id);
+                    const buttons = e.currentTarget.parentElement?.querySelectorAll<HTMLButtonElement>('[role="tab"]');
+                    buttons?.[nextIdx]?.focus();
+                  }}
+                  className={`inline-flex items-center gap-1.5 min-h-[44px] sm:min-h-[32px] px-3 py-1.5 rounded-md font-medium whitespace-nowrap shrink-0 cursor-pointer transition-colors ${
+                    isSelected ? tab.activeClass : 'text-[var(--avp-text-secondary)] hover:text-[var(--avp-text)]'
+                  }`}
+                >
+                  {tab.icon}
+                  <span className="tabular-nums">{tab.label}</span>
+                </button>
+              );
+            })}
           </div>
         </div>
 
         {activeBottomTab === 'TIMELINE' && (
-          <div className="bg-slate-950 border border-slate-800 rounded-lg p-3 space-y-2.5">
+          <div className="bg-[var(--avp-surface)] border border-[var(--avp-border)] rounded-lg p-3 space-y-2.5">
             <div
               data-testid="v12-waveform-sync-drift-bar"
-              className="flex flex-wrap items-center justify-between gap-3 text-xs pb-2 border-b border-slate-800/80"
+              className="flex flex-wrap items-center justify-between gap-3 text-xs pb-2 border-b border-[var(--avp-border-subtle)]"
             >
               <div className="flex flex-wrap items-center gap-2">
-                <span className="text-slate-400 font-medium">وضعیت همگام‌سازی چند ضبط‌کننده:</span>
+                <span className="text-[var(--avp-text-secondary)] font-medium">وضعیت همگام‌سازی چند ضبط‌کننده:</span>
                 <span
                   data-testid="v12-waveform-sync-drift-status"
                   className={`px-2.5 py-0.5 rounded border font-medium tabular-nums ${
                     hasSyncDrift
-                      ? 'bg-amber-500/15 border-amber-500/40 text-amber-300'
-                      : 'bg-emerald-500/15 border-emerald-500/40 text-emerald-300'
+                      ? 'bg-[var(--avp-warning-soft)] border-[var(--avp-warning)]/40 text-[var(--avp-warning-text)]'
+                      : 'bg-[var(--avp-success-soft)] border-[var(--avp-success)]/40 text-[var(--avp-success-text)]'
                   }`}
                 >
                   {hasSyncDrift ? (
@@ -376,7 +447,7 @@ export const DesktopAudioStudioApp: React.FC<DesktopStudioProps> = ({
                       </span>
                       {Math.abs(clockDriftPpm) > 0.5 && (
                         <>
-                          <span className="mx-1.5 text-amber-500/60">·</span>
+                          <span className="mx-1.5 opacity-60">·</span>
                           <span>دریفت کلاک: </span>
                           <span dir="ltr" className="font-mono">
                             +{clockDriftPpm.toFixed(1)} ppm
@@ -394,14 +465,14 @@ export const DesktopAudioStudioApp: React.FC<DesktopStudioProps> = ({
                 <button
                   type="button"
                   onClick={() => setSyncOffsetMs((v) => Number((v - 5).toFixed(1)))}
-                  className="px-2 py-1 rounded border border-slate-700 bg-slate-900 hover:bg-slate-800 text-slate-200 font-mono text-[11px] cursor-pointer"
+                  className="avp-btn avp-btn-sm avp-btn-outline min-h-[44px] sm:min-h-[28px] font-mono text-[11px]"
                 >
                   <span dir="ltr">-5ms</span>
                 </button>
                 <button
                   type="button"
                   onClick={() => setSyncOffsetMs((v) => Number((v + 5).toFixed(1)))}
-                  className="px-2 py-1 rounded border border-slate-700 bg-slate-900 hover:bg-slate-800 text-slate-200 font-mono text-[11px] cursor-pointer"
+                  className="avp-btn avp-btn-sm avp-btn-outline min-h-[44px] sm:min-h-[28px] font-mono text-[11px]"
                 >
                   <span dir="ltr">+5ms</span>
                 </button>
@@ -412,7 +483,7 @@ export const DesktopAudioStudioApp: React.FC<DesktopStudioProps> = ({
                     setSyncOffsetMs(0);
                     setClockDriftPpm(0);
                   }}
-                  className="px-3 py-1 rounded bg-amber-500 hover:bg-amber-400 disabled:bg-slate-800 disabled:text-slate-500 text-slate-950 font-semibold text-xs cursor-pointer disabled:cursor-not-allowed"
+                  className="avp-btn avp-btn-sm avp-btn-tonal min-h-[44px] sm:min-h-[28px] font-semibold text-xs disabled:opacity-45"
                 >
                   اصلاح آنی و هم‌ترازسازی (Align)
                 </button>
@@ -431,32 +502,32 @@ export const DesktopAudioStudioApp: React.FC<DesktopStudioProps> = ({
         )}
 
         {activeBottomTab === 'PROCESSING' && (
-          <div className="bg-slate-950 border border-slate-800 rounded-lg p-4 flex flex-wrap items-center justify-between gap-4 text-xs">
+          <div className="bg-[var(--avp-surface)] border border-[var(--avp-border)] rounded-lg p-4 flex flex-wrap items-center justify-between gap-4 text-xs">
             {acousticDiagnostic ? (
               <>
-                <div className="flex flex-wrap items-center gap-6 text-slate-300">
+                <div className="flex flex-wrap items-center gap-6 text-[var(--avp-text-secondary)]">
                   <div>
-                    <span className="text-slate-400">نسبت سیگنال به نویز (SNR): </span>
-                    <span dir="ltr" className="font-mono tabular-nums text-slate-100">
+                    <span>نسبت سیگنال به نویز (SNR): </span>
+                    <span dir="ltr" className="font-mono tabular-nums text-[var(--avp-text)]">
                       {acousticDiagnostic.signalToNoiseRatioDb.toFixed(1)} dB
                     </span>
                   </div>
                   <div>
-                    <span className="text-slate-400">هوم برق شهر (50Hz): </span>
-                    <span className="font-medium text-slate-100">
+                    <span>هوم برق شهر (50Hz): </span>
+                    <span className="font-medium text-[var(--avp-text)]">
                       {acousticDiagnostic.has50HzMainsHum ? 'شناسایی شده' : 'سالم'}
                     </span>
                   </div>
                   <div>
-                    <span className="text-slate-400">رویداد پاپ / صفیری: </span>
-                    <span className="font-mono tabular-nums text-slate-100">
+                    <span>رویداد پاپ / صفیری: </span>
+                    <span className="font-mono tabular-nums text-[var(--avp-text)]">
                       {acousticDiagnostic.plosivePopEvents.length} /{' '}
                       {acousticDiagnostic.harshSibilanceEvents.length}
                     </span>
                   </div>
                   <div>
-                    <span className="text-slate-400">فیلترهای پیشنهادی: </span>
-                    <span className="font-mono tabular-nums text-sky-300">
+                    <span>فیلترهای پیشنهادی: </span>
+                    <span className="font-mono tabular-nums text-[var(--avp-accent-text)]">
                       {acousticDiagnostic.recommendedGraphNodes.length} گره پردازش
                     </span>
                   </div>
@@ -465,13 +536,13 @@ export const DesktopAudioStudioApp: React.FC<DesktopStudioProps> = ({
                   type="button"
                   onClick={onApplyAutoAcousticFix}
                   disabled={acousticDiagnostic.recommendedGraphNodes.length === 0}
-                  className="px-4 py-2 rounded-lg bg-sky-600 hover:bg-sky-500 disabled:opacity-50 text-white font-semibold whitespace-nowrap shrink-0 cursor-pointer disabled:cursor-not-allowed"
+                  className="avp-btn avp-btn-primary min-h-[44px] sm:min-h-[34px] font-semibold whitespace-nowrap shrink-0"
                 >
                   اعمال گره‌های ترمیم پیشنهادی
                 </button>
               </>
             ) : (
-              <p className="text-slate-400">
+              <p className="text-[var(--avp-text-secondary)]">
                 هنوز تحلیل آکوستیکی روی پروژه ثبت نشده است؛ پس از ورود صوت، وضعیت هوم ۵۰ هرتز، پاپ و تیزی حروف صفیری اینجا نمایش داده می‌شود.
               </p>
             )}
@@ -479,35 +550,65 @@ export const DesktopAudioStudioApp: React.FC<DesktopStudioProps> = ({
         )}
 
         {activeBottomTab === 'EXPORT' && (
-          <div className="bg-slate-950 border border-slate-800 rounded-lg p-4 flex flex-wrap items-center justify-between gap-4">
-            <div className="flex items-center gap-3">
-              <label
-                htmlFor="desktop-export-profile"
-                className="text-xs text-slate-300 font-medium whitespace-nowrap"
-              >
-                پروفایل خروجی استاندارد:
-              </label>
-              <select
-                id="desktop-export-profile"
-                value={selectedExportProfileId}
-                onChange={(e) => setSelectedExportProfileId(e.target.value)}
-                className="bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5 text-xs text-slate-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-sky-400"
-              >
-                {Object.values(STANDARD_EXPORT_PROFILES).map((prof) => (
-                  <option key={prof.profileId} value={prof.profileId}>
-                    {prof.nameFa}
-                  </option>
-                ))}
-              </select>
+          <div className="bg-[var(--avp-surface)] border border-[var(--avp-border)] rounded-lg p-4 space-y-4">
+            <div className="flex flex-wrap items-center justify-between gap-4">
+              <div className="flex items-center gap-3">
+                <label
+                  htmlFor="desktop-export-profile"
+                  className="text-xs text-[var(--avp-text)] font-medium whitespace-nowrap"
+                >
+                  پروفایل خروجی استاندارد:
+                </label>
+                <select
+                  id="desktop-export-profile"
+                  value={selectedExportProfileId}
+                  disabled={isExportRunning}
+                  onChange={(e) => setSelectedExportProfileId(e.target.value)}
+                  className="avp-input min-h-[44px] sm:min-h-[34px] px-3 py-1.5 text-xs"
+                >
+                  {Object.values(STANDARD_EXPORT_PROFILES).map((prof) => (
+                    <option key={prof.profileId} value={prof.profileId}>
+                      {prof.nameFa}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="flex items-center gap-2">
+                {isExportRunning && (
+                  <button
+                    type="button"
+                    data-testid="btn-desktop-cancel-export"
+                    onClick={handleCancelDesktopExport}
+                    className="avp-btn avp-btn-danger-ghost border border-[var(--avp-error)]/40 min-h-[44px] sm:min-h-[36px] text-xs"
+                  >
+                    <XCircle className="w-3.5 h-3.5" aria-hidden="true" />
+                    لغو خروجی
+                  </button>
+                )}
+
+                <button
+                  type="button"
+                  data-testid="btn-desktop-start-export"
+                  disabled={isExportRunning}
+                  onClick={handleStartDesktopExport}
+                  className="avp-btn min-h-[44px] sm:min-h-[36px] px-5 bg-[var(--avp-brand-solid)] text-[var(--avp-on-brand)] hover:opacity-90 disabled:opacity-60 font-bold text-xs whitespace-nowrap shrink-0"
+                >
+                  {isExportRunning
+                    ? 'در حال رندر و اعتبارسنجی...'
+                    : 'شروع رندر جریانی و اعتبارسنجی خروجی (LUFS & True-Peak)'}
+                </button>
+              </div>
             </div>
 
-            <button
-              type="button"
-              onClick={() => onTriggerExport(selectedExportProfileId)}
-              className="px-5 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-emerald-300 text-white font-bold text-xs whitespace-nowrap shrink-0 cursor-pointer"
-            >
-              شروع رندر جریانی و اعتبارسنجی خروجی (LUFS & True-Peak)
-            </button>
+            <ExportProgressIndicator
+              testId="desktop-export-progress-panel"
+              state={effectiveExportState}
+              progressPercent={effectiveExportPercent}
+              currentOperation={effectiveExportOp}
+              errorMessage={exportError}
+              locale="fa"
+            />
           </div>
         )}
 

@@ -122,7 +122,7 @@ export const DspControlRack: React.FC<DspControlRackProps> = ({
                 type="button"
                 data-testid="btn-apply-8band-persian-eq"
                 onClick={onApply8BandPersianVoiceEq}
-                className="avp-btn avp-btn-sm avp-btn-tonal"
+                className="avp-btn avp-btn-sm avp-btn-tonal min-h-[44px] lg:min-h-[28px]"
               >
                 <Sliders className="w-3.5 h-3.5" aria-hidden="true" />
                 <span>{isFa ? 'اکوالایزر ۸ بانده کلام' : '8-Band Voice EQ'}</span>
@@ -133,7 +133,7 @@ export const DspControlRack: React.FC<DspControlRackProps> = ({
                 type="button"
                 data-testid="btn-apply-acoustic-advisor-dsp"
                 onClick={onApplyAcousticAdvisorPreset}
-                className="avp-btn avp-btn-sm avp-btn-primary"
+                className="avp-btn avp-btn-sm avp-btn-secondary min-h-[44px] lg:min-h-[28px]"
               >
                 <Wand2 className="w-3.5 h-3.5" aria-hidden="true" />
                 <span>{isFa ? 'کالیبراسیون خودکار' : 'Auto Calibrate'}</span>
@@ -143,7 +143,7 @@ export const DspControlRack: React.FC<DspControlRackProps> = ({
               type="button"
               onClick={onResetDefaults}
               aria-label={isFa ? 'بازنشانی تنظیمات DSP' : 'Reset DSP parameters'}
-              className="avp-btn avp-btn-sm avp-btn-outline"
+              className="avp-btn avp-btn-sm avp-btn-outline min-h-[44px] lg:min-h-[28px]"
             >
               <RotateCcw className="w-3 h-3" aria-hidden="true" />
               <span>{isFa ? 'پیش‌فرض' : 'Reset'}</span>
@@ -221,7 +221,7 @@ export const DspControlRack: React.FC<DspControlRackProps> = ({
             <span className="text-[var(--avp-success-text)] font-semibold">
               {isFa ? 'منحنی پاسخ فرکانسی ۸ بانده:' : '8-Band Voice EQ Curve:'}
             </span>
-            <div className="flex flex-wrap items-center gap-1.5 font-mono text-[10.5px]">
+            <div className="flex flex-wrap items-center gap-1.5 font-mono text-[11px]">
               {eqResponseCurveDb.map((pt) => (
                 <span
                   key={pt.freqHz}
@@ -275,7 +275,7 @@ export const DspControlRack: React.FC<DspControlRackProps> = ({
                   onPointerCancel={() => onCommitGesture(`dsp-${s.key}`, `${s.label}: ${val} ${s.unit}`)}
                   onBlur={() => onCommitGesture(`dsp-${s.key}`, `${s.label}: ${val} ${s.unit}`)}
                   onKeyUp={() => onCommitGesture(`dsp-${s.key}`, `${s.label}: ${val} ${s.unit}`)}
-                  className="w-full accent-[var(--avp-accent)] cursor-pointer"
+                  className="w-full min-h-[44px] lg:min-h-[24px] accent-[var(--avp-accent)] cursor-pointer"
                 />
               </div>
             );

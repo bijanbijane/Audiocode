@@ -96,3 +96,57 @@ test('DesktopAudioStudioApp renders complete RTL studio workspace, OPFS/AI state
   assert.match(html, /data-testid="desktop-waveform-canvas"/);
   assert.match(html, /خروجی نهایی و مسترینگ/);
 });
+
+test('DesktopAudioStudioApp Export tab renders accessible progress bar and live status indicator', () => {
+  const tokens = PersianTextNormalizer.buildThreeLayerTranscript([
+    { id: 'tok_1', text: 'سلام', range: { start: 0, end: TimeMath.secondsToFlicks(0.4) }, confidence: 0.96 },
+  ]);
+
+  const html = renderToStaticMarkup(
+    React.createElement(DesktopAudioStudioApp, {
+      project: {
+        projectId: 'proj_desktop_export',
+        name: 'اپیزود خروجی',
+        canonicalSampleRate: 48000,
+        versions: {
+          projectSchemaVersion: 2,
+          audioEngineVersion: '1.2.0',
+          processingNodeCatalogVersion: '1.2.0',
+          activeModelBundleVersion: '1.2.0',
+        },
+        revision: 1,
+        tracks: [],
+        recommendations: [],
+      },
+      tokens,
+      playheadFlicks: 0,
+      isPlaying: false,
+      shuttleSpeed: 1.0,
+      opfsPersisted: true,
+      opfsUsedMb: 12,
+      aiModelReady: true,
+      aiModelDownloadProgressPercent: 100,
+      waveformCanvasRef: { current: null },
+      initialBottomTab: 'EXPORT',
+      exportState: 'RENDERING',
+      exportProgressPercent: 64,
+      exportOperationLabel: 'در حال پردازش ترک میزبان...',
+      onTogglePlayPause: () => {},
+      onSeek: () => {},
+      onUndo: () => {},
+      onRedo: () => {},
+      onPreviewSplice: () => {},
+      onAcceptRecommendation: () => {},
+      onRejectRecommendation: () => {},
+      onUpdateDisplayTranscript: () => {},
+      onApplyAutoAcousticFix: () => {},
+      onTriggerExport: () => {},
+    }),
+  );
+
+  assert.match(html, /data-testid="desktop-export-progress-panel"/);
+  assert.match(html, /role="progressbar"/);
+  assert.match(html, /aria-valuenow="64"/);
+  assert.match(html, /در حال رندر صوت/);
+  assert.match(html, /در حال پردازش ترک میزبان/);
+});

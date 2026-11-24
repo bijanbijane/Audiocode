@@ -37,6 +37,7 @@ export type ExportDefaultSampleRate = 16000 | 44100 | 48000;
 export type SuggestionSortOrder = 'time' | 'category' | 'confidence' | 'order';
 export type SuggestionCategoryFilter = 'all' | 'filler' | 'pause' | 'repetition' | 'breath';
 export type WorkspaceDensity = 'comfortable' | 'compact';
+export type WorkspaceInspectorSide = 'auto' | 'left' | 'right';
 
 export interface KeyboardShortcutMap {
   playPause: string;
@@ -64,6 +65,7 @@ export interface GlobalSettingsV1 {
   workspace: {
     showSuggestionsPanel: boolean;
     showFilesPanel: boolean;
+    inspectorSide: WorkspaceInspectorSide;
     density: WorkspaceDensity;
     transcriptFontScale: TranscriptFontScale;
     showTimelineRuler: boolean;
@@ -135,6 +137,7 @@ export function createDefaultGlobalSettings(): GlobalSettingsV1 {
     workspace: {
       showSuggestionsPanel: true,
       showFilesPanel: true,
+      inspectorSide: 'auto',
       density: 'comfortable',
       transcriptFontScale: 'md',
       showTimelineRuler: true,
@@ -153,7 +156,7 @@ export function createDefaultGlobalSettings(): GlobalSettingsV1 {
     suggestions: {
       defaultCategory: 'all',
       defaultSort: 'time',
-      autoExpandDetails: true,
+      autoExpandDetails: false,
       focusNextAfterReview: true,
       confirmBeforeApply: true,
       showContextTranscript: true,
@@ -352,6 +355,10 @@ export function migrateAndValidateSettings(
           typeof ws.showFilesPanel === 'boolean'
             ? ws.showFilesPanel
             : defaults.workspace.showFilesPanel,
+        inspectorSide:
+          ws.inspectorSide === 'left' || ws.inspectorSide === 'right'
+            ? ws.inspectorSide
+            : 'auto',
         density: ws.density === 'compact' ? 'compact' : 'comfortable',
         transcriptFontScale: VALID_FONT_SCALES.has(ws.transcriptFontScale as TranscriptFontScale)
           ? (ws.transcriptFontScale as TranscriptFontScale)

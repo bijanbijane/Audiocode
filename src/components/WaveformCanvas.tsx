@@ -25,6 +25,7 @@ import {
 import { selectPeakLevel } from '../engine/peakPyramid';
 import { flicksToSeconds, formatTimecode, secondsToFlicks } from '../engine/timebase';
 import type { WaveformSelectionState } from './AuditionTransportBar';
+import { readCanvasThemePalette } from '../utils/canvasThemePalette';
 
 export interface TimelineMarkerItem {
   id: string;
@@ -190,8 +191,10 @@ export const WaveformCanvas: React.FC<WaveformCanvasProps> = ({
     ctx.save();
     ctx.scale(dpr, dpr);
 
-    // Theme-Adaptive Studio Waveform Surface: Crisp Studio Slate in Light Mode, Deep Navy in Dark Mode
-    ctx.fillStyle = isDarkTheme ? '#0D1520' : '#F1F5F9';
+    const palette = readCanvasThemePalette();
+
+    // Theme-Adaptive Studio Waveform Surface derived from centralized CSS tokens (AUD-13)
+    ctx.fillStyle = isDarkTheme ? palette.waveBg : palette.surfaceSecondary;
     ctx.fillRect(0, 0, width, height);
 
     const safeTotalSec = Math.max(0.5, totalDurationSec);
@@ -204,9 +207,9 @@ export const WaveformCanvas: React.FC<WaveformCanvasProps> = ({
 
     // 1. Time Ruler
     if (showRuler) {
-      ctx.fillStyle = isDarkTheme ? '#131E2D' : '#E2E8F0';
+      ctx.fillStyle = isDarkTheme ? palette.waveSurface : palette.borderSubtle;
       ctx.fillRect(0, 0, width, rulerHeight);
-      ctx.strokeStyle = isDarkTheme ? '#243447' : '#CBD5E1';
+      ctx.strokeStyle = palette.border;
       ctx.lineWidth = 1;
       ctx.beginPath();
       ctx.moveTo(0, rulerHeight);
@@ -214,15 +217,15 @@ export const WaveformCanvas: React.FC<WaveformCanvasProps> = ({
       ctx.stroke();
 
       const tickStep = visibleSec <= 4 ? 0.5 : visibleSec <= 15 ? 1 : visibleSec <= 60 ? 5 : 10;
-      ctx.font = '10.5px ui-monospace, SFMono-Regular, Menlo, monospace';
-      ctx.fillStyle = isDarkTheme ? '#8EA3B8' : '#475569';
+      ctx.font = '11px ui-monospace, SFMono-Regular, Menlo, monospace';
+      ctx.fillStyle = palette.textMuted;
       for (
         let t = Math.ceil(viewStartSec / tickStep) * tickStep;
         t <= viewStartSec + visibleSec;
         t += tickStep
       ) {
         const x = secToX(t);
-        ctx.strokeStyle = isDarkTheme ? '#293B4F' : '#94A3B8';
+        ctx.strokeStyle = palette.border;
         ctx.beginPath();
         ctx.moveTo(x, rulerHeight - 6);
         ctx.lineTo(x, rulerHeight);
@@ -230,7 +233,7 @@ export const WaveformCanvas: React.FC<WaveformCanvasProps> = ({
         ctx.fillText(`${t.toFixed(tickStep < 1 ? 1 : 0)}s`, x + 4, 16);
 
         if (showGrid) {
-          ctx.strokeStyle = isDarkTheme ? 'rgba(142, 163, 184, 0.06)' : 'rgba(100, 116, 139, 0.10)';
+          ctx.strokeStyle = palette.waveGrid;
           ctx.beginPath();
           ctx.moveTo(x, rulerHeight);
           ctx.lineTo(x, height);
@@ -246,21 +249,21 @@ export const WaveformCanvas: React.FC<WaveformCanvasProps> = ({
 
       ctx.fillStyle = isDarkTheme
         ? tIdx % 2 === 0
-          ? '#0D1520'
-          : '#101A27'
+          ? palette.waveBg
+          : palette.waveSurface
         : tIdx % 2 === 0
-          ? '#F8FAFC'
-          : '#F1F5F9';
+          ? palette.surfaceShell
+          : palette.surfaceSecondary;
       ctx.fillRect(0, top, width, trackHeight);
 
-      ctx.strokeStyle = isDarkTheme ? '#1E2D3E' : '#CBD5E1';
+      ctx.strokeStyle = palette.border;
       ctx.beginPath();
       ctx.moveTo(0, top + trackHeight);
       ctx.lineTo(width, top + trackHeight);
       ctx.stroke();
 
       if (showGrid) {
-        ctx.strokeStyle = isDarkTheme ? 'rgba(148, 163, 184, 0.14)' : 'rgba(100, 116, 139, 0.22)';
+        ctx.strokeStyle = palette.waveGrid;
         ctx.beginPath();
         ctx.moveTo(0, midY);
         ctx.lineTo(width, midY);
@@ -277,12 +280,12 @@ export const WaveformCanvas: React.FC<WaveformCanvasProps> = ({
         const clipW = Math.max(1, x1 - x0);
 
         if (clip.kind === 'room-tone-fill') {
-          ctx.fillStyle = 'rgba(31, 163, 139, 0.14)';
+          ctx.fillStyle = palette.brandSoft;
           ctx.fillRect(x0, top + 8, clipW, trackHeight - 16);
-          ctx.strokeStyle = 'rgba(67, 199, 167, 0.5)';
+          ctx.strokeStyle = palette.waveStroke;
           ctx.strokeRect(x0 + 0.5, top + 8.5, Math.max(1, clipW - 1), trackHeight - 17);
-          ctx.fillStyle = isDarkTheme ? '#43C7A7' : '#0D7A66';
-          ctx.font = '10px sans-serif';
+          ctx.fillStyle = palette.accentText;
+          ctx.font = '11px sans-serif';
           if (clipW > 48) {
             ctx.fillText('Room Tone', x0 + 6, top + 22);
           }
@@ -290,7 +293,7 @@ export const WaveformCanvas: React.FC<WaveformCanvasProps> = ({
         }
 
         if (clipStartSec > 0.02 && x0 > 1 && x0 < width - 1) {
-          ctx.strokeStyle = 'rgba(67, 199, 167, 0.45)';
+          ctx.strokeStyle = palette.waveStroke;
           ctx.lineWidth = 1;
           ctx.beginPath();
           ctx.moveTo(x0, top + 6);
@@ -311,18 +314,14 @@ export const WaveformCanvas: React.FC<WaveformCanvasProps> = ({
         const barColor = track.muted
           ? 'rgba(100, 116, 139, 0.45)'
           : tIdx === 0
-            ? isDarkTheme
-              ? '#43C7A7'
-              : '#0D9488'
-            : isDarkTheme
-              ? '#38BDF8'
-              : '#0284C7';
+            ? palette.waveStroke
+            : palette.waveStrokeSecondary;
         const rmsColor = track.muted
           ? 'rgba(100, 116, 139, 0.25)'
           : tIdx === 0
             ? isDarkTheme
-              ? 'rgba(31, 163, 139, 0.45)'
-              : 'rgba(13, 148, 136, 0.35)'
+              ? 'rgba(52, 211, 183, 0.42)'
+              : 'rgba(15, 118, 110, 0.34)'
             : isDarkTheme
               ? 'rgba(56, 189, 248, 0.34)'
               : 'rgba(2, 132, 199, 0.28)';
@@ -744,8 +743,8 @@ export const WaveformCanvas: React.FC<WaveformCanvasProps> = ({
       aria-label={isFa ? 'تایملاین و شکل‌موج صوتی' : 'Audio Waveform & Timeline'}
       className="border-b border-[var(--avp-border)] bg-[var(--avp-surface)] shrink-0 overflow-hidden"
     >
-      {/* Strictly Single-Line 36px Timeline Toolbar — 3 Segmented Studio Clusters */}
-      <div className="h-[36px] flex items-center justify-between gap-1 sm:gap-1.5 px-2 sm:px-3 border-b border-[var(--avp-border)] bg-[var(--avp-surface)] overflow-x-auto">
+      {/* Responsive Single-Line / Tablet-Safe Timeline Toolbar — 3 Segmented Studio Clusters */}
+      <div className="min-h-[36px] flex flex-wrap xl:flex-nowrap items-center justify-between gap-1 sm:gap-1.5 px-2 sm:px-3 py-1 xl:py-0 border-b border-[var(--avp-border)] bg-[var(--avp-surface)]">
         {/* Cluster 1 (Right/Start): Timeline Identity + Unified Sync & Drift Capsule */}
         <div className="flex items-center gap-1.5 sm:gap-2 text-xs min-w-0 shrink-0">
           <span className="font-bold text-[12px] sm:text-[12.5px] text-[var(--avp-text)] whitespace-nowrap">
@@ -766,7 +765,7 @@ export const WaveformCanvas: React.FC<WaveformCanvasProps> = ({
                   ? 'قفل همگام‌سازی فعال — بررسی و تنظیم انحراف زمانی ترک‌ها'
                   : 'Sync-Lock active — Inspect & align multi-track sync offset'
               }
-              className={`inline-flex items-center gap-1 sm:gap-1.5 h-[22px] sm:h-[24px] px-1.5 sm:px-2 rounded-md border text-[10px] sm:text-[10.5px] font-medium cursor-pointer transition-colors ${
+              className={`inline-flex items-center gap-1 sm:gap-1.5 min-h-[44px] sm:min-h-[26px] px-2 rounded-md border text-[11px] font-medium cursor-pointer transition-colors ${
                 showSyncPopover || hasDetectedDrift
                   ? 'border-[var(--avp-warning)]/40 bg-[var(--avp-warning-soft)]/70 text-[var(--avp-warning-text)]'
                   : 'border-[var(--avp-border)] bg-[var(--avp-surface-secondary)] text-[var(--avp-accent-text)]'
@@ -785,7 +784,7 @@ export const WaveformCanvas: React.FC<WaveformCanvasProps> = ({
             </button>
           ) : (
             <span
-              className="inline-flex items-center gap-1 h-[22px] px-1.5 rounded border border-[var(--avp-border)] bg-[var(--avp-surface-secondary)] text-[10.5px] text-[var(--avp-accent-text)] font-medium whitespace-nowrap"
+              className="inline-flex items-center gap-1 min-h-[26px] px-2 rounded border border-[var(--avp-border)] bg-[var(--avp-surface-secondary)] text-[11px] text-[var(--avp-accent-text)] font-medium whitespace-nowrap"
               title={isFa ? 'قفل همگام‌سازی چندترکی فعال' : 'Multi-track Sync-Lock active'}
             >
               <Lock className="w-3 h-3" strokeWidth={1.75} aria-hidden="true" />
@@ -795,7 +794,7 @@ export const WaveformCanvas: React.FC<WaveformCanvasProps> = ({
         </div>
 
         {/* Cluster 2 & 3 (Left/End): Framed Editing Tools + View & Zoom Deck */}
-        <div className="flex items-center gap-1 sm:gap-1.5 text-xs shrink-0">
+        <div className="flex flex-wrap sm:flex-nowrap items-center gap-1 sm:gap-1.5 text-xs shrink-0">
           {/* Cluster 2: Framed Action Tool Group [Marker | Split | Range] */}
           <div className="inline-flex items-center rounded-lg border border-[var(--avp-border)] bg-[var(--avp-surface-secondary)]/60 p-0.5">
             {onAddMarkerAtPlayhead && (
@@ -803,10 +802,11 @@ export const WaveformCanvas: React.FC<WaveformCanvasProps> = ({
                 type="button"
                 data-testid="btn-add-timeline-marker"
                 onClick={onAddMarkerAtPlayhead}
+                aria-label={isFa ? 'ثبت نشانگر در مکان‌نما' : 'Add marker at playhead'}
                 title={isFa ? 'ثبت نشانگر در مکان‌نما (M)' : 'Add marker at playhead (M)'}
-                className="inline-flex items-center gap-1 h-[22px] px-1.5 sm:px-2 rounded-[5px] text-[11px] font-medium text-[var(--avp-text-secondary)] hover:text-[var(--avp-text)] hover:bg-[var(--avp-surface)] cursor-pointer transition-colors"
+                className="inline-flex items-center justify-center gap-1 min-w-[44px] min-h-[44px] sm:min-w-[26px] sm:min-h-[26px] px-2 rounded-[5px] text-[11px] font-medium text-[var(--avp-text-secondary)] hover:text-[var(--avp-text)] hover:bg-[var(--avp-surface)] cursor-pointer transition-colors"
               >
-                <BookmarkPlus className="w-3 h-3 text-[var(--avp-accent)]" strokeWidth={1.75} aria-hidden="true" />
+                <BookmarkPlus className="w-3.5 h-3.5 text-[var(--avp-accent)]" strokeWidth={1.75} aria-hidden="true" />
                 <span className="hidden xl:inline">{isFa ? 'نشانگر' : 'Marker'}</span>
               </button>
             )}
@@ -820,10 +820,11 @@ export const WaveformCanvas: React.FC<WaveformCanvasProps> = ({
                 type="button"
                 data-testid="btn-split-at-playhead"
                 onClick={onSplitAtPlayhead}
+                aria-label={isFa ? 'برش غیرمخرب در مکان‌نما' : 'Split at playhead'}
                 title={isFa ? 'برش غیرمخرب در مکان‌نما' : 'Non-destructive split at playhead'}
-                className="inline-flex items-center gap-1 h-[22px] px-1.5 sm:px-2 rounded-[5px] text-[11px] font-medium text-[var(--avp-text-secondary)] hover:text-[var(--avp-text)] hover:bg-[var(--avp-surface)] cursor-pointer transition-colors"
+                className="inline-flex items-center justify-center gap-1 min-w-[44px] min-h-[44px] sm:min-w-[26px] sm:min-h-[26px] px-2 rounded-[5px] text-[11px] font-medium text-[var(--avp-text-secondary)] hover:text-[var(--avp-text)] hover:bg-[var(--avp-surface)] cursor-pointer transition-colors"
               >
-                <SplitSquareVertical className="w-3 h-3" strokeWidth={1.75} aria-hidden="true" />
+                <SplitSquareVertical className="w-3.5 h-3.5" strokeWidth={1.75} aria-hidden="true" />
                 <span className="hidden xl:inline">{isFa ? 'برش' : 'Split'}</span>
               </button>
             )}
@@ -834,10 +835,11 @@ export const WaveformCanvas: React.FC<WaveformCanvasProps> = ({
               type="button"
               data-testid="btn-select-playhead-window"
               onClick={handleSelectWindowAroundPlayhead}
+              aria-label={isFa ? 'انتخاب بازه اطراف مکان‌نما' : 'Select range around playhead'}
               title={isFa ? 'انتخاب بازه ۰.۷ ثانیه‌ای اطراف مکان‌نما' : 'Select 0.7s range around playhead'}
-              className="inline-flex items-center gap-1 h-[22px] px-1.5 sm:px-2 rounded-[5px] text-[11px] font-medium text-[var(--avp-text-secondary)] hover:text-[var(--avp-text)] hover:bg-[var(--avp-surface)] cursor-pointer transition-colors"
+              className="inline-flex items-center justify-center gap-1 min-w-[44px] min-h-[44px] sm:min-w-[26px] sm:min-h-[26px] px-2 rounded-[5px] text-[11px] font-medium text-[var(--avp-text-secondary)] hover:text-[var(--avp-text)] hover:bg-[var(--avp-surface)] cursor-pointer transition-colors"
             >
-              <Scissors className="w-3 h-3 text-[var(--avp-warning)]" strokeWidth={1.75} aria-hidden="true" />
+              <Scissors className="w-3.5 h-3.5 text-[var(--avp-warning)]" strokeWidth={1.75} aria-hidden="true" />
               <span className="hidden xl:inline">{isFa ? 'بازه' : 'Range'}</span>
             </button>
           </div>
@@ -852,7 +854,7 @@ export const WaveformCanvas: React.FC<WaveformCanvasProps> = ({
                 setSelectedRangeSec({ ...selectedRangeSec, scope: nextScope });
               }
             }}
-            className="hidden 2xl:inline-flex avp-btn avp-btn-sm avp-btn-ghost h-[24px] px-2"
+            className="hidden 2xl:inline-flex avp-btn avp-btn-sm avp-btn-ghost min-h-[26px] px-2"
           >
             {effectiveSelectionScope === 'all'
               ? isFa
@@ -890,7 +892,7 @@ export const WaveformCanvas: React.FC<WaveformCanvasProps> = ({
                         ? `تنظیم نسبت ارتفاع تایم‌لاین (${preset.label})`
                         : `Set timeline split ratio (${preset.label})`
                     }
-                    className={`inline-flex items-center justify-center h-[22px] px-1.5 rounded-[5px] text-[10px] font-mono font-medium cursor-pointer transition-colors ${
+                    className={`inline-flex items-center justify-center min-h-[26px] min-w-[28px] px-2 rounded-[5px] text-[11px] font-mono font-medium cursor-pointer transition-colors ${
                       isActive
                         ? 'bg-[var(--avp-surface)] text-[var(--avp-accent-text)] font-semibold shadow-2xs'
                         : 'text-[var(--avp-text-secondary)] hover:text-[var(--avp-text)]'
@@ -909,16 +911,16 @@ export const WaveformCanvas: React.FC<WaveformCanvasProps> = ({
               type="button"
               data-testid="btn-toggle-spectral-view"
               onClick={() => setViewMode((m) => (m === 'waveform' ? 'spectral' : 'waveform'))}
-              className={`inline-flex items-center gap-1 h-[22px] px-2 rounded-[5px] text-[11px] font-medium cursor-pointer transition-colors ${
+              className={`inline-flex items-center justify-center gap-1 min-h-[44px] sm:min-h-[26px] px-2.5 sm:px-2 rounded-[5px] text-[11px] font-medium cursor-pointer transition-colors ${
                 viewMode === 'spectral'
                   ? 'bg-[var(--avp-warning-soft)] text-[var(--avp-warning-text)] font-semibold'
                   : 'text-[var(--avp-text-secondary)] hover:text-[var(--avp-text)] hover:bg-[var(--avp-surface)]'
               }`}
             >
               {viewMode === 'spectral' ? (
-                <Waves className="w-3 h-3 text-[var(--avp-warning)]" strokeWidth={1.75} aria-hidden="true" />
+                <Waves className="w-3.5 h-3.5 text-[var(--avp-warning)]" strokeWidth={1.75} aria-hidden="true" />
               ) : (
-                <Activity className="w-3 h-3 text-[var(--avp-accent)]" strokeWidth={1.75} aria-hidden="true" />
+                <Activity className="w-3.5 h-3.5 text-[var(--avp-accent)]" strokeWidth={1.75} aria-hidden="true" />
               )}
               <span>{viewMode === 'spectral' ? (isFa ? 'طیف' : 'Spectral') : isFa ? 'موج' : 'Wave'}</span>
             </button>
@@ -931,16 +933,16 @@ export const WaveformCanvas: React.FC<WaveformCanvasProps> = ({
                 data-testid="btn-waveform-zoom-out"
                 onClick={() => onZoomChange(Math.max(1, Number((zoom / 1.5).toFixed(2))))}
                 aria-label={isFa ? 'کوچک‌نمایی' : 'Zoom out'}
-                className="inline-flex items-center justify-center w-[22px] h-[22px] rounded-[5px] text-[var(--avp-text-secondary)] hover:text-[var(--avp-text)] hover:bg-[var(--avp-surface)] cursor-pointer"
+                className="inline-flex items-center justify-center min-w-[44px] min-h-[44px] sm:min-w-[26px] sm:min-h-[26px] rounded-[5px] text-[var(--avp-text-secondary)] hover:text-[var(--avp-text)] hover:bg-[var(--avp-surface)] cursor-pointer"
               >
-                <ZoomOut className="w-3 h-3" strokeWidth={1.75} />
+                <ZoomOut className="w-3.5 h-3.5" strokeWidth={1.75} />
               </button>
               <button
                 type="button"
                 data-testid="btn-waveform-zoom-fit"
                 onClick={() => onZoomChange(1)}
                 title={isFa ? 'نمایش کامل (Fit)' : 'Fit to view'}
-                className="inline-flex items-center justify-center h-[22px] px-1.5 rounded-[5px] font-mono tabular-nums text-[10.5px] font-semibold text-[var(--avp-text)] hover:bg-[var(--avp-surface)] cursor-pointer"
+                className="inline-flex items-center justify-center min-w-[44px] min-h-[44px] sm:min-w-[36px] sm:min-h-[26px] px-1.5 rounded-[5px] font-mono tabular-nums text-[11px] font-semibold text-[var(--avp-text)] hover:bg-[var(--avp-surface)] cursor-pointer"
               >
                 {zoom.toFixed(1)}x
               </button>
@@ -949,18 +951,18 @@ export const WaveformCanvas: React.FC<WaveformCanvasProps> = ({
                 data-testid="btn-waveform-zoom-in"
                 onClick={() => onZoomChange(Math.min(12, Number((zoom * 1.5).toFixed(2))))}
                 aria-label={isFa ? 'بزرگ‌نمایی' : 'Zoom in'}
-                className="inline-flex items-center justify-center w-[22px] h-[22px] rounded-[5px] text-[var(--avp-text-secondary)] hover:text-[var(--avp-text)] hover:bg-[var(--avp-surface)] cursor-pointer"
+                className="inline-flex items-center justify-center min-w-[44px] min-h-[44px] sm:min-w-[26px] sm:min-h-[26px] rounded-[5px] text-[var(--avp-text-secondary)] hover:text-[var(--avp-text)] hover:bg-[var(--avp-surface)] cursor-pointer"
               >
-                <ZoomIn className="w-3 h-3" strokeWidth={1.75} />
+                <ZoomIn className="w-3.5 h-3.5" strokeWidth={1.75} />
               </button>
               {zoom > 1.05 && (
                 <button
                   type="button"
                   onClick={() => onZoomChange(1)}
                   aria-label={isFa ? 'بازنشانی بزرگ‌نمایی' : 'Reset zoom'}
-                  className="inline-flex items-center justify-center w-[22px] h-[22px] rounded-[5px] text-[var(--avp-text-secondary)] hover:text-[var(--avp-text)] hover:bg-[var(--avp-surface)] cursor-pointer"
+                  className="inline-flex items-center justify-center min-w-[44px] min-h-[44px] sm:min-w-[26px] sm:min-h-[26px] rounded-[5px] text-[var(--avp-text-secondary)] hover:text-[var(--avp-text)] hover:bg-[var(--avp-surface)] cursor-pointer"
                 >
-                  <Minimize2 className="w-3 h-3" strokeWidth={1.75} />
+                  <Minimize2 className="w-3.5 h-3.5" strokeWidth={1.75} />
                 </button>
               )}
             </div>
@@ -1010,7 +1012,7 @@ export const WaveformCanvas: React.FC<WaveformCanvasProps> = ({
               type="button"
               data-testid="btn-waveform-ripple-cut"
               onClick={() => handleExecuteWaveformRangeCut('sync-locked-ripple-cut')}
-              className="avp-btn avp-btn-sm bg-[var(--avp-warning)] text-slate-950 font-semibold hover:opacity-90"
+              className="avp-btn avp-btn-sm avp-btn-secondary font-semibold"
             >
               {isFa ? 'حذف بازه (Ripple)' : 'Ripple Cut'}
             </button>
@@ -1029,7 +1031,7 @@ export const WaveformCanvas: React.FC<WaveformCanvasProps> = ({
               data-testid="btn-clear-waveform-selection"
               onClick={() => setSelectedRangeSec(null)}
               aria-label={isFa ? 'لغو انتخاب بازه' : 'Clear selection'}
-              className="avp-btn-icon-sm"
+              className="avp-btn-icon avp-btn-icon-sm avp-touch-icon"
             >
               <X className="w-3.5 h-3.5" strokeWidth={1.75} />
             </button>
@@ -1100,7 +1102,7 @@ export const WaveformCanvas: React.FC<WaveformCanvasProps> = ({
               type="button"
               onClick={() => setShowSyncPopover(false)}
               aria-label={isFa ? 'بستن تنظیم همگام‌سازی' : 'Close sync alignment'}
-              className="avp-btn-icon-sm"
+              className="avp-btn-icon avp-btn-icon-sm avp-touch-icon"
             >
               <X className="w-3.5 h-3.5" strokeWidth={1.75} />
             </button>
@@ -1108,12 +1110,12 @@ export const WaveformCanvas: React.FC<WaveformCanvasProps> = ({
         </div>
       )}
 
-      {/* Mobile (<md) Compact Horizontal Track Strip — Saves 160px vertical space on 390px screens */}
+      {/* Mobile (<md) Compact Horizontal Track Strip — Preserves >=44px touch targets */}
       <div className="flex md:hidden items-center justify-between gap-2 px-3 py-1 border-b border-[var(--avp-border)] bg-[var(--avp-surface-secondary)] overflow-x-auto">
         {tracks.map((track, idx) => {
           const isHost = idx === 0;
           return (
-            <div key={track.id} className="inline-flex items-center gap-1.5 shrink-0 text-[11px]">
+            <div key={track.id} className="inline-flex items-center gap-1.5 shrink-0 text-xs">
               <span
                 className={`w-2 h-2 rounded-full shrink-0 ${
                   isHost ? 'bg-emerald-500' : 'bg-sky-400'
@@ -1128,7 +1130,7 @@ export const WaveformCanvas: React.FC<WaveformCanvasProps> = ({
                 onClick={() => onToggleTrackMute(track.id)}
                 aria-label={`${isFa ? 'قطع صدا' : 'Mute'} ${track.name}`}
                 aria-pressed={track.muted}
-                className={`h-5 px-1.5 rounded text-[10px] font-mono font-semibold cursor-pointer ${
+                className={`inline-flex items-center justify-center min-w-[44px] min-h-[44px] px-2.5 rounded-md border border-[var(--avp-border)] text-[11px] font-mono font-semibold cursor-pointer ${
                   track.muted
                     ? 'bg-[var(--avp-danger-soft)] text-[var(--avp-danger)]'
                     : 'bg-[var(--avp-surface)] text-[var(--avp-text-secondary)]'
@@ -1141,7 +1143,7 @@ export const WaveformCanvas: React.FC<WaveformCanvasProps> = ({
                 onClick={() => onToggleTrackSolo(track.id)}
                 aria-label={`${isFa ? 'تک‌صدایی' : 'Solo'} ${track.name}`}
                 aria-pressed={track.solo}
-                className={`h-5 px-1.5 rounded text-[10px] font-mono font-semibold cursor-pointer ${
+                className={`inline-flex items-center justify-center min-w-[44px] min-h-[44px] px-2.5 rounded-md border border-[var(--avp-border)] text-[11px] font-mono font-semibold cursor-pointer ${
                   track.solo
                     ? 'bg-[var(--avp-warning-soft)] text-[var(--avp-warning-text)]'
                     : 'bg-[var(--avp-surface)] text-[var(--avp-text-secondary)]'
@@ -1158,9 +1160,9 @@ export const WaveformCanvas: React.FC<WaveformCanvasProps> = ({
       <div dir="ltr" className="grid grid-cols-1 md:grid-cols-[120px_1fr]">
         <div className="hidden md:flex border-r border-[var(--avp-border)] bg-[var(--avp-surface-secondary)] flex-col">
           {showRuler && (
-            <div className="h-[24px] px-2 flex items-center justify-between text-[10.5px] text-[var(--avp-accent-text)] border-b border-[var(--avp-border)] avp-bidi-num font-semibold">
+            <div className="h-[24px] px-2 flex items-center justify-between text-[11px] text-[var(--avp-accent-text)] border-b border-[var(--avp-border)] avp-bidi-num font-semibold">
               <span>{formatTimecode(secondsToFlicks(playheadSec))}</span>
-              <span className="text-[9px] uppercase tracking-wider text-[var(--avp-text-faint)] font-sans">
+              <span className="text-[11px] uppercase tracking-wider text-[var(--avp-text-muted)] font-sans">
                 0s →
               </span>
             </div>
@@ -1173,18 +1175,20 @@ export const WaveformCanvas: React.FC<WaveformCanvasProps> = ({
               <div
                 key={track.id}
                 dir={isFa ? 'rtl' : 'ltr'}
-                style={{ height: `${trackHeight}px` }}
-                className={`px-2 py-1.5 border-b border-[var(--avp-border)] last:border-b-0 border-l-[3px] flex flex-col justify-between overflow-hidden ${
-                  isHost ? 'border-l-emerald-500' : 'border-l-sky-400'
-                }`}
+                style={{
+                  height: `${trackHeight}px`,
+                  borderLeftColor: isHost ? 'var(--avp-track-host)' : 'var(--avp-track-guest)',
+                }}
+                className="px-2 py-1.5 border-b border-[var(--avp-border)] last:border-b-0 border-l-[3px] flex flex-col justify-between overflow-hidden"
               >
                 {/* Row 1: Color Dot + Speaker Identity (Start) + Segmented [M|S] Studio Pill (End) */}
                 <div className="flex items-center justify-between gap-1.5 min-w-0">
                   <div className="min-w-0 flex items-center gap-1.5">
                     <span
-                      className={`w-2 h-2 rounded-full shrink-0 ${
-                        isHost ? 'bg-emerald-500' : 'bg-sky-400'
-                      }`}
+                      style={{
+                        backgroundColor: isHost ? 'var(--avp-track-host)' : 'var(--avp-track-guest)',
+                      }}
+                      className="w-2 h-2 rounded-full shrink-0"
                       aria-hidden="true"
                     />
                     <span
@@ -1195,7 +1199,7 @@ export const WaveformCanvas: React.FC<WaveformCanvasProps> = ({
                     </span>
                   </div>
 
-                  {/* Unified Segmented [M | S] Control Pill */}
+                  {/* Unified Segmented [M | S] Control Pill (>= 24px WCAG 2.5.8 target) */}
                   <div
                     className="inline-flex items-center rounded-md border border-[var(--avp-border)] bg-[var(--avp-surface)] overflow-hidden shrink-0"
                     dir="ltr"
@@ -1205,7 +1209,7 @@ export const WaveformCanvas: React.FC<WaveformCanvasProps> = ({
                       onClick={() => onToggleTrackMute(track.id)}
                       aria-label={`${isFa ? 'قطع صدا' : 'Mute'} ${track.name}`}
                       aria-pressed={track.muted}
-                      className={`inline-flex items-center justify-center w-[22px] h-[20px] text-[10px] font-mono font-bold cursor-pointer transition-colors ${
+                      className={`inline-flex items-center justify-center w-[26px] h-[24px] text-[11px] font-mono font-bold cursor-pointer transition-colors ${
                         track.muted
                           ? 'bg-[var(--avp-danger-soft)] text-[var(--avp-danger)]'
                           : 'text-[var(--avp-text-secondary)] hover:bg-[var(--avp-surface-hover)] hover:text-[var(--avp-text)]'
@@ -1219,7 +1223,7 @@ export const WaveformCanvas: React.FC<WaveformCanvasProps> = ({
                       onClick={() => onToggleTrackSolo(track.id)}
                       aria-label={`${isFa ? 'تک‌صدایی' : 'Solo'} ${track.name}`}
                       aria-pressed={track.solo}
-                      className={`inline-flex items-center justify-center w-[22px] h-[20px] text-[10px] font-mono font-bold cursor-pointer transition-colors ${
+                      className={`inline-flex items-center justify-center w-[26px] h-[24px] text-[11px] font-mono font-bold cursor-pointer transition-colors ${
                         track.solo
                           ? 'bg-[var(--avp-warning-soft)] text-[var(--avp-warning-text)]'
                           : 'text-[var(--avp-text-secondary)] hover:bg-[var(--avp-surface-hover)] hover:text-[var(--avp-text)]'
@@ -1233,22 +1237,27 @@ export const WaveformCanvas: React.FC<WaveformCanvasProps> = ({
                 {/* Row 2: Role + Channel Telemetry & Segmented Gain Strip (hidden in Mini compact mode) */}
                 {!isCompactTrack && (
                   <div className="space-y-1">
-                    <div className="flex items-center justify-between text-[9.5px]">
+                    <div className="flex items-center justify-between text-[11px]">
                       <span className="text-[var(--avp-text-muted)] font-medium truncate">
-                        {roleLabel} · <bdi dir="ltr" className="font-mono text-[9px]">{`CH${idx + 1}`}</bdi>
+                        {roleLabel} · <bdi dir="ltr" className="font-mono text-[11px]">{`CH${idx + 1}`}</bdi>
                       </span>
-                      <bdi dir="ltr" className="font-mono text-[9px] text-[var(--avp-text-secondary)] font-semibold">
+                      <bdi dir="ltr" className="font-mono text-[11px] text-[var(--avp-text-secondary)] font-semibold">
                         {track.muted ? 'MUTE' : '0.0 dB'}
                       </bdi>
                     </div>
                     <div className="h-[3px] w-full rounded-full bg-[var(--avp-border)] overflow-hidden" dir="ltr">
                       <div
-                        className={`h-full rounded-full transition-all ${
+                        style={
                           track.muted
-                            ? 'w-0'
-                            : isHost
-                              ? 'w-[78%] bg-emerald-500/80'
-                              : 'w-[72%] bg-sky-400/80'
+                            ? undefined
+                            : {
+                                backgroundColor: isHost
+                                  ? 'var(--avp-track-host)'
+                                  : 'var(--avp-track-guest)',
+                              }
+                        }
+                        className={`h-full rounded-full transition-all ${
+                          track.muted ? 'w-0' : isHost ? 'w-[78%] opacity-85' : 'w-[72%] opacity-85'
                         }`}
                       />
                     </div>
@@ -1259,7 +1268,7 @@ export const WaveformCanvas: React.FC<WaveformCanvasProps> = ({
           })}
         </div>
 
-        <div ref={containerRef} className="w-full overflow-hidden select-none bg-slate-100 dark:bg-[#0D1520]">
+        <div ref={containerRef} className="w-full overflow-hidden select-none bg-[var(--avp-wave-bg)]">
           <canvas
             ref={canvasRef}
             tabIndex={0}

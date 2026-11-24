@@ -136,9 +136,9 @@ export const SuggestionWaveformMiniCard: React.FC<SuggestionWaveformMiniCardProp
                 data-testid={`minicard-mode-${opt.id}`}
                 aria-pressed={active}
                 onClick={() => setViewMode(opt.id)}
-                className={`px-2 py-0.5 text-[11px] font-medium rounded-md transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
+                className={`min-h-[44px] sm:min-h-[24px] px-2 py-0.5 text-[11px] font-medium rounded-md transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
                   active
-                    ? 'bg-[var(--avp-accent)] text-white'
+                    ? 'bg-[var(--avp-brand-solid)] text-[var(--avp-on-brand)]'
                     : 'text-[var(--avp-text-secondary)] hover:text-[var(--avp-text)]'
                 }`}
               >
@@ -179,7 +179,7 @@ export const SuggestionWaveformMiniCard: React.FC<SuggestionWaveformMiniCardProp
             </div>
             <div
               dir="ltr"
-              className="rounded-lg border border-slate-800 bg-[var(--avp-waveform-bg)] px-1.5 py-1 overflow-hidden"
+              className="rounded-lg border border-[var(--avp-border-strong)] bg-[var(--avp-wave-bg)] px-1.5 py-1 overflow-hidden"
             >
               <svg
                 data-testid="minicard-svg-before"
@@ -188,14 +188,14 @@ export const SuggestionWaveformMiniCard: React.FC<SuggestionWaveformMiniCardProp
                 role="img"
                 aria-label={`${isFa ? 'موج قبل از اعمال' : 'Before waveform'} ${recommendation.relatedText}`}
               >
-                <line x1={0} y1={MID_Y} x2={SVG_W} y2={MID_Y} stroke="#1E2B3A" strokeWidth={1} />
+                <line x1={0} y1={MID_Y} x2={SVG_W} y2={MID_Y} stroke="var(--avp-wave-surface)" strokeWidth={1} />
                 <rect
                   data-testid="minicard-cut-zone"
                   x={cutStartX.toFixed(2)}
                   y={1}
                   width={cutWidthX.toFixed(2)}
                   height={SVG_H - 2}
-                  fill="#D85D65"
+                  fill="var(--avp-danger)"
                   fillOpacity={0.22}
                 />
                 {renderWaveformBars(
@@ -204,7 +204,7 @@ export const SuggestionWaveformMiniCard: React.FC<SuggestionWaveformMiniCardProp
                   SVG_W,
                   (_bin, _idx, ratio) => {
                     const inCut = ratio >= preview.cutStartRatio && ratio <= preview.cutEndRatio;
-                    return inCut ? '#F2747C' : '#43C7A7';
+                    return inCut ? 'var(--avp-danger)' : 'var(--avp-wave-stroke)';
                   },
                   (_bin, _idx, ratio) => {
                     const inCut = ratio >= preview.cutStartRatio && ratio <= preview.cutEndRatio;
@@ -216,7 +216,7 @@ export const SuggestionWaveformMiniCard: React.FC<SuggestionWaveformMiniCardProp
                   y1={0}
                   x2={cutStartX.toFixed(2)}
                   y2={SVG_H}
-                  stroke="#F2747C"
+                  stroke="var(--avp-danger)"
                   strokeWidth={1.25}
                   strokeDasharray="3 2"
                 />
@@ -225,7 +225,7 @@ export const SuggestionWaveformMiniCard: React.FC<SuggestionWaveformMiniCardProp
                   y1={0}
                   x2={cutEndX.toFixed(2)}
                   y2={SVG_H}
-                  stroke="#F2747C"
+                  stroke="var(--avp-danger)"
                   strokeWidth={1.25}
                   strokeDasharray="3 2"
                 />
@@ -252,7 +252,7 @@ export const SuggestionWaveformMiniCard: React.FC<SuggestionWaveformMiniCardProp
             </div>
             <div
               dir="ltr"
-              className="rounded-lg border border-slate-800 bg-[var(--avp-waveform-bg)] px-1.5 py-1 overflow-hidden"
+              className="rounded-lg border border-[var(--avp-border-strong)] bg-[var(--avp-wave-bg)] px-1.5 py-1 overflow-hidden"
             >
               <svg
                 data-testid="minicard-svg-after"
@@ -274,13 +274,13 @@ export const SuggestionWaveformMiniCard: React.FC<SuggestionWaveformMiniCardProp
                       y1="0"
                       x2="0"
                       y2="6"
-                      stroke="#334155"
+                      stroke="var(--avp-border-strong)"
                       strokeWidth="1.2"
                       strokeOpacity="0.6"
                     />
                   </pattern>
                 </defs>
-                <line x1={0} y1={MID_Y} x2={SVG_W} y2={MID_Y} stroke="#1E2B3A" strokeWidth={1} />
+                <line x1={0} y1={MID_Y} x2={SVG_W} y2={MID_Y} stroke="var(--avp-wave-surface)" strokeWidth={1} />
                 {!isRipple && (
                   <rect
                     data-testid="minicard-roomtone-zone"
@@ -288,7 +288,7 @@ export const SuggestionWaveformMiniCard: React.FC<SuggestionWaveformMiniCardProp
                     y={1}
                     width={cutWidthX.toFixed(2)}
                     height={SVG_H - 2}
-                    fill="#1FA38B"
+                    fill="var(--avp-wave-stroke)"
                     fillOpacity={0.14}
                   />
                 )}
@@ -306,7 +306,7 @@ export const SuggestionWaveformMiniCard: React.FC<SuggestionWaveformMiniCardProp
                       y1={0}
                       x2={afterFillW.toFixed(2)}
                       y2={SVG_H}
-                      stroke="#475569"
+                      stroke="var(--avp-text-muted)"
                       strokeWidth={1}
                       strokeDasharray="2 2"
                     />
@@ -316,7 +316,7 @@ export const SuggestionWaveformMiniCard: React.FC<SuggestionWaveformMiniCardProp
                   preview.afterBins,
                   0,
                   afterFillW,
-                  (bin) => (bin.isRoomTone ? '#1FA38B' : '#43C7A7'),
+                  (bin) => (bin.isRoomTone ? 'var(--avp-brand)' : 'var(--avp-wave-stroke)'),
                   (bin) => (bin.isRoomTone ? 0.65 : 0.88),
                 )}
                 {isRipple ? (
@@ -326,12 +326,12 @@ export const SuggestionWaveformMiniCard: React.FC<SuggestionWaveformMiniCardProp
                       y1={0}
                       x2={spliceX.toFixed(2)}
                       y2={SVG_H}
-                      stroke="#E5A13B"
+                      stroke="var(--avp-wave-selection)"
                       strokeWidth={1.6}
                     />
                     <polygon
                       points={`${spliceX.toFixed(2)},1 ${(spliceX - 3.5).toFixed(2)},6 ${(spliceX + 3.5).toFixed(2)},6`}
-                      fill="#E5A13B"
+                      fill="var(--avp-wave-selection)"
                     />
                   </g>
                 ) : (
@@ -341,7 +341,7 @@ export const SuggestionWaveformMiniCard: React.FC<SuggestionWaveformMiniCardProp
                       y1={0}
                       x2={cutStartX.toFixed(2)}
                       y2={SVG_H}
-                      stroke="#43C7A7"
+                      stroke="var(--avp-wave-stroke)"
                       strokeWidth={1}
                       strokeDasharray="2 2"
                     />
@@ -350,7 +350,7 @@ export const SuggestionWaveformMiniCard: React.FC<SuggestionWaveformMiniCardProp
                       y1={0}
                       x2={cutEndX.toFixed(2)}
                       y2={SVG_H}
-                      stroke="#43C7A7"
+                      stroke="var(--avp-wave-stroke)"
                       strokeWidth={1}
                       strokeDasharray="2 2"
                     />

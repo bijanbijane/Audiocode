@@ -18,6 +18,7 @@ import {
   Webhook,
   X,
 } from 'lucide-react';
+import { AccessibleModal } from './AccessibleModal';
 import type {
   ApiCredentialRecord,
   AuthoritativeUsageEvent,
@@ -32,6 +33,7 @@ import type {
   TenantSubscriptionRecord,
   WebhookDeliveryRecord,
 } from '../platform/PlatformContractsAndSchemas';
+import { getNextRovingTabIndex } from '../studio/layoutUtils';
 
 export type PortalTabId =
   | 'overview'
@@ -76,6 +78,7 @@ interface PortalOverviewPayload {
 interface DeveloperPlatformPortalModalProps {
   isOpen: boolean;
   onClose: () => void;
+  locale?: 'fa' | 'en';
 }
 
 /**
@@ -118,7 +121,9 @@ function createDefaultTestWavBlob(durationSec = 1): Blob {
 export const DeveloperPlatformPortalModal: React.FC<DeveloperPlatformPortalModalProps> = ({
   isOpen,
   onClose,
+  locale = 'fa',
 }) => {
+  const isFa = locale === 'fa';
   // Strictly in-memory admin control-plane Bearer token — NEVER persisted to storage/URL/logs
   const [adminBearerToken, setAdminBearerToken] = useState('');
   const [authStatus, setAuthStatus] = useState<'UNAUTHENTICATED' | 'AUTHENTICATED' | 'FORBIDDEN'>('UNAUTHENTICATED');
@@ -179,15 +184,6 @@ export const DeveloperPlatformPortalModal: React.FC<DeveloperPlatformPortalModal
     onClose();
   }, [onClose]);
 
-  useEffect(() => {
-    if (!isOpen) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') handleClosePortal();
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [isOpen, handleClosePortal]);
-
   /**
    * Centralized authenticated transport for ALL `/api/v1/platform/*` Control Plane operations.
    * Refuses calls when adminBearerToken is absent, classifies 401 vs 403 separately,
@@ -201,7 +197,11 @@ export const DeveloperPlatformPortalModal: React.FC<DeveloperPlatformPortalModal
       const token = adminBearerToken.trim();
       if (!token) {
         setAuthStatus('UNAUTHENTICATED');
-        setNotice('برای دسترسی به Control Plane، ابتدا کلید مدیریتی معتبر (Bearer Token) را وارد کنید.');
+        setNotice(
+          isFa
+            ? 'برای دسترسی به Control Plane، ابتدا کلید مدیریتی معتبر (Bearer Token) را وارد کنید.'
+            : 'Enter a valid Admin Bearer Token first to access the Control Plane.',
+        );
         return null;
       }
 
@@ -223,14 +223,22 @@ export const DeveloperPlatformPortalModal: React.FC<DeveloperPlatformPortalModal
 
       if (res.status === 401) {
         setAuthStatus('UNAUTHENTICATED');
-        setNotice('احراز هویت ناموفق (۴۰۱): کلید مدیریتی نامعتبر، منقضی یا باطل شده است.');
+        setNotice(
+          isFa
+            ? 'احراز هویت ناموفق (۴۰۱): کلید مدیریتی نامعتبر، منقضی یا باطل شده است.'
+            : 'Authentication failed (401): Admin key is invalid, expired, or revoked.',
+        );
       } else if (res.status === 403) {
         setAuthStatus('FORBIDDEN');
-        setNotice('دسترسی غیرمجاز (۴۰۳): کلید شما مجوز (Scope) یا نقش کافی برای این عملیات ندارد.');
+        setNotice(
+          isFa
+            ? 'دسترسی غیرمجاز (۴۰۳): کلید شما مجوز (Scope) یا نقش کافی برای این عملیات ندارد.'
+            : 'Forbidden (403): Your key lacks the required scope or role for this action.',
+        );
       }
       return res;
     },
-    [adminBearerToken]
+    [adminBearerToken, isFa]
   );
 
   const loadOverview = useCallback(async () => {
@@ -248,22 +256,32 @@ export const DeveloperPlatformPortalModal: React.FC<DeveloperPlatformPortalModal
         setOverview(data);
         setAuthStatus('AUTHENTICATED');
       } else if (res.status !== 401 && res.status !== 403) {
-        setNotice(`خطا در بارگذاری نمای کلی پورتال توسعه‌دهندگان (کد ${res.status}).`);
+        setNotice(
+          isFa
+            ? `خطا در بارگذاری نمای کلی پورتال توسعه‌دهندگان (کد ${res.status}).`
+            : `Failed to load developer portal overview (HTTP ${res.status}).`,
+        );
       }
     } catch (err) {
-      setNotice(`خطا در ارتباط با پورتال توسعه‌دهندگان: ${err instanceof Error ? err.message : String(err)}`);
+      setNotice(
+        isFa
+          ? `خطا در ارتباط با پورتال توسعه‌دهندگان: ${err instanceof Error ? err.message : String(err)}`
+          : `Portal connection error: ${err instanceof Error ? err.message : String(err)}`,
+      );
     } finally {
       setLoading(false);
     }
-  }, [adminBearerToken, platformFetch]);
-
-  if (!isOpen) return null;
+  }, [adminBearerToken, isFa, platformFetch]);
 
   const handleIssueApiKey = async () => {
     try {
       const projectId = overview?.projects[0]?.id;
       if (!projectId) {
-        setNotice('ابتدا با کلید مدیریتی معتبر به پورتال متصل شوید تا پروژه فعال بارگذاری شود.');
+        setNotice(
+          isFa
+            ? 'ابتدا با کلید مدیریتی معتبر به پورتال متصل شوید تا پروژه فعال بارگذاری شود.'
+            : 'Connect with a valid Admin Bearer key first to load an active project.',
+        );
         return;
       }
       const res = await platformFetch('/api/v1/platform/api-keys', {
@@ -279,13 +297,25 @@ export const DeveloperPlatformPortalModal: React.FC<DeveloperPlatformPortalModal
         const data = (await res.json()) as { plaintextSecretOnce: string };
         setIssuedSecretOnce(data.plaintextSecretOnce);
         setCopiedKey(false);
-        setNotice('کلید جدید صادر شد. مقدار Secret فقط همین یک‌بار نمایش داده می‌شود و در سرور فقط هش HMAC نگهداری می‌شود.');
+        setNotice(
+          isFa
+            ? 'کلید جدید صادر شد. مقدار Secret فقط همین یک‌بار نمایش داده می‌شود و در سرور فقط هش HMAC نگهداری می‌شود.'
+            : 'New API key issued. The plaintext secret is displayed only once; the server stores only its HMAC hash.',
+        );
         await loadOverview();
       } else if (res.status !== 401 && res.status !== 403) {
-        setNotice(`خطا در صدور کلید API (کد ${res.status}).`);
+        setNotice(
+          isFa
+            ? `خطا در صدور کلید API (کد ${res.status}).`
+            : `Failed to issue API key (HTTP ${res.status}).`,
+        );
       }
     } catch (err) {
-      setNotice(`خطا در صدور کلید API: ${err instanceof Error ? err.message : String(err)}`);
+      setNotice(
+        isFa
+          ? `خطا در صدور کلید API: ${err instanceof Error ? err.message : String(err)}`
+          : `Failed to issue API key: ${err instanceof Error ? err.message : String(err)}`,
+      );
     }
   };
 
@@ -300,13 +330,25 @@ export const DeveloperPlatformPortalModal: React.FC<DeveloperPlatformPortalModal
         const data = (await res.json()) as { plaintextSecretOnce: string };
         setIssuedSecretOnce(data.plaintextSecretOnce);
         setCopiedKey(false);
-        setNotice('چرخش کلید انجام شد؛ کلید قبلی با پنجره هم‌پوشانی ۲۴ ساعته فعال می‌ماند.');
+        setNotice(
+          isFa
+            ? 'چرخش کلید انجام شد؛ کلید قبلی با پنجره هم‌پوشانی ۲۴ ساعته فعال می‌ماند.'
+            : 'Key rotated; the previous key stays valid during a 24-hour overlap window.',
+        );
         await loadOverview();
       } else if (res.status !== 401 && res.status !== 403) {
-        setNotice(`خطا در چرخش کلید API (کد ${res.status}).`);
+        setNotice(
+          isFa
+            ? `خطا در چرخش کلید API (کد ${res.status}).`
+            : `Failed to rotate API key (HTTP ${res.status}).`,
+        );
       }
     } catch (err) {
-      setNotice(`خطا در چرخش کلید API: ${err instanceof Error ? err.message : String(err)}`);
+      setNotice(
+        isFa
+          ? `خطا در چرخش کلید API: ${err instanceof Error ? err.message : String(err)}`
+          : `Failed to rotate API key: ${err instanceof Error ? err.message : String(err)}`,
+      );
     }
   };
 
@@ -317,13 +359,25 @@ export const DeveloperPlatformPortalModal: React.FC<DeveloperPlatformPortalModal
       });
       if (!res) return;
       if (res.ok) {
-        setNotice('کلید بلافاصله باطل شد و هر درخواست با آن با کد 401 رد می‌شود.');
+        setNotice(
+          isFa
+            ? 'کلید بلافاصله باطل شد و هر درخواست با آن با کد 401 رد می‌شود.'
+            : 'API key immediately revoked; subsequent requests return HTTP 401.',
+        );
         await loadOverview();
       } else if (res.status !== 401 && res.status !== 403) {
-        setNotice(`خطا در ابطال کلید API (کد ${res.status}).`);
+        setNotice(
+          isFa
+            ? `خطا در ابطال کلید API (کد ${res.status}).`
+            : `Failed to revoke API key (HTTP ${res.status}).`,
+        );
       }
     } catch (err) {
-      setNotice(`خطا در ابطال کلید API: ${err instanceof Error ? err.message : String(err)}`);
+      setNotice(
+        isFa
+          ? `خطا در ابطال کلید API: ${err instanceof Error ? err.message : String(err)}`
+          : `Failed to revoke API key: ${err instanceof Error ? err.message : String(err)}`,
+      );
     }
   };
 
@@ -338,19 +392,35 @@ export const DeveloperPlatformPortalModal: React.FC<DeveloperPlatformPortalModal
       if (!res) return;
       if (res.ok) {
         setNewProjectName('');
-        setNotice('پروژه جدید با جداسازی محیطی و ردیابی مصرف مستقل ایجاد شد.');
+        setNotice(
+          isFa
+            ? 'پروژه جدید با جداسازی محیطی و ردیابی مصرف مستقل ایجاد شد.'
+            : 'New project created with isolated environment and usage tracking.',
+        );
         await loadOverview();
       } else if (res.status !== 401 && res.status !== 403) {
-        setNotice(`خطا در ایجاد پروژه جدید (کد ${res.status}).`);
+        setNotice(
+          isFa
+            ? `خطا در ایجاد پروژه جدید (کد ${res.status}).`
+            : `Failed to create project (HTTP ${res.status}).`,
+        );
       }
     } catch (err) {
-      setNotice(`خطا در ایجاد پروژه جدید: ${err instanceof Error ? err.message : String(err)}`);
+      setNotice(
+        isFa
+          ? `خطا در ایجاد پروژه جدید: ${err instanceof Error ? err.message : String(err)}`
+          : `Failed to create project: ${err instanceof Error ? err.message : String(err)}`,
+      );
     }
   };
 
   const handleEstimateApiCost = async () => {
     if (!issuedSecretOnce) {
-      setNotice('ابتدا در تب «کلیدها و پروژه‌ها» یک کلید تست Data Plane بسازید تا درخواست با Bearer Token واقعی ارسال شود.');
+      setNotice(
+        isFa
+          ? 'ابتدا در تب «کلیدها و پروژه‌ها» یک کلید تست Data Plane بسازید تا درخواست با Bearer Token واقعی ارسال شود.'
+          : 'Create a Data Plane test key in the "API Keys & Projects" tab first so requests send a real Bearer Token.',
+      );
       return;
     }
     try {
@@ -368,16 +438,24 @@ export const DeveloperPlatformPortalModal: React.FC<DeveloperPlatformPortalModal
       const json = (await res.json().catch(() => ({}))) as Record<string, unknown>;
       setEstimateResult(json);
       if (!res.ok) {
-        setNotice(`برآورد هزینه با کد ${res.status} بازگشت.`);
+        setNotice(
+          isFa ? `برآورد هزینه با کد ${res.status} بازگشت.` : `Cost estimate returned HTTP ${res.status}.`,
+        );
       }
     } catch (err) {
-      setNotice(`خطا در برآورد هزینه API: ${err instanceof Error ? err.message : String(err)}`);
+      setNotice(
+        isFa
+          ? `خطا در برآورد هزینه API: ${err instanceof Error ? err.message : String(err)}`
+          : `API cost estimate failed: ${err instanceof Error ? err.message : String(err)}`,
+      );
     }
   };
 
   const handleExecutePlaygroundTranscription = async () => {
     if (!issuedSecretOnce) {
-      setNotice('ابتدا یک کلید API در تب کلیدها بسازید.');
+      setNotice(
+        isFa ? 'ابتدا یک کلید API در تب کلیدها بسازید.' : 'Create an API key in the Keys tab first.',
+      );
       return;
     }
     try {
@@ -404,13 +482,21 @@ export const DeveloperPlatformPortalModal: React.FC<DeveloperPlatformPortalModal
       const json = (await res.json().catch(() => ({}))) as Record<string, unknown>;
       setApiPlayResult(json);
       if (!res.ok) {
-        setNotice(`اجرای درخواست رونویسی API با کد ${res.status} بازگشت.`);
+        setNotice(
+          isFa
+            ? `اجرای درخواست رونویسی API با کد ${res.status} بازگشت.`
+            : `API transcription returned HTTP ${res.status}.`,
+        );
       }
       if (adminBearerToken.trim()) {
         await loadOverview();
       }
     } catch (err) {
-      setNotice(`خطا در اجرای درخواست رونویسی API: ${err instanceof Error ? err.message : String(err)}`);
+      setNotice(
+        isFa
+          ? `خطا در اجرای درخواست رونویسی API: ${err instanceof Error ? err.message : String(err)}`
+          : `API transcription failed: ${err instanceof Error ? err.message : String(err)}`,
+      );
     }
   };
 
@@ -419,13 +505,23 @@ export const DeveloperPlatformPortalModal: React.FC<DeveloperPlatformPortalModal
       const res = await platformFetch('/api/v1/platform/invoices/issue', { method: 'POST' });
       if (!res) return;
       if (res.ok) {
-        setNotice('فاکتور تغییرناپذیر با اسنپ‌شات قیمت‌گذاری و هش SHA-256 صادر شد.');
+        setNotice(
+          isFa
+            ? 'فاکتور تغییرناپذیر با اسنپ‌شات قیمت‌گذاری و هش SHA-256 صادر شد.'
+            : 'Immutable invoice issued with pricing snapshot and SHA-256 hash.',
+        );
         await loadOverview();
       } else if (res.status !== 401 && res.status !== 403) {
-        setNotice(`خطا در صدور فاکتور (کد ${res.status}).`);
+        setNotice(
+          isFa ? `خطا در صدور فاکتور (کد ${res.status}).` : `Failed to issue invoice (HTTP ${res.status}).`,
+        );
       }
     } catch (err) {
-      setNotice(`خطا در صدور فاکتور: ${err instanceof Error ? err.message : String(err)}`);
+      setNotice(
+        isFa
+          ? `خطا در صدور فاکتور: ${err instanceof Error ? err.message : String(err)}`
+          : `Failed to issue invoice: ${err instanceof Error ? err.message : String(err)}`,
+      );
     }
   };
 
@@ -445,14 +541,26 @@ export const DeveloperPlatformPortalModal: React.FC<DeveloperPlatformPortalModal
         if (data.signingSecretOnce) {
           setWebhookSigningSecretOnce(data.signingSecretOnce);
         }
-        setNotice('نقطه انتهایی Webhook با کلید امضای HMAC-SHA256 ثبت شد (کلید امضا فقط یک‌بار نمایش داده می‌شود).');
+        setNotice(
+          isFa
+            ? 'نقطه انتهایی Webhook با کلید امضای HMAC-SHA256 ثبت شد (کلید امضا فقط یک‌بار نمایش داده می‌شود).'
+            : 'Webhook endpoint registered with HMAC-SHA256 signing secret (displayed once).',
+        );
         await loadOverview();
       } else if (res.status !== 401 && res.status !== 403) {
         const errBody = (await res.json().catch(() => ({}))) as { error?: { message?: string } };
-        setNotice(`خطا در ثبت Webhook (کد ${res.status}): ${errBody.error?.message ?? ''}`);
+        setNotice(
+          isFa
+            ? `خطا در ثبت Webhook (کد ${res.status}): ${errBody.error?.message ?? ''}`
+            : `Failed to register webhook (HTTP ${res.status}): ${errBody.error?.message ?? ''}`,
+        );
       }
     } catch (err) {
-      setNotice(`خطا در ثبت Webhook: ${err instanceof Error ? err.message : String(err)}`);
+      setNotice(
+        isFa
+          ? `خطا در ثبت Webhook: ${err instanceof Error ? err.message : String(err)}`
+          : `Failed to register webhook: ${err instanceof Error ? err.message : String(err)}`,
+      );
     }
   };
 
@@ -466,15 +574,27 @@ export const DeveloperPlatformPortalModal: React.FC<DeveloperPlatformPortalModal
       if (res.ok) {
         setNotice(
           simulateFailure
-            ? 'رویداد تست پس از ۶ تلاش به Dead-Letter Queue منتقل شد.'
-            : 'رویداد امضاشده (t=..., v1=...) در صف ارسال قرار گرفت.'
+            ? isFa
+              ? 'رویداد تست پس از ۶ تلاش به Dead-Letter Queue منتقل شد.'
+              : 'Test event moved to Dead-Letter Queue after 6 delivery attempts.'
+            : isFa
+              ? 'رویداد امضاشده (t=..., v1=...) در صف ارسال قرار گرفت.'
+              : 'Signed event (t=..., v1=...) queued for delivery.',
         );
         await loadOverview();
       } else if (res.status !== 401 && res.status !== 403) {
-        setNotice(`خطا در ارسال رویداد تست Webhook (کد ${res.status}).`);
+        setNotice(
+          isFa
+            ? `خطا در ارسال رویداد تست Webhook (کد ${res.status}).`
+            : `Failed to dispatch test webhook (HTTP ${res.status}).`,
+        );
       }
     } catch (err) {
-      setNotice(`خطا در ارسال رویداد تست Webhook: ${err instanceof Error ? err.message : String(err)}`);
+      setNotice(
+        isFa
+          ? `خطا در ارسال رویداد تست Webhook: ${err instanceof Error ? err.message : String(err)}`
+          : `Failed to dispatch test webhook: ${err instanceof Error ? err.message : String(err)}`,
+      );
     }
   };
 
@@ -485,13 +605,25 @@ export const DeveloperPlatformPortalModal: React.FC<DeveloperPlatformPortalModal
       });
       if (!res) return;
       if (res.ok) {
-        setNotice('رویداد DLQ با وضعیت RETRY_SCHEDULED برای ارسال مجدد زمان‌بندی شد.');
+        setNotice(
+          isFa
+            ? 'رویداد DLQ با وضعیت RETRY_SCHEDULED برای ارسال مجدد زمان‌بندی شد.'
+            : 'DLQ event scheduled for retry (RETRY_SCHEDULED).',
+        );
         await loadOverview();
       } else if (res.status !== 401 && res.status !== 403) {
-        setNotice(`خطا در بازپخش رویداد DLQ (کد ${res.status}).`);
+        setNotice(
+          isFa
+            ? `خطا در بازپخش رویداد DLQ (کد ${res.status}).`
+            : `Failed to replay DLQ event (HTTP ${res.status}).`,
+        );
       }
     } catch (err) {
-      setNotice(`خطا در بازپخش رویداد DLQ: ${err instanceof Error ? err.message : String(err)}`);
+      setNotice(
+        isFa
+          ? `خطا در بازپخش رویداد DLQ: ${err instanceof Error ? err.message : String(err)}`
+          : `Failed to replay DLQ event: ${err instanceof Error ? err.message : String(err)}`,
+      );
     }
   };
 
@@ -510,17 +642,25 @@ export const DeveloperPlatformPortalModal: React.FC<DeveloperPlatformPortalModal
       if (res.ok && json.allowed) {
         setRegionCheckResult({
           allowed: true,
-          message: `منطقه ${json.region?.regionId} مجاز و فعال است (Single-Region G0).`,
+          message: isFa
+            ? `منطقه ${json.region?.regionId} مجاز و فعال است (Single-Region G0).`
+            : `Region ${json.region?.regionId} is permitted and active (Single-Region G0).`,
         });
       } else if (res.status !== 401 && res.status !== 403) {
         setRegionCheckResult({
           allowed: false,
-          message: `رد شده طبق سیاست اقامت داده (${json.errorEnvelope?.error?.code ?? `HTTP_${res.status}`}): ${json.errorEnvelope?.error?.message ?? 'نامشخص'}`,
+          message: isFa
+            ? `رد شده طبق سیاست اقامت داده (${json.errorEnvelope?.error?.code ?? `HTTP_${res.status}`}): ${json.errorEnvelope?.error?.message ?? 'نامشخص'}`
+            : `Rejected by data residency policy (${json.errorEnvelope?.error?.code ?? `HTTP_${res.status}`}): ${json.errorEnvelope?.error?.message ?? 'Unknown'}`,
         });
       }
       await loadOverview();
     } catch (err) {
-      setNotice(`خطا در بررسی سیاست اقامت داده: ${err instanceof Error ? err.message : String(err)}`);
+      setNotice(
+        isFa
+          ? `خطا در بررسی سیاست اقامت داده: ${err instanceof Error ? err.message : String(err)}`
+          : `Region residency check failed: ${err instanceof Error ? err.message : String(err)}`,
+      );
     }
   };
 
@@ -553,26 +693,40 @@ print(result["text"], result["usage"])`;
   const totalBilledSec =
     overview?.usageEvents.reduce((acc, u) => acc + Math.round(u.billableDurationMs / 1000), 0) ?? 0;
 
+  const portalTabs: Array<{ id: PortalTabId; label: string; icon: typeof Activity }> = [
+    { id: 'overview', label: isFa ? 'خانه و کاتالوگ مدل‌ها' : 'Overview & Models', icon: Activity },
+    { id: 'keys_projects', label: isFa ? 'کلیدهای API و پروژه‌ها' : 'API Keys & Projects', icon: KeyRound },
+    { id: 'playground_sdks', label: isFa ? 'آزمایشگاه API و SDKها' : 'API Playground & SDKs', icon: Code2 },
+    { id: 'usage_billing', label: isFa ? 'مصرف، لجر مالی و فاکتور' : 'Usage, Ledger & Invoices', icon: CreditCard },
+    { id: 'webhooks', label: isFa ? 'وب‌هوک‌ها و DLQ' : 'Webhooks & DLQ', icon: Webhook },
+    { id: 'enterprise_regions', label: isFa ? 'منطقه داده، RBAC و حسابرسی' : 'Residency, RBAC & Audit', icon: Globe2 },
+  ];
+
   return (
-    <div
-      role="dialog"
-      aria-modal="true"
-      aria-label="پورتال توسعه‌دهندگان و پلتفرم API (فاز ۱۰)"
-      className="fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-sm flex items-center justify-center p-3 sm:p-5"
-      dir="rtl"
+    <AccessibleModal
+      isOpen={isOpen}
+      onClose={handleClosePortal}
+      dir={isFa ? 'rtl' : 'ltr'}
+      labelledBy="dev-platform-portal-title"
+      dataTestId="developer-platform-portal-modal"
+      panelClassName="w-full max-w-6xl"
     >
-      <div className="w-full max-w-6xl max-h-[92vh] bg-[#0E131D] border border-[#252F42] rounded-xl shadow-2xl flex flex-col overflow-hidden text-slate-100">
+      <div className="w-full max-h-[92vh] bg-[var(--avp-surface)] border border-[var(--avp-border)] rounded-2xl shadow-[var(--avp-shadow-md)] flex flex-col overflow-hidden text-[var(--avp-text)]">
         {/* Header */}
-        <header className="flex items-center justify-between gap-4 px-5 py-3.5 border-b border-[#252F42] bg-[#0B0F17]">
+        <header className="flex items-center justify-between gap-4 px-5 py-3.5 border-b border-[var(--avp-border)] bg-[var(--avp-surface-shell)]">
           <div className="flex items-center gap-3">
-            <Terminal className="w-5 h-5 text-sky-400 shrink-0" aria-hidden="true" />
+            <Terminal className="w-5 h-5 text-[var(--avp-brand)] shrink-0" aria-hidden="true" />
             <div>
-              <h2 className="text-sm sm:text-base font-bold text-slate-100">
-                پورتال توسعه‌دهندگان و اکوسیستم تجاری ASR (فاز ۱۰ — Private Alpha Sandbox)
+              <h2 id="dev-platform-portal-title" className="text-sm sm:text-base font-bold text-[var(--avp-text)]">
+                {isFa
+                  ? 'پورتال توسعه‌دهندگان و اکوسیستم تجاری ASR'
+                  : 'Developer Platform Portal & Commercial ASR Sandbox'}
               </h2>
-              <p className="text-xs text-slate-400">
-                تفکیک کامل Control Plane از هسته علمی ASR · محاسبات مالی Integer (USD Cents) · وضعیت:{' '}
-                <span className="font-mono text-amber-300">ENGINEERING_COMPLETE_PRIVATE_ALPHA_READY</span>
+              <p className="text-xs text-[var(--avp-text-secondary)]">
+                {isFa
+                  ? 'تفکیک کامل Control Plane از هسته علمی ASR · محاسبات مالی Integer (USD Cents) · وضعیت: '
+                  : 'Separated Control Plane · Integer USD-Cents Ledger · Status: '}
+                <span className="font-mono text-[var(--avp-warning-text)]">ENGINEERING_COMPLETE_PRIVATE_ALPHA_READY</span>
               </p>
             </div>
           </div>
@@ -581,16 +735,16 @@ print(result["text"], result["usage"])`;
               type="button"
               onClick={() => void loadOverview()}
               disabled={!adminBearerToken.trim()}
-              aria-label="بروزرسانی اطلاعات پورتال"
-              className="p-2 rounded-md border border-[#252F42] bg-[#141B27] text-slate-300 hover:text-white cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+              aria-label={isFa ? 'بروزرسانی اطلاعات پورتال' : 'Refresh portal overview'}
+              className="avp-touch-icon sm:w-8 sm:h-8 rounded-lg border border-[var(--avp-border)] bg-[var(--avp-surface)] text-[var(--avp-text-secondary)] hover:text-[var(--avp-text)] hover:bg-[var(--avp-hover)] inline-flex items-center justify-center cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
             >
               <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
             </button>
             <button
               type="button"
               onClick={handleClosePortal}
-              aria-label="بستن پورتال توسعه‌دهندگان"
-              className="p-2 rounded-md border border-[#252F42] bg-[#141B27] text-slate-300 hover:text-white cursor-pointer"
+              aria-label={isFa ? 'بستن پورتال توسعه‌دهندگان' : 'Close developer platform portal'}
+              className="avp-touch-icon sm:w-8 sm:h-8 rounded-lg border border-[var(--avp-border)] bg-[var(--avp-surface)] text-[var(--avp-text-secondary)] hover:text-[var(--avp-text)] hover:bg-[var(--avp-hover)] inline-flex items-center justify-center cursor-pointer"
             >
               <X className="w-4 h-4" />
             </button>
@@ -598,17 +752,19 @@ print(result["text"], result["usage"])`;
         </header>
 
         {/* Control Plane Admin Credential Bar (In-Memory Only) */}
-        <div className="px-5 py-3 border-b border-[#252F42] bg-[#0C121D] text-xs flex flex-wrap items-center justify-between gap-3">
-          <div className="flex items-center gap-2 text-slate-300">
-            <Lock className="w-4 h-4 text-sky-400 shrink-0" aria-hidden="true" />
+        <div className="px-5 py-3 border-b border-[var(--avp-border)] bg-[var(--avp-bg-subtle)] text-xs flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-2 text-[var(--avp-text)]">
+            <Lock className="w-4 h-4 text-[var(--avp-brand)] shrink-0" aria-hidden="true" />
             <label htmlFor="portal-admin-bearer-input" className="font-semibold whitespace-nowrap">
-              Control Plane Admin Bearer Key
+              {isFa ? 'کلید مدیریتی Control Plane (Bearer)' : 'Control Plane Admin Bearer Key'}
             </label>
-            <span className="text-slate-400 hidden lg:inline">
-              (فقط در حافظه موقت مرورگر نگهداری و با بستن پنجره پاک می‌شود)
+            <span className="text-[var(--avp-text-secondary)] hidden lg:inline">
+              {isFa
+                ? '(فقط در حافظه موقت مرورگر نگهداری و با بستن پنجره پاک می‌شود)'
+                : '(Held in memory only; cleared when modal closes)'}
             </span>
           </div>
-          <div className="flex items-center gap-2 flex-1 max-w-xl justify-end">
+          <div className="flex flex-wrap items-center gap-2 flex-1 max-w-xl justify-end">
             <input
               id="portal-admin-bearer-input"
               data-testid="input-portal-admin-token"
@@ -617,49 +773,60 @@ print(result["text"], result["usage"])`;
               spellCheck={false}
               value={adminBearerToken}
               onChange={(e) => setAdminBearerToken(e.target.value)}
-              placeholder="asr_test_... (دارای اسکوپ‌های مدیریتی platform:read / api-keys:manage)"
+              placeholder={
+                isFa
+                  ? 'asr_test_... (دارای اسکوپ‌های مدیریتی platform:read / api-keys:manage)'
+                  : 'asr_test_... (with platform:read / api-keys:manage scopes)'
+              }
               dir="ltr"
-              className="flex-1 min-w-[220px] px-2.5 py-1.5 rounded border border-[#252F42] bg-[#0B0F17] font-mono text-xs text-slate-100"
+              className="flex-1 min-w-[220px] min-h-[44px] sm:min-h-[34px] px-2.5 py-1.5 rounded-lg border border-[var(--avp-border)] bg-[var(--avp-surface)] font-mono text-xs text-[var(--avp-text)]"
             />
             <button
               type="button"
               data-testid="btn-portal-authenticate"
               disabled={!adminBearerToken.trim() || loading}
               onClick={() => void loadOverview()}
-              className="px-3 py-1.5 rounded bg-sky-400 text-slate-950 font-semibold hover:bg-sky-300 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed whitespace-nowrap"
+              className="avp-btn avp-btn-primary min-h-[44px] sm:min-h-[34px] whitespace-nowrap"
             >
-              اتصال احراز هویت‌شده
+              {isFa ? 'اتصال احراز هویت‌شده' : 'Authenticate'}
             </button>
           </div>
         </div>
 
         {/* Sub-navigation */}
-        <nav
-          aria-label="بخش‌های پورتال توسعه‌دهندگان"
-          className="flex flex-wrap items-center gap-1.5 px-5 py-2.5 border-b border-[#252F42] bg-[#111827]"
+        <div
+          role="tablist"
+          aria-label={isFa ? 'بخش‌های پورتال توسعه‌دهندگان' : 'Developer Portal Sections'}
+          className="flex flex-wrap items-center gap-1.5 px-5 py-2.5 border-b border-[var(--avp-border)] bg-[var(--avp-surface-shell)]"
         >
-          {(
-            [
-              { id: 'overview', label: 'خانه و کاتالوگ مدل‌ها', icon: Activity },
-              { id: 'keys_projects', label: 'کلیدهای API و پروژه‌ها', icon: KeyRound },
-              { id: 'playground_sdks', label: 'آزمایشگاه API و SDKها', icon: Code2 },
-              { id: 'usage_billing', label: 'مصرف، لجر مالی و فاکتور', icon: CreditCard },
-              { id: 'webhooks', label: 'وب‌هوک‌ها و DLQ', icon: Webhook },
-              { id: 'enterprise_regions', label: 'منطقه داده، RBAC و حسابرسی', icon: Globe2 },
-            ] as const
-          ).map((t) => {
+          {portalTabs.map((t, idx) => {
             const Icon = t.icon;
             const active = activeTab === t.id;
             return (
               <button
                 key={t.id}
                 type="button"
+                role="tab"
+                aria-selected={active}
+                tabIndex={active ? 0 : -1}
                 data-testid={`portal-tab-${t.id}`}
                 onClick={() => setActiveTab(t.id)}
-                className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium whitespace-nowrap cursor-pointer ${
+                onKeyDown={(e) => {
+                  const nextIdx = getNextRovingTabIndex(idx, portalTabs.length, e.key, isFa, 'horizontal');
+                  if (nextIdx !== null) {
+                    e.preventDefault();
+                    const nextId = portalTabs[nextIdx].id;
+                    setActiveTab(nextId);
+                    const el = e.currentTarget
+                      .closest('[role="tablist"]')
+                      ?.querySelector<HTMLButtonElement>(`[data-testid="portal-tab-${nextId}"]`);
+                    el?.focus();
+                  }
+                }}
+                className={`min-h-[44px] sm:min-h-[34px] inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium whitespace-nowrap cursor-pointer border transition-colors ${
                   active
-                    ? 'bg-sky-400 text-slate-950 font-semibold'
-                    : 'bg-[#172030] text-slate-300 hover:bg-[#1F2A3E] border border-[#252F42]'
+                    ? 'bg-[var(--avp-brand)] text-white border-[var(--avp-brand)] font-semibold'
+                    : 'bg-[var(--avp-surface)] text-[var(--avp-text-secondary)] hover:bg-[var(--avp-hover)] hover:text-[var(--avp-text)] border-[var(--avp-border)]'
                 }`}
               >
                 <Icon className="w-3.5 h-3.5" aria-hidden="true" />
@@ -667,34 +834,50 @@ print(result["text"], result["usage"])`;
               </button>
             );
           })}
-        </nav>
+        </div>
 
         {notice && (
-          <div className="mx-5 mt-3 px-3.5 py-2 rounded-md border border-sky-500/30 bg-sky-500/10 text-xs text-sky-200 flex items-center justify-between">
+          <div className="mx-5 mt-3 px-3.5 py-2 rounded-lg border border-[var(--avp-brand)]/35 bg-[var(--avp-brand-soft)] text-xs text-[var(--avp-accent-text)] flex items-center justify-between gap-2">
             <span>{notice}</span>
-            <button type="button" onClick={() => setNotice(null)} className="text-sky-300 cursor-pointer">
-              بستن
+            <button
+              type="button"
+              onClick={() => setNotice(null)}
+              className="min-h-[36px] px-2 text-[var(--avp-accent-text)] font-semibold hover:underline cursor-pointer"
+            >
+              {isFa ? 'بستن' : 'Dismiss'}
             </button>
           </div>
         )}
 
-        <div className="flex-1 overflow-y-auto p-5 space-y-5">
+        <div className="flex-1 overflow-y-auto p-5 space-y-5 bg-[var(--avp-bg)]">
           {/* Authentication Required Gate when no verified admin session is loaded */}
           {!overview && activeTab !== 'playground_sdks' && (
             <section
               data-testid="portal-auth-required-panel"
-              className="p-6 rounded-lg border border-[#252F42] bg-[#141B27] space-y-2 text-xs text-center"
+              className="p-6 rounded-xl border border-[var(--avp-border)] bg-[var(--avp-surface)] space-y-2 text-xs text-center"
             >
-              <Lock className="w-6 h-6 text-sky-400 mx-auto" aria-hidden="true" />
-              <h3 className="text-sm font-semibold text-slate-100">
-                احراز هویت برای دسترسی به Control Plane الزامی است
+              <Lock className="w-6 h-6 text-[var(--avp-brand)] mx-auto" aria-hidden="true" />
+              <h3 className="text-sm font-semibold text-[var(--avp-text)]">
+                {isFa
+                  ? 'احراز هویت برای دسترسی به Control Plane الزامی است'
+                  : 'Authentication Required for Control Plane Access'}
               </h3>
-              <p className="text-slate-400 max-w-xl mx-auto">
-                تمامی مسیرهای مدیریتی <code dir="ltr" className="font-mono text-sky-300">/api/v1/platform/*</code> بدون کلید احراز هویت‌شده مسدود هستند. کلید مدیریتی خود را در کادر بالا وارد کرده و «اتصال احراز هویت‌شده» را بزنید.
+              <p className="text-[var(--avp-text-secondary)] max-w-xl mx-auto">
+                {isFa ? (
+                  <>
+                    تمامی مسیرهای مدیریتی <code dir="ltr" className="font-mono text-[var(--avp-accent-text)]">/api/v1/platform/*</code> بدون کلید احراز هویت‌شده مسدود هستند. کلید مدیریتی خود را در کادر بالا وارد کرده و «اتصال احراز هویت‌شده» را بزنید.
+                  </>
+                ) : (
+                  <>
+                    All management endpoints under <code dir="ltr" className="font-mono text-[var(--avp-accent-text)]">/api/v1/platform/*</code> require authentication. Enter your admin key above and select Authenticate.
+                  </>
+                )}
               </p>
               {authStatus === 'FORBIDDEN' && (
-                <p className="text-amber-300">
-                  کلید فعلی شما احراز هویت شد اما دسترسی (RBAC / Scope) لازم برای نمای کلی ندارد (HTTP 403).
+                <p className="text-[var(--avp-warning-text)]">
+                  {isFa
+                    ? 'کلید فعلی شما احراز هویت شد اما دسترسی (RBAC / Scope) لازم برای نمای کلی ندارد (HTTP 403).'
+                    : 'Your key authenticated, but lacks the required RBAC role or scope for the portal overview (HTTP 403).'}
                 </p>
               )}
             </section>
@@ -704,52 +887,70 @@ print(result["text"], result["usage"])`;
           {activeTab === 'overview' && overview && (
             <section className="space-y-4">
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
-                <div className="p-3 rounded-lg border border-[#252F42] bg-[#141B27]">
-                  <div className="text-slate-400">اعتبار ارزیابی باقی‌مانده</div>
-                  <div className="text-lg font-bold font-mono text-emerald-400 mt-1">
+                <div className="p-3 rounded-xl border border-[var(--avp-border)] bg-[var(--avp-surface)]">
+                  <div className="text-[var(--avp-text-secondary)]">
+                    {isFa ? 'اعتبار ارزیابی باقی‌مانده' : 'Remaining Sandbox Credit'}
+                  </div>
+                  <div className="text-lg font-bold font-mono text-[var(--avp-success-text)] mt-1" dir="ltr">
                     ${((overview.subscription?.availableCreditMinor ?? 0) / 100).toFixed(2)}
                   </div>
                 </div>
-                <div className="p-3 rounded-lg border border-[#252F42] bg-[#141B27]">
-                  <div className="text-slate-400">مصرف تأییدشده (ثانیه صوت)</div>
-                  <div className="text-lg font-bold font-mono text-sky-300 mt-1">{totalBilledSec}s</div>
+                <div className="p-3 rounded-xl border border-[var(--avp-border)] bg-[var(--avp-surface)]">
+                  <div className="text-[var(--avp-text-secondary)]">
+                    {isFa ? 'مصرف تأییدشده (ثانیه صوت)' : 'Verified Usage (Audio Sec)'}
+                  </div>
+                  <div className="text-lg font-bold font-mono text-[var(--avp-accent-text)] mt-1" dir="ltr">
+                    {totalBilledSec}s
+                  </div>
                 </div>
-                <div className="p-3 rounded-lg border border-[#252F42] bg-[#141B27]">
-                  <div className="text-slate-400">پروژه‌ها / کلیدهای فعال</div>
-                  <div className="text-lg font-bold font-mono text-amber-300 mt-1">
+                <div className="p-3 rounded-xl border border-[var(--avp-border)] bg-[var(--avp-surface)]">
+                  <div className="text-[var(--avp-text-secondary)]">
+                    {isFa ? 'پروژه‌ها / کلیدهای فعال' : 'Projects / Active Keys'}
+                  </div>
+                  <div className="text-lg font-bold font-mono text-[var(--avp-warning-text)] mt-1" dir="ltr">
                     {overview.projects.length} / {overview.credentials.filter((c) => !c.revokedAtIso).length}
                   </div>
                 </div>
-                <div className="p-3 rounded-lg border border-[#252F42] bg-[#141B27]">
-                  <div className="text-slate-400">منطقه عملیاتی فعال</div>
-                  <div className="text-sm font-bold font-mono text-slate-100 mt-1">
+                <div className="p-3 rounded-xl border border-[var(--avp-border)] bg-[var(--avp-surface)]">
+                  <div className="text-[var(--avp-text-secondary)]">
+                    {isFa ? 'منطقه عملیاتی فعال' : 'Active Residency Region'}
+                  </div>
+                  <div className="text-sm font-bold font-mono text-[var(--avp-text)] mt-1" dir="ltr">
                     {overview.organization?.defaultRegionId}
                   </div>
                 </div>
               </div>
 
-              <div className="p-4 rounded-lg border border-amber-500/30 bg-amber-500/5 text-xs text-amber-200 flex items-start gap-2.5">
-                <ShieldAlert className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+              <div className="p-4 rounded-xl border border-[var(--avp-warning)]/35 bg-[var(--avp-warning-soft)] text-xs text-[var(--avp-warning-text)] flex items-start gap-2.5">
+                <ShieldAlert className="w-4 h-4 shrink-0 mt-0.5" aria-hidden="true" />
                 <div>
-                  <strong>تفکیک آماده بودن فنی از مجوز فروش تجاری:</strong> پرداخت بانکی زنده (PSP)، خوشه GPU برای مدل‌های سنگین و PostgreSQL مدیریت‌شده در محیط کانتینر محلی فعال نیستند؛ درگاه `/v1/*` فقط با پلن Sandbox غیرتجاری و موتور مستقل محلی (`asr-fa-en-v1`) پاسخ واقعی می‌دهد.
+                  {isFa ? (
+                    <>
+                      <strong>تفکیک آماده بودن فنی از مجوز فروش تجاری:</strong> پرداخت بانکی زنده (PSP)، خوشه GPU برای مدل‌های سنگین و PostgreSQL مدیریت‌شده در محیط کانتینر محلی فعال نیستند؛ درگاه `/v1/*` فقط با پلن Sandbox غیرتجاری و موتور مستقل محلی (`asr-fa-en-v1`) پاسخ واقعی می‌دهد.
+                    </>
+                  ) : (
+                    <>
+                      <strong>Technical Readiness vs. Commercial Licensing:</strong> Live PSP billing, external GPU clusters, and managed PostgreSQL are inactive in this local container; `/v1/*` responds in non-commercial Sandbox mode backed by the local `asr-fa-en-v1` engine.
+                    </>
+                  )}
                 </div>
               </div>
 
-              <div className="overflow-x-auto rounded-lg border border-[#252F42]">
-                <table className="w-full text-right text-xs">
-                  <thead className="bg-[#111827] text-slate-300 border-b border-[#252F42]">
+              <div className="overflow-x-auto rounded-xl border border-[var(--avp-border)]">
+                <table className={`w-full ${isFa ? 'text-right' : 'text-left'} text-xs`}>
+                  <thead className="bg-[var(--avp-surface-shell)] text-[var(--avp-text-secondary)] border-b border-[var(--avp-border)]">
                     <tr>
-                      <th className="p-2.5">شناسه مدل عمومی (`/v1/models`)</th>
-                      <th className="p-2.5">وضعیت انتشار</th>
-                      <th className="p-2.5">حالت‌های پشتیبانی‌شده</th>
+                      <th className="p-2.5">{isFa ? 'شناسه مدل عمومی (`/v1/models`)' : 'Public Model ID (`/v1/models`)'}</th>
+                      <th className="p-2.5">{isFa ? 'وضعیت انتشار' : 'Release State'}</th>
+                      <th className="p-2.5">{isFa ? 'حالت‌های پشتیبانی‌شده' : 'Supported Modes'}</th>
                       <th className="p-2.5">Timestamp / Diarization</th>
-                      <th className="p-2.5">در دسترس بودن در محیط فعلی</th>
+                      <th className="p-2.5">{isFa ? 'در دسترس بودن در محیط فعلی' : 'Container Availability'}</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-[#252F42] bg-[#0B0F17]">
+                  <tbody className="divide-y divide-[var(--avp-border-subtle)] bg-[var(--avp-surface)]">
                     {overview.models.map((m) => (
                       <tr key={m.modelId}>
-                        <td className="p-2.5 font-mono text-sky-300">{m.modelId}</td>
+                        <td className="p-2.5 font-mono text-[var(--avp-accent-text)]">{m.modelId}</td>
                         <td className="p-2.5 font-mono">{m.releaseState}</td>
                         <td className="p-2.5 font-mono text-[11px]">{m.supportedModes.join(', ')}</td>
                         <td className="p-2.5 font-mono">
@@ -759,8 +960,8 @@ print(result["text"], result["usage"])`;
                           <span
                             className={
                               m.availabilityInCurrentContainer === 'AVAILABLE_NOW'
-                                ? 'text-emerald-400'
-                                : 'text-amber-300'
+                                ? 'text-[var(--avp-success-text)]'
+                                : 'text-[var(--avp-warning-text)]'
                             }
                           >
                             {m.availabilityInCurrentContainer}
@@ -777,32 +978,41 @@ print(result["text"], result["usage"])`;
           {/* TAB 2: API KEYS & PROJECTS */}
           {activeTab === 'keys_projects' && overview && (
             <section className="space-y-4 text-xs">
-              <div className="p-4 rounded-lg border border-[#252F42] bg-[#141B27] space-y-3">
+              <div className="p-4 rounded-xl border border-[var(--avp-border)] bg-[var(--avp-surface)] space-y-3">
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <div>
-                    <h3 className="text-sm font-semibold text-slate-100">
-                      مدیریت چرخه عمر کلیدهای API (نمایش یک‌بار مصرف + هش HMAC با Pepper سروری)
+                    <h3 className="text-sm font-semibold text-[var(--avp-text)]">
+                      {isFa
+                        ? 'مدیریت چرخه عمر کلیدهای API (نمایش یک‌بار مصرف + هش HMAC با Pepper سروری)'
+                        : 'API Key Lifecycle (One-Time Secret Reveal + Server-Peppered HMAC Hash)'}
                     </h3>
-                    <p className="text-slate-400">
-                      کلیدهای ساخته‌شده در پروژه Development با پیشوند `asr_test_` صادر می‌شوند.
+                    <p className="text-[var(--avp-text-secondary)]">
+                      {isFa
+                        ? 'کلیدهای ساخته‌شده در پروژه Development با پیشوند `asr_test_` صادر می‌شوند.'
+                        : 'Keys created in Development projects are issued with the `asr_test_` prefix.'}
                     </p>
                   </div>
-                  <div className="flex items-center gap-2">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <label htmlFor="portal-new-key-name" className="sr-only">
+                      {isFa ? 'نام کلید API' : 'API Key Name'}
+                    </label>
                     <input
+                      id="portal-new-key-name"
                       type="text"
+                      dir="auto"
                       value={newKeyName}
                       onChange={(e) => setNewKeyName(e.target.value)}
-                      aria-label="نام کلید API"
-                      className="px-3 py-1.5 rounded border border-[#252F42] bg-[#0B0F17] text-slate-100"
+                      aria-label={isFa ? 'نام کلید API' : 'API Key Name'}
+                      className="min-h-[44px] sm:min-h-[34px] px-3 py-1.5 rounded-lg border border-[var(--avp-border)] bg-[var(--avp-bg)] text-[var(--avp-text)]"
                     />
                     <button
                       type="button"
                       data-testid="btn-issue-api-key"
                       onClick={handleIssueApiKey}
-                      className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded bg-sky-400 text-slate-950 font-semibold hover:bg-sky-300 cursor-pointer"
+                      className="avp-btn avp-btn-primary min-h-[44px] sm:min-h-[34px]"
                     >
-                      <KeyRound className="w-3.5 h-3.5" />
-                      <span>صدور کلید جدید</span>
+                      <KeyRound className="w-3.5 h-3.5" aria-hidden="true" />
+                      <span>{isFa ? 'صدور کلید جدید' : 'Issue New Key'}</span>
                     </button>
                   </div>
                 </div>
@@ -810,74 +1020,88 @@ print(result["text"], result["usage"])`;
                 {issuedSecretOnce && (
                   <div
                     data-testid="issued-key-once-banner"
-                    className="p-3 rounded-lg border border-emerald-500/40 bg-emerald-500/10 flex flex-wrap items-center justify-between gap-2"
+                    className="p-3 rounded-lg border border-[var(--avp-success)]/40 bg-[var(--avp-success-soft)] flex flex-wrap items-center justify-between gap-2"
                   >
                     <div className="space-y-0.5">
-                      <div className="text-emerald-300 font-semibold">
-                        کلید یک‌بار مصرف صادرشده (بلافاصله کپی کنید — دیگر قابل بازیابی نیست):
+                      <div className="text-[var(--avp-success-text)] font-semibold">
+                        {isFa
+                          ? 'کلید یک‌بار مصرف صادرشده (بلافاصله کپی کنید — دیگر قابل بازیابی نیست):'
+                          : 'One-Time Issued Secret (copy immediately — cannot be retrieved later):'}
                       </div>
-                      <code className="block font-mono text-xs text-white break-all">{issuedSecretOnce}</code>
+                      <code className="block font-mono text-xs text-[var(--avp-text)] break-all" dir="ltr">
+                        {issuedSecretOnce}
+                      </code>
                     </div>
                     <button
                       type="button"
                       onClick={() => {
                         if (!navigator.clipboard?.writeText) {
-                          setNotice('دسترسی خودکار کلیپ‌بورد در این محیط در دسترس نیست؛ کلید را به‌صورت دستی کپی کنید.');
+                          setNotice(
+                            isFa
+                              ? 'دسترسی خودکار کلیپ‌بورد در این محیط در دسترس نیست؛ کلید را به‌صورت دستی کپی کنید.'
+                              : 'Clipboard API unavailable; please copy the secret manually.',
+                          );
                           return;
                         }
                         navigator.clipboard
                           .writeText(issuedSecretOnce)
                           .then(() => setCopiedKey(true))
                           .catch(() =>
-                            setNotice('امکان کپی خودکار در کلیپ‌بورد نبود؛ لطفاً کلید را به‌صورت دستی کپی کنید.')
+                            setNotice(
+                              isFa
+                                ? 'امکان کپی خودکار در کلیپ‌بورد نبود؛ لطفاً کلید را به‌صورت دستی کپی کنید.'
+                                : 'Could not copy automatically; please copy the secret manually.',
+                            ),
                           );
                       }}
-                      className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded bg-[#0B0F17] border border-emerald-500/40 text-emerald-200 cursor-pointer"
+                      className="avp-btn avp-btn-outline min-h-[44px] sm:min-h-[32px] border-[var(--avp-success)]/40 text-[var(--avp-success-text)]"
                     >
-                      <Copy className="w-3.5 h-3.5" />
-                      <span>{copiedKey ? 'کپی شد' : 'کپی'}</span>
+                      <Copy className="w-3.5 h-3.5" aria-hidden="true" />
+                      <span>{copiedKey ? (isFa ? 'کپی شد' : 'Copied') : isFa ? 'کپی' : 'Copy'}</span>
                     </button>
                   </div>
                 )}
               </div>
 
-              <div className="overflow-x-auto rounded-lg border border-[#252F42]">
-                <table className="w-full text-right">
-                  <thead className="bg-[#111827] text-slate-300 border-b border-[#252F42]">
+              <div className="overflow-x-auto rounded-xl border border-[var(--avp-border)]">
+                <table className={`w-full ${isFa ? 'text-right' : 'text-left'}`}>
+                  <thead className="bg-[var(--avp-surface-shell)] text-[var(--avp-text-secondary)] border-b border-[var(--avp-border)]">
                     <tr>
-                      <th className="p-2.5">نام</th>
-                      <th className="p-2.5">شناسه عمومی</th>
-                      <th className="p-2.5">محیط</th>
+                      <th className="p-2.5">{isFa ? 'نام' : 'Name'}</th>
+                      <th className="p-2.5">{isFa ? 'شناسه عمومی' : 'Public ID'}</th>
+                      <th className="p-2.5">{isFa ? 'محیط' : 'Environment'}</th>
                       <th className="p-2.5">Scopes</th>
-                      <th className="p-2.5">وضعیت</th>
-                      <th className="p-2.5">عملیات</th>
+                      <th className="p-2.5">{isFa ? 'وضعیت' : 'Status'}</th>
+                      <th className="p-2.5">{isFa ? 'عملیات' : 'Actions'}</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-[#252F42] bg-[#0B0F17]">
+                  <tbody className="divide-y divide-[var(--avp-border-subtle)] bg-[var(--avp-surface)]">
                     {overview.credentials.length === 0 ? (
                       <tr>
-                        <td colSpan={6} className="p-4 text-center text-slate-400">
-                          هنوز کلیدی صادر نشده است. دکمه «صدور کلید جدید» را بزنید.
+                        <td colSpan={6} className="p-4 text-center text-[var(--avp-text-secondary)]">
+                          {isFa
+                            ? 'هنوز کلیدی صادر نشده است. دکمه «صدور کلید جدید» را بزنید.'
+                            : 'No API keys issued yet. Click "Issue New Key" above.'}
                         </td>
                       </tr>
                     ) : (
                       overview.credentials.map((c) => (
                         <tr key={c.id}>
-                          <td className="p-2.5 text-slate-100">{c.name}</td>
-                          <td className="p-2.5 font-mono text-sky-300">
+                          <td className="p-2.5 text-[var(--avp-text)]">{c.name}</td>
+                          <td className="p-2.5 font-mono text-[var(--avp-accent-text)]" dir="ltr">
                             {c.keyPrefix}_{c.publicIdentifier}_****
                           </td>
                           <td className="p-2.5 font-mono">{c.environment}</td>
-                          <td className="p-2.5 font-mono text-[11px] text-slate-400">
+                          <td className="p-2.5 font-mono text-[11px] text-[var(--avp-text-secondary)]">
                             {c.scopes.join(', ')}
                           </td>
                           <td className="p-2.5 font-mono">
                             {c.revokedAtIso ? (
-                              <span className="text-rose-400">REVOKED</span>
+                              <span className="text-[var(--avp-danger-text)]">REVOKED</span>
                             ) : c.overlapRevokesAtIso ? (
-                              <span className="text-amber-300">ROTATING (24h Overlap)</span>
+                              <span className="text-[var(--avp-warning-text)]">ROTATING (24h Overlap)</span>
                             ) : (
-                              <span className="text-emerald-400">ACTIVE</span>
+                              <span className="text-[var(--avp-success-text)]">ACTIVE</span>
                             )}
                           </td>
                           <td className="p-2.5">
@@ -886,17 +1110,17 @@ print(result["text"], result["usage"])`;
                                 <button
                                   type="button"
                                   onClick={() => handleRotateKey(c.id)}
-                                  className="px-2 py-1 rounded border border-amber-500/40 text-amber-300 hover:bg-amber-500/15 cursor-pointer"
+                                  className="min-h-[36px] sm:min-h-[28px] px-2.5 py-1 rounded border border-[var(--avp-warning)]/40 text-[var(--avp-warning-text)] hover:bg-[var(--avp-warning-soft)] cursor-pointer"
                                 >
-                                  چرخش ۲۴h
+                                  {isFa ? 'چرخش ۲۴h' : 'Rotate 24h'}
                                 </button>
                                 <button
                                   type="button"
                                   onClick={() => handleRevokeKey(c.id)}
-                                  className="inline-flex items-center gap-1 px-2 py-1 rounded border border-rose-500/40 text-rose-300 hover:bg-rose-500/15 cursor-pointer"
+                                  className="min-h-[36px] sm:min-h-[28px] inline-flex items-center gap-1 px-2.5 py-1 rounded border border-[var(--avp-danger)]/40 text-[var(--avp-danger-text)] hover:bg-[var(--avp-danger-soft)] cursor-pointer"
                                 >
-                                  <Trash2 className="w-3 h-3" />
-                                  <span>ابطال</span>
+                                  <Trash2 className="w-3 h-3" aria-hidden="true" />
+                                  <span>{isFa ? 'ابطال' : 'Revoke'}</span>
                                 </button>
                               </div>
                             )}
@@ -908,20 +1132,24 @@ print(result["text"], result["usage"])`;
                 </table>
               </div>
 
-              <form onSubmit={handleCreateProject} className="p-3.5 rounded-lg border border-[#252F42] bg-[#141B27] flex flex-wrap items-center gap-2">
-                <span className="text-slate-300 font-medium">ایجاد پروژه جدید:</span>
+              <form onSubmit={handleCreateProject} className="p-3.5 rounded-xl border border-[var(--avp-border)] bg-[var(--avp-surface)] flex flex-wrap items-center gap-2">
+                <label htmlFor="portal-new-project-name" className="text-[var(--avp-text)] font-medium">
+                  {isFa ? 'ایجاد پروژه جدید:' : 'Create New Project:'}
+                </label>
                 <input
+                  id="portal-new-project-name"
                   type="text"
-                  placeholder="نام پروژه (مثلاً اپ موبایل فارسی)"
+                  dir="auto"
+                  placeholder={isFa ? 'نام پروژه (مثلاً اپ موبایل فارسی)' : 'Project name (e.g., Persian Mobile App)'}
                   value={newProjectName}
                   onChange={(e) => setNewProjectName(e.target.value)}
-                  className="flex-1 min-w-[200px] px-3 py-1.5 rounded border border-[#252F42] bg-[#0B0F17] text-slate-100"
+                  className="flex-1 min-w-[200px] min-h-[44px] sm:min-h-[34px] px-3 py-1.5 rounded-lg border border-[var(--avp-border)] bg-[var(--avp-bg)] text-[var(--avp-text)]"
                 />
                 <button
                   type="submit"
-                  className="px-3 py-1.5 rounded bg-[#1E2738] border border-[#252F42] text-slate-200 hover:bg-[#273349] cursor-pointer"
+                  className="avp-btn avp-btn-outline min-h-[44px] sm:min-h-[34px]"
                 >
-                  ثبت پروژه
+                  {isFa ? 'ثبت پروژه' : 'Create Project'}
                 </button>
               </form>
             </section>
@@ -930,18 +1158,22 @@ print(result["text"], result["usage"])`;
           {/* TAB 3: INTERACTIVE API PLAYGROUND & OFFICIAL SDKs */}
           {activeTab === 'playground_sdks' && (
             <section className="space-y-4 text-xs">
-              <div className="p-4 rounded-lg border border-[#252F42] bg-[#141B27] space-y-3">
-                <h3 className="text-sm font-semibold text-slate-100">
-                  آزمایشگاه زنده API عمومی (`POST /v1/audio/transcriptions` و برآورد هزینه قبل از اجرا)
+              <div className="p-4 rounded-xl border border-[var(--avp-border)] bg-[var(--avp-surface)] space-y-3">
+                <h3 className="text-sm font-semibold text-[var(--avp-text)]">
+                  {isFa
+                    ? 'آزمایشگاه زنده API عمومی (`POST /v1/audio/transcriptions` و برآورد هزینه قبل از اجرا)'
+                    : 'Live Public API Playground (`POST /v1/audio/transcriptions` & Pre-Run Cost Estimate)'}
                 </h3>
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                   <div>
-                    <label className="block text-slate-400 mb-1">مدل (`/v1/models`):</label>
+                    <label htmlFor="playground-model-select" className="block text-[var(--avp-text-secondary)] mb-1">
+                      {isFa ? 'مدل (`/v1/models`):' : 'Model (`/v1/models`):'}
+                    </label>
                     <select
-                      aria-label="مدل انتخابی Playground"
+                      id="playground-model-select"
                       value={playgroundModel}
                       onChange={(e) => setPlaygroundModel(e.target.value)}
-                      className="w-full px-2.5 py-2 rounded border border-[#252F42] bg-[#0B0F17]"
+                      className="w-full min-h-[44px] sm:min-h-[36px] px-2.5 py-2 rounded-lg border border-[var(--avp-border)] bg-[var(--avp-bg)] text-[var(--avp-text)]"
                     >
                       <option value="asr-fa-en-v1">asr-fa-en-v1 (Stable Local)</option>
                       <option value="asr-fa-en-baseline">asr-fa-en-baseline (Beta Local)</option>
@@ -949,41 +1181,60 @@ print(result["text"], result["usage"])`;
                     </select>
                   </div>
                   <div>
-                    <label className="block text-slate-400 mb-1">Idempotency-Key (حفظ ۲۴ ساعته):</label>
+                    <label htmlFor="playground-idemp-input" className="block text-[var(--avp-text-secondary)] mb-1">
+                      {isFa ? 'Idempotency-Key (حفظ ۲۴ ساعته):' : 'Idempotency-Key (24h window):'}
+                    </label>
                     <input
+                      id="playground-idemp-input"
                       type="text"
+                      dir="ltr"
                       value={playgroundIdempKey}
                       onChange={(e) => setPlaygroundIdempKey(e.target.value)}
-                      className="w-full px-2.5 py-2 rounded border border-[#252F42] bg-[#0B0F17] font-mono"
+                      className="w-full min-h-[44px] sm:min-h-[36px] px-2.5 py-2 rounded-lg border border-[var(--avp-border)] bg-[var(--avp-bg)] font-mono text-[var(--avp-text)]"
                     />
                   </div>
                   <div>
-                    <label className="block text-slate-400 mb-1">مدت تخمینی برای `/v1/audio/estimates` (ثانیه):</label>
+                    <label htmlFor="playground-duration-input" className="block text-[var(--avp-text-secondary)] mb-1">
+                      {isFa ? 'مدت تخمینی برای `/v1/audio/estimates` (ثانیه):' : 'Estimated Duration for `/v1/audio/estimates` (s):'}
+                    </label>
                     <input
+                      id="playground-duration-input"
                       type="number"
                       min={1}
+                      dir="ltr"
                       value={estimateDurationSec}
                       onChange={(e) => setEstimateDurationSec(Number(e.target.value))}
-                      className="w-full px-2.5 py-2 rounded border border-[#252F42] bg-[#0B0F17] font-mono"
+                      className="w-full min-h-[44px] sm:min-h-[36px] px-2.5 py-2 rounded-lg border border-[var(--avp-border)] bg-[var(--avp-bg)] font-mono text-[var(--avp-text)]"
                     />
                   </div>
                 </div>
-                <div className="flex flex-wrap items-center gap-3 p-3 rounded border border-[#252F42] bg-[#0B0F17]">
-                  <Upload className="w-4 h-4 text-sky-400 shrink-0" aria-hidden="true" />
-                  <label className="text-slate-300">
-                    فایل صوتی باینری برای آپلود مستقیم به <code dir="ltr" className="font-mono">/v1/audio/transcriptions</code>:
+                <div className="flex flex-wrap items-center gap-3 p-3 rounded-lg border border-[var(--avp-border)] bg-[var(--avp-bg)]">
+                  <Upload className="w-4 h-4 text-[var(--avp-brand)] shrink-0" aria-hidden="true" />
+                  <label htmlFor="playground-audio-file-input" className="text-[var(--avp-text)]">
+                    {isFa ? (
+                      <>
+                        فایل صوتی باینری برای آپلود مستقیم به <code dir="ltr" className="font-mono">/v1/audio/transcriptions</code>:
+                      </>
+                    ) : (
+                      <>
+                        Binary audio file to upload directly to <code dir="ltr" className="font-mono">/v1/audio/transcriptions</code>:
+                      </>
+                    )}
                   </label>
                   <input
+                    id="playground-audio-file-input"
                     type="file"
                     accept="audio/*"
                     data-testid="input-playground-audio-file"
                     onChange={(e) => setPlaygroundAudioFile(e.target.files?.[0] ?? null)}
-                    className="text-xs text-slate-300"
+                    className="text-xs text-[var(--avp-text-secondary)]"
                   />
-                  <span className="text-slate-400 font-mono text-[11px]">
+                  <span className="text-[var(--avp-text-muted)] font-mono text-[11px]">
                     {playgroundAudioFile
                       ? `${playgroundAudioFile.name} (${playgroundAudioFile.size} bytes)`
-                      : 'در صورت انتخاب نکردن فایل، یک WAV آزمایشی ۱ ثانیه‌ای ۱۶kHz ارسال می‌شود'}
+                      : isFa
+                        ? 'در صورت انتخاب نکردن فایل، یک WAV آزمایشی ۱ ثانیه‌ای ۱۶kHz ارسال می‌شود'
+                        : 'If no file is selected, a 1-second 16kHz test WAV is sent automatically'}
                   </span>
                 </div>
                 <div className="flex flex-wrap gap-2">
@@ -991,30 +1242,34 @@ print(result["text"], result["usage"])`;
                     type="button"
                     data-testid="btn-estimate-api-cost"
                     onClick={handleEstimateApiCost}
-                    className="px-3.5 py-2 rounded border border-[#252F42] bg-[#0B0F17] text-slate-200 hover:bg-[#1D2739] cursor-pointer"
+                    className="avp-btn avp-btn-outline min-h-[44px] sm:min-h-[36px]"
                   >
-                    ۱. پیش‌برآورد هزینه (`/v1/audio/estimates`)
+                    {isFa ? '۱. پیش‌برآورد هزینه (`/v1/audio/estimates`)' : '1. Pre-Estimate Cost (`/v1/audio/estimates`)'}
                   </button>
                   <button
                     type="button"
                     data-testid="btn-execute-api-playground"
                     onClick={handleExecutePlaygroundTranscription}
-                    className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded bg-sky-400 text-slate-950 font-semibold hover:bg-sky-300 cursor-pointer"
+                    className="avp-btn avp-btn-primary min-h-[44px] sm:min-h-[36px]"
                   >
-                    <Play className="w-3.5 h-3.5" />
-                    <span>۲. ارسال درخواست واقعی `/v1/audio/transcriptions`</span>
+                    <Play className="w-3.5 h-3.5" aria-hidden="true" />
+                    <span>
+                      {isFa
+                        ? '۲. ارسال درخواست واقعی `/v1/audio/transcriptions`'
+                        : '2. Send Live Request `/v1/audio/transcriptions`'}
+                    </span>
                   </button>
                 </div>
 
                 {estimateResult && (
-                  <pre className="p-2.5 rounded bg-[#0B0F17] border border-amber-500/30 font-mono text-[11px] overflow-x-auto text-amber-200" dir="ltr">
+                  <pre className="p-2.5 rounded-lg bg-[var(--avp-bg-subtle)] border border-[var(--avp-warning)]/35 font-mono text-[11px] overflow-x-auto text-[var(--avp-warning-text)]" dir="ltr">
                     {JSON.stringify(estimateResult, null, 2)}
                   </pre>
                 )}
                 {apiPlayResult && (
                   <pre
                     data-testid="playground-api-response"
-                    className="p-3 rounded bg-[#0B0F17] border border-emerald-500/30 font-mono text-[11px] overflow-x-auto text-emerald-200"
+                    className="p-3 rounded-lg bg-[var(--avp-bg-subtle)] border border-[var(--avp-success)]/35 font-mono text-[11px] overflow-x-auto text-[var(--avp-success-text)]"
                     dir="ltr"
                   >
                     {JSON.stringify(apiPlayResult, null, 2)}
@@ -1022,15 +1277,19 @@ print(result["text"], result["usage"])`;
                 )}
               </div>
 
-              <div className="p-4 rounded-lg border border-[#252F42] bg-[#141B27] space-y-2.5">
-                <div className="flex items-center justify-between">
-                  <h4 className="font-semibold text-slate-100">نمونه کد رسمی SDKهای TypeScript و Python</h4>
+              <div className="p-4 rounded-xl border border-[var(--avp-border)] bg-[var(--avp-surface)] space-y-2.5">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <h4 className="font-semibold text-[var(--avp-text)]">
+                    {isFa ? 'نمونه کد رسمی SDKهای TypeScript و Python' : 'Official TypeScript & Python SDK Snippets'}
+                  </h4>
                   <div className="flex gap-1.5">
                     <button
                       type="button"
                       onClick={() => setSdkLangTab('ts')}
-                      className={`px-2.5 py-1 rounded font-mono cursor-pointer ${
-                        sdkLangTab === 'ts' ? 'bg-sky-400 text-slate-950' : 'bg-[#0B0F17] text-slate-300'
+                      className={`min-h-[36px] sm:min-h-[28px] px-2.5 py-1 rounded font-mono cursor-pointer border ${
+                        sdkLangTab === 'ts'
+                          ? 'bg-[var(--avp-brand)] text-white border-[var(--avp-brand)]'
+                          : 'bg-[var(--avp-bg)] text-[var(--avp-text-secondary)] border-[var(--avp-border)]'
                       }`}
                     >
                       TypeScript (@asr-platform/sdk)
@@ -1038,15 +1297,17 @@ print(result["text"], result["usage"])`;
                     <button
                       type="button"
                       onClick={() => setSdkLangTab('py')}
-                      className={`px-2.5 py-1 rounded font-mono cursor-pointer ${
-                        sdkLangTab === 'py' ? 'bg-sky-400 text-slate-950' : 'bg-[#0B0F17] text-slate-300'
+                      className={`min-h-[36px] sm:min-h-[28px] px-2.5 py-1 rounded font-mono cursor-pointer border ${
+                        sdkLangTab === 'py'
+                          ? 'bg-[var(--avp-brand)] text-white border-[var(--avp-brand)]'
+                          : 'bg-[var(--avp-bg)] text-[var(--avp-text-secondary)] border-[var(--avp-border)]'
                       }`}
                     >
                       Python (asr-platform-python)
                     </button>
                   </div>
                 </div>
-                <pre className="p-3 rounded bg-[#0B0F17] border border-[#252F42] font-mono text-[11px] overflow-x-auto text-slate-200" dir="ltr">
+                <pre className="p-3 rounded-lg bg-[var(--avp-bg-subtle)] border border-[var(--avp-border)] font-mono text-[11px] overflow-x-auto text-[var(--avp-text)]" dir="ltr">
                   {sdkLangTab === 'ts' ? tsSnippet : pySnippet}
                 </pre>
               </div>
@@ -1057,53 +1318,61 @@ print(result["text"], result["usage"])`;
           {activeTab === 'usage_billing' && overview && (
             <section className="space-y-4 text-xs">
               <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                <div className="p-3 rounded-lg border border-[#252F42] bg-[#141B27]">
-                  <div className="text-slate-400">تطابق لجر با مصرف (Reconciliation)</div>
-                  <div className="text-base font-bold font-mono text-emerald-400 mt-1">
+                <div className="p-3 rounded-xl border border-[var(--avp-border)] bg-[var(--avp-surface)]">
+                  <div className="text-[var(--avp-text-secondary)]">
+                    {isFa ? 'تطابق لجر با مصرف (Reconciliation)' : 'Ledger Reconciliation'}
+                  </div>
+                  <div className="text-base font-bold font-mono text-[var(--avp-success-text)] mt-1" dir="ltr">
                     {overview.reconciliation.balanced ? 'BALANCED (Discrepancy = 0¢)' : 'MISMATCH'}
                   </div>
                 </div>
-                <div className="p-3 rounded-lg border border-[#252F42] bg-[#141B27]">
-                  <div className="text-slate-400">مجموع برداشت مصرفی (Integer Cents)</div>
-                  <div className="text-base font-bold font-mono text-amber-300 mt-1">
+                <div className="p-3 rounded-xl border border-[var(--avp-border)] bg-[var(--avp-surface)]">
+                  <div className="text-[var(--avp-text-secondary)]">
+                    {isFa ? 'مجموع برداشت مصرفی (Integer Cents)' : 'Total Consumed (Integer Cents)'}
+                  </div>
+                  <div className="text-base font-bold font-mono text-[var(--avp-warning-text)] mt-1" dir="ltr">
                     {overview.reconciliation.ledgerConsumptionMinor}¢ (${(overview.reconciliation.ledgerConsumptionMinor / 100).toFixed(2)})
                   </div>
                 </div>
-                <div className="p-3 rounded-lg border border-[#252F42] bg-[#141B27] flex items-center justify-between">
+                <div className="p-3 rounded-xl border border-[var(--avp-border)] bg-[var(--avp-surface)] flex items-center justify-between gap-2">
                   <div>
-                    <div className="text-slate-400">صدور فاکتور تغییرناپذیر</div>
-                    <div className="font-mono text-sky-300 mt-1">{overview.invoices.length} فاکتور</div>
+                    <div className="text-[var(--avp-text-secondary)]">
+                      {isFa ? 'صدور فاکتور تغییرناپذیر' : 'Immutable Invoice'}
+                    </div>
+                    <div className="font-mono text-[var(--avp-accent-text)] mt-1">
+                      {overview.invoices.length} {isFa ? 'فاکتور' : 'invoices'}
+                    </div>
                   </div>
                   <button
                     type="button"
                     data-testid="btn-issue-invoice"
                     onClick={handleIssueInvoice}
-                    className="px-3 py-1.5 rounded bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 cursor-pointer"
+                    className="min-h-[44px] sm:min-h-[34px] px-3 py-1.5 rounded-lg bg-[var(--avp-success-soft)] border border-[var(--avp-success)]/40 text-[var(--avp-success-text)] font-medium cursor-pointer"
                   >
-                    صدور صورتحساب دوره
+                    {isFa ? 'صدور صورتحساب دوره' : 'Issue Period Invoice'}
                   </button>
                 </div>
               </div>
 
-              <div className="overflow-x-auto rounded-lg border border-[#252F42]">
-                <table className="w-full text-right">
-                  <thead className="bg-[#111827] text-slate-300 border-b border-[#252F42]">
+              <div className="overflow-x-auto rounded-xl border border-[var(--avp-border)]">
+                <table className={`w-full ${isFa ? 'text-right' : 'text-left'}`}>
+                  <thead className="bg-[var(--avp-surface-shell)] text-[var(--avp-text-secondary)] border-b border-[var(--avp-border)]">
                     <tr>
-                      <th className="p-2.5">شناسه تراکنش لجر</th>
-                      <th className="p-2.5">نوع</th>
-                      <th className="p-2.5">بدهکار ← بستانکار</th>
-                      <th className="p-2.5">مبلغ (Minor Cents)</th>
-                      <th className="p-2.5">شرح</th>
+                      <th className="p-2.5">{isFa ? 'شناسه تراکنش لجر' : 'Ledger Entry ID'}</th>
+                      <th className="p-2.5">{isFa ? 'نوع' : 'Type'}</th>
+                      <th className="p-2.5">{isFa ? 'بدهکار ← بستانکار' : 'Debit → Credit'}</th>
+                      <th className="p-2.5">{isFa ? 'مبلغ (Minor Cents)' : 'Amount (Minor Cents)'}</th>
+                      <th className="p-2.5">{isFa ? 'شرح' : 'Note'}</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-[#252F42] bg-[#0B0F17]">
+                  <tbody className="divide-y divide-[var(--avp-border-subtle)] bg-[var(--avp-surface)]">
                     {overview.ledgerEntries.map((l) => (
                       <tr key={l.ledgerEntryId}>
-                        <td className="p-2.5 font-mono text-sky-300">{l.ledgerEntryId.slice(0, 18)}</td>
-                        <td className="p-2.5 font-mono text-amber-300">{l.transactionType}</td>
-                        <td className="p-2.5 font-mono text-[11px]">{l.debitAccount} → {l.creditAccount}</td>
+                        <td className="p-2.5 font-mono text-[var(--avp-accent-text)]">{l.ledgerEntryId.slice(0, 18)}</td>
+                        <td className="p-2.5 font-mono text-[var(--avp-warning-text)]">{l.transactionType}</td>
+                        <td className="p-2.5 font-mono text-[11px]" dir="ltr">{l.debitAccount} → {l.creditAccount}</td>
                         <td className="p-2.5 font-mono">{l.amountMinor}¢</td>
-                        <td className="p-2.5 text-slate-300">{l.note}</td>
+                        <td className="p-2.5 text-[var(--avp-text-secondary)]">{l.note}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -1111,15 +1380,17 @@ print(result["text"], result["usage"])`;
               </div>
 
               {overview.invoices.length > 0 && (
-                <div className="p-3 rounded-lg border border-[#252F42] bg-[#141B27] space-y-2">
-                  <div className="font-semibold text-slate-100">فاکتورهای صادرشده (Snapshot قفل‌شده با SHA-256)</div>
+                <div className="p-3 rounded-xl border border-[var(--avp-border)] bg-[var(--avp-surface)] space-y-2">
+                  <div className="font-semibold text-[var(--avp-text)]">
+                    {isFa ? 'فاکتورهای صادرشده (Snapshot قفل‌شده با SHA-256)' : 'Issued Invoices (SHA-256 Locked Snapshot)'}
+                  </div>
                   {overview.invoices.map((inv) => (
-                    <div key={inv.invoiceId} className="p-2.5 rounded border border-[#252F42] bg-[#0B0F17] flex flex-wrap justify-between gap-2 font-mono">
-                      <span className="text-sky-300">{inv.invoiceNumber}</span>
+                    <div key={inv.invoiceId} className="p-2.5 rounded-lg border border-[var(--avp-border)] bg-[var(--avp-bg)] flex flex-wrap justify-between gap-2 font-mono" dir="ltr">
+                      <span className="text-[var(--avp-accent-text)]">{inv.invoiceNumber}</span>
                       <span>Plan: {inv.pricingSnapshot.planId} ({inv.pricingSnapshot.planVersion})</span>
                       <span>Total: {inv.totalMinor}¢ {inv.currency}</span>
-                      <span className="text-emerald-400">{inv.status}</span>
-                      <span className="text-slate-400">SHA256: {inv.snapshotSha256.slice(0, 16)}...</span>
+                      <span className="text-[var(--avp-success-text)]">{inv.status}</span>
+                      <span className="text-[var(--avp-text-muted)]">SHA256: {inv.snapshotSha256.slice(0, 16)}...</span>
                     </div>
                   ))}
                 </div>
@@ -1130,79 +1401,88 @@ print(result["text"], result["usage"])`;
           {/* TAB 5: WEBHOOKS & DEAD LETTER QUEUE */}
           {activeTab === 'webhooks' && overview && (
             <section className="space-y-4 text-xs">
-              <form onSubmit={handleRegisterWebhook} className="p-4 rounded-lg border border-[#252F42] bg-[#141B27] flex flex-wrap items-center gap-2">
+              <form onSubmit={handleRegisterWebhook} className="p-4 rounded-xl border border-[var(--avp-border)] bg-[var(--avp-surface)] flex flex-wrap items-center gap-2">
+                <label htmlFor="portal-webhook-url" className="sr-only">
+                  {isFa ? 'آدرس Webhook' : 'Webhook Endpoint URL'}
+                </label>
                 <input
+                  id="portal-webhook-url"
                   type="url"
+                  dir="ltr"
                   value={webhookUrl}
                   onChange={(e) => setWebhookUrl(e.target.value)}
-                  aria-label="آدرس Webhook"
-                  className="flex-1 min-w-[260px] px-3 py-2 rounded border border-[#252F42] bg-[#0B0F17] font-mono"
+                  aria-label={isFa ? 'آدرس Webhook' : 'Webhook Endpoint URL'}
+                  className="flex-1 min-w-[260px] min-h-[44px] sm:min-h-[36px] px-3 py-2 rounded-lg border border-[var(--avp-border)] bg-[var(--avp-bg)] font-mono text-[var(--avp-text)]"
                 />
                 <button
                   type="submit"
-                  className="px-3.5 py-2 rounded bg-sky-400 text-slate-950 font-semibold cursor-pointer"
+                  className="avp-btn avp-btn-primary min-h-[44px] sm:min-h-[36px]"
                 >
-                  ثبت Endpoint
+                  {isFa ? 'ثبت Endpoint' : 'Register Endpoint'}
                 </button>
                 <button
                   type="button"
                   data-testid="btn-dispatch-webhook-fail"
                   onClick={() => handleDispatchWebhook(true)}
-                  className="px-3 py-2 rounded border border-rose-500/40 bg-rose-500/15 text-rose-200 cursor-pointer"
+                  className="min-h-[44px] sm:min-h-[36px] px-3 py-2 rounded-lg border border-[var(--avp-danger)]/40 bg-[var(--avp-danger-soft)] text-[var(--avp-danger-text)] cursor-pointer"
                 >
-                  شبیه‌سازی خطا و انتقال به DLQ
+                  {isFa ? 'شبیه‌سازی خطا و انتقال به DLQ' : 'Simulate Failure & Route to DLQ'}
                 </button>
               </form>
               {webhookSigningSecretOnce && (
                 <div
                   data-testid="webhook-signing-secret-once-banner"
-                  className="p-3 rounded-lg border border-amber-500/40 bg-amber-500/10 flex flex-wrap items-center justify-between gap-2"
+                  className="p-3 rounded-lg border border-[var(--avp-warning)]/40 bg-[var(--avp-warning-soft)] flex flex-wrap items-center justify-between gap-2"
                 >
                   <div className="space-y-0.5">
-                    <div className="text-amber-300 font-semibold">
-                      کلید امضای Webhook (فقط همین یک‌بار نمایش داده می‌شود):
+                    <div className="text-[var(--avp-warning-text)] font-semibold">
+                      {isFa
+                        ? 'کلید امضای Webhook (فقط همین یک‌بار نمایش داده می‌شود):'
+                        : 'Webhook Signing Secret (displayed once):'}
                     </div>
-                    <code className="block font-mono text-xs text-white break-all">{webhookSigningSecretOnce}</code>
+                    <code className="block font-mono text-xs text-[var(--avp-text)] break-all" dir="ltr">
+                      {webhookSigningSecretOnce}
+                    </code>
                   </div>
                   <button
                     type="button"
                     onClick={() => setWebhookSigningSecretOnce(null)}
-                    className="px-2.5 py-1 rounded border border-amber-500/40 text-amber-200 cursor-pointer"
+                    className="min-h-[36px] px-2.5 py-1 rounded border border-[var(--avp-warning)]/40 text-[var(--avp-warning-text)] cursor-pointer"
                   >
-                    بستن
+                    {isFa ? 'بستن' : 'Dismiss'}
                   </button>
                 </div>
               )}
 
-              <div className="overflow-x-auto rounded-lg border border-[#252F42]">
-                <table className="w-full text-right">
-                  <thead className="bg-[#111827] text-slate-300 border-b border-[#252F42]">
+              <div className="overflow-x-auto rounded-xl border border-[var(--avp-border)]">
+                <table className={`w-full ${isFa ? 'text-right' : 'text-left'}`}>
+                  <thead className="bg-[var(--avp-surface-shell)] text-[var(--avp-text-secondary)] border-b border-[var(--avp-border)]">
                     <tr>
                       <th className="p-2.5">Delivery ID</th>
-                      <th className="p-2.5">رویداد</th>
-                      <th className="p-2.5">وضعیت</th>
-                      <th className="p-2.5">امضای HMAC</th>
-                      <th className="p-2.5">عملیات DLQ</th>
+                      <th className="p-2.5">{isFa ? 'رویداد' : 'Event'}</th>
+                      <th className="p-2.5">{isFa ? 'وضعیت' : 'Status'}</th>
+                      <th className="p-2.5">{isFa ? 'امضای HMAC' : 'HMAC Signature'}</th>
+                      <th className="p-2.5">{isFa ? 'عملیات DLQ' : 'DLQ Action'}</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-[#252F42] bg-[#0B0F17]">
+                  <tbody className="divide-y divide-[var(--avp-border-subtle)] bg-[var(--avp-surface)]">
                     {overview.webhookDeliveries.length === 0 ? (
                       <tr>
-                        <td colSpan={5} className="p-4 text-center text-slate-400">
-                          هنوز رویداد Webhook ارسال نشده است.
+                        <td colSpan={5} className="p-4 text-center text-[var(--avp-text-secondary)]">
+                          {isFa ? 'هنوز رویداد Webhook ارسال نشده است.' : 'No webhook events dispatched yet.'}
                         </td>
                       </tr>
                     ) : (
                       overview.webhookDeliveries.map((d) => (
                         <tr key={d.deliveryId}>
-                          <td className="p-2.5 font-mono text-sky-300">{d.deliveryId.slice(0, 14)}</td>
+                          <td className="p-2.5 font-mono text-[var(--avp-accent-text)]">{d.deliveryId.slice(0, 14)}</td>
                           <td className="p-2.5 font-mono">{d.eventType}</td>
                           <td className="p-2.5 font-mono">
-                            <span className={d.status === 'DELIVERED' ? 'text-emerald-400' : 'text-rose-400'}>
+                            <span className={d.status === 'DELIVERED' ? 'text-[var(--avp-success-text)]' : 'text-[var(--avp-danger-text)]'}>
                               {d.status} (HTTP {d.httpStatus ?? 'PENDING'})
                             </span>
                           </td>
-                          <td className="p-2.5 font-mono text-[11px] text-slate-400">
+                          <td className="p-2.5 font-mono text-[11px] text-[var(--avp-text-muted)]" dir="ltr">
                             {d.signatureHeader.slice(0, 28)}...
                           </td>
                           <td className="p-2.5">
@@ -1211,10 +1491,10 @@ print(result["text"], result["usage"])`;
                                 type="button"
                                 data-testid={`btn-replay-dlq-${d.deliveryId}`}
                                 onClick={() => handleReplayWebhook(d.deliveryId)}
-                                className="inline-flex items-center gap-1 px-2.5 py-1 rounded bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 cursor-pointer"
+                                className="min-h-[36px] sm:min-h-[28px] inline-flex items-center gap-1 px-2.5 py-1 rounded bg-[var(--avp-success-soft)] border border-[var(--avp-success)]/40 text-[var(--avp-success-text)] cursor-pointer"
                               >
-                                <RotateCcw className="w-3 h-3" />
-                                <span>Replay دستی</span>
+                                <RotateCcw className="w-3 h-3" aria-hidden="true" />
+                                <span>{isFa ? 'Replay دستی' : 'Manual Replay'}</span>
                               </button>
                             )}
                           </td>
@@ -1230,22 +1510,36 @@ print(result["text"], result["usage"])`;
           {/* TAB 6: MULTI-REGION DATA RESIDENCY & ENTERPRISE AUDIT */}
           {activeTab === 'enterprise_regions' && overview && (
             <section className="space-y-4 text-xs">
-              <div className="p-4 rounded-lg border border-[#252F42] bg-[#141B27] space-y-3">
+              <div className="p-4 rounded-xl border border-[var(--avp-border)] bg-[var(--avp-surface)] space-y-3">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <div>
-                    <h3 className="text-sm font-semibold text-slate-100">
-                      حاکمیت چندمنطقه‌ای و مسدودسازی خودکار مناطق ممنوعه (Data Residency Hard Constraint)
+                    <h3 className="text-sm font-semibold text-[var(--avp-text)]">
+                      {isFa
+                        ? 'حاکمیت چندمنطقه‌ای و مسدودسازی خودکار مناطق ممنوعه (Data Residency Hard Constraint)'
+                        : 'Multi-Region Governance & Automatic Prohibited-Region Block (Data Residency)'}
                     </h3>
-                    <p className="text-slate-400">
-                      سیاست فعلی مستأجر: مجاز `ir-thr-01` · ممنوع `{overview.organization?.prohibitedRegions.join(', ')}`
+                    <p className="text-[var(--avp-text-secondary)]">
+                      {isFa ? (
+                        <>
+                          سیاست فعلی مستأجر: مجاز `ir-thr-01` · ممنوع `{overview.organization?.prohibitedRegions.join(', ')}`
+                        </>
+                      ) : (
+                        <>
+                          Tenant policy: allowed `ir-thr-01` · prohibited `{overview.organization?.prohibitedRegions.join(', ')}`
+                        </>
+                      )}
                     </p>
                   </div>
-                  <div className="flex items-center gap-2">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <label htmlFor="portal-region-select" className="sr-only">
+                      {isFa ? 'منطقه آزمایشی Data Residency' : 'Test Data Residency Region'}
+                    </label>
                     <select
-                      aria-label="منطقه آزمایشی Data Residency"
+                      id="portal-region-select"
+                      aria-label={isFa ? 'منطقه آزمایشی Data Residency' : 'Test Data Residency Region'}
                       value={selectedTestRegion}
                       onChange={(e) => setSelectedTestRegion(e.target.value)}
-                      className="px-2.5 py-1.5 rounded border border-[#252F42] bg-[#0B0F17] font-mono"
+                      className="min-h-[44px] sm:min-h-[34px] px-2.5 py-1.5 rounded-lg border border-[var(--avp-border)] bg-[var(--avp-bg)] font-mono text-[var(--avp-text)]"
                     >
                       {overview.regions.map((r) => (
                         <option key={r.regionId} value={r.regionId}>
@@ -1257,19 +1551,19 @@ print(result["text"], result["usage"])`;
                       type="button"
                       data-testid="btn-test-region-residency"
                       onClick={handleTestRegionResidency}
-                      className="px-3.5 py-1.5 rounded bg-sky-400 text-slate-950 font-semibold cursor-pointer"
+                      className="avp-btn avp-btn-primary min-h-[44px] sm:min-h-[34px]"
                     >
-                      بررسی مجوز اقامت داده
+                      {isFa ? 'بررسی مجوز اقامت داده' : 'Check Data Residency'}
                     </button>
                   </div>
                 </div>
                 {regionCheckResult && (
                   <div
                     data-testid="region-residency-result"
-                    className={`p-2.5 rounded border ${
+                    className={`p-2.5 rounded-lg border ${
                       regionCheckResult.allowed
-                        ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-200'
-                        : 'border-rose-500/40 bg-rose-500/10 text-rose-200'
+                        ? 'border-[var(--avp-success)]/40 bg-[var(--avp-success-soft)] text-[var(--avp-success-text)]'
+                        : 'border-[var(--avp-danger)]/40 bg-[var(--avp-danger-soft)] text-[var(--avp-danger-text)]'
                     }`}
                   >
                     {regionCheckResult.message}
@@ -1277,24 +1571,28 @@ print(result["text"], result["usage"])`;
                 )}
               </div>
 
-              <div className="p-4 rounded-lg border border-[#252F42] bg-[#141B27] space-y-2">
-                <div className="flex items-center gap-2 font-semibold text-slate-100">
-                  <ShieldCheck className="w-4 h-4 text-emerald-400" />
-                  <span>گزارش حسابرسی امنیتی و عملیاتی (Audit Log)</span>
+              <div className="p-4 rounded-xl border border-[var(--avp-border)] bg-[var(--avp-surface)] space-y-2">
+                <div className="flex items-center gap-2 font-semibold text-[var(--avp-text)]">
+                  <ShieldCheck className="w-4 h-4 text-[var(--avp-success-text)]" aria-hidden="true" />
+                  <span>
+                    {isFa ? 'گزارش حسابرسی امنیتی و عملیاتی (Audit Log)' : 'Security & Operational Audit Log'}
+                  </span>
                 </div>
                 <div className="space-y-1.5 max-h-56 overflow-y-auto font-mono text-[11px]">
                   {overview.auditLogs.length === 0 ? (
-                    <div className="text-slate-400">رویدادی ثبت نشده است.</div>
+                    <div className="text-[var(--avp-text-secondary)]">
+                      {isFa ? 'رویدادی ثبت نشده است.' : 'No audit events recorded.'}
+                    </div>
                   ) : (
                     overview.auditLogs
                       .slice()
                       .reverse()
                       .map((a) => (
-                        <div key={a.auditId} className="p-2 rounded bg-[#0B0F17] border border-[#252F42] flex justify-between gap-2">
-                          <span className={a.outcome === 'ALLOWED' ? 'text-emerald-400' : 'text-rose-400'}>
+                        <div key={a.auditId} className="p-2 rounded-lg bg-[var(--avp-bg)] border border-[var(--avp-border)] flex justify-between gap-2">
+                          <span className={a.outcome === 'ALLOWED' ? 'text-[var(--avp-success-text)]' : 'text-[var(--avp-danger-text)]'}>
                             [{a.outcome}] {a.action}
                           </span>
-                          <span className="text-slate-300 truncate">{a.reason}</span>
+                          <span className="text-[var(--avp-text-secondary)] truncate">{a.reason}</span>
                         </div>
                       ))
                   )}
@@ -1304,6 +1602,6 @@ print(result["text"], result["usage"])`;
           )}
         </div>
       </div>
-    </div>
+    </AccessibleModal>
   );
 };

@@ -174,12 +174,14 @@ interface StudioRootBootstrapperProps {
 }
 
 /**
- * Adaptive Studio Root Bootstrapper (Architecture Doc Sections 10, 14, 47 & 50)
- * Executes startup sequence:
+ * Adaptive Studio Root Bootstrapper
+ * In standard production/development routing (`src/main.tsx`), renders `desktopStudioElement` (`<App />`) directly
+ * as the unified responsive workspace (`390px` mobile, `1024px` tablet, `1440px+` desktop).
+ * When `useV12DesktopShell` is explicitly enabled, runs the standalone v1.2 experimental shell:
  * 1. Registers Offline-First Service Worker (/sw.js) with COOP/COEP enforcement
  * 2. Requests Persistent OPFS Storage
  * 3. Runs Crash Recovery pending journal check
- * 4. Runs HardwareBenchmarkProfiler calibration and routes Desktop Studio vs Mobile Companion
+ * 4. Runs HardwareBenchmarkProfiler calibration
  */
 export const StudioRootBootstrapper: React.FC<StudioRootBootstrapperProps> = ({
   desktopStudioElement,
@@ -355,6 +357,10 @@ export const StudioRootBootstrapper: React.FC<StudioRootBootstrapperProps> = ({
     }));
   };
 
+  if (desktopStudioElement && !useV12DesktopShell) {
+    return <>{desktopStudioElement}</>;
+  }
+
   if (!bootstrapSummary) {
     return (
       <div
@@ -365,10 +371,6 @@ export const StudioRootBootstrapper: React.FC<StudioRootBootstrapperProps> = ({
         در حال آماده‌سازی استودیوی هوشمند آواپرداز...
       </div>
     );
-  }
-
-  if (desktopStudioElement && !useV12DesktopShell) {
-    return <>{desktopStudioElement}</>;
   }
 
   return (

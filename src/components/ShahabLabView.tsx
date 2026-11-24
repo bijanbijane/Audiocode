@@ -15,6 +15,13 @@ import {
   Trash2,
   XCircle,
 } from 'lucide-react';
+import { formatNumberForLocale } from '../utils/formatters';
+import { getNextRovingTabIndex } from '../studio/layoutUtils';
+
+interface ShahabLabViewProps {
+  locale?: 'fa' | 'en';
+  persianDigits?: boolean;
+}
 
 type LabSubTab =
   | 'qualification'
@@ -109,7 +116,7 @@ function SectionCard({
     <section className="bg-[var(--avp-surface)] border border-[var(--avp-border)] rounded-md overflow-hidden">
       <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-3 border-b border-[var(--avp-border)] bg-[var(--avp-surface-shell)]">
         <div>
-          <h3 className="text-sm font-semibold text-[var(--avp-text)] tracking-tight">{title}</h3>
+          <h2 className="text-sm font-semibold text-[var(--avp-text)] tracking-tight">{title}</h2>
           {subtitle && <p className="text-xs text-[var(--avp-text-secondary)] mt-0.5">{subtitle}</p>}
         </div>
         {badge && <StatusTag value={badge} />}
@@ -119,7 +126,27 @@ function SectionCard({
   );
 }
 
-export const ShahabLabView: React.FC = () => {
+function formatConfigValue(value: unknown): string {
+  if (value === null || value === undefined) return '—';
+  if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
+    return String(value);
+  }
+  if (Array.isArray(value)) {
+    return value.length > 0 ? value.map((item) => formatConfigValue(item)).join(', ') : '—';
+  }
+  if (typeof value === 'object') {
+    const entries = Object.entries(value as Record<string, unknown>);
+    if (entries.length === 0) return '—';
+    return entries.map(([k, val]) => `${k}: ${formatConfigValue(val)}`).join(' · ');
+  }
+  return String(value);
+}
+
+export const ShahabLabView: React.FC<ShahabLabViewProps> = ({
+  locale = 'fa',
+  persianDigits = false,
+}) => {
+  const isFa = locale === 'fa';
   const [activeSubTab, setActiveSubTab] = useState<LabSubTab>('qualification');
   const [data, setData] = useState<ShahabApiPayload | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
@@ -146,11 +173,17 @@ export const ShahabLabView: React.FC = () => {
       const json = (await resp.json()) as ShahabApiPayload;
       setData(json);
     } catch (err) {
-      setErrorMsg(err instanceof Error ? err.message : 'Failed to load SHAHAB persisted state.');
+      setErrorMsg(
+        err instanceof Error
+          ? err.message
+          : isFa
+            ? 'بارگذاری وضعیت ذخیره‌شده شهاب ناموفق بود.'
+            : 'Failed to load SHAHAB persisted state.',
+      );
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [isFa]);
 
   useEffect(() => {
     void fetchState();
@@ -178,10 +211,20 @@ export const ShahabLabView: React.FC = () => {
         throw new Error(errBody.message || `HTTP ${resp.status}`);
       }
       setNewTerm('');
-      setNotice(`Persisted Persian context term "${trimmed}" to docs/shahab/.`);
+      setNotice(
+        isFa
+          ? `واژه زمینه فارسی «${trimmed}» در docs/shahab/ ذخیره شد.`
+          : `Persisted Persian context term "${trimmed}" to docs/shahab/.`,
+      );
       await fetchState();
     } catch (err) {
-      setErrorMsg(err instanceof Error ? err.message : 'Failed to save Persian term.');
+      setErrorMsg(
+        err instanceof Error
+          ? err.message
+          : isFa
+            ? 'ذخیره واژه فارسی ناموفق بود.'
+            : 'Failed to save Persian term.',
+      );
     } finally {
       setSavingTerm(false);
     }
@@ -194,10 +237,16 @@ export const ShahabLabView: React.FC = () => {
         method: 'DELETE',
       });
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-      setNotice(`Removed context entry ${entryId}.`);
+      setNotice(isFa ? `مدخل زمینه ${entryId} حذف شد.` : `Removed context entry ${entryId}.`);
       await fetchState();
     } catch (err) {
-      setErrorMsg(err instanceof Error ? err.message : 'Failed to remove Persian term.');
+      setErrorMsg(
+        err instanceof Error
+          ? err.message
+          : isFa
+            ? 'حذف واژه فارسی ناموفق بود.'
+            : 'Failed to remove Persian term.',
+      );
     }
   };
 
@@ -211,10 +260,20 @@ export const ShahabLabView: React.FC = () => {
         body: JSON.stringify(patch),
       });
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-      setNotice('Updated and persisted local-first privacy consent record.');
+      setNotice(
+        isFa
+          ? 'رکورد رضایت حریم خصوصی محلی به‌روزرسانی و ذخیره شد.'
+          : 'Updated and persisted local-first privacy consent record.',
+      );
       await fetchState();
     } catch (err) {
-      setErrorMsg(err instanceof Error ? err.message : 'Failed to persist consent change.');
+      setErrorMsg(
+        err instanceof Error
+          ? err.message
+          : isFa
+            ? 'ثبت تغییر رضایت ناموفق بود.'
+            : 'Failed to persist consent change.',
+      );
     } finally {
       setSavingConsent(false);
     }
@@ -226,9 +285,19 @@ export const ShahabLabView: React.FC = () => {
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
       const bundle = await resp.json();
       setExportedBundle(bundle);
-      setNotice('Generated sanitized diagnostic bundle (zero raw audio, transcripts, or local paths).');
+      setNotice(
+        isFa
+          ? 'بسته تشخیصی پالایش‌شده (بدون صوت خام، متن یا مسیر محلی) ایجاد شد.'
+          : 'Generated sanitized diagnostic bundle (zero raw audio, transcripts, or local paths).',
+      );
     } catch (err) {
-      setErrorMsg(err instanceof Error ? err.message : 'Failed to export sanitized diagnostics.');
+      setErrorMsg(
+        err instanceof Error
+          ? err.message
+          : isFa
+            ? 'خروجی گرفتن تشخیصی پالایش‌شده ناموفق بود.'
+            : 'Failed to export sanitized diagnostics.',
+      );
     }
   };
 
@@ -236,10 +305,16 @@ export const ShahabLabView: React.FC = () => {
     try {
       const resp = await fetch('/api/shahab/operations/local-diagnostics', { method: 'DELETE' });
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-      setNotice('Cleared local runtime diagnostic events.');
+      setNotice(isFa ? 'رویدادهای تشخیصی محلی پاک شدند.' : 'Cleared local runtime diagnostic events.');
       await fetchState();
     } catch (err) {
-      setErrorMsg(err instanceof Error ? err.message : 'Failed to clear diagnostics.');
+      setErrorMsg(
+        err instanceof Error
+          ? err.message
+          : isFa
+            ? 'پاک‌سازی رویدادهای تشخیصی ناموفق بود.'
+            : 'Failed to clear diagnostics.',
+      );
     }
   };
 
@@ -275,17 +350,44 @@ export const ShahabLabView: React.FC = () => {
     'NO_GO_REQUIRES_ENGINEERING_FIXES';
   const releaseBlockersCount =
     qual?.releaseDecision?.releaseBlockersCount ?? blockers.length;
+  const qualificationRunId =
+    qual?.qualificationConfig?.qualificationRunId ??
+    qual?.releaseDecision?.qualificationRunId ??
+    qual?.qualificationRunId ??
+    '—';
+  const qualificationCreatedAt =
+    qual?.qualificationConfig?.createdAtUtc ??
+    qual?.releaseDecision?.decidedAtUtc ??
+    qual?.createdAtUtc ??
+    '';
+  const eligibleForProduction =
+    typeof qual?.releaseDecision?.eligibleForProductionRelease === 'boolean'
+      ? qual.releaseDecision.eligibleForProductionRelease
+      : goNoGoDecision === 'GO_PRODUCTION' && releaseBlockersCount === 0;
+  const secondaryRecommendation =
+    qual?.releaseDecision?.secondaryRecommendation ??
+    (typeof qual?.releaseDecision?.eligibleForNextResearchStage === 'boolean'
+      ? String(qual.releaseDecision.eligibleForNextResearchStage)
+      : 'CONDITIONAL_R_AND_D');
+  const resolvedBlockingReasons: string[] = Array.isArray(qual?.releaseDecision?.blockingReasons) &&
+    qual.releaseDecision.blockingReasons.length > 0
+    ? qual.releaseDecision.blockingReasons
+    : Array.isArray(qual?.releaseDecision?.remainingUserRisks)
+      ? qual.releaseDecision.remainingUserRisks.filter((r: string) =>
+          r.includes('RELEASE_BLOCKER') || r.includes('HIGH_RISK'),
+        )
+      : [];
 
   const tabs: Array<{ id: LabSubTab; label: string }> = [
-    { id: 'qualification', label: 'System Qualification (021)' },
-    { id: 'integrations', label: 'SDK & Host Integrations (022–024)' },
-    { id: 'overview', label: 'Overview & Gates (001–024)' },
-    { id: 'performance', label: 'Performance & Streaming (016–017)' },
-    { id: 'persian', label: 'Persian Context & Fidelity (008/019)' },
-    { id: 'compact', label: 'Discovery & Compact (003/009/020)' },
-    { id: 'validation', label: 'Validation & Neural Dev (011–012)' },
-    { id: 'runtime', label: 'Release & Runtime (013/018)' },
-    { id: 'operations', label: 'SHAHAB OPERATIONS (014–015)' },
+    { id: 'qualification', label: isFa ? 'صلاحیت‌سنجی سیستم (021)' : 'System Qualification (021)' },
+    { id: 'integrations', label: isFa ? 'SDK و اتصال میزبان (022–024)' : 'SDK & Host Integrations (022–024)' },
+    { id: 'overview', label: isFa ? 'نمای کلی و دروازه‌ها (001–024)' : 'Overview & Gates (001–024)' },
+    { id: 'performance', label: isFa ? 'کارایی و استریم (016–017)' : 'Performance & Streaming (016–017)' },
+    { id: 'persian', label: isFa ? 'حافظه و وفاداری فارسی (008/019)' : 'Persian Context & Fidelity (008/019)' },
+    { id: 'compact', label: isFa ? 'کشف و مدل‌های فشرده (003/009/020)' : 'Discovery & Compact (003/009/020)' },
+    { id: 'validation', label: isFa ? 'اعتبارسنجی و توسعه عصبی (011–012)' : 'Validation & Neural Dev (011–012)' },
+    { id: 'runtime', label: isFa ? 'انتشار و زمان اجرا (013/018)' : 'Release & Runtime (013/018)' },
+    { id: 'operations', label: isFa ? 'عملیات شهاب (014–015)' : 'SHAHAB OPERATIONS (014–015)' },
   ];
 
   const missionList = impl?.missions ? Object.values(impl.missions) as Array<Record<string, any>> : [];
@@ -295,7 +397,7 @@ export const ShahabLabView: React.FC = () => {
 
   return (
     <div
-      dir="ltr"
+      dir={isFa ? 'rtl' : 'ltr'}
       data-testid="shahab-lab-root"
       className="min-h-full bg-[var(--avp-bg)] text-[var(--avp-text)] px-4 sm:px-6 py-5 space-y-5 font-sans"
     >
@@ -305,15 +407,26 @@ export const ShahabLabView: React.FC = () => {
           <div className="space-y-1">
             <div className="flex flex-wrap items-center gap-2.5">
               <h1 className="text-lg font-bold tracking-tight text-[var(--avp-text)]">
-                SHAHAB LAB — System Qualification &amp; Evidence Observatory
+                {isFa
+                  ? 'آزمایشگاه شهاب — رصدخانه شواهد و صلاحیت‌سنجی موتور فارسی'
+                  : 'SHAHAB LAB — System Qualification & Evidence Observatory'}
               </h1>
               <StatusTag value={goNoGoDecision} />
             </div>
-            <p className="text-xs text-[var(--avp-text-secondary)] max-w-3xl">
-              Native Persian Speech Recognition Engine ({impl?.engineRelease ?? 'SHAHAB-R2.0.0-RC1'}) ·
-              Neural Core: <span className="font-mono text-[var(--avp-text)]">{impl?.neuralCoreIdentity ?? 'INHERITED-PERSIAN-ASR-CORE'}</span> ·
-              <span className="font-mono text-[var(--avp-warning-text)] ml-1">trainable_parameters = 0</span> ·
-              Local-First Offline Architecture
+            <p className="text-xs text-[var(--avp-text-secondary)] max-w-3xl leading-relaxed">
+              {isFa ? 'موتور بومی تشخیص گفتار فارسی' : 'Native Persian Speech Recognition Engine'} (
+              <bdi dir="ltr" className="font-mono text-[var(--avp-text)]">
+                {impl?.engineRelease ?? 'SHAHAB-R2.0.0-RC1'}
+              </bdi>
+              ) · {isFa ? 'هسته عصبی:' : 'Neural Core:'}{' '}
+              <bdi dir="ltr" className="font-mono text-[var(--avp-text)]">
+                {impl?.neuralCoreIdentity ?? 'INHERITED-PERSIAN-ASR-CORE'}
+              </bdi>{' '}
+              ·{' '}
+              <bdi dir="ltr" className="font-mono text-[var(--avp-warning-text)]">
+                trainable_parameters = 0
+              </bdi>{' '}
+              · {isFa ? 'معماری ۱۰۰٪ محلی و آفلاین' : 'Local-First Offline Architecture'}
             </p>
           </div>
           <div className="flex items-center gap-2">
@@ -321,53 +434,81 @@ export const ShahabLabView: React.FC = () => {
               type="button"
               onClick={() => void fetchState()}
               disabled={loading}
-              className="avp-btn avp-btn-secondary"
+              className="avp-btn avp-btn-outline min-h-[44px] sm:min-h-[34px]"
             >
-              <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
-              <span>Reload Persisted Artifacts</span>
+              <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} aria-hidden="true" />
+              <span>{isFa ? 'بارگذاری مجدد شواهد' : 'Reload Persisted Artifacts'}</span>
             </button>
           </div>
         </div>
 
         {/* Honest KPI Strip — surfaces blockers explicitly */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 gap-2.5 mt-4 pt-4 border-t border-[var(--avp-border)]">
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2.5 mt-4 pt-4 border-t border-[var(--avp-border)]">
           <div className="bg-[var(--avp-bg-subtle)] border border-[var(--avp-border)] rounded-sm p-2.5">
-            <div className="text-[10px] uppercase tracking-wider text-[var(--avp-text-secondary)]">Release Decision</div>
-            <div className="text-xs font-mono font-semibold text-[var(--avp-danger-text)] mt-1 truncate" title={goNoGoDecision}>
-              {goNoGoDecision}
+            <div className="text-[11px] uppercase tracking-wider text-[var(--avp-text-secondary)]">
+              {isFa ? 'تصمیم انتشار' : 'Release Decision'}
+            </div>
+            <div
+              className={`text-xs font-semibold mt-1 leading-snug ${
+                eligibleForProduction ? 'text-[var(--avp-success-text)]' : 'text-[var(--avp-danger-text)]'
+              }`}
+              title={goNoGoDecision}
+            >
+              {goNoGoDecision === 'NO_GO_REQUIRES_ENGINEERING_FIXES'
+                ? isFa
+                  ? 'نیاز به اصلاح مهندسی'
+                  : 'No-Go (Fixes Req.)'
+                : goNoGoDecision === 'GO_PRODUCTION'
+                  ? isFa
+                    ? 'تأییدشده برای انتشار'
+                    : 'Go (Production)'
+                  : goNoGoDecision}
             </div>
           </div>
           <div className="bg-[var(--avp-bg-subtle)] border border-[var(--avp-border)] rounded-sm p-2.5">
-            <div className="text-[10px] uppercase tracking-wider text-[var(--avp-text-secondary)]">Open Blockers</div>
-            <div className="text-sm font-mono font-semibold text-[var(--avp-warning-text)] mt-1">
-              {releaseBlockersCount} Active
+            <div className="text-[11px] uppercase tracking-wider text-[var(--avp-text-secondary)]">
+              {isFa ? 'مسدودکننده‌های باز' : 'Open Blockers'}
+            </div>
+            <div className="text-sm font-semibold text-[var(--avp-warning-text)] mt-1 flex items-baseline gap-1">
+              <bdi dir="ltr" className="font-mono tabular-nums">
+                {formatNumberForLocale(releaseBlockersCount, { persianDigits })}
+              </bdi>
+              <span>{isFa ? 'مورد فعال' : 'Active'}</span>
             </div>
           </div>
           <div className="bg-[var(--avp-bg-subtle)] border border-[var(--avp-border)] rounded-sm p-2.5">
-            <div className="text-[10px] uppercase tracking-wider text-[var(--avp-text-secondary)]">Workloads (WL-A..H)</div>
-            <div className="text-sm font-mono font-semibold text-[var(--avp-text)] mt-1">
+            <div className="text-[11px] uppercase tracking-wider text-[var(--avp-text-secondary)]">
+              {isFa ? 'بارهای کاری (WL-A..H)' : 'Workloads (WL-A..H)'}
+            </div>
+            <div dir="ltr" className="text-sm font-mono tabular-nums font-semibold text-[var(--avp-text)] mt-1">
               {qual?.integratedWorkloads
-                ? `${qual.integratedWorkloads.filter((w: any) => w.passed).length}/${qual.integratedWorkloads.length} Passed`
+                ? `${formatNumberForLocale(qual.integratedWorkloads.filter((w: any) => w.passed).length, { persianDigits })}/${formatNumberForLocale(qual.integratedWorkloads.length, { persianDigits })} Passed`
                 : 'NOT_MEASURED'}
             </div>
           </div>
           <div className="bg-[var(--avp-bg-subtle)] border border-[var(--avp-border)] rounded-sm p-2.5">
-            <div className="text-[10px] uppercase tracking-wider text-[var(--avp-text-secondary)]">Warm Median RTF</div>
-            <div className="text-sm font-mono font-semibold text-[var(--avp-text)] mt-1">
+            <div className="text-[11px] uppercase tracking-wider text-[var(--avp-text-secondary)]">
+              {isFa ? 'RTF میانه (Warm)' : 'Warm Median RTF'}
+            </div>
+            <div dir="ltr" className="text-sm font-mono tabular-nums font-semibold text-[var(--avp-text)] mt-1">
               {perf?.tracks?.trackB_warmRepeats?.rtf?.medianP50 != null
                 ? `${Number(perf.tracks.trackB_warmRepeats.rtf.medianP50).toFixed(3)}x`
                 : 'NOT_MEASURED'}
             </div>
           </div>
           <div className="bg-[var(--avp-bg-subtle)] border border-[var(--avp-border)] rounded-sm p-2.5">
-            <div className="text-[10px] uppercase tracking-wider text-[var(--avp-text-secondary)]">Package Footprint</div>
-            <div className="text-xs font-mono font-semibold text-[var(--avp-warning-text)] mt-1">
+            <div className="text-[11px] uppercase tracking-wider text-[var(--avp-text-secondary)]">
+              {isFa ? 'حجم بسته مدل' : 'Package Footprint'}
+            </div>
+            <div dir="ltr" className="text-xs font-mono tabular-nums font-semibold text-[var(--avp-warning-text)] mt-1">
               110.41 MiB Disk · 55.66 Gzip
             </div>
           </div>
           <div className="bg-[var(--avp-bg-subtle)] border border-[var(--avp-border)] rounded-sm p-2.5">
-            <div className="text-[10px] uppercase tracking-wider text-[var(--avp-text-secondary)]">Ed25519 Signing</div>
-            <div className="text-xs font-mono font-semibold text-[var(--avp-danger-text)] mt-1">
+            <div className="text-[11px] uppercase tracking-wider text-[var(--avp-text-secondary)]">
+              {isFa ? 'امضای Ed25519' : 'Ed25519 Signing'}
+            </div>
+            <div dir="ltr" className="text-xs font-mono font-semibold text-[var(--avp-danger-text)] mt-1">
               {impl?.releaseGates?.SIGNING_STATUS ?? 'BLOCKED'}
             </div>
           </div>
@@ -375,25 +516,52 @@ export const ShahabLabView: React.FC = () => {
       </div>
 
       {errorMsg && (
-        <div className="flex items-center gap-2 px-4 py-2.5 text-xs bg-[var(--avp-danger-soft)] border border-[var(--avp-danger)]/50 text-[var(--avp-danger-text)] rounded-sm">
-          <XCircle className="w-4 h-4 shrink-0" />
+        <div
+          role="alert"
+          className="flex items-center gap-2 px-4 py-2.5 text-xs bg-[var(--avp-danger-soft)] border border-[var(--avp-danger)]/50 text-[var(--avp-danger-text)] rounded-sm"
+        >
+          <XCircle className="w-4 h-4 shrink-0" aria-hidden="true" />
           <span>{errorMsg}</span>
         </div>
       )}
       {notice && (
-        <div className="flex items-center gap-2 px-4 py-2.5 text-xs bg-[var(--avp-accent-soft)] border border-[var(--avp-accent)]/50 text-[var(--avp-accent-text)] rounded-sm">
-          <CheckCircle2 className="w-4 h-4 shrink-0" />
+        <div
+          role="status"
+          aria-live="polite"
+          className="flex items-center gap-2 px-4 py-2.5 text-xs bg-[var(--avp-accent-soft)] border border-[var(--avp-accent)]/50 text-[var(--avp-accent-text)] rounded-sm"
+        >
+          <CheckCircle2 className="w-4 h-4 shrink-0" aria-hidden="true" />
           <span>{notice}</span>
         </div>
       )}
 
-      {/* Sub-navigation bar */}
+      {/* Mobile Compact Sub-Tab Selector (<md) — replaces 9 stacked buttons */}
+      <div className="md:hidden">
+        <label htmlFor="shahab-lab-mobile-tab" className="sr-only">
+          {isFa ? 'انتخاب بخش آزمایشگاه شهاب' : 'Select SHAHAB Lab section'}
+        </label>
+        <select
+          id="shahab-lab-mobile-tab"
+          data-testid="shahab-mobile-tab-select"
+          value={activeSubTab}
+          onChange={(e) => setActiveSubTab(e.target.value as LabSubTab)}
+          className="avp-select w-full min-h-[44px] text-xs font-medium"
+        >
+          {tabs.map((tab) => (
+            <option key={tab.id} value={tab.id}>
+              {tab.label}
+            </option>
+          ))}
+        </select>
+      </div>
+
+      {/* Desktop Sub-navigation tab bar (md+) */}
       <div
         role="tablist"
-        aria-label="SHAHAB Lab Sections"
-        className="flex flex-wrap items-center gap-1.5 border-b border-[var(--avp-border)] pb-2"
+        aria-label={isFa ? 'بخش‌های آزمایشگاه شهاب' : 'SHAHAB Lab Sections'}
+        className="hidden md:flex flex-wrap items-center gap-1.5 border-b border-[var(--avp-border)] pb-2"
       >
-        {tabs.map((tab) => {
+        {tabs.map((tab, idx) => {
           const isActive = activeSubTab === tab.id;
           return (
             <button
@@ -401,9 +569,18 @@ export const ShahabLabView: React.FC = () => {
               type="button"
               role="tab"
               aria-selected={isActive}
+              tabIndex={isActive ? 0 : -1}
               data-testid={`shahab-tab-${tab.id}`}
               onClick={() => setActiveSubTab(tab.id)}
-              className={`px-3 py-1.5 text-xs font-medium rounded-sm border transition-colors cursor-pointer ${
+              onKeyDown={(e) => {
+                const nextIdx = getNextRovingTabIndex(idx, tabs.length, e.key, isFa, 'horizontal');
+                if (nextIdx === null) return;
+                e.preventDefault();
+                setActiveSubTab(tabs[nextIdx].id);
+                const buttons = e.currentTarget.parentElement?.querySelectorAll<HTMLButtonElement>('[role="tab"]');
+                buttons?.[nextIdx]?.focus();
+              }}
+              className={`min-h-[32px] px-3 py-1.5 text-xs font-medium rounded-sm border transition-colors cursor-pointer ${
                 isActive
                   ? 'bg-[var(--avp-accent-soft)] border-[var(--avp-accent)]/60 text-[var(--avp-accent-text)] font-semibold'
                   : 'bg-[var(--avp-surface)] border-[var(--avp-border)] text-[var(--avp-text-secondary)] hover:bg-[var(--avp-hover)] hover:text-[var(--avp-text)]'
@@ -417,12 +594,29 @@ export const ShahabLabView: React.FC = () => {
 
       {loading && !data ? (
         <div className="p-8 text-center text-xs text-[var(--avp-text-secondary)] bg-[var(--avp-surface)] border border-[var(--avp-border)] rounded-md">
-          Loading persisted SHAHAB evidence artifacts from <code className="font-mono">docs/shahab/</code>…
+          {isFa ? (
+            <>
+              در حال بارگذاری شواهد ذخیره‌شده از مسیر <code dir="ltr" className="font-mono">docs/shahab/</code>…
+            </>
+          ) : (
+            <>
+              Loading persisted SHAHAB evidence artifacts from <code className="font-mono">docs/shahab/</code>…
+            </>
+          )}
         </div>
       ) : !data?.available ? (
         <div className="p-6 text-xs text-[var(--avp-warning-text)] bg-[var(--avp-warning-soft)] border border-[var(--avp-warning)]/40 rounded-md">
-          Persisted SHAHAB pipeline artifacts are not yet generated. Run{' '}
-          <code className="font-mono">npx tsx scripts/run-shahab-pipeline.ts</code> to execute real verification.
+          {isFa ? (
+            <>
+              شواهد خط لوله شهاب هنوز تولید نشده است. دستور{' '}
+              <code dir="ltr" className="font-mono">npx tsx scripts/run-shahab-pipeline.ts</code> را اجرا کنید.
+            </>
+          ) : (
+            <>
+              Persisted SHAHAB pipeline artifacts are not yet generated. Run{' '}
+              <code className="font-mono">npx tsx scripts/run-shahab-pipeline.ts</code> to execute real verification.
+            </>
+          )}
         </div>
       ) : (
         <div className="space-y-4">
@@ -435,47 +629,57 @@ export const ShahabLabView: React.FC = () => {
                 badge={goNoGoDecision}
               >
                 {qual?.releaseDecision ? (
-                  <div className="space-y-3 text-xs">
+                  <div className="space-y-3 text-xs" dir="ltr">
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                       <div className="bg-[var(--avp-bg-subtle)] border border-[var(--avp-border)] p-3 rounded-sm">
-                        <div className="text-[var(--avp-text-secondary)] uppercase text-[10px]">Qualification Run ID</div>
-                        <div className="font-mono text-[var(--avp-text)] mt-1">{qual.qualificationRunId}</div>
-                        <div className="text-[11px] text-[var(--avp-text-muted)] mt-1">{qual.createdAtUtc}</div>
+                        <div className="text-[var(--avp-text-secondary)] uppercase text-[11px]">Qualification Run ID</div>
+                        <div data-testid="shahab-qual-run-id" className="font-mono text-[var(--avp-text)] mt-1">
+                          {qualificationRunId}
+                        </div>
+                        <div className="text-[11px] text-[var(--avp-text-muted)] mt-1">
+                          {qualificationCreatedAt || 'Timestamp unavailable'}
+                        </div>
                       </div>
                       <div className="bg-[var(--avp-bg-subtle)] border border-[var(--avp-border)] p-3 rounded-sm">
-                        <div className="text-[var(--avp-text-secondary)] uppercase text-[10px]">Eligibility</div>
+                        <div className="text-[var(--avp-text-secondary)] uppercase text-[11px]">Eligibility</div>
                         <div className="font-mono text-[var(--avp-text)] mt-1">
-                          Production Release: <span className="text-[var(--avp-danger-text)]">{String(qual.releaseDecision.eligibleForProductionRelease)}</span>
+                          Production Release:{' '}
+                          <span className={eligibleForProduction ? 'text-[var(--avp-success-text)]' : 'text-[var(--avp-danger-text)]'}>
+                            {eligibleForProduction ? 'ELIGIBLE' : 'NO (BLOCKED)'}
+                          </span>
                         </div>
                         <div className="font-mono text-[var(--avp-text-secondary)] mt-0.5">
-                          Next Research Stage: <span className="text-[var(--avp-success-text)]">{String(qual.releaseDecision.eligibleForNextResearchStage)}</span>
+                          Disposition:{' '}
+                          <span className="text-[var(--avp-accent-text)]">{secondaryRecommendation}</span>
                         </div>
                       </div>
                       <div className="bg-[var(--avp-bg-subtle)] border border-[var(--avp-border)] p-3 rounded-sm">
-                        <div className="text-[var(--avp-text-secondary)] uppercase text-[10px]">Blocking Conditions</div>
+                        <div className="text-[var(--avp-text-secondary)] uppercase text-[11px]">Blocking Conditions</div>
                         <div className="font-mono text-[var(--avp-danger-text)] mt-1">
-                          {qual.releaseDecision.releaseBlockersCount} Critical/High Release Blockers
+                          {qual.releaseDecision.releaseBlockersCount ?? releaseBlockersCount} Critical/High Release Blockers
                         </div>
                         <div className="text-[11px] text-[var(--avp-text-secondary)] mt-0.5">
-                          Final Status: {qual.finalMissionStatus}
+                          Evidence Status: {qual.finalMissionStatus ?? 'VERIFIED'} · Verified Checks:{' '}
+                          {Array.isArray(qual.releaseDecision.verifiedCapabilities)
+                            ? qual.releaseDecision.verifiedCapabilities.length
+                            : 0}
                         </div>
                       </div>
                     </div>
 
-                    {Array.isArray(qual.releaseDecision.blockingReasons) &&
-                      qual.releaseDecision.blockingReasons.length > 0 && (
-                        <div className="bg-[var(--avp-danger-soft)] border border-[var(--avp-danger)]/40 rounded-sm p-3">
-                          <div className="font-semibold text-[var(--avp-danger-text)] mb-1.5 flex items-center gap-1.5">
-                            <ShieldAlert className="w-3.5 h-3.5" />
-                            <span>Unresolved Release Blockers</span>
-                          </div>
-                          <ul className="space-y-1 text-[var(--avp-danger-text)] list-disc list-inside">
-                            {qual.releaseDecision.blockingReasons.map((reason: string, idx: number) => (
-                              <li key={idx}>{reason}</li>
-                            ))}
-                          </ul>
+                    {resolvedBlockingReasons.length > 0 && (
+                      <div className="bg-[var(--avp-danger-soft)] border border-[var(--avp-danger)]/40 rounded-sm p-3">
+                        <div className="font-semibold text-[var(--avp-danger-text)] mb-1.5 flex items-center gap-1.5">
+                          <ShieldAlert className="w-3.5 h-3.5" />
+                          <span>Unresolved Release Blockers &amp; High Risks</span>
                         </div>
-                      )}
+                        <ul className="space-y-1 text-[var(--avp-danger-text)] list-disc list-inside">
+                          {resolvedBlockingReasons.map((reason: string, idx: number) => (
+                            <li key={idx}>{reason}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
                   </div>
                 ) : (
                   <p className="text-xs text-[var(--avp-text-secondary)]">Qualification decision record not loaded.</p>
@@ -489,12 +693,12 @@ export const ShahabLabView: React.FC = () => {
                   subtitle="Exact identity binding every integrated workload & benchmark result"
                   badge="VERIFIED"
                 >
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5 text-xs">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5 text-xs" dir="ltr">
                     {[
                       ['Application Revision', qual.qualificationConfig.applicationRevision],
                       ['Engine Revision', qual.qualificationConfig.engineRevision],
                       ['Model Revision SHA', qual.qualificationConfig.modelRevision],
-                      ['Runtime & Provider', `${qual.qualificationConfig.runtimeVersion} (${qual.qualificationConfig.executionProvider})`],
+                      ['Runtime & Provider', `${qual.qualificationConfig.runtimeVersion ?? '—'} (${qual.qualificationConfig.executionProvider ?? 'wasm'})`],
                       ['Audio Frontend', qual.qualificationConfig.audioFrontendConfig],
                       ['Decoder Policy', qual.qualificationConfig.decoderConfig],
                       ['Streaming Mode', qual.qualificationConfig.streamingConfig],
@@ -502,8 +706,10 @@ export const ShahabLabView: React.FC = () => {
                       ['Privacy Config', qual.qualificationConfig.privacyConfig],
                     ].map(([k, v]) => (
                       <div key={String(k)} className="bg-[var(--avp-bg-subtle)] border border-[var(--avp-border)] p-2.5 rounded-sm">
-                        <div className="text-[10px] uppercase text-[var(--avp-text-secondary)]">{k}</div>
-                        <div className="font-mono text-[var(--avp-text)] mt-1 break-all">{String(v ?? 'UNKNOWN')}</div>
+                        <div className="text-[11px] uppercase text-[var(--avp-text-secondary)]">{k}</div>
+                        <div className="font-mono text-[var(--avp-text)] mt-1 break-all">
+                          {formatConfigValue(v)}
+                        </div>
                       </div>
                     ))}
                   </div>
@@ -633,25 +839,25 @@ export const ShahabLabView: React.FC = () => {
                   <div className="space-y-3 text-xs">
                     <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                       <div className="bg-[var(--avp-bg-subtle)] border border-[var(--avp-border)] p-3 rounded-sm">
-                        <div className="text-[10px] uppercase text-[var(--avp-text-secondary)]">SDK / Schema Versions</div>
+                        <div className="text-[11px] uppercase text-[var(--avp-text-secondary)]">SDK / Schema Versions</div>
                         <div className="font-mono text-[var(--avp-text)] mt-1">
                           API v{sdkState.sdkApiVersion} · Result v{sdkState.resultSchemaVersion}
                         </div>
                       </div>
                       <div className="bg-[var(--avp-bg-subtle)] border border-[var(--avp-border)] p-3 rounded-sm">
-                        <div className="text-[10px] uppercase text-[var(--avp-text-secondary)]">Conformance Suite</div>
+                        <div className="text-[11px] uppercase text-[var(--avp-text-secondary)]">Conformance Suite</div>
                         <div className="font-mono text-[var(--avp-success-text)] mt-1">
                           {sdkState.conformanceSuite?.passedCases}/{sdkState.conformanceSuite?.totalCases} Passed
                         </div>
                       </div>
                       <div className="bg-[var(--avp-bg-subtle)] border border-[var(--avp-border)] p-3 rounded-sm">
-                        <div className="text-[10px] uppercase text-[var(--avp-text-secondary)]">Sample Host Real Run</div>
+                        <div className="text-[11px] uppercase text-[var(--avp-text-secondary)]">Sample Host Real Run</div>
                         <div className="font-mono text-[var(--avp-text)] mt-1">
                           {sdkState.sampleHostRun?.durationSec}s · RTF {sdkState.sampleHostRun?.rtf}
                         </div>
                       </div>
                       <div className="bg-[var(--avp-bg-subtle)] border border-[var(--avp-border)] p-3 rounded-sm">
-                        <div className="text-[10px] uppercase text-[var(--avp-text-secondary)]">SHAHAB-021 Gate Honored</div>
+                        <div className="text-[11px] uppercase text-[var(--avp-text-secondary)]">SHAHAB-021 Gate Honored</div>
                         <div className="font-mono text-[var(--avp-warning-text)] mt-1 truncate" title={sdkState.entryGateQualificationDecision}>
                           {sdkState.entryGateQualificationDecision}
                         </div>
@@ -695,19 +901,19 @@ export const ShahabLabView: React.FC = () => {
                   <div className="space-y-3 text-xs">
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                       <div className="bg-[var(--avp-bg-subtle)] border border-[var(--avp-border)] p-3 rounded-sm">
-                        <div className="text-[10px] uppercase text-[var(--avp-text-secondary)]">Non-Destructive Source</div>
+                        <div className="text-[11px] uppercase text-[var(--avp-text-secondary)]">Non-Destructive Source</div>
                         <div className="font-mono text-[var(--avp-success-text)] mt-1">
                           Verified: {String(avapardazState.nonDestructiveSourceVerified)}
                         </div>
                       </div>
                       <div className="bg-[var(--avp-bg-subtle)] border border-[var(--avp-border)] p-3 rounded-sm">
-                        <div className="text-[10px] uppercase text-[var(--avp-text-secondary)]">P0-009 / 010 / 012 Authority</div>
+                        <div className="text-[11px] uppercase text-[var(--avp-text-secondary)]">P0-009 / 010 / 012 Authority</div>
                         <div className="font-mono text-[var(--avp-success-text)] mt-1">
                           Preserved (0 parallel correction engines)
                         </div>
                       </div>
                       <div className="bg-[var(--avp-bg-subtle)] border border-[var(--avp-border)] p-3 rounded-sm">
-                        <div className="text-[10px] uppercase text-[var(--avp-text-secondary)]">Verified Exports</div>
+                        <div className="text-[11px] uppercase text-[var(--avp-text-secondary)]">Verified Exports</div>
                         <div className="font-mono text-[var(--avp-text)] mt-1">
                           {(avapardazState.supportedExportFormats ?? []).join(' · ')}
                         </div>
@@ -741,19 +947,19 @@ export const ShahabLabView: React.FC = () => {
                   <div className="space-y-3 text-xs">
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                       <div className="bg-[var(--avp-bg-subtle)] border border-[var(--avp-border)] p-3 rounded-sm">
-                        <div className="text-[10px] uppercase text-[var(--avp-text-secondary)]">Architecture Decision</div>
+                        <div className="text-[11px] uppercase text-[var(--avp-text-secondary)]">Architecture Decision</div>
                         <div className="font-mono text-[var(--avp-success-text)] mt-1">
                           {adobeState.primaryArchitectureDecision}
                         </div>
                       </div>
                       <div className="bg-[var(--avp-bg-subtle)] border border-[var(--avp-border)] p-3 rounded-sm">
-                        <div className="text-[10px] uppercase text-[var(--avp-text-secondary)]">Official Capability Register</div>
+                        <div className="text-[11px] uppercase text-[var(--avp-text-secondary)]">Official Capability Register</div>
                         <div className="font-mono text-[var(--avp-text)] mt-1">
                           {adobeState.officialCapabilityRegisterCount} Adobe Official Entries (2026-11-21)
                         </div>
                       </div>
                       <div className="bg-[var(--avp-bg-subtle)] border border-[var(--avp-border)] p-3 rounded-sm">
-                        <div className="text-[10px] uppercase text-[var(--avp-text-secondary)]">Live Audition GUI Host Test</div>
+                        <div className="text-[11px] uppercase text-[var(--avp-text-secondary)]">Live Audition GUI Host Test</div>
                         <div className="mt-1"><StatusTag value="NOT_TESTED" /></div>
                       </div>
                     </div>
@@ -846,13 +1052,13 @@ export const ShahabLabView: React.FC = () => {
                   <div className="space-y-4 text-xs">
                     <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                       <div className="bg-[var(--avp-bg-subtle)] border border-[var(--avp-border)] p-3 rounded-sm">
-                        <div className="text-[10px] uppercase text-[var(--avp-text-secondary)]">Cold Model Load</div>
+                        <div className="text-[11px] uppercase text-[var(--avp-text-secondary)]">Cold Model Load</div>
                         <div className="text-base font-mono font-semibold text-[var(--avp-text)] mt-1">
                           {perf.tracks?.trackA_coldStart?.modelLoadMs ?? '—'} ms
                         </div>
                       </div>
                       <div className="bg-[var(--avp-bg-subtle)] border border-[var(--avp-border)] p-3 rounded-sm">
-                        <div className="text-[10px] uppercase text-[var(--avp-text-secondary)]">Warm Median RTF (P50)</div>
+                        <div className="text-[11px] uppercase text-[var(--avp-text-secondary)]">Warm Median RTF (P50)</div>
                         <div className="text-base font-mono font-semibold text-[var(--avp-success-text)] mt-1">
                           {perf.tracks?.trackB_warmRepeats?.rtf?.medianP50 != null
                             ? `${Number(perf.tracks.trackB_warmRepeats.rtf.medianP50).toFixed(3)}x`
@@ -860,7 +1066,7 @@ export const ShahabLabView: React.FC = () => {
                         </div>
                       </div>
                       <div className="bg-[var(--avp-bg-subtle)] border border-[var(--avp-border)] p-3 rounded-sm">
-                        <div className="text-[10px] uppercase text-[var(--avp-text-secondary)]">Warm P95 Latency</div>
+                        <div className="text-[11px] uppercase text-[var(--avp-text-secondary)]">Warm P95 Latency</div>
                         <div className="text-base font-mono font-semibold text-[var(--avp-text)] mt-1">
                           {perf.tracks?.trackB_warmRepeats?.totalLatencyMs?.p95 != null
                             ? `${Number(perf.tracks.trackB_warmRepeats.totalLatencyMs.p95).toFixed(1)} ms`
@@ -868,7 +1074,7 @@ export const ShahabLabView: React.FC = () => {
                         </div>
                       </div>
                       <div className="bg-[var(--avp-bg-subtle)] border border-[var(--avp-border)] p-3 rounded-sm">
-                        <div className="text-[10px] uppercase text-[var(--avp-text-secondary)]">Peak Process RSS</div>
+                        <div className="text-[11px] uppercase text-[var(--avp-text-secondary)]">Peak Process RSS</div>
                         <div className="text-base font-mono font-semibold text-[var(--avp-text)] mt-1">
                           {perf.tracks?.trackA_coldStart?.peakRssMiB != null
                             ? `${Number(perf.tracks.trackA_coldStart.peakRssMiB).toFixed(1)} MiB`
@@ -922,15 +1128,15 @@ export const ShahabLabView: React.FC = () => {
                   <div className="space-y-3 text-xs">
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                       <div className="bg-[var(--avp-bg-subtle)] border border-[var(--avp-border)] p-3 rounded-sm">
-                        <div className="text-[10px] uppercase text-[var(--avp-text-secondary)]">True Stateful Streaming</div>
+                        <div className="text-[11px] uppercase text-[var(--avp-text-secondary)]">True Stateful Streaming</div>
                         <div className="mt-1"><StatusTag value={stream.capabilityAudit?.trueStatefulStreamingStatus ?? 'NOT_SUPPORTED_BY_MODEL'} /></div>
                       </div>
                       <div className="bg-[var(--avp-bg-subtle)] border border-[var(--avp-border)] p-3 rounded-sm">
-                        <div className="text-[10px] uppercase text-[var(--avp-text-secondary)]">Active Streaming Mode</div>
+                        <div className="text-[11px] uppercase text-[var(--avp-text-secondary)]">Active Streaming Mode</div>
                         <div className="font-mono text-[var(--avp-warning-text)] mt-1">{stream.capabilityAudit?.selectedStreamingMode}</div>
                       </div>
                       <div className="bg-[var(--avp-bg-subtle)] border border-[var(--avp-border)] p-3 rounded-sm">
-                        <div className="text-[10px] uppercase text-[var(--avp-text-secondary)]">Repetition &amp; Editor Safety</div>
+                        <div className="text-[11px] uppercase text-[var(--avp-text-secondary)]">Repetition &amp; Editor Safety</div>
                         <div className="font-mono text-[var(--avp-success-text)] mt-1">
                           «نه نه» Preserved: {String(stream.overlapReconciliationAudit?.repetitionPreserved)} ·
                           User Edit Safe: {String(stream.editorBridgeAudit?.userEditPreserved)}
@@ -960,56 +1166,81 @@ export const ShahabLabView: React.FC = () => {
                   onSubmit={(e) => void handleAddTerm(e)}
                   className="grid grid-cols-1 sm:grid-cols-5 gap-2 mb-4"
                 >
-                  <input
-                    type="text"
-                    dir="rtl"
-                    data-testid="input-persian-term"
-                    value={newTerm}
-                    onChange={(e) => setNewTerm(e.target.value)}
-                    placeholder="واژه یا نام خاص فارسی (مثلاً آواپرداز)"
-                    className="avp-input sm:col-span-2 h-8 px-3 text-xs"
-                  />
-                  <select
-                    data-testid="select-persian-scope"
-                    value={newScope}
-                    onChange={(e) => setNewScope(e.target.value)}
-                    className="avp-input h-8 px-2.5 text-xs"
-                  >
-                    <option value="SESSION">SESSION</option>
-                    <option value="PROJECT">PROJECT</option>
-                    <option value="WORKSPACE">WORKSPACE</option>
-                    <option value="USER">USER</option>
-                  </select>
-                  <select
-                    data-testid="select-persian-status"
-                    value={newVerification}
-                    onChange={(e) => setNewVerification(e.target.value)}
-                    className="avp-input h-8 px-2.5 text-xs"
-                  >
-                    <option value="USER_VERIFIED">USER_VERIFIED</option>
-                    <option value="UNVERIFIED_CANDIDATE">UNVERIFIED_CANDIDATE</option>
-                    <option value="ADMIN_APPROVED">ADMIN_APPROVED</option>
-                  </select>
+                  <div className="sm:col-span-2">
+                    <label htmlFor="shahab-persian-term-input" className="sr-only">
+                      {isFa ? 'واژه یا نام خاص فارسی' : 'Persian term or proper noun'}
+                    </label>
+                    <input
+                      id="shahab-persian-term-input"
+                      type="text"
+                      dir="rtl"
+                      data-testid="input-persian-term"
+                      aria-label={isFa ? 'واژه یا نام خاص فارسی' : 'Persian term or proper noun'}
+                      value={newTerm}
+                      onChange={(e) => setNewTerm(e.target.value)}
+                      placeholder={
+                        isFa
+                          ? 'واژه یا نام خاص فارسی (مثلاً آواپرداز)'
+                          : 'Persian term or proper noun (e.g. آواپرداز)'
+                      }
+                      className="avp-input w-full min-h-[44px] sm:min-h-[34px] px-3 text-xs"
+                    />
+                  </div>
+                  <div>
+                    <label htmlFor="shahab-persian-scope-select" className="sr-only">
+                      {isFa ? 'دامنه حافظه واژه' : 'Memory scope'}
+                    </label>
+                    <select
+                      id="shahab-persian-scope-select"
+                      data-testid="select-persian-scope"
+                      aria-label={isFa ? 'دامنه حافظه واژه' : 'Memory scope'}
+                      value={newScope}
+                      onChange={(e) => setNewScope(e.target.value)}
+                      className="avp-input w-full min-h-[44px] sm:min-h-[34px] px-2.5 text-xs"
+                    >
+                      <option value="SESSION">SESSION</option>
+                      <option value="PROJECT">PROJECT</option>
+                      <option value="WORKSPACE">WORKSPACE</option>
+                      <option value="USER">USER</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label htmlFor="shahab-persian-status-select" className="sr-only">
+                      {isFa ? 'وضعیت اعتبارسنجی واژه' : 'Verification status'}
+                    </label>
+                    <select
+                      id="shahab-persian-status-select"
+                      data-testid="select-persian-status"
+                      aria-label={isFa ? 'وضعیت اعتبارسنجی واژه' : 'Verification status'}
+                      value={newVerification}
+                      onChange={(e) => setNewVerification(e.target.value)}
+                      className="avp-input w-full min-h-[44px] sm:min-h-[34px] px-2.5 text-xs"
+                    >
+                      <option value="USER_VERIFIED">USER_VERIFIED</option>
+                      <option value="UNVERIFIED_CANDIDATE">UNVERIFIED_CANDIDATE</option>
+                      <option value="ADMIN_APPROVED">ADMIN_APPROVED</option>
+                    </select>
+                  </div>
                   <button
                     type="submit"
                     data-testid="btn-add-persian-term"
                     disabled={savingTerm || !newTerm.trim()}
-                    className="avp-btn avp-btn-primary h-8"
+                    className="avp-btn avp-btn-primary min-h-[44px] sm:min-h-[34px]"
                   >
-                    <Plus className="w-3.5 h-3.5" />
-                    <span>Save Term</span>
+                    <Plus className="w-3.5 h-3.5" aria-hidden="true" />
+                    <span>{isFa ? 'ذخیره واژه' : 'Save Term'}</span>
                   </button>
                 </form>
 
                 <div className="overflow-x-auto">
-                  <table className="w-full text-xs text-left border-collapse">
+                  <table className="w-full text-xs text-start border-collapse">
                     <thead>
                       <tr className="border-b border-[var(--avp-border)] text-[var(--avp-text-secondary)] text-[11px]">
-                        <th className="py-2 pr-3">Term</th>
-                        <th className="py-2 pr-3">Scope</th>
-                        <th className="py-2 pr-3">Verification</th>
-                        <th className="py-2 pr-3">Category</th>
-                        <th className="py-2 text-right">Action</th>
+                        <th className="py-2 pe-3">{isFa ? 'واژه' : 'Term'}</th>
+                        <th className="py-2 pe-3">{isFa ? 'دامنه' : 'Scope'}</th>
+                        <th className="py-2 pe-3">{isFa ? 'اعتبارسنجی' : 'Verification'}</th>
+                        <th className="py-2 pe-3">{isFa ? 'دسته' : 'Category'}</th>
+                        <th className="py-2 text-end">{isFa ? 'عملیات' : 'Action'}</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-[var(--avp-border-subtle)]">
@@ -1017,22 +1248,22 @@ export const ShahabLabView: React.FC = () => {
                         const id = entry.entryId || entry.id;
                         return (
                           <tr key={id}>
-                            <td className="py-2 pr-3 font-medium text-[var(--avp-text)]" dir="rtl">
+                            <td className="py-2 pe-3 font-medium text-[var(--avp-text)]" dir="rtl">
                               {entry.term || entry.canonicalSurface}
                             </td>
-                            <td className="py-2 pr-3 font-mono text-[var(--avp-text-secondary)]">{entry.scope}</td>
-                            <td className="py-2 pr-3">
+                            <td className="py-2 pe-3 font-mono text-[var(--avp-text-secondary)]">{entry.scope}</td>
+                            <td className="py-2 pe-3">
                               <StatusTag value={entry.verificationStatus || 'USER_VERIFIED'} />
                             </td>
-                            <td className="py-2 pr-3 font-mono text-[var(--avp-text-muted)]">{entry.category || 'DOMAIN_TERM'}</td>
-                            <td className="py-2 text-right">
+                            <td className="py-2 pe-3 font-mono text-[var(--avp-text-muted)]">{entry.category || 'DOMAIN_TERM'}</td>
+                            <td className="py-2 text-end">
                               <button
                                 type="button"
                                 onClick={() => void handleDeleteTerm(id)}
-                                className="inline-flex items-center gap-1 px-2 py-1 text-[11px] text-[var(--avp-danger-text)] bg-[var(--avp-danger-soft)] border border-[var(--avp-danger)]/40 rounded-sm cursor-pointer"
+                                className="inline-flex items-center justify-center gap-1 min-h-[44px] sm:min-h-[28px] px-2.5 py-1 text-[11px] text-[var(--avp-danger-text)] bg-[var(--avp-danger-soft)] border border-[var(--avp-danger)]/40 rounded-sm cursor-pointer"
                               >
-                                <Trash2 className="w-3 h-3" />
-                                <span>Remove</span>
+                                <Trash2 className="w-3 h-3" aria-hidden="true" />
+                                <span>{isFa ? 'حذف' : 'Remove'}</span>
                               </button>
                             </td>
                           </tr>
@@ -1052,13 +1283,13 @@ export const ShahabLabView: React.FC = () => {
                   <div className="space-y-3 text-xs">
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                       <div className="bg-[var(--avp-bg-subtle)] border border-[var(--avp-border)] p-3 rounded-sm">
-                        <div className="text-[10px] uppercase text-[var(--avp-text-secondary)]">Error Taxonomy Coverage</div>
+                        <div className="text-[11px] uppercase text-[var(--avp-text-secondary)]">Error Taxonomy Coverage</div>
                         <div className="font-mono text-[var(--avp-text)] mt-1">
                           {fidelity.taxonomyCategoryCount} Persian Categories · 7-Level Adjudication
                         </div>
                       </div>
                       <div className="bg-[var(--avp-bg-subtle)] border border-[var(--avp-border)] p-3 rounded-sm">
-                        <div className="text-[10px] uppercase text-[var(--avp-text-secondary)]">Uncalibrated Score Guard</div>
+                        <div className="text-[11px] uppercase text-[var(--avp-text-secondary)]">Uncalibrated Score Guard</div>
                         <div className="font-mono text-[var(--avp-warning-text)] mt-1">
                           {fidelity.confidenceGuard?.calibrationStatus ?? 'UNCALIBRATED_DECODER_SCORE'}
                         </div>
@@ -1067,7 +1298,7 @@ export const ShahabLabView: React.FC = () => {
                         </div>
                       </div>
                       <div className="bg-[var(--avp-bg-subtle)] border border-[var(--avp-border)] p-3 rounded-sm">
-                        <div className="text-[10px] uppercase text-[var(--avp-text-secondary)]">Reused Workspace Modules</div>
+                        <div className="text-[11px] uppercase text-[var(--avp-text-secondary)]">Reused Workspace Modules</div>
                         <div className="font-mono text-[var(--avp-text)] mt-1">
                           P0-009, P0-010, P0-012 (P0-011: NOT_PRESENT)
                         </div>
@@ -1083,7 +1314,7 @@ export const ShahabLabView: React.FC = () => {
                           ['Layer 4 — Normalized Display Representation', fidelity.sixLayerRecord.normalizedRepresentation],
                         ].map(([label, text]) => (
                           <div key={String(label)} className="bg-[var(--avp-bg-subtle)] border border-[var(--avp-border)] p-2.5 rounded-sm">
-                            <div className="text-[10px] uppercase text-[var(--avp-text-secondary)]">{label}</div>
+                            <div className="text-[11px] uppercase text-[var(--avp-text-secondary)]">{label}</div>
                             <div dir="rtl" className="text-xs text-[var(--avp-text)] mt-1 leading-relaxed">
                               {String(text || '—')}
                             </div>
@@ -1109,14 +1340,14 @@ export const ShahabLabView: React.FC = () => {
               >
                 <div className="grid grid-cols-1 md:grid-cols-4 gap-3 text-xs">
                   <div className="bg-[var(--avp-bg-subtle)] border border-[var(--avp-border)] p-3 rounded-sm">
-                    <div className="text-[10px] uppercase text-[var(--avp-text-secondary)]">Variant A (Active On-Disk)</div>
+                    <div className="text-[11px] uppercase text-[var(--avp-text-secondary)]">Variant A (Active On-Disk)</div>
                     <div className="font-mono text-[var(--avp-warning-text)] text-sm mt-1">
                       {impl?.compressionLab?.variantA?.uncompressedDisplay ?? '110.41 MiB'}
                     </div>
                     <div className="text-[11px] text-[var(--avp-text-muted)] mt-0.5">Uncompressed mandatory assets</div>
                   </div>
                   <div className="bg-[var(--avp-bg-subtle)] border border-[var(--avp-border)] p-3 rounded-sm">
-                    <div className="text-[10px] uppercase text-[var(--avp-text-secondary)]">Variant B (Lossless Strip)</div>
+                    <div className="text-[11px] uppercase text-[var(--avp-text-secondary)]">Variant B (Lossless Strip)</div>
                     <div className="font-mono text-[var(--avp-text)] text-sm mt-1">
                       {impl?.compressionLab?.variantB?.uncompressedDisplay ?? '110.41 MiB'}
                     </div>
@@ -1125,12 +1356,12 @@ export const ShahabLabView: React.FC = () => {
                     </div>
                   </div>
                   <div className="bg-[var(--avp-bg-subtle)] border border-[var(--avp-border)] p-3 rounded-sm">
-                    <div className="text-[10px] uppercase text-[var(--avp-text-secondary)]">Variant C (INT4 WASM)</div>
+                    <div className="text-[11px] uppercase text-[var(--avp-text-secondary)]">Variant C (INT4 WASM)</div>
                     <div className="mt-1"><StatusTag value="BLOCKED" /></div>
                     <div className="text-[11px] text-[var(--avp-text-muted)] mt-1">Unsupported in WASM CPU runtime</div>
                   </div>
                   <div className="bg-[var(--avp-bg-subtle)] border border-[var(--avp-border)] p-3 rounded-sm">
-                    <div className="text-[10px] uppercase text-[var(--avp-text-secondary)]">Variant D (Gzip Transfer Only)</div>
+                    <div className="text-[11px] uppercase text-[var(--avp-text-secondary)]">Variant D (Gzip Transfer Only)</div>
                     <div className="font-mono text-[var(--avp-accent-text)] text-sm mt-1">
                       {impl?.compressionLab?.variantD_gzip?.display ?? '55.66 MiB'}
                     </div>
@@ -1181,7 +1412,7 @@ export const ShahabLabView: React.FC = () => {
               >
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs">
                   <div className="bg-[var(--avp-bg-subtle)] border border-[var(--avp-border)] p-3 rounded-sm">
-                    <div className="text-[10px] uppercase text-[var(--avp-text-secondary)]">SHAHAB-011 Decision</div>
+                    <div className="text-[11px] uppercase text-[var(--avp-text-secondary)]">SHAHAB-011 Decision</div>
                     <div className="font-mono text-[var(--avp-warning-text)] mt-1">
                       {impl?.fieldValidation?.neuralIndependenceDecision?.decisionCode ?? 'CONTINUE_FROZEN_WEIGHT_RUNTIME'}
                     </div>
@@ -1190,7 +1421,7 @@ export const ShahabLabView: React.FC = () => {
                     </div>
                   </div>
                   <div className="bg-[var(--avp-bg-subtle)] border border-[var(--avp-border)] p-3 rounded-sm">
-                    <div className="text-[10px] uppercase text-[var(--avp-text-secondary)]">SHAHAB-012 Training Status</div>
+                    <div className="text-[11px] uppercase text-[var(--avp-text-secondary)]">SHAHAB-012 Training Status</div>
                     <div className="font-mono text-[var(--avp-text)] mt-1">
                       {impl?.neuralDevelopment?.mission012Gate?.trainingStatusLabel ?? 'NO_TRAINING_EXECUTED'}
                     </div>
@@ -1199,7 +1430,7 @@ export const ShahabLabView: React.FC = () => {
                     </div>
                   </div>
                   <div className="bg-[var(--avp-bg-subtle)] border border-[var(--avp-border)] p-3 rounded-sm">
-                    <div className="text-[10px] uppercase text-[var(--avp-text-secondary)]">Teacher Legal Gate</div>
+                    <div className="text-[11px] uppercase text-[var(--avp-text-secondary)]">Teacher Legal Gate</div>
                     <div className="font-mono text-[var(--avp-danger-text)] mt-1">
                       nemotron-asr-streaming-farsi EXCLUDED
                     </div>
@@ -1261,20 +1492,20 @@ export const ShahabLabView: React.FC = () => {
               >
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs">
                   <div className="bg-[var(--avp-bg-subtle)] border border-[var(--avp-border)] p-3 rounded-sm">
-                    <div className="text-[10px] uppercase text-[var(--avp-text-secondary)]">Artifact Integrity</div>
+                    <div className="text-[11px] uppercase text-[var(--avp-text-secondary)]">Artifact Integrity</div>
                     <div className="font-mono text-[var(--avp-success-text)] mt-1">
                       {impl?.releaseCenter?.integrityReport?.verifiedFileCount ?? 0}/
                       {impl?.releaseCenter?.integrityReport?.requiredFileCount ?? 0} SHA-256 Verified
                     </div>
                   </div>
                   <div className="bg-[var(--avp-bg-subtle)] border border-[var(--avp-border)] p-3 rounded-sm">
-                    <div className="text-[10px] uppercase text-[var(--avp-text-secondary)]">Security Boundary Checks</div>
+                    <div className="text-[11px] uppercase text-[var(--avp-text-secondary)]">Security Boundary Checks</div>
                     <div className="font-mono text-[var(--avp-success-text)] mt-1">
                       Path Traversal / Symlink / HTTP / Unpinned Blocked: {String(impl?.releaseCenter?.securityChecksPassed ?? true)}
                     </div>
                   </div>
                   <div className="bg-[var(--avp-bg-subtle)] border border-[var(--avp-border)] p-3 rounded-sm">
-                    <div className="text-[10px] uppercase text-[var(--avp-text-secondary)]">Atomic Install &amp; Rollback</div>
+                    <div className="text-[11px] uppercase text-[var(--avp-text-secondary)]">Atomic Install &amp; Rollback</div>
                     <div className="font-mono text-[var(--avp-success-text)] mt-1">
                       Install: {String(impl?.releaseCenter?.installationTests?.passed ?? true)} ·
                       Rollback: {String(impl?.releaseCenter?.rollbackTests?.passed ?? true)}
@@ -1352,27 +1583,27 @@ export const ShahabLabView: React.FC = () => {
                       data-testid="btn-revoke-consent"
                       disabled={savingConsent}
                       onClick={() => void handleUpdateConsent({ revokedByUser: true })}
-                      className="avp-btn avp-btn-danger"
+                      className="avp-btn avp-btn-danger min-h-[44px] sm:min-h-[34px]"
                     >
-                      <Lock className="w-3.5 h-3.5" />
-                      <span>Revoke All External Opt-Ins</span>
+                      <Lock className="w-3.5 h-3.5" aria-hidden="true" />
+                      <span>{isFa ? 'لغو تمام رضایت‌های بیرونی' : 'Revoke All External Opt-Ins'}</span>
                     </button>
                     <button
                       type="button"
                       data-testid="btn-export-sanitized-diagnostics"
                       onClick={() => void handleExportDiagnostics()}
-                      className="avp-btn avp-btn-secondary"
+                      className="avp-btn avp-btn-outline min-h-[44px] sm:min-h-[34px]"
                     >
-                      <Download className="w-3.5 h-3.5" />
-                      <span>Export Sanitized Diagnostic Bundle</span>
+                      <Download className="w-3.5 h-3.5" aria-hidden="true" />
+                      <span>{isFa ? 'خروجی بسته تشخیصی پالایش‌شده' : 'Export Sanitized Diagnostic Bundle'}</span>
                     </button>
                     <button
                       type="button"
                       onClick={() => void handleClearLocalDiagnostics()}
-                      className="avp-btn avp-btn-secondary"
+                      className="avp-btn avp-btn-outline min-h-[44px] sm:min-h-[34px]"
                     >
-                      <Trash2 className="w-3.5 h-3.5" />
-                      <span>Clear Local Runtime Events</span>
+                      <Trash2 className="w-3.5 h-3.5" aria-hidden="true" />
+                      <span>{isFa ? 'پاک‌سازی رویدادهای محلی' : 'Clear Local Runtime Events'}</span>
                     </button>
                   </div>
 
@@ -1454,7 +1685,7 @@ export const ShahabLabView: React.FC = () => {
                         </div>
                         <div className="flex items-center gap-2 shrink-0">
                           <StatusTag value={ev.evidenceStatus || 'RECORDED'} />
-                          <span className="font-mono text-[10px] text-[var(--avp-text-muted)]">
+                          <span className="font-mono text-[11px] text-[var(--avp-text-muted)]">
                             {ev.timestampUtc ? String(ev.timestampUtc).slice(11, 19) : ''}
                           </span>
                         </div>

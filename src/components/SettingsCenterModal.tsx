@@ -27,6 +27,7 @@ import {
   SuggestionSortOrder,
   SupportedPlaybackRate,
   WorkspaceDensity,
+  WorkspaceInspectorSide,
   resetAllGlobalSettings,
   resetSettingsCategory,
   validateShortcutBinding,
@@ -36,6 +37,7 @@ import { formatAudioByteSize } from '../projects/audioFileValidator';
 import { AdobeAuditionHostAdapter } from '../host-bridge/audition/AuditionHostAdapter';
 import { AccessibleModal } from './AccessibleModal';
 import { isLabModeEnabled } from '../utils/labMode';
+import { getNextRovingTabIndex } from '../studio/layoutUtils';
 
 type SettingsNavTab = SettingsCategoryKey | 'advanced';
 
@@ -46,6 +48,8 @@ interface SettingsCenterModalProps {
   onUpdateSettings: (next: GlobalSettingsV1) => void;
   saveStatus: 'saved' | 'saving' | 'error';
   saveError: string | null;
+  isLabMode?: boolean;
+  onOpenShortcutsCheatSheet?: () => void;
   onOpenDeveloperView?: (
     target:
       | 'graph'
@@ -53,6 +57,7 @@ interface SettingsCenterModalProps {
       | 'shahab'
       | 'asr-lab'
       | 'security'
+      | 'dev-portal'
       | 'lifecycle'
       | 'companion',
   ) => void;
@@ -65,6 +70,8 @@ export const SettingsCenterModal: React.FC<SettingsCenterModalProps> = ({
   onUpdateSettings,
   saveStatus,
   saveError,
+  isLabMode: isLabModeProp,
+  onOpenShortcutsCheatSheet,
   onOpenDeveloperView,
 }) => {
   const isFa = settings.language.locale === 'fa';
@@ -78,7 +85,12 @@ export const SettingsCenterModal: React.FC<SettingsCenterModalProps> = ({
     [],
   );
 
-  const isLabMode = isLabModeEnabled();
+  const isLabMode =
+    isLabModeProp ??
+    isLabModeEnabled(
+      typeof window !== 'undefined' ? window.location.search : '',
+      typeof window !== 'undefined' ? window.location.pathname : '',
+    );
 
   useEffect(() => {
     if (!isOpen || activeTab !== 'storage') return;
@@ -90,8 +102,6 @@ export const SettingsCenterModal: React.FC<SettingsCenterModalProps> = ({
       active = false;
     };
   }, [isOpen, activeTab]);
-
-  if (!isOpen) return null;
 
   const navItems: Array<{ id: SettingsNavTab; label: string; icon: React.ReactNode }> = [
     { id: 'appearance', label: isFa ? 'ظاهر برنامه' : 'Appearance', icon: <Palette className="w-4 h-4" /> },
@@ -131,6 +141,7 @@ export const SettingsCenterModal: React.FC<SettingsCenterModalProps> = ({
     <AccessibleModal
       isOpen={isOpen}
       onClose={onClose}
+      closeOnBackdropClick={!confirmResetScope}
       labelledBy="settings-center-title"
       dir={isFa ? 'rtl' : 'ltr'}
       disableEscape={Boolean(confirmResetScope)}
@@ -174,19 +185,51 @@ export const SettingsCenterModal: React.FC<SettingsCenterModalProps> = ({
               type="button"
               onClick={onClose}
               aria-label={isFa ? 'بستن تنظیمات' : 'Close settings'}
-              className="w-9 h-9 rounded-xl border border-[var(--avp-border)] text-[var(--avp-text-secondary)] hover:bg-[var(--avp-hover)] hover:text-[var(--avp-text)] inline-flex items-center justify-center cursor-pointer"
+              className="avp-touch-icon sm:w-9 sm:h-9 rounded-xl border border-[var(--avp-border)] text-[var(--avp-text-secondary)] hover:bg-[var(--avp-hover)] hover:text-[var(--avp-text)] inline-flex items-center justify-center cursor-pointer"
             >
               <X className="w-4 h-4" />
             </button>
           </div>
         </div>
 
-        {/* 2-Pane Body (Responsive mobile horizontal strip + desktop sidebar) */}
+        {/* 2-Pane Body (Responsive mobile grouped <select> + desktop grouped sidebar) */}
         <div className="flex-1 min-h-0 flex flex-col md:flex-row">
-          {/* Sidebar Navigation (Grouped into 3 Semantic Sections on Desktop — Blueprint 4) */}
-          <nav
+          {/* Mobile Category Picker (<768px) — eliminates blind horizontal overflow (AUD-16) */}
+          <div className="md:hidden shrink-0 border-b border-[var(--avp-border)] bg-[var(--avp-bg)] px-4 py-2.5">
+            <label htmlFor="settings-mobile-category-select" className="sr-only">
+              {isFa ? 'انتخاب بخش تنظیمات' : 'Select settings category'}
+            </label>
+            <select
+              id="settings-mobile-category-select"
+              data-testid="settings-mobile-category-select"
+              value={activeTab}
+              onChange={(e) => setActiveTab(e.target.value as SettingsNavTab)}
+              className="avp-select w-full min-h-[44px] text-xs font-semibold text-[var(--avp-text)] px-3"
+            >
+              <optgroup label={isFa ? 'محیط کار و ظاهر' : 'Workspace & UI'}>
+                <option value="appearance">{isFa ? 'ظاهر برنامه' : 'Appearance'}</option>
+                <option value="language">{isFa ? 'زبان و منطقه' : 'Language & Region'}</option>
+                <option value="workspace">{isFa ? 'محیط تدوین' : 'Workspace'}</option>
+                <option value="shortcuts">{isFa ? 'میانبرهای صفحه‌کلید' : 'Keyboard Shortcuts'}</option>
+                <option value="accessibility">{isFa ? 'دسترس‌پذیری' : 'Accessibility'}</option>
+              </optgroup>
+              <optgroup label={isFa ? 'صوت، هوش مصنوعی و خروجی' : 'Audio, AI & Export'}>
+                <option value="playback">{isFa ? 'پخش و صوت' : 'Playback & Audio'}</option>
+                <option value="suggestions">{isFa ? 'پیشنهادهای هوشمند' : 'Smart Suggestions'}</option>
+                <option value="exportDefaults">{isFa ? 'تنظیمات خروجی' : 'Export Defaults'}</option>
+              </optgroup>
+              <optgroup label={isFa ? 'فضای ذخیره و پیشرفته' : 'Storage & System'}>
+                <option value="storage">{isFa ? 'ذخیره‌سازی و حریم خصوصی' : 'Storage & Privacy'}</option>
+                <option value="advanced">{isFa ? 'تنظیمات پیشرفته' : 'Advanced'}</option>
+              </optgroup>
+            </select>
+          </div>
+
+          {/* Desktop Sidebar Navigation (Grouped into 3 Semantic Sections) */}
+          <div
+            role="tablist"
             aria-label={isFa ? 'دسته‌بندی تنظیمات' : 'Settings categories'}
-            className="md:w-[240px] shrink-0 border-b md:border-b-0 md:border-e border-[var(--avp-border)] bg-[var(--avp-bg)] p-2.5 md:p-3 overflow-x-auto md:overflow-y-auto flex md:flex-col gap-1 md:gap-3"
+            className="hidden md:flex md:w-[240px] shrink-0 md:border-e border-[var(--avp-border)] bg-[var(--avp-bg)] md:p-3 md:overflow-y-auto md:flex-col gap-3"
           >
             {[
               {
@@ -203,20 +246,55 @@ export const SettingsCenterModal: React.FC<SettingsCenterModalProps> = ({
               },
             ].map((group) => (
               <div key={group.groupTitle} className="flex md:flex-col gap-1 shrink-0">
-                <div className="hidden md:block px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-[var(--avp-text-muted)]">
+                <div className="hidden md:block px-2.5 py-0.5 text-[11px] font-bold uppercase tracking-wider text-[var(--avp-text-muted)]">
                   {group.groupTitle}
                 </div>
                 {group.ids.map((tabId) => {
                   const item = navItems.find((n) => n.id === tabId);
                   if (!item) return null;
                   const active = activeTab === item.id;
+                  const tabOrder: SettingsNavTab[] = [
+                    'appearance',
+                    'language',
+                    'workspace',
+                    'shortcuts',
+                    'accessibility',
+                    'playback',
+                    'suggestions',
+                    'exportDefaults',
+                    'storage',
+                    'advanced',
+                  ];
+                  const idx = tabOrder.indexOf(item.id);
                   return (
                     <button
                       key={item.id}
                       type="button"
+                      role="tab"
+                      aria-selected={active}
+                      tabIndex={active ? 0 : -1}
                       data-testid={`settings-tab-${item.id}`}
                       onClick={() => setActiveTab(item.id)}
-                      className={`h-9 px-3 rounded-[var(--avp-radius-md)] text-xs font-medium inline-flex items-center gap-2.5 whitespace-nowrap shrink-0 cursor-pointer transition-colors ${
+                      onKeyDown={(e) => {
+                        const isDesktop = typeof window !== 'undefined' && window.innerWidth >= 768;
+                        const nextIdx = getNextRovingTabIndex(
+                          idx,
+                          tabOrder.length,
+                          e.key,
+                          isFa,
+                          isDesktop ? 'vertical' : 'horizontal',
+                        );
+                        if (nextIdx !== null) {
+                          e.preventDefault();
+                          const nextId = tabOrder[nextIdx];
+                          setActiveTab(nextId);
+                          const el = e.currentTarget
+                            .closest('[role="tablist"]')
+                            ?.querySelector<HTMLButtonElement>(`[data-testid="settings-tab-${nextId}"]`);
+                          el?.focus();
+                        }
+                      }}
+                      className={`min-h-[44px] md:min-h-[36px] md:h-9 px-3 rounded-[var(--avp-radius-md)] text-xs font-medium inline-flex items-center gap-2.5 whitespace-nowrap shrink-0 cursor-pointer transition-colors ${
                         active
                           ? 'bg-[var(--avp-brand-soft)] text-[var(--avp-brand)] font-semibold'
                           : 'text-[var(--avp-text-secondary)] hover:bg-[var(--avp-hover)] hover:text-[var(--avp-text)]'
@@ -229,7 +307,7 @@ export const SettingsCenterModal: React.FC<SettingsCenterModalProps> = ({
                 })}
               </div>
             ))}
-          </nav>
+          </div>
 
           {/* Content Area */}
           <div className="flex-1 min-w-0 overflow-y-auto p-6 space-y-6">
@@ -468,9 +546,9 @@ export const SettingsCenterModal: React.FC<SettingsCenterModalProps> = ({
                               workspace: { ...settings.workspace, density: den },
                             })
                           }
-                          className={`px-3.5 py-1.5 rounded-lg text-xs font-medium cursor-pointer ${
+                          className={`px-3.5 py-1.5 min-h-[44px] sm:min-h-[32px] rounded-lg text-xs font-medium cursor-pointer ${
                             settings.workspace.density === den
-                              ? 'bg-[var(--avp-brand)] text-white dark:text-[#0B1419]'
+                              ? 'bg-[var(--avp-brand-solid)] text-[var(--avp-on-brand)]'
                               : 'text-[var(--avp-text-secondary)] hover:bg-[var(--avp-hover)]'
                           }`}
                         >
@@ -502,9 +580,9 @@ export const SettingsCenterModal: React.FC<SettingsCenterModalProps> = ({
                               accessibility: { ...settings.accessibility, fontScale: sz },
                             })
                           }
-                          className={`px-3.5 py-1.5 rounded-lg text-xs font-medium cursor-pointer ${
+                          className={`px-3.5 py-1.5 min-h-[44px] sm:min-h-[32px] rounded-lg text-xs font-medium cursor-pointer ${
                             settings.workspace.transcriptFontScale === sz
-                              ? 'bg-[var(--avp-brand)] text-white dark:text-[#0B1419]'
+                              ? 'bg-[var(--avp-brand-solid)] text-[var(--avp-on-brand)]'
                               : 'text-[var(--avp-text-secondary)] hover:bg-[var(--avp-hover)]'
                           }`}
                         >
@@ -512,6 +590,44 @@ export const SettingsCenterModal: React.FC<SettingsCenterModalProps> = ({
                         </button>
                       ))}
                     </div>
+                  </div>
+                </div>
+
+                <div className="space-y-1.5 pt-1">
+                  <span className="text-xs font-semibold block">
+                    {isFa ? 'جایگاه پنل بازرس هوشمند (Inspector Side)' : 'Smart Inspector Placement'}
+                  </span>
+                  <div className="inline-flex flex-wrap rounded-xl border border-[var(--avp-border)] p-1 bg-[var(--avp-bg)] gap-1">
+                    {(['auto', 'right', 'left'] as WorkspaceInspectorSide[]).map((side) => (
+                      <button
+                        key={side}
+                        type="button"
+                        data-testid={`settings-inspector-side-${side}`}
+                        onClick={() =>
+                          onUpdateSettings({
+                            ...settings,
+                            workspace: { ...settings.workspace, inspectorSide: side },
+                          })
+                        }
+                        className={`px-3.5 py-1.5 min-h-[44px] sm:min-h-[32px] rounded-lg text-xs font-medium cursor-pointer ${
+                          settings.workspace.inspectorSide === side
+                            ? 'bg-[var(--avp-brand-solid)] text-[var(--avp-on-brand)]'
+                            : 'text-[var(--avp-text-secondary)] hover:bg-[var(--avp-hover)]'
+                        }`}
+                      >
+                        {side === 'auto'
+                          ? isFa
+                            ? 'خودکار (بر اساس جهت زبان)'
+                            : 'Auto (RTL/LTR)'
+                          : side === 'right'
+                            ? isFa
+                              ? 'سمت راست'
+                              : 'Right'
+                            : isFa
+                              ? 'سمت چپ'
+                              : 'Left'}
+                      </button>
+                    ))}
                   </div>
                 </div>
               </section>
@@ -864,12 +980,30 @@ export const SettingsCenterModal: React.FC<SettingsCenterModalProps> = ({
 
             {activeTab === 'shortcuts' && (
               <section className="space-y-4">
-                <h3 className="text-sm font-bold">{isFa ? 'میانبرهای صفحه‌کلید' : 'Keyboard Shortcuts'}</h3>
-                <p className="text-xs text-[var(--avp-text-secondary)]">
-                  {isFa
-                    ? 'میانبرها هنگام تایپ در فیلدهای متنی اجرا نمی‌شوند و از تداخل با کلیدهای مرورگر جلوگیری می‌شود.'
-                    : 'Shortcuts automatically pause while typing in inputs and prevent browser conflicts.'}
-                </p>
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <h3 className="text-sm font-bold">{isFa ? 'میانبرهای صفحه‌کلید' : 'Keyboard Shortcuts'}</h3>
+                    <p className="text-xs text-[var(--avp-text-secondary)] mt-0.5">
+                      {isFa
+                        ? 'میانبرها هنگام تایپ در فیلدهای متنی اجرا نمی‌شوند و از تداخل با کلیدهای مرورگر جلوگیری می‌شود.'
+                        : 'Shortcuts automatically pause while typing in inputs and prevent browser conflicts.'}
+                    </p>
+                  </div>
+                  {onOpenShortcutsCheatSheet && (
+                    <button
+                      type="button"
+                      data-testid="btn-settings-open-shortcuts-sheet"
+                      onClick={() => {
+                        onClose();
+                        onOpenShortcutsCheatSheet();
+                      }}
+                      className="avp-btn avp-btn-sm avp-btn-outline"
+                    >
+                      <Keyboard className="w-3.5 h-3.5" />
+                      <span>{isFa ? 'راهنمای کامل میانبرها (? / Ctrl+K)' : 'Full Cheat Sheet (? / Ctrl+K)'}</span>
+                    </button>
+                  )}
+                </div>
                 {shortcutError && (
                   <p className="text-xs text-[var(--avp-error)]" role="alert">
                     {shortcutError}
@@ -877,9 +1011,12 @@ export const SettingsCenterModal: React.FC<SettingsCenterModalProps> = ({
                 )}
                 <div className="divide-y divide-[var(--avp-border)] rounded-xl border border-[var(--avp-border)] bg-[var(--avp-bg)] overflow-hidden">
                   {(Object.keys(settings.shortcuts) as Array<keyof KeyboardShortcutMap>).map((k) => (
-                    <div key={k} className="flex items-center justify-between px-4 py-2.5 text-xs">
-                      <span>{shortcutLabels[k]}</span>
+                    <div key={k} className="flex items-center justify-between gap-3 px-4 py-2.5 text-xs">
+                      <label htmlFor={`shortcut-input-${k}`} className="font-medium text-[var(--avp-text)]">
+                        {shortcutLabels[k]}
+                      </label>
                       <input
+                        id={`shortcut-input-${k}`}
                         dir="ltr"
                         type="text"
                         value={settings.shortcuts[k]}
@@ -900,7 +1037,7 @@ export const SettingsCenterModal: React.FC<SettingsCenterModalProps> = ({
                             shortcuts: { ...settings.shortcuts, [k]: nextVal.trim() },
                           });
                         }}
-                        className="w-36 h-8 px-2.5 rounded-lg border border-[var(--avp-border)] bg-[var(--avp-surface)] text-center font-mono text-[11px]"
+                        className="w-36 min-h-[44px] sm:min-h-[34px] sm:h-8 px-2.5 rounded-lg border border-[var(--avp-border)] bg-[var(--avp-surface)] text-center font-mono text-[11px]"
                       />
                     </div>
                   ))}
@@ -1055,13 +1192,13 @@ export const SettingsCenterModal: React.FC<SettingsCenterModalProps> = ({
                   </p>
                 </div>
 
-                {/* Honest Adobe Audition Capability Matrix (Phase 09) */}
+                {/* Honest Adobe Audition Capability Matrix */}
                 <div className="rounded-xl border border-[var(--avp-border)] bg-[var(--avp-bg)] p-4 space-y-3">
                   <div className="flex items-center justify-between gap-2">
                     <h4 className="text-xs font-bold">
                       {isFa
-                        ? 'ماتریس قابلیت‌های واقعی Adobe Audition (Phase 09)'
-                        : 'Adobe Audition Host Capability Matrix (Phase 09)'}
+                        ? 'ماتریس قابلیت‌های واقعی Adobe Audition'
+                        : 'Adobe Audition Host Capability Matrix'}
                     </h4>
                     <span className="text-[11px] font-mono text-[var(--avp-text-muted)]">
                       SESX v1.9 + Companion IPC
@@ -1082,10 +1219,10 @@ export const SettingsCenterModal: React.FC<SettingsCenterModalProps> = ({
                           </div>
                         </div>
                         <span
-                          className={`px-2 py-0.5 rounded font-mono text-[10px] shrink-0 ${
+                          className={`px-2 py-0.5 rounded font-mono text-[11px] shrink-0 ${
                             cap.verification_state === 'VERIFIED_CONTRACT_AND_SCHEMA'
                               ? 'bg-[var(--avp-ready-bg)] text-[var(--avp-ready-text)]'
-                              : 'bg-[var(--avp-warning-soft)] text-[#996515] dark:text-[var(--avp-warning)]'
+                              : 'bg-[var(--avp-warning-soft)] text-[var(--avp-warning-text)]'
                           }`}
                         >
                           {cap.verification_state === 'VERIFIED_CONTRACT_AND_SCHEMA'
@@ -1106,23 +1243,29 @@ export const SettingsCenterModal: React.FC<SettingsCenterModalProps> = ({
                   <div className="space-y-3">
                     <div className="space-y-2">
                       <h4 className="text-xs font-bold text-[var(--avp-text-secondary)]">
-                        {isFa ? 'سلامت سیستم و اتصال دسکتاپ' : 'System Health & Desktop Bridge'}
+                        {isFa ? 'موتور صوتی آفلاین و اتصال دسکتاپ' : 'Offline Speech Engine & Desktop Bridge'}
                       </h4>
                       <div className="flex flex-wrap gap-2">
                         {(
                           [
-                            { id: 'lifecycle', label: isFa ? 'مدیریت مدل، آفلاین و سلامت ۱۴ زیرسیستم' : 'Models, Offline & 14-Subsystem Health' },
+                            {
+                              id: 'lifecycle',
+                              label: isFa
+                                ? 'وضعیت موتور صوتی، مدل‌های محلی و آفلاین'
+                                : 'Local Speech Engine, Models & Offline Status',
+                            },
                             { id: 'companion', label: isFa ? 'اتصال Companion / Audition' : 'Companion / Audition Bridge' },
                           ] as const
                         ).map((tool) => (
                           <button
                             key={tool.id}
                             type="button"
+                            data-testid={tool.id === 'lifecycle' ? 'btn-open-lifecycle-from-settings' : undefined}
                             onClick={() => {
                               onClose();
                               onOpenDeveloperView(tool.id);
                             }}
-                            className="avp-btn avp-btn-outline"
+                            className="avp-btn avp-btn-outline min-h-[44px] sm:min-h-[34px]"
                           >
                             {tool.label}
                           </button>
@@ -1143,6 +1286,7 @@ export const SettingsCenterModal: React.FC<SettingsCenterModalProps> = ({
                               { id: 'shahab', label: 'SHAHAB LAB' },
                               { id: 'asr-lab', label: isFa ? 'آزمایشگاه ASR' : 'ASR Research Lab' },
                               { id: 'security', label: isFa ? 'امنیت و حریم خصوصی' : 'Speech Security' },
+                              { id: 'dev-portal', label: isFa ? 'پورتال توسعه‌دهندگان API' : 'Developer API Portal' },
                             ] as const
                           ).map((tool) => (
                             <button
@@ -1169,13 +1313,13 @@ export const SettingsCenterModal: React.FC<SettingsCenterModalProps> = ({
 
         {/* Footer Reset Actions */}
         <div className="px-6 py-3.5 border-t border-[var(--avp-border)] bg-[var(--avp-bg)] flex flex-wrap items-center justify-between gap-3 shrink-0">
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             {activeTab !== 'advanced' && (
               <button
                 type="button"
                 data-testid="btn-reset-settings-category"
                 onClick={() => setConfirmResetScope('category')}
-                className="avp-btn avp-btn-outline"
+                className="avp-btn avp-btn-outline min-h-[44px] sm:min-h-[36px]"
               >
                 <RotateCcw className="w-3.5 h-3.5" />
                 <span>{isFa ? 'بازنشانی این بخش' : 'Reset Category'}</span>
@@ -1185,7 +1329,7 @@ export const SettingsCenterModal: React.FC<SettingsCenterModalProps> = ({
               type="button"
               data-testid="btn-reset-all-settings"
               onClick={() => setConfirmResetScope('all')}
-              className="avp-btn avp-btn-danger-ghost"
+              className="avp-btn avp-btn-danger-ghost min-h-[44px] sm:min-h-[36px]"
             >
               <RotateCcw className="w-3.5 h-3.5" />
               <span>{isFa ? 'بازنشانی تمام تنظیمات عمومی' : 'Reset All Global Settings'}</span>
@@ -1194,7 +1338,7 @@ export const SettingsCenterModal: React.FC<SettingsCenterModalProps> = ({
           <button
             type="button"
             onClick={onClose}
-            className="avp-btn avp-btn-primary"
+            className="avp-btn avp-btn-primary min-h-[44px] sm:min-h-[36px]"
           >
             {isFa ? 'بستن' : 'Done'}
           </button>
@@ -1207,7 +1351,7 @@ export const SettingsCenterModal: React.FC<SettingsCenterModalProps> = ({
         onClose={() => setConfirmResetScope(null)}
         labelledBy="settings-reset-confirm-title"
         dir={isFa ? 'rtl' : 'ltr'}
-        zIndexClassName="z-[60]"
+        zIndexClassName="z-[var(--avp-z-confirm)]"
         panelClassName="w-full max-w-md"
       >
         <div className="w-full rounded-2xl border border-[var(--avp-border)] bg-[var(--avp-surface)] p-6 space-y-4 shadow-[var(--avp-shadow-md)] text-[var(--avp-text)]">

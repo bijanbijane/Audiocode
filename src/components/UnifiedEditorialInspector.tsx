@@ -12,6 +12,7 @@ import type { SuggestionCategoryFilter, SuggestionSortOrder } from '../settings/
 import { SuggestionsPanel } from './SuggestionsPanel';
 import { EdlReviewPanel } from './EdlReviewPanel';
 import { formatNumberForLocale } from '../utils/formatters';
+import { getNextRovingTabIndex } from '../studio/layoutUtils';
 
 export type EditorialInspectorFocus = 'unified' | 'suggestions' | 'edl';
 
@@ -120,7 +121,7 @@ export const UnifiedEditorialInspector: React.FC<UnifiedEditorialInspectorProps>
   onApplyLinguisticBatchUpdates,
 }) => {
   const isFa = locale === 'fa';
-  const [focusMode, setFocusMode] = useState<EditorialInspectorFocus>('unified');
+  const [focusMode, setFocusMode] = useState<EditorialInspectorFocus>('suggestions');
 
   useEffect(() => {
     if (requestedFocus) {
@@ -136,39 +137,34 @@ export const UnifiedEditorialInspector: React.FC<UnifiedEditorialInspectorProps>
       data-testid="unified-editorial-inspector"
       className="avp-pane-shell flex flex-col h-full min-h-0 overflow-hidden bg-[var(--avp-surface)]"
     >
-      {/* Unified Inspector Top Mode Bar (34px) */}
-      <div className="h-[34px] px-2 border-b border-[var(--avp-border)] bg-[var(--avp-surface-shell)] flex items-center justify-between gap-1.5 shrink-0">
-        <span className="text-[11px] font-bold text-[var(--avp-text-secondary)] whitespace-nowrap">
+      {/* Unified Inspector Top Mode Bar */}
+      <div className="min-h-[44px] sm:min-h-[36px] px-1.5 xl:px-2 border-b border-[var(--avp-border)] bg-[var(--avp-surface-shell)] flex flex-wrap sm:flex-nowrap items-center justify-between gap-1 shrink-0 py-1 sm:py-0">
+        <span className="hidden xl:inline text-[11px] font-bold text-[var(--avp-text-secondary)] whitespace-nowrap">
           {isFa ? 'بازرس' : 'Inspector'}
         </span>
 
         <div
-          role="group"
+          role="tablist"
           aria-label={isFa ? 'نمای بازرس تدوین' : 'Inspector layout'}
-          className="inline-flex items-center p-0.5 rounded-lg border border-[var(--avp-border)] bg-[var(--avp-surface-secondary)] gap-0.5 shrink-0"
+          onKeyDown={(e) => {
+            const modes: EditorialInspectorFocus[] = ['suggestions', 'edl', 'unified'];
+            const idx = modes.indexOf(focusMode);
+            const nextIdx = getNextRovingTabIndex(idx, modes.length, e.key, isFa, 'horizontal');
+            if (nextIdx !== null) {
+              e.preventDefault();
+              setFocusMode(modes[nextIdx]);
+            }
+          }}
+          className="flex xl:inline-flex flex-1 xl:flex-initial items-center p-0.5 rounded-lg border border-[var(--avp-border)] bg-[var(--avp-surface-secondary)] gap-0.5 shrink-0"
         >
           <button
             type="button"
-            data-testid="inspector-mode-unified"
-            aria-pressed={focusMode === 'unified'}
-            onClick={() => setFocusMode('unified')}
-            title={isFa ? 'نمای یکپارچه (پیشنهادها + EDL)' : 'Unified split view'}
-            className={`inline-flex items-center gap-1 h-[22px] px-1.5 xl:px-2 rounded-[5px] text-[10px] xl:text-[10.5px] font-medium cursor-pointer transition-colors whitespace-nowrap ${
-              focusMode === 'unified'
-                ? 'bg-[var(--avp-surface)] text-[var(--avp-accent-text)] font-semibold shadow-2xs'
-                : 'text-[var(--avp-text-muted)] hover:text-[var(--avp-text)]'
-            }`}
-          >
-            <SplitSquareVertical className="w-3 h-3 shrink-0" aria-hidden="true" />
-            <span>{isFa ? 'یکپارچه' : 'All'}</span>
-          </button>
-
-          <button
-            type="button"
+            role="tab"
             data-testid="inspector-mode-suggestions"
-            aria-pressed={focusMode === 'suggestions'}
+            aria-selected={focusMode === 'suggestions'}
+            tabIndex={focusMode === 'suggestions' ? 0 : -1}
             onClick={() => setFocusMode('suggestions')}
-            className={`inline-flex items-center gap-1 h-[22px] px-1.5 xl:px-2 rounded-[5px] text-[10px] xl:text-[10.5px] font-medium cursor-pointer transition-colors whitespace-nowrap ${
+            className={`inline-flex items-center justify-center gap-1 min-h-[44px] sm:min-h-[26px] sm:h-[26px] px-2 rounded-[5px] text-[11px] font-medium cursor-pointer transition-colors whitespace-nowrap ${
               focusMode === 'suggestions'
                 ? 'bg-[var(--avp-surface)] text-[var(--avp-accent-text)] font-semibold shadow-2xs'
                 : 'text-[var(--avp-text-muted)] hover:text-[var(--avp-text)]'
@@ -182,10 +178,12 @@ export const UnifiedEditorialInspector: React.FC<UnifiedEditorialInspectorProps>
 
           <button
             type="button"
+            role="tab"
             data-testid="inspector-mode-edl"
-            aria-pressed={focusMode === 'edl'}
+            aria-selected={focusMode === 'edl'}
+            tabIndex={focusMode === 'edl' ? 0 : -1}
             onClick={() => setFocusMode('edl')}
-            className={`inline-flex items-center gap-1 h-[22px] px-1.5 xl:px-2 rounded-[5px] text-[10px] xl:text-[10.5px] font-medium cursor-pointer transition-colors whitespace-nowrap ${
+            className={`inline-flex items-center justify-center gap-1 min-h-[44px] sm:min-h-[26px] sm:h-[26px] px-2 rounded-[5px] text-[11px] font-medium cursor-pointer transition-colors whitespace-nowrap ${
               focusMode === 'edl'
                 ? 'bg-[var(--avp-surface)] text-[var(--avp-accent-text)] font-semibold shadow-2xs'
                 : 'text-[var(--avp-text-muted)] hover:text-[var(--avp-text)]'
@@ -193,8 +191,26 @@ export const UnifiedEditorialInspector: React.FC<UnifiedEditorialInspectorProps>
           >
             <ListChecks className="w-3 h-3 shrink-0" aria-hidden="true" />
             <span>
-              EDL ({formatNumberForLocale(edlCount, { persianDigits })})
+              {isFa ? 'تصمیمات' : 'EDL'} ({formatNumberForLocale(edlCount, { persianDigits })})
             </span>
+          </button>
+
+          <button
+            type="button"
+            role="tab"
+            data-testid="inspector-mode-unified"
+            aria-selected={focusMode === 'unified'}
+            tabIndex={focusMode === 'unified' ? 0 : -1}
+            onClick={() => setFocusMode('unified')}
+            title={isFa ? 'نمای یکپارچه (پیشنهادها + لیست تدوین)' : 'Unified split view'}
+            className={`inline-flex items-center justify-center gap-1 min-h-[44px] sm:min-h-[26px] sm:h-[26px] px-2 rounded-[5px] text-[11px] font-medium cursor-pointer transition-colors whitespace-nowrap ${
+              focusMode === 'unified'
+                ? 'bg-[var(--avp-surface)] text-[var(--avp-accent-text)] font-semibold shadow-2xs'
+                : 'text-[var(--avp-text-muted)] hover:text-[var(--avp-text)]'
+            }`}
+          >
+            <SplitSquareVertical className="w-3 h-3 shrink-0" aria-hidden="true" />
+            <span>{isFa ? 'یکپارچه' : 'All'}</span>
           </button>
         </div>
       </div>

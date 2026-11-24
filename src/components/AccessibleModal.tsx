@@ -41,7 +41,7 @@ export const AccessibleModal: React.FC<AccessibleModalProps> = ({
   dir,
   disableEscape = false,
   closeOnBackdropClick = false,
-  zIndexClassName = 'z-50',
+  zIndexClassName = 'z-[var(--avp-z-modal)]',
   backdropClassName = 'bg-black/55 backdrop-blur-[2px]',
   panelClassName = '',
   dataTestId,

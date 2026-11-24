@@ -35,6 +35,8 @@ import {
   TranscriptTransformationEngine,
 } from '../persian-linguistics';
 import { formatNumberForLocale, formatStudioTimecode } from '../utils/formatters';
+import { hasRtlCharacters } from '../utils/bidi';
+import { getNextRovingTabIndex } from '../studio/layoutUtils';
 
 interface EdlReviewPanelProps {
   locale: 'fa' | 'en';
@@ -99,6 +101,29 @@ function statusLabel(status: EditProposal['status'], isFa: boolean): string {
     case 'APPLIED':
       return isFa ? 'اعمال‌شده' : 'Applied';
   }
+}
+
+function formatEdlOperationLabel(operation: string, isFa: boolean): string {
+  const map: Record<string, { fa: string; en: string }> = {
+    SHORTEN_SILENCE: { fa: 'کوتاه‌سازی مکث', en: 'Shorten Silence' },
+    REMOVE_SILENCE: { fa: 'حذف سکوت اضافی', en: 'Remove Silence' },
+    REMOVE_FILLER: { fa: 'حذف تپق و پرکننده', en: 'Remove Filler' },
+    REMOVE_STUTTER: { fa: 'حذف تکرار کلام', en: 'Remove Repetition' },
+    REMOVE_REPETITION: { fa: 'حذف تکرار کلام', en: 'Remove Repetition' },
+    SUPPRESS_CROSSTALK: { fa: 'کاهش تداخل صدا', en: 'Suppress Crosstalk' },
+    SOFTEN_BREATH: { fa: 'نرم‌سازی صدای نفس', en: 'Soften Breath' },
+    ATTENUATE_BREATH: { fa: 'نرم‌سازی صدای نفس', en: 'Attenuate Breath' },
+    ATTENUATE_COUGH: { fa: 'تضعیف سرفه و نویز', en: 'Attenuate Cough' },
+    TRIM_BOUNDARY: { fa: 'اصلاح مرز برش', en: 'Trim Boundary' },
+    CUT_SEGMENT: { fa: 'برش بخش انتخابی', en: 'Cut Segment' },
+  };
+  const entry = map[operation];
+  if (entry) return isFa ? entry.fa : entry.en;
+  return operation
+    .toLowerCase()
+    .split('_')
+    .map((part) => (part ? part[0].toUpperCase() + part.slice(1) : ''))
+    .join(' ');
 }
 
 export const EdlReviewPanel: React.FC<EdlReviewPanelProps> = ({
@@ -379,15 +404,16 @@ export const EdlReviewPanel: React.FC<EdlReviewPanelProps> = ({
         forceExpanded ? 'flex flex-col h-full min-h-0' : ''
       }`}
     >
-      {/* Unified Inspector Sub-Header (36px — Docked inside Right Editorial Inspector) */}
-      <div className="h-[36px] px-2.5 border-b border-[var(--avp-border-subtle)] bg-[var(--avp-surface-shell)] flex items-center justify-between gap-1.5">
-        <div className="flex items-center gap-1 min-w-0 overflow-x-auto" role="tablist">
+      {/* Unified Inspector Sub-Header (Wraps cleanly on narrow 272px tablet columns) */}
+      <div className="min-h-[44px] sm:min-h-[38px] px-2.5 py-1 border-b border-[var(--avp-border-subtle)] bg-[var(--avp-surface-shell)] flex flex-wrap items-center justify-between gap-1.5">
+        <div className="flex items-center gap-1 min-w-0">
           <button
             type="button"
             onClick={() => setIsDrawerOpen((v) => !v)}
             aria-expanded={isDrawerOpen}
+            aria-label={isFa ? 'باز یا بستن بخش تحلیل تدوین و فارسی' : 'Toggle EDL & Linguistics inspector'}
             title={isFa ? 'باز یا بستن بخش تحلیل EDL و پالایش فارسی' : 'Toggle EDL & Linguistics inspector'}
-            className="inline-flex items-center justify-center w-[22px] h-[22px] rounded-md border border-[var(--avp-border)] bg-[var(--avp-surface)] text-[var(--avp-text-secondary)] hover:text-[var(--avp-text)] hover:bg-[var(--avp-surface-hover)] shrink-0 cursor-pointer transition-colors"
+            className="inline-flex items-center justify-center min-w-[44px] min-h-[44px] sm:min-w-[26px] sm:min-h-[26px] sm:w-[26px] sm:h-[26px] rounded-md border border-[var(--avp-border)] bg-[var(--avp-surface)] text-[var(--avp-text-secondary)] hover:text-[var(--avp-text)] hover:bg-[var(--avp-surface-hover)] shrink-0 cursor-pointer transition-colors"
           >
             {isDrawerOpen ? (
               <ChevronDown className="w-3.5 h-3.5" strokeWidth={1.75} />
@@ -396,11 +422,26 @@ export const EdlReviewPanel: React.FC<EdlReviewPanelProps> = ({
             )}
           </button>
 
-          <div className="inline-flex items-center gap-0.5 p-0.5 rounded-lg border border-[var(--avp-border)] bg-[var(--avp-surface-secondary)]/80">
+          <div
+            role="tablist"
+            aria-label={isFa ? 'بخش‌های بازبینی و زبان‌شناسی' : 'EDL and linguistics tabs'}
+            onKeyDown={(e) => {
+              const tabs: PanelTab[] = ['edl', 'events', 'linguistics'];
+              const idx = tabs.indexOf(activeTab);
+              const nextIdx = getNextRovingTabIndex(idx, tabs.length, e.key, isFa, 'horizontal');
+              if (nextIdx !== null) {
+                e.preventDefault();
+                setActiveTab(tabs[nextIdx]);
+                setIsDrawerOpen(true);
+              }
+            }}
+            className="inline-flex items-center gap-0.5 p-0.5 rounded-lg border border-[var(--avp-border)] bg-[var(--avp-surface-secondary)]/80"
+          >
             <button
               type="button"
               role="tab"
               aria-selected={activeTab === 'edl'}
+              tabIndex={activeTab === 'edl' ? 0 : -1}
               data-testid="tab-edl-review"
               onClick={() => {
                 if (activeTab === 'edl') {
@@ -410,14 +451,14 @@ export const EdlReviewPanel: React.FC<EdlReviewPanelProps> = ({
                   setIsDrawerOpen(true);
                 }
               }}
-              className={`inline-flex items-center gap-1 h-[22px] px-1.5 rounded-[5px] text-[10.5px] font-medium whitespace-nowrap cursor-pointer transition-colors ${
+              className={`inline-flex items-center justify-center gap-1 min-h-[44px] sm:min-h-[26px] sm:h-[26px] px-2 sm:px-1.5 rounded-[5px] text-[11px] font-medium whitespace-nowrap cursor-pointer transition-colors ${
                 activeTab === 'edl'
                   ? 'bg-[var(--avp-surface)] text-[var(--avp-accent-text)] font-semibold shadow-2xs'
                   : 'text-[var(--avp-text-secondary)] hover:text-[var(--avp-text)]'
               }`}
             >
-              <span>{isFa ? 'EDL' : 'EDL'}</span>
-              <span className="inline-flex items-center justify-center min-w-[15px] h-[14px] px-1 rounded-full bg-[var(--avp-surface-secondary)] font-mono text-[9px] font-bold">
+              <span>{isFa ? 'تصمیمات' : 'EDL'}</span>
+              <span className="inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full bg-[var(--avp-surface-secondary)] font-mono text-[11px] font-bold">
                 {formatNumberForLocale(proposals.length, { persianDigits })}
               </span>
             </button>
@@ -426,6 +467,7 @@ export const EdlReviewPanel: React.FC<EdlReviewPanelProps> = ({
               type="button"
               role="tab"
               aria-selected={activeTab === 'events'}
+              tabIndex={activeTab === 'events' ? 0 : -1}
               data-testid="tab-speech-events"
               onClick={() => {
                 if (activeTab === 'events') {
@@ -435,14 +477,14 @@ export const EdlReviewPanel: React.FC<EdlReviewPanelProps> = ({
                   setIsDrawerOpen(true);
                 }
               }}
-              className={`inline-flex items-center gap-1 h-[22px] px-1.5 rounded-[5px] text-[10.5px] font-medium whitespace-nowrap cursor-pointer transition-colors ${
+              className={`inline-flex items-center justify-center gap-1 min-h-[44px] sm:min-h-[26px] sm:h-[26px] px-2 sm:px-1.5 rounded-[5px] text-[11px] font-medium whitespace-nowrap cursor-pointer transition-colors ${
                 activeTab === 'events'
                   ? 'bg-[var(--avp-surface)] text-[var(--avp-accent-text)] font-semibold shadow-2xs'
                   : 'text-[var(--avp-text-secondary)] hover:text-[var(--avp-text)]'
               }`}
             >
               <span>{isFa ? 'رویدادها' : 'Events'}</span>
-              <span className="inline-flex items-center justify-center min-w-[15px] h-[14px] px-1 rounded-full bg-[var(--avp-surface-secondary)] font-mono text-[9px] font-bold">
+              <span className="inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full bg-[var(--avp-surface-secondary)] font-mono text-[11px] font-bold">
                 {formatNumberForLocale(events.length, { persianDigits })}
               </span>
             </button>
@@ -451,12 +493,13 @@ export const EdlReviewPanel: React.FC<EdlReviewPanelProps> = ({
               type="button"
               role="tab"
               aria-selected={activeTab === 'linguistics'}
+              tabIndex={activeTab === 'linguistics' ? 0 : -1}
               data-testid="tab-persian-linguistics"
               onClick={() => {
                 setActiveTab('linguistics');
                 setIsDrawerOpen(true);
               }}
-              className={`inline-flex items-center gap-1 h-[22px] px-1.5 rounded-[5px] text-[10px] xl:text-[10.5px] font-medium whitespace-nowrap cursor-pointer transition-colors ${
+              className={`inline-flex items-center justify-center gap-1 min-h-[44px] sm:min-h-[26px] sm:h-[26px] px-2 sm:px-1.5 rounded-[5px] text-[11px] font-medium whitespace-nowrap cursor-pointer transition-colors ${
                 activeTab === 'linguistics'
                   ? 'bg-[var(--avp-surface)] text-[var(--avp-accent-text)] font-semibold shadow-2xs'
                   : 'text-[var(--avp-text-secondary)] hover:text-[var(--avp-text)]'
@@ -467,7 +510,7 @@ export const EdlReviewPanel: React.FC<EdlReviewPanelProps> = ({
           </div>
         </div>
 
-        <div className="flex items-center gap-1 shrink-0">
+        <div className="flex items-center gap-1 shrink-0 ms-auto">
           {activeTab !== 'linguistics' && (
             <>
               {drawerVisible && (
@@ -477,18 +520,18 @@ export const EdlReviewPanel: React.FC<EdlReviewPanelProps> = ({
                     onClick={onUndoEdl}
                     disabled={!canUndoEdl}
                     aria-label={isFa ? 'بازگشت تصمیم EDL' : 'Undo EDL Decision'}
-                    className="avp-btn-icon-sm w-[22px] h-[22px]"
+                    className="avp-btn-icon avp-btn-icon-sm avp-touch-icon"
                   >
-                    <Undo2 className="w-3 h-3" strokeWidth={1.75} />
+                    <Undo2 className="w-3.5 h-3.5" strokeWidth={1.75} />
                   </button>
                   <button
                     type="button"
                     onClick={onRedoEdl}
                     disabled={!canRedoEdl}
                     aria-label={isFa ? 'تکرار تصمیم EDL' : 'Redo EDL Decision'}
-                    className="avp-btn-icon-sm w-[22px] h-[22px]"
+                    className="avp-btn-icon avp-btn-icon-sm avp-touch-icon"
                   >
-                    <Redo2 className="w-3 h-3" strokeWidth={1.75} />
+                    <Redo2 className="w-3.5 h-3.5" strokeWidth={1.75} />
                   </button>
                 </>
               )}
@@ -501,7 +544,7 @@ export const EdlReviewPanel: React.FC<EdlReviewPanelProps> = ({
                 }}
                 disabled={isAnalyzing}
                 title={isFa ? 'تحلیل رویدادهای گفتاری و ساخت لیست تصمیمات تدوین (EDL)' : 'Analyze speech events & build EDL'}
-                className="inline-flex items-center gap-1 h-[24px] px-2 rounded-md border border-[var(--avp-accent)]/35 bg-[var(--avp-accent-soft)] hover:opacity-90 text-[var(--avp-accent-text)] font-semibold text-[10.5px] whitespace-nowrap cursor-pointer transition-opacity"
+                className="inline-flex items-center justify-center gap-1 min-h-[44px] sm:min-h-[26px] sm:h-[26px] px-2.5 sm:px-2 rounded-md border border-[var(--avp-accent)]/35 bg-[var(--avp-accent-soft)] hover:opacity-90 text-[var(--avp-accent-text)] font-semibold text-[11px] whitespace-nowrap cursor-pointer transition-opacity"
               >
                 <Sparkles className="w-3 h-3 shrink-0" strokeWidth={1.75} aria-hidden="true" />
                 <span>
@@ -521,7 +564,7 @@ export const EdlReviewPanel: React.FC<EdlReviewPanelProps> = ({
               type="button"
               data-testid="btn-run-persian-linguistics"
               onClick={handleRunPersianLinguistics}
-              className="avp-btn avp-btn-sm avp-btn-tonal h-[24px] px-2 text-[10.5px]"
+              className="avp-btn avp-btn-sm avp-btn-tonal min-h-[44px] sm:min-h-[26px] sm:h-[26px] px-2.5 sm:px-2 text-[11px]"
             >
               <Languages className="w-3 h-3" strokeWidth={1.75} aria-hidden="true" />
               <span>{isFa ? 'تحلیل متن' : 'Analyze'}</span>
@@ -550,12 +593,17 @@ export const EdlReviewPanel: React.FC<EdlReviewPanelProps> = ({
               <div className="flex flex-wrap items-center justify-between gap-1.5 text-[11px] text-[var(--avp-text-secondary)] border-b border-[var(--avp-border-subtle)] pb-1.5">
                 <span className="tabular-nums font-medium">
                   {isFa
-                    ? `نسخه EDL ${edlSnapshot.edlVersion} · تأیید: ${approvedCount}/${proposals.length}`
+                    ? `نسخه لیست تدوین ${formatNumberForLocale(edlSnapshot.edlVersion, { persianDigits })} · تأییدشده: ${formatNumberForLocale(approvedCount, { persianDigits })}/${formatNumberForLocale(proposals.length, { persianDigits })}`
                     : `EDL v${edlSnapshot.edlVersion} · Approved: ${approvedCount}/${proposals.length}`}
                 </span>
-                <span className="font-mono text-[10px] text-[var(--avp-text-muted)]" dir="ltr">
-                  {edlSnapshot.sourceAudioHash.slice(0, 10)}
-                </span>
+                <details className="text-[11px] text-[var(--avp-text-muted)]">
+                  <summary className="cursor-pointer select-none hover:text-[var(--avp-text)]">
+                    {isFa ? 'جزئیات فنی' : 'Technical details'}
+                  </summary>
+                  <div className="mt-1 font-mono text-[11px] text-[var(--avp-text-muted)]" dir="ltr">
+                    Source Hash: {edlSnapshot.sourceAudioHash.slice(0, 16)}
+                  </div>
+                </details>
               </div>
 
               {proposals.length === 0 ? (
@@ -575,6 +623,7 @@ export const EdlReviewPanel: React.FC<EdlReviewPanelProps> = ({
                     const endSec = endSample / safeSampleRate;
                     const durationMs = Math.round((endSec - startSec) * 1000);
                     const isExpanded = expandedProposalId === prop.proposalId;
+                    const operationLabel = formatEdlOperationLabel(prop.operation, isFa);
 
                     return (
                       <div
@@ -586,7 +635,7 @@ export const EdlReviewPanel: React.FC<EdlReviewPanelProps> = ({
                           <div className="flex items-center gap-1.5">
                             {riskIcon(prop.risk.overallLevel)}
                             <span className="font-semibold text-[var(--avp-text)]">
-                              {prop.operation}
+                              {operationLabel}
                             </span>
                             <span className="text-[var(--avp-text-muted)]">·</span>
                             <span className="text-[var(--avp-text-secondary)]">
@@ -598,7 +647,7 @@ export const EdlReviewPanel: React.FC<EdlReviewPanelProps> = ({
                             type="button"
                             onClick={() => onSeekSec(startSec)}
                             dir="ltr"
-                            className="font-mono tabular-nums text-[10.5px] text-[var(--avp-warning-text)] hover:underline cursor-pointer"
+                            className="font-mono tabular-nums text-[11px] min-h-[24px] px-1 rounded text-[var(--avp-warning-text)] hover:underline cursor-pointer"
                           >
                             {formatStudioTimecode(startSec, timecodeFormat, persianDigits)}–
                             {formatStudioTimecode(endSec, timecodeFormat, persianDigits)} (
@@ -607,7 +656,9 @@ export const EdlReviewPanel: React.FC<EdlReviewPanelProps> = ({
                         </div>
 
                         <p className="text-[var(--avp-text-secondary)] leading-relaxed">
-                          {prop.explanationFa}
+                          {isFa || !hasRtlCharacters(prop.explanationFa)
+                            ? prop.explanationFa
+                            : `${operationLabel} (${prop.risk.overallLevel} risk · ${durationMs}ms)`}
                         </p>
 
                         <div className="flex flex-wrap items-center gap-1 pt-0.5">
@@ -616,7 +667,7 @@ export const EdlReviewPanel: React.FC<EdlReviewPanelProps> = ({
                             data-testid={`btn-approve-${prop.proposalId}`}
                             onClick={() => onApproveProposal(prop.proposalId)}
                             disabled={prop.status === 'APPROVED' || prop.status === 'INVALID' || prop.status === 'STALE'}
-                            className="inline-flex items-center gap-1 h-[22px] px-2 rounded bg-[var(--avp-accent)] text-white hover:bg-[var(--avp-accent-hover)] disabled:opacity-40 cursor-pointer disabled:cursor-not-allowed text-[10.5px] font-semibold"
+                            className="avp-btn avp-btn-sm avp-btn-secondary min-h-[44px] sm:min-h-[26px] px-2.5 sm:px-2 text-[11px]"
                           >
                             <Check className="w-3 h-3" aria-hidden="true" />
                             <span>{isFa ? 'تأیید' : 'Approve'}</span>
@@ -625,7 +676,7 @@ export const EdlReviewPanel: React.FC<EdlReviewPanelProps> = ({
                             type="button"
                             onClick={() => onRejectProposal(prop.proposalId)}
                             disabled={prop.status === 'REJECTED'}
-                            className="inline-flex items-center gap-1 h-[22px] px-2 rounded border border-[var(--avp-border)] bg-[var(--avp-surface)] text-[var(--avp-text-secondary)] hover:bg-[var(--avp-surface-hover)] disabled:opacity-40 cursor-pointer text-[10.5px]"
+                            className="inline-flex items-center justify-center gap-1 min-h-[44px] sm:min-h-[26px] px-2.5 sm:px-2 rounded border border-[var(--avp-border)] bg-[var(--avp-surface)] text-[var(--avp-text-secondary)] hover:bg-[var(--avp-surface-hover)] disabled:opacity-40 cursor-pointer text-[11px]"
                           >
                             <X className="w-3 h-3" aria-hidden="true" />
                             <span>{isFa ? 'رد' : 'Reject'}</span>
@@ -633,7 +684,7 @@ export const EdlReviewPanel: React.FC<EdlReviewPanelProps> = ({
                           <button
                             type="button"
                             onClick={() => onRequestReviewProposal(prop.proposalId)}
-                            className="inline-flex items-center gap-1 h-[22px] px-1.5 rounded border border-[var(--avp-border)] bg-[var(--avp-surface)] text-[var(--avp-text-secondary)] hover:bg-[var(--avp-surface-hover)] cursor-pointer text-[10.5px]"
+                            className="inline-flex items-center justify-center gap-1 min-h-[44px] sm:min-h-[26px] px-2 rounded border border-[var(--avp-border)] bg-[var(--avp-surface)] text-[var(--avp-text-secondary)] hover:bg-[var(--avp-surface-hover)] cursor-pointer text-[11px]"
                           >
                             <Flag className="w-3 h-3" aria-hidden="true" />
                             <span>{isFa ? 'بازبینی' : 'Flag'}</span>
@@ -641,7 +692,7 @@ export const EdlReviewPanel: React.FC<EdlReviewPanelProps> = ({
                           <button
                             type="button"
                             onClick={() => onPreviewProposal(prop, 'before')}
-                            className="inline-flex items-center gap-1 h-[22px] px-1.5 rounded border border-[var(--avp-border)] bg-[var(--avp-surface)] text-[var(--avp-text-secondary)] hover:bg-[var(--avp-surface-hover)] cursor-pointer text-[10.5px]"
+                            className="inline-flex items-center justify-center gap-1 min-h-[44px] sm:min-h-[26px] px-2 rounded border border-[var(--avp-border)] bg-[var(--avp-surface)] text-[var(--avp-text-secondary)] hover:bg-[var(--avp-surface-hover)] cursor-pointer text-[11px]"
                           >
                             <Play className="w-2.5 h-2.5" aria-hidden="true" />
                             <span>{isFa ? 'قبل' : 'Before'}</span>
@@ -649,7 +700,7 @@ export const EdlReviewPanel: React.FC<EdlReviewPanelProps> = ({
                           <button
                             type="button"
                             onClick={() => onPreviewProposal(prop, 'after')}
-                            className="inline-flex items-center gap-1 h-[22px] px-1.5 rounded border border-[var(--avp-border)] bg-[var(--avp-surface)] text-[var(--avp-text-secondary)] hover:bg-[var(--avp-surface-hover)] cursor-pointer text-[10.5px]"
+                            className="inline-flex items-center justify-center gap-1 min-h-[44px] sm:min-h-[26px] px-2 rounded border border-[var(--avp-border)] bg-[var(--avp-surface)] text-[var(--avp-text-secondary)] hover:bg-[var(--avp-surface-hover)] cursor-pointer text-[11px]"
                           >
                             <Scissors className="w-2.5 h-2.5" aria-hidden="true" />
                             <span>{isFa ? 'بعد' : 'After'}</span>
@@ -657,19 +708,21 @@ export const EdlReviewPanel: React.FC<EdlReviewPanelProps> = ({
                           <button
                             type="button"
                             onClick={() => onReviseBoundaryMs(prop.proposalId, -15, 15)}
-                            className="h-[22px] px-1.5 rounded border border-[var(--avp-border)] bg-[var(--avp-surface)] text-[var(--avp-text-muted)] hover:bg-[var(--avp-surface-hover)] font-mono cursor-pointer text-[10px]"
+                            className="inline-flex items-center justify-center min-h-[44px] sm:min-h-[26px] px-2 rounded border border-[var(--avp-border)] bg-[var(--avp-surface)] text-[var(--avp-text-muted)] hover:bg-[var(--avp-surface-hover)] font-mono cursor-pointer text-[11px]"
                             title={isFa ? 'اصلاح مرز ±15ms' : 'Widen boundaries ±15ms'}
                           >
                             ±15ms
                           </button>
                           <button
                             type="button"
+                            aria-expanded={isExpanded}
+                            aria-label={isFa ? 'جزئیات پیشنهاد' : 'Proposal details'}
                             onClick={() =>
                               setExpandedProposalId(isExpanded ? null : prop.proposalId)
                             }
-                            className="ms-auto inline-flex items-center gap-0.5 text-[var(--avp-text-muted)] hover:text-[var(--avp-text)] cursor-pointer text-[10.5px]"
+                            className="ms-auto inline-flex items-center justify-center min-w-[44px] min-h-[44px] sm:min-w-[26px] sm:min-h-[26px] gap-0.5 text-[var(--avp-text-muted)] hover:text-[var(--avp-text)] cursor-pointer text-[11px]"
                           >
-                            <Eye className="w-3 h-3" aria-hidden="true" />
+                            <Eye className="w-3.5 h-3.5" aria-hidden="true" />
                             {isExpanded ? (
                               <ChevronUp className="w-3 h-3" />
                             ) : (
@@ -679,7 +732,11 @@ export const EdlReviewPanel: React.FC<EdlReviewPanelProps> = ({
                         </div>
 
                         {isExpanded && (
-                          <div className="mt-1.5 pt-1.5 border-t border-[var(--avp-border-subtle)] space-y-1 text-[10.5px] text-[var(--avp-text-muted)]">
+                          <div className="mt-1.5 pt-1.5 border-t border-[var(--avp-border-subtle)] space-y-1 text-[11px] text-[var(--avp-text-muted)]">
+                            <div>
+                              <strong>{isFa ? 'کد عملیات:' : 'Operation Code:'}</strong>{' '}
+                              <bdi dir="ltr" className="font-mono">{prop.operation}</bdi>
+                            </div>
                             <div>
                               <strong>{isFa ? 'سطح ریسک:' : 'Risk Level:'}</strong> {prop.risk.overallLevel} (
                               {prop.risk.blockingReasons.join(' · ') || '—'})
@@ -725,13 +782,17 @@ export const EdlReviewPanel: React.FC<EdlReviewPanelProps> = ({
                       ({ev.subtype})
                     </span>
                   </div>
-                  <div className="text-[var(--avp-text-secondary)]">{ev.explanationFa}</div>
+                  <div className="text-[var(--avp-text-secondary)]">
+                    {isFa || !hasRtlCharacters(ev.explanationFa)
+                      ? ev.explanationFa
+                      : `${ev.category} · ${ev.subtype} (${Math.round(ev.confidence * 100)}%)`}
+                  </div>
                 </div>
                 <button
                   type="button"
                   onClick={() => onSeekSec(ev.startSec)}
                   dir="ltr"
-                  className="font-mono tabular-nums text-[10.5px] text-[var(--avp-warning-text)] hover:underline cursor-pointer"
+                  className="min-h-[44px] sm:min-h-[26px] px-1.5 font-mono tabular-nums text-[11px] text-[var(--avp-warning-text)] hover:underline cursor-pointer"
                 >
                   {formatStudioTimecode(ev.startSec, timecodeFormat, persianDigits)}–
                   {formatStudioTimecode(ev.endSec, timecodeFormat, persianDigits)} ·{' '}
@@ -743,7 +804,7 @@ export const EdlReviewPanel: React.FC<EdlReviewPanelProps> = ({
         </div>
       )}
 
-      {/* Tab 3: Mission 13 Persian Linguistic Intelligence */}
+      {/* Tab 3: Persian Linguistic Intelligence */}
       {drawerVisible && activeTab === 'linguistics' && (
         <div
           className={`p-2.5 space-y-2.5 overflow-y-auto text-[11.5px] bg-[var(--avp-surface)] ${
@@ -765,26 +826,36 @@ export const EdlReviewPanel: React.FC<EdlReviewPanelProps> = ({
           ) : (
             <>
               <div className="flex flex-wrap items-center gap-1">
-                {(['RAW_ASR', 'VERBATIM', 'NORMALIZED', 'READABLE'] as const).map((layer) => (
+                {(
+                  [
+                    { id: 'RAW_ASR', fa: 'خام ASR', en: 'Raw ASR' },
+                    { id: 'VERBATIM', fa: 'دقیق', en: 'Verbatim' },
+                    { id: 'NORMALIZED', fa: 'معیار', en: 'Normalized' },
+                    { id: 'READABLE', fa: 'خوانا', en: 'Readable' },
+                  ] as const
+                ).map((layerOpt) => (
                   <button
-                    key={layer}
+                    key={layerOpt.id}
                     type="button"
-                    onClick={() => setLingLayer(layer)}
-                    className={`px-2 py-0.5 rounded border text-[10px] font-mono font-medium cursor-pointer ${
-                      lingLayer === layer
+                    onClick={() => setLingLayer(layerOpt.id)}
+                    className={`min-h-[44px] sm:min-h-[26px] px-2.5 py-0.5 rounded border text-[11px] font-medium cursor-pointer ${
+                      lingLayer === layerOpt.id
                         ? 'border-[var(--avp-accent)] bg-[var(--avp-accent-soft)] text-[var(--avp-accent-text)] font-semibold'
                         : 'border-[var(--avp-border)] text-[var(--avp-text-secondary)]'
                     }`}
                   >
-                    {layer}
+                    {isFa ? layerOpt.fa : layerOpt.en}
                   </button>
                 ))}
-                <span className="ms-auto font-mono text-[10.5px] text-[var(--avp-text-muted)]">
+                <span className="ms-auto font-mono text-[11px] text-[var(--avp-text-muted)]">
                   v{lingDoc.version}
                 </span>
               </div>
 
-              <div className="rounded-lg border border-[var(--avp-border)] bg-[var(--avp-surface-secondary)]/55 p-2.5 leading-6 text-[var(--avp-text)]">
+              <div
+                dir="auto"
+                className="rounded-lg border border-[var(--avp-border)] bg-[var(--avp-surface-secondary)]/55 p-2.5 leading-6 text-[var(--avp-text)]"
+              >
                 {renderTranscriptLayerText(lingDoc, lingLayer) || (isFa ? 'متنی موجود نیست' : 'No text')}
               </div>
 
@@ -802,21 +873,25 @@ export const EdlReviewPanel: React.FC<EdlReviewPanelProps> = ({
                       className="rounded-lg border border-[var(--avp-border)] bg-[var(--avp-surface-secondary)]/55 p-2 space-y-1.5"
                     >
                       <div className="flex flex-wrap items-center justify-between gap-1.5">
-                        <span className="font-semibold text-[var(--avp-text)]">
+                        <span dir="rtl" className="font-semibold text-[var(--avp-text)]">
                           «{cand.originalText}» ← «{cand.proposedText}»
                         </span>
-                        <span className="text-[10px] text-[var(--avp-text-muted)] font-mono">
+                        <span className="text-[11px] text-[var(--avp-text-muted)] font-mono">
                           {cand.category} · {cand.status}
                         </span>
                       </div>
-                      <p className="text-[var(--avp-text-secondary)]">{cand.linguisticEvidence}</p>
+                      <p className="text-[var(--avp-text-secondary)]">
+                        {isFa || !hasRtlCharacters(cand.linguisticEvidence)
+                          ? cand.linguisticEvidence
+                          : `${cand.category} (${cand.evidenceStrength})`}
+                      </p>
                       <div className="flex items-center gap-1.5 pt-0.5">
                         {cand.status === 'PROPOSED' && (
                           <>
                             <button
                               type="button"
                               onClick={() => handleAcceptLingCandidate(cand)}
-                              className="inline-flex items-center gap-1 h-[22px] px-2 rounded bg-[var(--avp-accent)] text-white hover:bg-[var(--avp-accent-hover)] cursor-pointer text-[10.5px] font-semibold"
+                              className="inline-flex items-center justify-center gap-1 min-h-[44px] sm:min-h-[26px] px-2.5 rounded bg-[var(--avp-accent)] text-white hover:bg-[var(--avp-accent-hover)] cursor-pointer text-[11px] font-semibold"
                             >
                               <Check className="w-3 h-3" />
                               <span>{isFa ? 'اعمال روی لایه خوانا' : 'Accept'}</span>
@@ -824,7 +899,7 @@ export const EdlReviewPanel: React.FC<EdlReviewPanelProps> = ({
                             <button
                               type="button"
                               onClick={() => handleRejectLingCandidate(cand.candidateId)}
-                              className="inline-flex items-center gap-1 h-[22px] px-2 rounded border border-[var(--avp-border)] bg-[var(--avp-surface)] text-[var(--avp-text-secondary)] cursor-pointer text-[10.5px]"
+                              className="inline-flex items-center justify-center gap-1 min-h-[44px] sm:min-h-[26px] px-2.5 rounded border border-[var(--avp-border)] bg-[var(--avp-surface)] text-[var(--avp-text-secondary)] cursor-pointer text-[11px]"
                             >
                               <X className="w-3 h-3" />
                               <span>{isFa ? 'رد' : 'Reject'}</span>
@@ -835,7 +910,7 @@ export const EdlReviewPanel: React.FC<EdlReviewPanelProps> = ({
                           <button
                             type="button"
                             onClick={() => handleRevertLingCandidate(cand.candidateId)}
-                            className="inline-flex items-center gap-1 h-[22px] px-2 rounded border border-[var(--avp-warning)]/40 text-[var(--avp-warning-text)] cursor-pointer text-[10.5px]"
+                            className="inline-flex items-center justify-center gap-1 min-h-[44px] sm:min-h-[26px] px-2.5 rounded border border-[var(--avp-warning)]/40 text-[var(--avp-warning-text)] cursor-pointer text-[11px]"
                           >
                             <RotateCcw className="w-3 h-3" />
                             <span>{isFa ? 'بازگردانی' : 'Revert'}</span>

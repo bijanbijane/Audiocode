@@ -176,7 +176,7 @@ export const DspFrequencyResponseGraph: React.FC<DspFrequencyResponseGraphProps>
         </div>
       </div>
 
-      <div className="rounded-md border border-[var(--avp-border-strong)] bg-[#0E131D] overflow-hidden" dir="ltr">
+      <div className="rounded-[var(--avp-radius-sm)] border border-[var(--avp-border-strong)] bg-[var(--avp-wave-bg)] overflow-hidden" dir="ltr">
         <svg
           direction="ltr"
           role="img"
@@ -201,15 +201,15 @@ export const DspFrequencyResponseGraph: React.FC<DspFrequencyResponseGraphProps>
                     y1={0}
                     x2={x}
                     y2={INNER_H}
-                    stroke="#1E2738"
+                    stroke="var(--avp-wave-surface)"
                     strokeWidth={1}
                   />
                   <text
                     x={x}
                     y={INNER_H + 15}
                     textAnchor={anchor}
-                    fill="#94A3B8"
-                    fontSize="10"
+                    fill="var(--avp-text-muted)"
+                    fontSize="11"
                     fontFamily="var(--font-mono)"
                   >
                     {tick.label}
@@ -229,7 +229,7 @@ export const DspFrequencyResponseGraph: React.FC<DspFrequencyResponseGraphProps>
                     y1={y}
                     x2={INNER_W}
                     y2={y}
-                    stroke={isZeroDb ? '#475569' : '#1E2738'}
+                    stroke={isZeroDb ? 'var(--avp-border-strong)' : 'var(--avp-wave-surface)'}
                     strokeWidth={isZeroDb ? 1.25 : 1}
                     strokeDasharray={isZeroDb ? '3 3' : undefined}
                   />
@@ -238,8 +238,8 @@ export const DspFrequencyResponseGraph: React.FC<DspFrequencyResponseGraphProps>
                       x={-8}
                       y={y + 3.5}
                       textAnchor="end"
-                      fill={isZeroDb ? '#CBD5E1' : '#64748B'}
-                      fontSize="9.5"
+                      fill={isZeroDb ? 'var(--avp-text-secondary)' : 'var(--avp-text-muted)'}
+                      fontSize="11"
                       fontFamily="var(--font-mono)"
                     >
                       {db > 0 ? `+${db}` : String(db)}
@@ -254,7 +254,8 @@ export const DspFrequencyResponseGraph: React.FC<DspFrequencyResponseGraphProps>
               <path
                 data-testid="dsp-curve-gr-area"
                 d={livePaths.reductionAreaPath}
-                fill="rgba(251, 191, 36, 0.14)"
+                fill="var(--avp-wave-selection)"
+                fillOpacity={0.14}
               />
             )}
 
@@ -264,7 +265,7 @@ export const DspFrequencyResponseGraph: React.FC<DspFrequencyResponseGraphProps>
                 data-testid="dsp-curve-committed"
                 d={committedPaths.effectivePath}
                 fill="none"
-                stroke="#64748B"
+                stroke="var(--avp-text-muted)"
                 strokeWidth={1.25}
                 strokeDasharray="2 3"
               />
@@ -276,7 +277,7 @@ export const DspFrequencyResponseGraph: React.FC<DspFrequencyResponseGraphProps>
                 data-testid="dsp-curve-eq"
                 d={eqPath}
                 fill="none"
-                stroke="#34D399"
+                stroke="var(--avp-wave-stroke)"
                 strokeWidth={1.5}
                 strokeDasharray="4 3"
               />
@@ -288,7 +289,8 @@ export const DspFrequencyResponseGraph: React.FC<DspFrequencyResponseGraphProps>
               y1={0}
               x2={livePaths.cutoffPoint.x}
               y2={INNER_H}
-              stroke="rgba(56, 189, 248, 0.45)"
+              stroke="var(--avp-wave-stroke-secondary)"
+              strokeOpacity={0.45}
               strokeWidth={1}
               strokeDasharray="3 2"
             />
@@ -298,7 +300,7 @@ export const DspFrequencyResponseGraph: React.FC<DspFrequencyResponseGraphProps>
               data-testid="dsp-curve-hpf"
               d={livePaths.staticPath}
               fill="none"
-              stroke="#38BDF8"
+              stroke="var(--avp-wave-stroke-secondary)"
               strokeWidth={1.75}
               strokeDasharray="5 3"
             />
@@ -308,7 +310,7 @@ export const DspFrequencyResponseGraph: React.FC<DspFrequencyResponseGraphProps>
               data-testid="dsp-curve-effective"
               d={livePaths.effectivePath}
               fill="none"
-              stroke="#FBBF24"
+              stroke="var(--avp-wave-selection)"
               strokeWidth={2.5}
               strokeLinejoin="round"
               strokeLinecap="round"
@@ -320,8 +322,8 @@ export const DspFrequencyResponseGraph: React.FC<DspFrequencyResponseGraphProps>
               cx={livePaths.cutoffPoint.x}
               cy={livePaths.cutoffPoint.y}
               r={4.5}
-              fill="#38BDF8"
-              stroke="#0E131D"
+              fill="var(--avp-wave-stroke-secondary)"
+              stroke="var(--avp-wave-bg)"
               strokeWidth={1.5}
             />
           </g>

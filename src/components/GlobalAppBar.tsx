@@ -25,9 +25,9 @@ export const GlobalAppBar: React.FC<GlobalAppBarProps> = ({
     <header
       dir={dir}
       data-testid={dataTestId}
-      className={`w-full min-h-[var(--avp-header-h)] bg-[var(--avp-surface-shell)] border-b border-[var(--avp-border)] px-3 sm:px-4 py-1.5 flex items-center justify-between gap-2 sm:gap-3 shrink-0 z-30 ${className}`}
+      className={`w-full min-h-[48px] sm:min-h-[var(--avp-header-h)] bg-[var(--avp-surface-shell)] border-b border-[var(--avp-border)] px-2 sm:px-4 py-0.5 sm:py-1 flex items-center justify-between gap-1.5 sm:gap-3 shrink-0 z-[var(--avp-z-sticky)] ${className}`}
     >
-      <div className="flex items-center gap-2 min-w-0">{startSlot}</div>
+      <div className="flex-1 sm:flex-initial flex items-center gap-2 min-w-0">{startSlot}</div>
       {centerSlot ? (
         <div className="hidden lg:flex items-center justify-center min-w-0 shrink">
           {centerSlot}

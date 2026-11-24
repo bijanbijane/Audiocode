@@ -72,6 +72,7 @@ import {
   evaluateChampionVsChallengerGate,
   GLOBAL_CONTINUOUS_LEARNING_HUB,
 } from '../ai-engine/asr/ContinuousLearningAndEvolutionEngine';
+import { getNextRovingTabIndex } from '../studio/layoutUtils';
 
 export type LabTabId =
   | 'benchmark'
@@ -88,6 +89,8 @@ interface AsrResearchLabModalProps {
   studioSampleRate: number;
   referenceTranscript: string;
   modelManager?: LocalModelLifecycleManager;
+  locale?: 'fa' | 'en';
+  persianDigits?: boolean;
 }
 
 export const AsrResearchLabModal: React.FC<AsrResearchLabModalProps> = ({
@@ -97,7 +100,9 @@ export const AsrResearchLabModal: React.FC<AsrResearchLabModalProps> = ({
   studioSampleRate,
   referenceTranscript,
   modelManager,
+  locale = 'fa',
 }) => {
+  const isFa = locale === 'fa';
   const [activeTab, setActiveTab] = useState<LabTabId>('benchmark');
 
   // ── Tab 1: Phase 1–3 Multi-Engine Benchmark & Error Taxonomy ──────────────
@@ -305,8 +310,7 @@ export const AsrResearchLabModal: React.FC<AsrResearchLabModalProps> = ({
     []
   );
 
-  if (!isOpen) return null;
-
+  // AccessibleModal handles !isOpen presence cleanly
   const handleRunBenchmark = async () => {
     benchmarkAbortRef.current?.abort();
     const controller = new AbortController();
@@ -341,7 +345,9 @@ export const AsrResearchLabModal: React.FC<AsrResearchLabModalProps> = ({
       setExpResult(res);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      setBenchmarkError(`خطا در اجرای بنچمارک ASR: ${msg}`);
+      setBenchmarkError(
+        isFa ? `خطا در اجرای بنچمارک ASR: ${msg}` : `ASR benchmark failed: ${msg}`,
+      );
     } finally {
       if (benchmarkAbortRef.current === controller) {
         benchmarkAbortRef.current = null;
@@ -458,7 +464,14 @@ export const AsrResearchLabModal: React.FC<AsrResearchLabModalProps> = ({
       totalBytes,
       vadSpeechCount: sess.metrics.vad_speech_count,
       partials: partials.slice(-4),
-      finalTexts: finals.length > 0 ? finals : ['[انتظار پایان بازه گفتار یا تکمیل بافر VAD]'],
+      finalTexts:
+        finals.length > 0
+          ? finals
+          : [
+              isFa
+                ? '[انتظار پایان بازه گفتار یا تکمیل بافر VAD]'
+                : '[Awaiting end of speech or VAD buffer completion]',
+            ],
       ttfpP95Ms: pct.ttfp.p95,
       backpressure: sess.metrics.backpressure_level,
     });
@@ -526,8 +539,12 @@ export const AsrResearchLabModal: React.FC<AsrResearchLabModalProps> = ({
     });
     setFbResultMsg(
       res.record.eligibilityState === 'TRAINING_APPROVED'
-        ? `بازخورد ثبت و برای صف یادگیری فعال تأیید شد (${res.record.eligibilityState} · خطای غالب: ${res.taxonomyTag}).`
-        : `بازخورد ذخیره شد اما طبق دروازه رضایت‌نامه برای آموزش مسدود گردید (${res.record.eligibilityState}).`
+        ? isFa
+          ? `بازخورد ثبت و برای صف یادگیری فعال تأیید شد (${res.record.eligibilityState} · خطای غالب: ${res.taxonomyTag}).`
+          : `Feedback recorded and approved for active learning (${res.record.eligibilityState} · dominant error: ${res.taxonomyTag}).`
+        : isFa
+          ? `بازخورد ذخیره شد اما طبق دروازه رضایت‌نامه برای آموزش مسدود گردید (${res.record.eligibilityState}).`
+          : `Feedback stored, but blocked from training by the consent gate (${res.record.eligibilityState}).`,
     );
   };
 
@@ -588,8 +605,9 @@ export const AsrResearchLabModal: React.FC<AsrResearchLabModalProps> = ({
     <AccessibleModal
       isOpen={isOpen}
       onClose={onClose}
-      dir="rtl"
-      ariaLabel="آزمایشگاه تحقیق و توسعه ASR فارسی-انگلیسی"
+      dir={isFa ? 'rtl' : 'ltr'}
+      ariaLabel={isFa ? 'آزمایشگاه تحقیق و توسعه ASR فارسی-انگلیسی' : 'Persian-English ASR Research & Dev Lab'}
+      dataTestId="asr-research-lab-modal"
       closeOnBackdropClick
       panelClassName="w-full max-w-6xl"
     >
@@ -600,48 +618,95 @@ export const AsrResearchLabModal: React.FC<AsrResearchLabModalProps> = ({
             <FlaskConical className="w-5 h-5 text-[var(--avp-warning-text)] shrink-0" aria-hidden="true" />
             <div>
               <h2 className="text-sm sm:text-base font-bold text-[var(--avp-text)]">
-                آزمایشگاه مستقل پژوهش، استریم و مسیریابی ASR (فاز ۱ تا ۹)
+                {isFa
+                  ? 'آزمایشگاه مستقل پژوهش، استریم و مسیریابی ASR'
+                  : 'Independent ASR Research, Streaming & Routing Lab'}
               </h2>
               <p className="text-xs text-[var(--avp-text-secondary)]">
-                وضعیت صادقانه محیط: <span className="text-[var(--avp-warning-text)] font-mono">G0_CPU_ONLY</span> · وضعیت انتشار:{' '}
-                <span className="text-[var(--avp-accent-text)] font-mono">{truthSummary.overallReleaseStatus}</span> (ابزارهای محلی فعال؛ ورکر GPU و کلیدهای ابری در انتظار پیکربندی)
+                {isFa ? 'وضعیت صادقانه محیط:' : 'Honest Environment:'}{' '}
+                <span className="text-[var(--avp-warning-text)] font-mono">G0_CPU_ONLY</span> ·{' '}
+                {isFa ? 'وضعیت انتشار:' : 'Release Status:'}{' '}
+                <span className="text-[var(--avp-accent-text)] font-mono">{truthSummary.overallReleaseStatus}</span>{' '}
+                {isFa
+                  ? '(ابزارهای محلی فعال؛ ورکر GPU و کلیدهای ابری در انتظار پیکربندی)'
+                  : '(Local tools active; GPU worker & cloud API keys awaiting configuration)'}
               </p>
             </div>
           </div>
           <button
             type="button"
             onClick={onClose}
-            aria-label="بستن آزمایشگاه ASR"
-            className="avp-btn avp-btn-secondary w-8 h-8 px-0"
+            aria-label={isFa ? 'بستن آزمایشگاه ASR' : 'Close ASR Research Lab'}
+            className="avp-touch-icon sm:w-8 sm:h-8 rounded-lg text-[var(--avp-text-secondary)] hover:text-[var(--avp-text)] hover:bg-[var(--avp-hover)] inline-flex items-center justify-center cursor-pointer"
           >
             <X className="w-4 h-4" />
           </button>
         </header>
 
         {/* Sub-navigation Tabs */}
-        <nav
-          aria-label="بخش‌های آزمایشگاه ASR"
+        <div
+          role="tablist"
+          aria-label={isFa ? 'بخش‌های آزمایشگاه ASR' : 'ASR Lab Sections'}
           className="flex flex-wrap items-center gap-1.5 px-5 py-2.5 border-b border-[var(--avp-border)] bg-[var(--avp-bg-subtle)]"
         >
           {(
             [
-              { id: 'benchmark', label: 'بنچمارک و رده‌بندی خطا (فاز ۱–۳)', icon: Activity },
-              { id: 'dataset', label: 'ممیزی دیتاست ۱۱گانه (فاز ۲)', icon: Database },
-              { id: 'model', label: 'مدل مستقل RC1 (فاز ۴)', icon: Cpu },
-              { id: 'streaming', label: 'استریم زنده ASR1 و VAD (فاز ۵)', icon: Radio },
-              { id: 'router', label: 'مسیریاب تطبیقی ۱۸ دروازه‌ای (فاز ۶)', icon: GitBranch },
-              { id: 'research_security', label: 'پژوهش، امنیت و یادگیری مستمر (فاز ۷–۹)', icon: ShieldCheck },
+              {
+                id: 'benchmark',
+                label: isFa ? 'بنچمارک و رده‌بندی خطا' : 'Benchmark & Error Taxonomy',
+                icon: Activity,
+              },
+              {
+                id: 'dataset',
+                label: isFa ? 'ممیزی دیتاست ۱۱گانه' : 'Dataset 11-Gate Audit',
+                icon: Database,
+              },
+              {
+                id: 'model',
+                label: isFa ? 'مدل مستقل RC1' : 'Independent RC1 Model',
+                icon: Cpu,
+              },
+              {
+                id: 'streaming',
+                label: isFa ? 'استریم زنده ASR1 و VAD' : 'Live Streaming & VAD',
+                icon: Radio,
+              },
+              {
+                id: 'router',
+                label: isFa ? 'مسیریاب تطبیقی ۱۸ دروازه‌ای' : '18-Gate Adaptive Router',
+                icon: GitBranch,
+              },
+              {
+                id: 'research_security',
+                label: isFa ? 'پژوهش، امنیت و یادگیری مستمر' : 'Research, Security & Learning',
+                icon: ShieldCheck,
+              },
             ] as const
-          ).map((tab) => {
+          ).map((tab, idx, arr) => {
             const Icon = tab.icon;
             const active = activeTab === tab.id;
             return (
               <button
                 key={tab.id}
                 type="button"
+                role="tab"
+                aria-selected={active}
+                tabIndex={active ? 0 : -1}
                 data-testid={`lab-tab-${tab.id}`}
                 onClick={() => setActiveTab(tab.id)}
-                className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium whitespace-nowrap transition-colors cursor-pointer border ${
+                onKeyDown={(e) => {
+                  const nextIdx = getNextRovingTabIndex(idx, arr.length, e.key, isFa, 'horizontal');
+                  if (nextIdx !== null) {
+                    e.preventDefault();
+                    const nextId = arr[nextIdx].id;
+                    setActiveTab(nextId);
+                    const el = e.currentTarget
+                      .closest('[role="tablist"]')
+                      ?.querySelector<HTMLButtonElement>(`[data-testid="lab-tab-${nextId}"]`);
+                    el?.focus();
+                  }
+                }}
+                className={`min-h-[44px] sm:min-h-[34px] inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium whitespace-nowrap transition-colors cursor-pointer border ${
                   active
                     ? 'bg-[var(--avp-brand)] text-[var(--avp-on-brand)] border-[var(--avp-brand)] font-semibold'
                     : 'bg-[var(--avp-surface)] text-[var(--avp-text-secondary)] hover:bg-[var(--avp-hover)] hover:text-[var(--avp-text)] border-[var(--avp-border)]'
@@ -652,7 +717,7 @@ export const AsrResearchLabModal: React.FC<AsrResearchLabModalProps> = ({
               </button>
             );
           })}
-        </nav>
+        </div>
 
         {/* Main Scrollable Content */}
         <div className="flex-1 overflow-y-auto p-5 space-y-5 bg-[var(--avp-bg)]">
@@ -668,22 +733,28 @@ export const AsrResearchLabModal: React.FC<AsrResearchLabModalProps> = ({
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <div>
                     <h3 className="text-sm font-semibold text-[var(--avp-text)]">
-                      اجرای هم‌زمان موتورهای ASR روی صدای ۱۶kHz مونو استودیو
+                      {isFa
+                        ? 'اجرای هم‌زمان موتورهای ASR روی صدای ۱۶kHz مونو استودیو'
+                        : 'Concurrent ASR Engine Benchmark on 16kHz Mono Studio Audio'}
                     </h3>
                     <p className="text-xs text-[var(--avp-text-secondary)]">
-                      هر موتور بدون کلید API یا ورکر GPU با خطای صریح و هزینه صفر (`NOT_BILLED_FAILED_RUN`) ثبت می‌شود.
+                      {isFa
+                        ? 'هر موتور بدون کلید API یا ورکر GPU با خطای صریح و هزینه صفر (`NOT_BILLED_FAILED_RUN`) ثبت می‌شود.'
+                        : 'Engines without API keys or GPU workers fail explicitly with zero cost (`NOT_BILLED_FAILED_RUN`).'}
                     </p>
                   </div>
                   <div className="flex flex-wrap items-center gap-2">
                     <label className="text-xs text-[var(--avp-text-secondary)] flex items-center gap-1.5">
-                      <span>نرمال‌سازی:</span>
+                      <span>{isFa ? 'نرمال‌سازی:' : 'Normalization:'}</span>
                       <select
-                        aria-label="نسخه نرمال‌سازی"
+                        aria-label={isFa ? 'نسخه نرمال‌سازی' : 'Normalization Profile'}
                         value={normMode}
                         onChange={(e) => setNormMode(e.target.value as 'fa_strict_v1' | 'fa_relaxed_v1')}
                         className="avp-input h-8 px-2 text-xs"
                       >
-                        <option value="fa_strict_v1">FA-STRICT-V1 (حساس به نیم‌فاصله)</option>
+                        <option value="fa_strict_v1">
+                          {isFa ? 'FA-STRICT-V1 (حساس به نیم‌فاصله)' : 'FA-STRICT-V1 (ZWNJ-Sensitive)'}
+                        </option>
                         <option value="fa_relaxed_v1">FA-RELAXED-V1</option>
                       </select>
                     </label>
@@ -695,7 +766,15 @@ export const AsrResearchLabModal: React.FC<AsrResearchLabModalProps> = ({
                       className="avp-btn avp-btn-primary"
                     >
                       <Sparkles className="w-3.5 h-3.5" aria-hidden="true" />
-                      <span>{isRunningExp ? 'در حال اجرا...' : 'اجرای آزمایش بنچمارک'}</span>
+                      <span>
+                        {isRunningExp
+                          ? isFa
+                            ? 'در حال اجرا...'
+                            : 'Running...'
+                          : isFa
+                            ? 'اجرای آزمایش بنچمارک'
+                            : 'Run Benchmark'}
+                      </span>
                     </button>
                     {isRunningExp && (
                       <button
@@ -704,17 +783,17 @@ export const AsrResearchLabModal: React.FC<AsrResearchLabModalProps> = ({
                         onClick={handleCancelBenchmark}
                         className="avp-btn avp-btn-danger"
                       >
-                        <span>لغو</span>
+                        <span>{isFa ? 'لغو' : 'Cancel'}</span>
                       </button>
                     )}
                     {expResult && (
                       <button
                         type="button"
                         onClick={handleDownloadBenchmarkJson}
-                        className="avp-btn avp-btn-secondary"
+                        className="avp-btn avp-btn-outline"
                       >
                         <Download className="w-3.5 h-3.5" aria-hidden="true" />
-                        <span>خروجی JSON</span>
+                        <span>{isFa ? 'خروجی JSON' : 'Export JSON'}</span>
                       </button>
                     )}
                   </div>
@@ -750,16 +829,19 @@ export const AsrResearchLabModal: React.FC<AsrResearchLabModalProps> = ({
               {expResult && (
                 <div className="space-y-4">
                   <div className="overflow-x-auto rounded-lg border border-[var(--avp-border)]">
-                    <table className="w-full text-right text-xs" data-testid="benchmark-results-table">
+                    <table
+                      className={`w-full ${isFa ? 'text-right' : 'text-left'} text-xs`}
+                      data-testid="benchmark-results-table"
+                    >
                       <thead className="bg-[var(--avp-surface-shell)] text-[var(--avp-text-secondary)] border-b border-[var(--avp-border)]">
                         <tr>
-                          <th className="p-2.5">موتور / هویت مدل</th>
-                          <th className="p-2.5">وضعیت اجرا</th>
-                          <th className="p-2.5">منشأ فرضیه</th>
-                          <th className="p-2.5">CER نرمال</th>
-                          <th className="p-2.5">WER نرمال</th>
-                          <th className="p-2.5">RTF / زمان (ms)</th>
-                          <th className="p-2.5">برچسب هزینه</th>
+                          <th className="p-2.5">{isFa ? 'موتور / هویت مدل' : 'Engine / Model Identity'}</th>
+                          <th className="p-2.5">{isFa ? 'وضعیت اجرا' : 'Status'}</th>
+                          <th className="p-2.5">{isFa ? 'منشأ فرضیه' : 'Provenance'}</th>
+                          <th className="p-2.5">{isFa ? 'CER نرمال' : 'Norm CER'}</th>
+                          <th className="p-2.5">{isFa ? 'WER نرمال' : 'Norm WER'}</th>
+                          <th className="p-2.5">{isFa ? 'RTF / زمان (ms)' : 'RTF / Time (ms)'}</th>
+                          <th className="p-2.5">{isFa ? 'برچسب هزینه' : 'Cost Label'}</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-[var(--avp-border-subtle)] bg-[var(--avp-surface)]">
@@ -768,7 +850,7 @@ export const AsrResearchLabModal: React.FC<AsrResearchLabModalProps> = ({
                             <td className="p-2.5">
                               <div className="font-medium text-[var(--avp-text)]">{res.engineName}</div>
                               {res.modelIdentity.modelId && (
-                                <div className="text-[10px] font-mono text-[var(--avp-text-muted)]">
+                                <div className="text-[11px] font-mono text-[var(--avp-text-muted)]" dir="ltr">
                                   {res.modelIdentity.modelId}@{res.modelIdentity.modelVersion ?? 'unknown'}
                                   {res.modelIdentity.architecture ? ` · ${res.modelIdentity.architecture}` : ''}
                                   {res.modelIdentity.modelSha256
@@ -830,10 +912,15 @@ export const AsrResearchLabModal: React.FC<AsrResearchLabModalProps> = ({
                           className="p-3.5 rounded-lg border border-[var(--avp-warning)]/40 bg-[var(--avp-warning-soft)] text-xs text-[var(--avp-warning-text)] space-y-1"
                         >
                           <div className="font-semibold">
-                            موتور محلی آماده استنتاج مستقل نیست ({localRes.status}) — هیچ نتیجه CER/WER ساختگی محاسبه نشد.
+                            {isFa
+                              ? `موتور محلی آماده استنتاج مستقل نیست (${localRes.status}) — هیچ نتیجه CER/WER ساختگی محاسبه نشد.`
+                              : `Local engine is not ready for standalone inference (${localRes.status}) — no synthetic CER/WER computed.`}
                           </div>
                           <div className="opacity-90">
-                            {localRes.errorMessage ?? 'برای اجرای بنچمارک واقعی، ابتدا مدل ONNX تأییدشده را از بخش مدیریت مدل نصب و بارگذاری کنید.'}
+                            {localRes.errorMessage ??
+                              (isFa
+                                ? 'برای اجرای بنچمارک واقعی، ابتدا مدل ONNX تأییدشده را از بخش مدیریت مدل نصب و بارگذاری کنید.'
+                                : 'Install and load a verified local ONNX model from Model Management to run a real local benchmark.')}
                           </div>
                         </div>
                       ) : localRes.status === 'SUCCESS' ? (
@@ -842,12 +929,16 @@ export const AsrResearchLabModal: React.FC<AsrResearchLabModalProps> = ({
                           className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs"
                         >
                           <div className="p-3 rounded-lg border border-[var(--avp-border)] bg-[var(--avp-surface)] space-y-1">
-                            <div className="text-[var(--avp-text-secondary)]">خروجی خام مدل محلی (`rawOutputText`)</div>
-                            <div className="text-[var(--avp-text)]">{localRes.rawOutputText}</div>
+                            <div className="text-[var(--avp-text-secondary)]">
+                              {isFa ? 'خروجی خام مدل محلی (`rawOutputText`)' : 'Raw Model Output (`rawOutputText`)'}
+                            </div>
+                            <div className="text-[var(--avp-text)]" dir="auto">{localRes.rawOutputText}</div>
                           </div>
                           <div className="p-3 rounded-lg border border-[var(--avp-border)] bg-[var(--avp-surface)] space-y-1">
-                            <div className="text-[var(--avp-warning-text)]">خروجی نرمال‌شده (`normalizedOutputText`)</div>
-                            <div className="text-[var(--avp-text)]">{localRes.normalizedOutputText}</div>
+                            <div className="text-[var(--avp-warning-text)]">
+                              {isFa ? 'خروجی نرمال‌شده (`normalizedOutputText`)' : 'Normalized Output (`normalizedOutputText`)'}
+                            </div>
+                            <div className="text-[var(--avp-text)]" dir="auto">{localRes.normalizedOutputText}</div>
                           </div>
                         </div>
                       ) : null,
@@ -857,35 +948,37 @@ export const AsrResearchLabModal: React.FC<AsrResearchLabModalProps> = ({
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4" data-testid="lab-local-accuracy-details">
                       <div className="p-3.5 rounded-lg border border-[var(--avp-border)] bg-[var(--avp-surface)] space-y-2">
                         <h4 className="text-xs font-semibold text-[var(--avp-warning-text)]">
-                          تاکسونومی ۳۶گرهی خطا (TAXONOMY-V1.0) و معیارهای {normMode}
+                          {isFa
+                            ? `تاکسونومی ۳۶گرهی خطا (TAXONOMY-V1.0) و معیارهای ${normMode}`
+                            : `36-Node Error Taxonomy (TAXONOMY-V1.0) & ${normMode} Metrics`}
                         </h4>
-                        <p className="text-xs text-[var(--avp-text-secondary)]">
+                        <p className="text-xs text-[var(--avp-text-secondary)]" dir="ltr">
                           CER: <span className="font-mono">{(localNormReport.cer * 100).toFixed(2)}%</span> · WER:{' '}
                           <span className="font-mono">{(localNormReport.wer * 100).toFixed(2)}%</span> · MER:{' '}
                           <span className="font-mono">{(localNormReport.mer * 100).toFixed(2)}%</span>
                         </p>
                         <p className="text-xs text-[var(--avp-text-muted)]">
-                          تعداد خطاهای طبقه‌بندی‌شده: {localTaxonomy.length} مورد (
-                          {localTaxonomy.slice(0, 3).map((t) => t.error_category).join('، ') || 'بدون خطای ساختاری'}
-                          )
+                          {isFa
+                            ? `تعداد خطاهای طبقه‌بندی‌شده: ${localTaxonomy.length} مورد (${localTaxonomy.slice(0, 3).map((t) => t.error_category).join('، ') || 'بدون خطای ساختاری'})`
+                            : `Classified errors: ${localTaxonomy.length} (${localTaxonomy.slice(0, 3).map((t) => t.error_category).join(', ') || 'No structural errors'})`}
                         </p>
                       </div>
                       <div className="p-3.5 rounded-lg border border-[var(--avp-border)] bg-[var(--avp-surface)] space-y-2">
                         <h4 className="text-xs font-semibold text-[var(--avp-accent-text)]">
-                          آزمون آماری Paired Bootstrap + Holm-Bonferroni
+                          {isFa ? 'آزمون آماری Paired Bootstrap + Holm-Bonferroni' : 'Paired Bootstrap + Holm-Bonferroni Test'}
                         </h4>
                         {pairedStats.map((st) => (
                           <div key={st.engine_a_id} className="text-xs text-[var(--avp-text-secondary)] space-y-1">
                             <div>
-                              تفاوت میانگین CER:{' '}
-                              <span className="font-mono">{(st.mean_difference_a_minus_b * 100).toFixed(2)}pp</span>
+                              {isFa ? 'تفاوت میانگین CER:' : 'Mean CER Difference:'}{' '}
+                              <span className="font-mono" dir="ltr">{(st.mean_difference_a_minus_b * 100).toFixed(2)}pp</span>
                             </div>
                             <div className="text-[var(--avp-warning-text)]">
-                              وضعیت کفایت آماری:{' '}
+                              {isFa ? 'وضعیت کفایت آماری:' : 'Sample Coverage Adequacy:'}{' '}
                               <span className="font-mono">
                                 {st.sample_coverage_adequate ? 'ADEQUATE' : 'INSUFFICIENT_SAMPLE_COUNT'}
                               </span>{' '}
-                              ({st.sample_count} نمونه)
+                              ({st.sample_count} {isFa ? 'نمونه' : 'samples'})
                             </div>
                           </div>
                         ))}
@@ -902,42 +995,50 @@ export const AsrResearchLabModal: React.FC<AsrResearchLabModalProps> = ({
             <section className="space-y-4">
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                 <div className="p-3 rounded-lg border border-[var(--avp-border)] bg-[var(--avp-surface)]">
-                  <div className="text-[11px] text-[var(--avp-text-secondary)]">کل نمونه‌های ممیزی‌شده</div>
+                  <div className="text-[11px] text-[var(--avp-text-secondary)]">
+                    {isFa ? 'کل نمونه‌های ممیزی‌شده' : 'Total Audited Samples'}
+                  </div>
                   <div className="text-lg font-bold font-mono text-[var(--avp-text)]">
                     {datasetAudit.qcRows.length}
                   </div>
                 </div>
                 <div className="p-3 rounded-lg border border-[var(--avp-border)] bg-[var(--avp-surface)]">
-                  <div className="text-[11px] text-[var(--avp-text-secondary)]">نشت گوینده بین Train/Test</div>
+                  <div className="text-[11px] text-[var(--avp-text-secondary)]">
+                    {isFa ? 'نشت گوینده بین Train/Test' : 'Train/Test Speaker Leakage'}
+                  </div>
                   <div className="text-lg font-bold font-mono text-[var(--avp-success-text)]">
                     {datasetAudit.splits.speakerLeakageCount}
                   </div>
                 </div>
                 <div className="p-3 rounded-lg border border-[var(--avp-border)] bg-[var(--avp-surface)]">
-                  <div className="text-[11px] text-[var(--avp-text-secondary)]">گویندگان Train / Val / Test</div>
+                  <div className="text-[11px] text-[var(--avp-text-secondary)]">
+                    {isFa ? 'گویندگان Train / Val / Test' : 'Speakers (Train / Val / Test)'}
+                  </div>
                   <div className="text-sm font-bold font-mono text-[var(--avp-warning-text)]">
                     {datasetAudit.splits.trainSpeakers.length} / {datasetAudit.splits.validationSpeakers.length} /{' '}
                     {datasetAudit.splits.testSpeakers.length}
                   </div>
                 </div>
                 <div className="p-3 rounded-lg border border-[var(--avp-border)] bg-[var(--avp-surface)]">
-                  <div className="text-[11px] text-[var(--avp-text-secondary)]">هش مانیفست قفل‌شده Test</div>
-                  <div className="text-xs font-mono text-[var(--avp-accent-text)] truncate">
+                  <div className="text-[11px] text-[var(--avp-text-secondary)]">
+                    {isFa ? 'هش مانیفست قفل‌شده Test' : 'Frozen Test Manifest SHA-256'}
+                  </div>
+                  <div className="text-xs font-mono text-[var(--avp-accent-text)] truncate" dir="ltr">
                     {datasetAudit.splits.frozenTestManifestSha256}
                   </div>
                 </div>
               </div>
 
               <div className="overflow-x-auto rounded-lg border border-[var(--avp-border)]">
-                <table className="w-full text-right text-xs">
+                <table className={`w-full ${isFa ? 'text-right' : 'text-left'} text-xs`}>
                   <thead className="bg-[var(--avp-surface-shell)] text-[var(--avp-text-secondary)] border-b border-[var(--avp-border)]">
                     <tr>
-                      <th className="p-2.5">شناسه نمونه</th>
-                      <th className="p-2.5">گوینده</th>
-                      <th className="p-2.5">زبان / محیط</th>
-                      <th className="p-2.5">امتیاز ۱۱ دروازه</th>
-                      <th className="p-2.5">لایه مجوز / رضایت</th>
-                      <th className="p-2.5">Split بدون نشت</th>
+                      <th className="p-2.5">{isFa ? 'شناسه نمونه' : 'Sample ID'}</th>
+                      <th className="p-2.5">{isFa ? 'گوینده' : 'Speaker'}</th>
+                      <th className="p-2.5">{isFa ? 'زبان / محیط' : 'Language / Environment'}</th>
+                      <th className="p-2.5">{isFa ? 'امتیاز ۱۱ دروازه' : '11-Gate QC Score'}</th>
+                      <th className="p-2.5">{isFa ? 'لایه مجوز / رضایت' : 'Consent / License'}</th>
+                      <th className="p-2.5">{isFa ? 'Split بدون نشت' : 'Zero-Leakage Split'}</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-[var(--avp-border-subtle)] bg-[var(--avp-surface)]">
@@ -966,102 +1067,118 @@ export const AsrResearchLabModal: React.FC<AsrResearchLabModalProps> = ({
             </section>
           )}
 
-          {/* TAB 3: PHASE 4 INDEPENDENT MODEL RC1 */}
+          {/* TAB 3: INDEPENDENT MODEL RC1 */}
           {activeTab === 'model' && (
             <section className="space-y-4">
               <div className="p-4 rounded-lg border border-[var(--avp-border)] bg-[var(--avp-surface)] space-y-3">
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <div>
                     <h3 className="text-sm font-semibold text-[var(--avp-text)]">
-                      معماری ۳ لایه مستقل و مدیریت چک‌پوینت ({activeCkpt.modelVersion})
+                      {isFa
+                        ? `معماری ۳ لایه مستقل و مدیریت چک‌پوینت (${activeCkpt.modelVersion})`
+                        : `3-Layer Independent Architecture & Checkpoint Manager (${activeCkpt.modelVersion})`}
                     </h3>
                     <p className="text-xs text-[var(--avp-text-secondary)]">
-                      چک‌پوینت فعال: <span className="font-mono text-[var(--avp-warning-text)]">{activeCkpt.checkpointId}</span> ·
+                      {isFa ? 'چک‌پوینت فعال:' : 'Active Checkpoint:'}{' '}
+                      <span className="font-mono text-[var(--avp-warning-text)]">{activeCkpt.checkpointId}</span> ·
                       Step: <span className="font-mono">{activeCkpt.globalStep}</span> · Val CER:{' '}
                       <span className="font-mono">{activeCkpt.validationCerPercent}%</span>
                     </p>
                   </div>
-                  <div className="flex items-center gap-2">
+                  <div className="flex flex-wrap items-center gap-2">
                     <button
                       type="button"
                       data-testid="btn-advance-checkpoint"
                       onClick={() => handleAdvanceOrRollbackCheckpoint('save')}
-                      className="px-3 py-1.5 rounded-md bg-[var(--avp-success-soft)] border border-[var(--avp-success)]/40 text-[var(--avp-success-text)] text-xs font-medium cursor-pointer"
+                      className="min-h-[44px] sm:min-h-[34px] px-3 py-1.5 rounded-md bg-[var(--avp-success-soft)] border border-[var(--avp-success)]/40 text-[var(--avp-success-text)] text-xs font-medium cursor-pointer"
                     >
-                      ذخیره چک‌پوینت (+50 Step)
+                      {isFa ? 'ذخیره چک‌پوینت (+50 Step)' : 'Save Checkpoint (+50 Step)'}
                     </button>
                     <button
                       type="button"
                       data-testid="btn-rollback-checkpoint"
                       onClick={() => handleAdvanceOrRollbackCheckpoint('rollback')}
-                      className="avp-btn avp-btn-danger"
+                      className="avp-btn avp-btn-danger min-h-[44px] sm:min-h-[34px]"
                     >
                       <RotateCcw className="w-3.5 h-3.5" aria-hidden="true" />
-                      <span>بازگشت (Rollback)</span>
+                      <span>{isFa ? 'بازگشت (Rollback)' : 'Rollback'}</span>
                     </button>
                   </div>
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-3 items-end">
                   <div className="md:col-span-2">
-                    <label className="block text-xs text-[var(--avp-text-secondary)] mb-1">
-                      خروجی خام تست ۳ لایه (Raw Model Input برای مشاهده جداسازی لایه ۱ تا ۳):
+                    <label
+                      htmlFor="asr-lab-phase4-input"
+                      className="block text-xs text-[var(--avp-text-secondary)] mb-1"
+                    >
+                      {isFa
+                        ? 'خروجی خام تست ۳ لایه (Raw Model Input برای مشاهده جداسازی لایه ۱ تا ۳):'
+                        : 'Raw Model Input for 3-Layer Separation Preview (Layers 1–3):'}
                     </label>
                     <input
+                      id="asr-lab-phase4-input"
                       type="text"
+                      dir="auto"
                       value={phase4RawInput}
                       onChange={(e) => setPhase4RawInput(e.target.value)}
-                      className="avp-input w-full h-9 px-3 text-xs"
+                      className="avp-input w-full min-h-[44px] sm:min-h-[36px] sm:h-9 px-3 text-xs"
                     />
                   </div>
                   <div className="flex gap-2">
                     <select
-                      aria-label="پروفیل دامنه تخصصی"
+                      aria-label={isFa ? 'پروفیل دامنه تخصصی' : 'Domain Profile'}
                       value={domainProfile}
                       onChange={(e) => setDomainProfile(e.target.value as DomainProfileName)}
-                      className="avp-input flex-1 h-9 px-2.5 text-xs"
+                      className="avp-input flex-1 min-h-[44px] sm:min-h-[36px] sm:h-9 px-2.5 text-xs"
                     >
-                      <option value="technology">دامنه فناوری</option>
-                      <option value="general">عمومی</option>
-                      <option value="business">کسب‌وکار</option>
-                      <option value="medical">پزشکی</option>
-                      <option value="legal">حقوقی</option>
+                      <option value="technology">{isFa ? 'دامنه فناوری' : 'Technology'}</option>
+                      <option value="general">{isFa ? 'عمومی' : 'General'}</option>
+                      <option value="business">{isFa ? 'کسب‌وکار' : 'Business'}</option>
+                      <option value="medical">{isFa ? 'پزشکی' : 'Medical'}</option>
+                      <option value="legal">{isFa ? 'حقوقی' : 'Legal'}</option>
                     </select>
                     <button
                       type="button"
                       data-testid="btn-run-phase4-infer"
                       onClick={handleRunPhase4Inference}
-                      className="avp-btn avp-btn-primary h-9"
+                      className="avp-btn avp-btn-primary min-h-[44px] sm:min-h-[36px] sm:h-9"
                     >
-                      تبدیل ۳ لایه
+                      {isFa ? 'تبدیل ۳ لایه' : 'Run 3-Layer Pass'}
                     </button>
                   </div>
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs">
                   <div className="p-3 rounded-md border border-[var(--avp-border)] bg-[var(--avp-bg-subtle)]">
-                    <div className="text-[var(--avp-text-secondary)] mb-1">لایه ۱: `raw_model_output`</div>
-                    <div className="text-[var(--avp-text)]">{phase4Output.raw_model_output}</div>
+                    <div className="text-[var(--avp-text-secondary)] mb-1">
+                      {isFa ? 'لایه ۱: `raw_model_output`' : 'Layer 1: `raw_model_output`'}
+                    </div>
+                    <div className="text-[var(--avp-text)]" dir="auto">{phase4Output.raw_model_output}</div>
                   </div>
                   <div className="p-3 rounded-md border border-[var(--avp-border)] bg-[var(--avp-bg-subtle)]">
-                    <div className="text-[var(--avp-warning-text)] mb-1">لایه ۲: `normalized_text`</div>
-                    <div className="text-[var(--avp-text)]">{phase4Output.normalized_text}</div>
+                    <div className="text-[var(--avp-warning-text)] mb-1">
+                      {isFa ? 'لایه ۲: `normalized_text`' : 'Layer 2: `normalized_text`'}
+                    </div>
+                    <div className="text-[var(--avp-text)]" dir="auto">{phase4Output.normalized_text}</div>
                   </div>
                   <div className="p-3 rounded-md border border-[var(--avp-success)]/40 bg-[var(--avp-bg-subtle)]">
-                    <div className="text-[var(--avp-success-text)] mb-1">لایه ۳: `domain_adapted_text`</div>
-                    <div className="text-[var(--avp-text)]">{phase4Output.domain_adapted_text}</div>
+                    <div className="text-[var(--avp-success-text)] mb-1">
+                      {isFa ? 'لایه ۳: `domain_adapted_text`' : 'Layer 3: `domain_adapted_text`'}
+                    </div>
+                    <div className="text-[var(--avp-text)]" dir="auto">{phase4Output.domain_adapted_text}</div>
                   </div>
                 </div>
               </div>
 
               <div className="overflow-x-auto rounded-lg border border-[var(--avp-border)]">
-                <table className="w-full text-right text-xs">
+                <table className={`w-full ${isFa ? 'text-right' : 'text-left'} text-xs`}>
                   <thead className="bg-[var(--avp-surface-shell)] text-[var(--avp-text-secondary)] border-b border-[var(--avp-border)]">
                     <tr>
-                      <th className="p-2.5">کاندید</th>
-                      <th className="p-2.5">مدل / پارامتر</th>
-                      <th className="p-2.5">لایسنس ۶لایه</th>
-                      <th className="p-2.5">وضعیت در G0_CPU_ONLY</th>
+                      <th className="p-2.5">{isFa ? 'کاندید' : 'Candidate'}</th>
+                      <th className="p-2.5">{isFa ? 'مدل / پارامتر' : 'Model / Parameters'}</th>
+                      <th className="p-2.5">{isFa ? 'لایسنس ۶لایه' : '6-Layer License'}</th>
+                      <th className="p-2.5">{isFa ? 'وضعیت در G0_CPU_ONLY' : 'G0_CPU_ONLY Status'}</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-[var(--avp-border-subtle)] bg-[var(--avp-surface)]">
@@ -1092,34 +1209,49 @@ export const AsrResearchLabModal: React.FC<AsrResearchLabModalProps> = ({
               </div>
 
               <div className="p-3 rounded-lg border border-[var(--avp-border)] bg-[var(--avp-surface)] text-xs text-[var(--avp-text-secondary)]">
-                ارزیابی مقایسه Baseline با RC1 روی {phase4Comparison.sampleCount} نمونه: CER فارسی از{' '}
-                <span className="font-mono text-[var(--avp-text)]">{phase4Comparison.persianBaselineCerPercent}%</span> به{' '}
-                <span className="font-mono text-[var(--avp-success-text)]">{phase4Comparison.persianFineTunedCerPercent}%</span> و CER کدسوئیچ از{' '}
-                <span className="font-mono text-[var(--avp-text)]">{phase4Comparison.mixedBaselineCerPercent}%</span> به{' '}
-                <span className="font-mono text-[var(--avp-success-text)]">{phase4Comparison.mixedFineTunedCerPercent}%</span> رسید.
+                {isFa ? (
+                  <>
+                    ارزیابی مقایسه Baseline با RC1 روی {phase4Comparison.sampleCount} نمونه: CER فارسی از{' '}
+                    <span className="font-mono text-[var(--avp-text)]">{phase4Comparison.persianBaselineCerPercent}%</span> به{' '}
+                    <span className="font-mono text-[var(--avp-success-text)]">{phase4Comparison.persianFineTunedCerPercent}%</span> و CER کدسوئیچ از{' '}
+                    <span className="font-mono text-[var(--avp-text)]">{phase4Comparison.mixedBaselineCerPercent}%</span> به{' '}
+                    <span className="font-mono text-[var(--avp-success-text)]">{phase4Comparison.mixedFineTunedCerPercent}%</span> رسید.
+                  </>
+                ) : (
+                  <>
+                    Baseline vs RC1 across {phase4Comparison.sampleCount} samples: Persian CER improved from{' '}
+                    <span className="font-mono text-[var(--avp-text)]">{phase4Comparison.persianBaselineCerPercent}%</span> to{' '}
+                    <span className="font-mono text-[var(--avp-success-text)]">{phase4Comparison.persianFineTunedCerPercent}%</span> and Code-Switch CER from{' '}
+                    <span className="font-mono text-[var(--avp-text)]">{phase4Comparison.mixedBaselineCerPercent}%</span> to{' '}
+                    <span className="font-mono text-[var(--avp-success-text)]">{phase4Comparison.mixedFineTunedCerPercent}%</span>.
+                  </>
+                )}
               </div>
             </section>
           )}
 
-          {/* TAB 4: PHASE 5 REAL-TIME STREAMING ASR1 & VAD */}
+          {/* TAB 4: REAL-TIME STREAMING ASR1 & VAD */}
           {activeTab === 'streaming' && (
             <section className="space-y-4">
               <div className="p-4 rounded-lg border border-[var(--avp-border)] bg-[var(--avp-surface)] space-y-3">
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <div>
                     <h3 className="text-sm font-semibold text-[var(--avp-text)]">
-                      موتور استریم زنده با پروتکل باینری `ASR1` (۲۴ بایت هدر + PCM16 مونو)
+                      {isFa
+                        ? 'موتور استریم زنده با پروتکل باینری `ASR1` (۲۴ بایت هدر + PCM16 مونو)'
+                        : 'Live Streaming Engine with Binary `ASR1` Protocol (24B Header + Mono PCM16)'}
                     </h3>
                     <p className="text-xs text-[var(--avp-text-secondary)]">
-                      وضعیت Web AudioWorklet خارج از ترد اصلی: <span className="font-mono text-[var(--avp-success-text)]">{workletStatus}</span> (`/asr-stream-worklet.js`)
+                      {isFa ? 'وضعیت Web AudioWorklet خارج از ترد اصلی:' : 'Off-main-thread Web AudioWorklet status:'}{' '}
+                      <span className="font-mono text-[var(--avp-success-text)]">{workletStatus}</span> (`/asr-stream-worklet.js`)
                     </p>
                   </div>
                   <div className="flex flex-wrap items-center gap-2">
                     <select
-                      aria-label="انتخاب بک‌اند استریم"
+                      aria-label={isFa ? 'انتخاب بک‌اند استریم' : 'Select Streaming Backend'}
                       value={selectedStreamBackend}
                       onChange={(e) => setSelectedStreamBackend(e.target.value as StreamingBackendId)}
-                      className="avp-input h-9 px-2.5 text-xs"
+                      className="avp-input min-h-[44px] sm:min-h-[36px] sm:h-9 px-2.5 text-xs"
                     >
                       {PHASE5_STREAMING_BACKEND_REGISTRY.map((b) => (
                         <option key={b.backendId} value={b.backendId}>
@@ -1131,10 +1263,10 @@ export const AsrResearchLabModal: React.FC<AsrResearchLabModalProps> = ({
                       type="button"
                       data-testid="btn-run-stream-sim"
                       onClick={handleRunStreamBurstSimulation}
-                      className="avp-btn avp-btn-primary h-9"
+                      className="avp-btn avp-btn-primary min-h-[44px] sm:min-h-[36px] sm:h-9"
                     >
                       <Mic className="w-3.5 h-3.5" aria-hidden="true" />
-                      <span>اجرای شبیه‌ساز فریم زنده ۱۰۰ms</span>
+                      <span>{isFa ? 'اجرای شبیه‌ساز فریم زنده ۱۰۰ms' : 'Run 100ms Live Frame Sim'}</span>
                     </button>
                   </div>
                 </div>
@@ -1142,43 +1274,52 @@ export const AsrResearchLabModal: React.FC<AsrResearchLabModalProps> = ({
                 {/* Mandatory Transparent Mode Disclosure */}
                 <div
                   data-testid="stream-mode-disclosure"
-                  className={`p-2.5 rounded-md border text-xs flex items-center justify-between ${
+                  className={`p-2.5 rounded-md border text-xs flex flex-wrap items-center justify-between gap-2 ${
                     activeStreamingSpec.nativeIncrementalStreamingSupported
                       ? 'border-[var(--avp-success)]/40 bg-[var(--avp-success-soft)] text-[var(--avp-success-text)]'
                       : 'border-[var(--avp-warning)]/40 bg-[var(--avp-warning-soft)] text-[var(--avp-warning-text)]'
                   }`}
                 >
                   <span>
-                    افشای صادقانه حالت استریم: <strong>{activeStreamingSpec.uiModeDisclosureLabel}</strong>
+                    {isFa ? 'افشای صادقانه حالت استریم:' : 'Streaming Mode Disclosure:'}{' '}
+                    <strong>{activeStreamingSpec.uiModeDisclosureLabel}</strong>
                   </span>
                   <span className="font-mono">{activeStreamingSpec.executionMode}</span>
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs">
                   <div className="p-3 rounded-md border border-[var(--avp-border)] bg-[var(--avp-bg-subtle)]">
-                    <div className="text-[var(--avp-text-secondary)]">سربار تجمعی Qwen (۳۰s با چانک ۲s)</div>
-                    <div className="font-mono text-[var(--avp-warning-text)] mt-1">
+                    <div className="text-[var(--avp-text-secondary)]">
+                      {isFa ? 'سربار تجمعی Qwen (۳۰s با چانک ۲s)' : 'Qwen Cumulative Overhead (30s / 2s chunks)'}
+                    </div>
+                    <div className="font-mono text-[var(--avp-warning-text)] mt-1" dir="ltr">
                       {qwenOverhead.totalCumulativeAudioSec}s ({qwenOverhead.overheadMultiplier}x)
                     </div>
                     <div className="text-[11px] text-[var(--avp-text-muted)] mt-0.5">
-                      محدودیت نرم VAD برای مهار سربار: ۱۲.۰ ثانیه
+                      {isFa ? 'محدودیت نرم VAD برای مهار سربار: ۱۲.۰ ثانیه' : 'VAD soft ceiling to bound overhead: 12.0s'}
                     </div>
                   </div>
                   <div className="p-3 rounded-md border border-[var(--avp-border)] bg-[var(--avp-bg-subtle)]">
-                    <div className="text-[var(--avp-text-secondary)]">هیسترزیس VAD ۵۱۲ نمونه</div>
-                    <div className="font-mono text-[var(--avp-accent-text)] mt-1">
+                    <div className="text-[var(--avp-text-secondary)]">
+                      {isFa ? 'هیسترزیس VAD ۵۱۲ نمونه' : '512-Sample VAD Hysteresis'}
+                    </div>
+                    <div className="font-mono text-[var(--avp-accent-text)] mt-1" dir="ltr">
                       Start ≥ 0.50 · Continue ≥ 0.35 · Endpoint = 600ms
                     </div>
                   </div>
                   <div className="p-3 rounded-md border border-[var(--avp-border)] bg-[var(--avp-bg-subtle)]">
-                    <div className="text-[var(--avp-text-secondary)]">ابعاد پکت باینری ۱۰۰ms</div>
-                    <div className="font-mono text-[var(--avp-success-text)] mt-1">24B Header + 3200B PCM16 = 3224B</div>
+                    <div className="text-[var(--avp-text-secondary)]">
+                      {isFa ? 'ابعاد پکت باینری ۱۰۰ms' : '100ms Binary Packet Size'}
+                    </div>
+                    <div className="font-mono text-[var(--avp-success-text)] mt-1" dir="ltr">
+                      24B Header + 3200B PCM16 = 3224B
+                    </div>
                   </div>
                 </div>
 
                 {streamSimState && (
                   <div className="p-3.5 rounded-lg border border-[var(--avp-accent)]/35 bg-[var(--avp-bg-subtle)] space-y-2 text-xs">
-                    <div className="flex flex-wrap gap-4 font-mono text-[var(--avp-accent-text)]">
+                    <div className="flex flex-wrap gap-4 font-mono text-[var(--avp-accent-text)]" dir="ltr">
                       <span>Session: {streamSimState.sessionId}</span>
                       <span>Frames: {streamSimState.framesSent}</span>
                       <span>Bytes: {streamSimState.totalBytes}</span>
@@ -1187,12 +1328,17 @@ export const AsrResearchLabModal: React.FC<AsrResearchLabModalProps> = ({
                       <span>TTFP P95: {streamSimState.ttfpP95Ms}ms</span>
                     </div>
                     <div className="text-[var(--avp-text-secondary)]">
-                      <span className="text-[var(--avp-warning-text)]">پیش‌نمایش‌های موقت (Partial Replace):</span>{' '}
-                      {streamSimState.partials.join(' | ') || 'بدون بازنگری میانی در حالت Segmented'}
+                      <span className="text-[var(--avp-warning-text)]">
+                        {isFa ? 'پیش‌نمایش‌های موقت (Partial Replace):' : 'Temporary Previews (Partial Replace):'}
+                      </span>{' '}
+                      {streamSimState.partials.join(' | ') ||
+                        (isFa ? 'بدون بازنگری میانی در حالت Segmented' : 'No intermediate partial revisions in Segmented mode')}
                     </div>
                     <div className="text-[var(--avp-success-text)]">
-                      <span className="font-semibold">متن نهایی قطعی (Committed Final):</span>{' '}
-                      {streamSimState.finalTexts.join(' · ')}
+                      <span className="font-semibold">
+                        {isFa ? 'متن نهایی قطعی (Committed Final):' : 'Committed Final Transcript:'}
+                      </span>{' '}
+                      <span dir="auto">{streamSimState.finalTexts.join(' · ')}</span>
                     </div>
                   </div>
                 )}
@@ -1200,27 +1346,31 @@ export const AsrResearchLabModal: React.FC<AsrResearchLabModalProps> = ({
             </section>
           )}
 
-          {/* TAB 5: PHASE 6 ADAPTIVE ROUTER */}
+          {/* TAB 5: ADAPTIVE ROUTER */}
           {activeTab === 'router' && (
             <section className="space-y-4">
               <div className="p-4 rounded-lg border border-[var(--avp-border)] bg-[var(--avp-surface)] space-y-3">
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <div>
                     <h3 className="text-sm font-semibold text-[var(--avp-text)]">
-                      مسیریاب هوشمند با فیلتر ۱۸ دروازه‌ای و محافظ حریم خصوصی (`disagreement_only: false`)
+                      {isFa
+                        ? 'مسیریاب هوشمند با فیلتر ۱۸ دروازه‌ای و محافظ حریم خصوصی (`disagreement_only: false`)'
+                        : '18-Gate Adaptive Router & Privacy Guard (`disagreement_only: false`)'}
                     </h3>
                     <p className="text-xs text-[var(--avp-text-secondary)]">
-                      پیش‌بینی محافظه‌کارانه خطا با `CER_Upper_95` و کنترلر بودجه اتمیک
+                      {isFa
+                        ? 'پیش‌بینی محافظه‌کارانه خطا با `CER_Upper_95` و کنترلر بودجه اتمیک'
+                        : 'Conservative error prediction via `CER_Upper_95` & atomic budget controller'}
                     </p>
                   </div>
                   <div className="flex flex-wrap items-center gap-2">
                     <select
-                      aria-label="سیاست مسیریابی"
+                      aria-label={isFa ? 'سیاست مسیریابی' : 'Routing Strategy'}
                       value={routerStrategy}
                       onChange={(e) =>
                         handleEvaluateRouter(e.target.value as RoutingStrategyName, routerPrivacy)
                       }
-                      className="avp-input h-8 px-2.5 text-xs"
+                      className="avp-input min-h-[44px] sm:min-h-[34px] sm:h-8 px-2.5 text-xs"
                     >
                       <option value="balanced">Balanced</option>
                       <option value="quality_first">Quality First</option>
@@ -1229,14 +1379,16 @@ export const AsrResearchLabModal: React.FC<AsrResearchLabModalProps> = ({
                       <option value="privacy_first">Privacy First</option>
                     </select>
                     <select
-                      aria-label="سیاست حریم خصوصی"
+                      aria-label={isFa ? 'سیاست حریم خصوصی' : 'Privacy Routing Policy'}
                       value={routerPrivacy}
                       onChange={(e) =>
                         handleEvaluateRouter(routerStrategy, e.target.value as PrivacyRoutingPolicy)
                       }
-                      className="avp-input h-8 px-2.5 text-xs"
+                      className="avp-input min-h-[44px] sm:min-h-[34px] sm:h-8 px-2.5 text-xs"
                     >
-                      <option value="local_only">Local Only (قطع کامل انتقال ابری)</option>
+                      <option value="local_only">
+                        {isFa ? 'Local Only (قطع کامل انتقال ابری)' : 'Local Only (Zero Cloud Egress)'}
+                      </option>
                       <option value="local_preferred">Local Preferred</option>
                       <option value="external_allowed">External Allowed</option>
                     </select>
@@ -1245,24 +1397,25 @@ export const AsrResearchLabModal: React.FC<AsrResearchLabModalProps> = ({
 
                 <div className="p-3 rounded-md border border-[var(--avp-success)]/40 bg-[var(--avp-bg-subtle)] text-xs space-y-1">
                   <div>
-                    موتور منتخب اولیه:{' '}
+                    {isFa ? 'موتور منتخب اولیه:' : 'Selected Primary Engine:'}{' '}
                     <span className="font-mono text-[var(--avp-success-text)] font-bold" data-testid="router-selected-primary">
                       {routerDecision.selected_primary ?? 'NONE'}
                     </span>{' '}
-                    · حالت اجرا: <span className="font-mono text-[var(--avp-warning-text)]">{routerDecision.operating_mode}</span>
+                    · {isFa ? 'حالت اجرا:' : 'Mode:'}{' '}
+                    <span className="font-mono text-[var(--avp-warning-text)]">{routerDecision.operating_mode}</span>
                   </div>
                   <div className="text-[var(--avp-text-secondary)]">{routerDecision.decision_reason}</div>
                 </div>
 
                 <div className="overflow-x-auto rounded-lg border border-[var(--avp-border)]">
-                  <table className="w-full text-right text-xs">
+                  <table className={`w-full ${isFa ? 'text-right' : 'text-left'} text-xs`}>
                     <thead className="bg-[var(--avp-surface-shell)] text-[var(--avp-text-secondary)] border-b border-[var(--avp-border)]">
                       <tr>
-                        <th className="p-2">موتور</th>
-                        <th className="p-2">وضعیت دروازه ۱۸گانه</th>
-                        <th className="p-2">امتیاز Utility</th>
+                        <th className="p-2">{isFa ? 'موتور' : 'Engine'}</th>
+                        <th className="p-2">{isFa ? 'وضعیت دروازه ۱۸گانه' : '18-Gate Eligibility'}</th>
+                        <th className="p-2">{isFa ? 'امتیاز Utility' : 'Utility Score'}</th>
                         <th className="p-2">CER_Upper_95</th>
-                        <th className="p-2">دلیل رد (در صورت رد)</th>
+                        <th className="p-2">{isFa ? 'دلیل رد (در صورت رد)' : 'Rejection Reason'}</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-[var(--avp-border-subtle)] bg-[var(--avp-surface)]">
@@ -1287,38 +1440,46 @@ export const AsrResearchLabModal: React.FC<AsrResearchLabModalProps> = ({
 
                 <div className="p-3 rounded-md border border-[var(--avp-border)] bg-[var(--avp-bg-subtle)] text-xs text-[var(--avp-text-secondary)] flex flex-wrap gap-4">
                   <span>
-                    دقت تطابق با Oracle: <strong className="font-mono text-[var(--avp-success-text)]">{routerRegret.routingAccuracyPercent}%</strong>
+                    {isFa ? 'دقت تطابق با Oracle:' : 'Oracle Agreement Accuracy:'}{' '}
+                    <strong className="font-mono text-[var(--avp-success-text)]">{routerRegret.routingAccuracyPercent}%</strong>
                   </span>
                   <span>
-                    میانگین Quality Regret: <strong className="font-mono text-[var(--avp-warning-text)]">{routerRegret.meanQualityRegretCer}</strong>
+                    {isFa ? 'میانگین Quality Regret:' : 'Mean Quality Regret:'}{' '}
+                    <strong className="font-mono text-[var(--avp-warning-text)]">{routerRegret.meanQualityRegretCer}</strong>
                   </span>
                   <span>
-                    نقض بودجه: <strong className="font-mono text-[var(--avp-success-text)]">{routerRegret.budgetViolationRate}%</strong>
+                    {isFa ? 'نقض بودجه:' : 'Budget Violation Rate:'}{' '}
+                    <strong className="font-mono text-[var(--avp-success-text)]">{routerRegret.budgetViolationRate}%</strong>
                   </span>
                 </div>
               </div>
             </section>
           )}
 
-          {/* TAB 6: PHASES 7–9 ARCHITECTURE, SECURITY TRUTH AUDIT & CONTINUOUS LEARNING */}
+          {/* TAB 6: ARCHITECTURE, SECURITY TRUTH AUDIT & CONTINUOUS LEARNING */}
           {activeTab === 'research_security' && (
             <section className="space-y-4">
-              {/* Phase 7 */}
+              {/* Architecture Go/No-Go */}
               <div className="p-4 rounded-lg border border-[var(--avp-border)] bg-[var(--avp-surface)] space-y-2 text-xs">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <h3 className="text-sm font-semibold text-[var(--avp-text)] flex items-center gap-2">
                     <Layers className="w-4 h-4 text-[var(--avp-warning-text)]" aria-hidden="true" />
-                    <span>فاز ۷: دروازه تصمیم آموزش از صفر و پروتوتایپ‌های FastConformer</span>
+                    <span>
+                      {isFa
+                        ? 'دروازه تصمیم آموزش از صفر و پروتوتایپ‌های FastConformer'
+                        : 'From-Scratch Training Go/No-Go Gate & FastConformer Prototypes'}
+                    </span>
                   </h3>
                   <span
                     data-testid="from-scratch-verdict"
                     className="font-mono px-2 py-0.5 rounded bg-[var(--avp-danger-soft)] text-[var(--avp-danger-text)] border border-[var(--avp-danger)]/40"
+                    dir="ltr"
                   >
                     {fromScratchReport.assignedDataTier} · {fromScratchReport.trackBProductionFromScratchDecision}
                   </span>
                 </div>
                 <p className="text-[var(--avp-text-secondary)]">{fromScratchReport.permittedGoalsSummary}</p>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-2 pt-1 font-mono text-[11px]">
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-2 pt-1 font-mono text-[11px]" dir="ltr">
                   <div className="p-2.5 rounded-md border border-[var(--avp-border)] bg-[var(--avp-bg-subtle)]">
                     FC-CTC-S1: {(archPrototypes.ctcS1.totalParameters / 1e6).toFixed(2)}M Params ·{' '}
                     {archPrototypes.ctcS1.estimatedGflopsPer10SecAudio} GFLOPs/10s
@@ -1332,34 +1493,44 @@ export const AsrResearchLabModal: React.FC<AsrResearchLabModalProps> = ({
                 </div>
               </div>
 
-              {/* Phase 8 Truth Audit & Security */}
+              {/* Truth Audit & Security */}
               <div className="p-4 rounded-lg border border-[var(--avp-border)] bg-[var(--avp-surface)] space-y-3 text-xs">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <h3 className="text-sm font-semibold text-[var(--avp-text)] flex items-center gap-2">
                     <ShieldCheck className="w-4 h-4 text-[var(--avp-success-text)]" aria-hidden="true" />
-                    <span>فاز ۸: ممیزی صداقت معماری و تست امنیتی OWASP ASVS / STRIDE</span>
+                    <span>
+                      {isFa
+                        ? 'ممیزی صداقت معماری و تست امنیتی OWASP ASVS / STRIDE'
+                        : 'Architectural Truth Audit & OWASP ASVS / STRIDE Security Suite'}
+                    </span>
                   </h3>
                   <button
                     type="button"
                     data-testid="btn-rerun-security-audit"
                     onClick={() => setSecurityReport(runAdversarialSecurityAndReadinessAudit())}
-                    className="avp-btn avp-btn-secondary"
+                    className="avp-btn avp-btn-outline min-h-[44px] sm:min-h-[34px]"
                   >
-                    اجرای مجدد تست نفوذ ورودی
+                    {isFa ? 'اجرای مجدد تست نفوذ ورودی' : 'Re-run Input Audit'}
                   </button>
                 </div>
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 font-mono">
                   <div className="p-2 rounded-md bg-[var(--avp-bg-subtle)] border border-[var(--avp-border)]">
-                    تست‌های امنیتی: <span className="text-[var(--avp-success-text)]">{securityReport.passedCount}/{securityReport.totalChecks} PASS</span>
+                    {isFa ? 'تست‌های امنیتی:' : 'Security Checks:'}{' '}
+                    <span className="text-[var(--avp-success-text)]" dir="ltr">
+                      {securityReport.passedCount}/{securityReport.totalChecks} PASS
+                    </span>
                   </div>
                   <div className="p-2 rounded-md bg-[var(--avp-bg-subtle)] border border-[var(--avp-border)]">
-                    تایید محلی کامل: {truthSummary.countsByStatus.IMPLEMENTED_AND_VERIFIED}
+                    {isFa ? 'تایید محلی کامل:' : 'Verified Local:'}{' '}
+                    {truthSummary.countsByStatus.IMPLEMENTED_AND_VERIFIED}
                   </div>
                   <div className="p-2 rounded-md bg-[var(--avp-bg-subtle)] border border-[var(--avp-border)]">
-                    نیازمند GPU/PG: {truthSummary.countsByStatus.PARTIALLY_IMPLEMENTED}
+                    {isFa ? 'نیازمند GPU/PG:' : 'Requires GPU/PG:'}{' '}
+                    {truthSummary.countsByStatus.PARTIALLY_IMPLEMENTED}
                   </div>
                   <div className="p-2 rounded-md bg-[var(--avp-bg-subtle)] border border-[var(--avp-border)]">
-                    وضعیت کل سیستم: <span className="text-[var(--avp-warning-text)]">{truthSummary.overallReleaseStatus}</span>
+                    {isFa ? 'وضعیت کل سیستم:' : 'System Status:'}{' '}
+                    <span className="text-[var(--avp-warning-text)]">{truthSummary.overallReleaseStatus}</span>
                   </div>
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
@@ -1372,36 +1543,44 @@ export const AsrResearchLabModal: React.FC<AsrResearchLabModalProps> = ({
                 </div>
               </div>
 
-              {/* Phase 9 Continuous Learning & Canary */}
+              {/* Continuous Learning & Canary */}
               <div className="p-4 rounded-lg border border-[var(--avp-border)] bg-[var(--avp-surface)] space-y-3 text-xs">
                 <h3 className="text-sm font-semibold text-[var(--avp-text)]">
-                  فاز ۹: جمع‌آوری بازخورد با دروازه رضایت‌نامه ۸گانه، Champion/Challenger و Canary
+                  {isFa
+                    ? 'جمع‌آوری بازخورد با دروازه رضایت‌نامه ۸گانه، Champion/Challenger و Canary'
+                    : 'Feedback Collection with 8-Gate Consent, Champion/Challenger & Canary Rollout'}
                 </h3>
                 <form onSubmit={handleSubmitFeedback} className="space-y-2">
                   <div className="flex flex-wrap gap-2 items-center">
                     <input
+                      id="asr-lab-feedback-input"
                       type="text"
+                      dir="auto"
                       value={fbText}
                       onChange={(e) => setFbText(e.target.value)}
-                      aria-label="متن اصلاحی کاربر"
-                      className="avp-input flex-1 min-w-[240px] h-9 px-3 text-xs"
+                      aria-label={isFa ? 'متن اصلاحی کاربر' : 'User correction text'}
+                      className="avp-input flex-1 min-w-[240px] min-h-[44px] sm:min-h-[36px] sm:h-9 px-3 text-xs"
                     />
-                    <label className="inline-flex items-center gap-1.5 text-[var(--avp-text-secondary)] cursor-pointer">
+                    <label className="min-h-[44px] sm:min-h-0 inline-flex items-center gap-1.5 text-[var(--avp-text-secondary)] cursor-pointer">
                       <input
                         type="checkbox"
                         data-testid="chk-training-consent"
                         checked={trainingConsent}
                         onChange={(e) => setTrainingConsent(e.target.checked)}
-                        className="accent-[var(--avp-brand)]"
+                        className="w-4 h-4 accent-[var(--avp-brand)]"
                       />
-                      <span>رضایت صریح برای استفاده آموزشی (`ALLOW_MODEL_TRAINING`)</span>
+                      <span>
+                        {isFa
+                          ? 'رضایت صریح برای استفاده آموزشی (`ALLOW_MODEL_TRAINING`)'
+                          : 'Explicit consent for model training (`ALLOW_MODEL_TRAINING`)'}
+                      </span>
                     </label>
                     <button
                       type="submit"
                       data-testid="btn-submit-feedback"
-                      className="avp-btn avp-btn-primary h-9"
+                      className="avp-btn avp-btn-primary min-h-[44px] sm:min-h-[36px] sm:h-9"
                     >
-                      ثبت بازخورد
+                      {isFa ? 'ثبت بازخورد' : 'Submit Feedback'}
                     </button>
                   </div>
                   {fbResultMsg && (
@@ -1413,16 +1592,21 @@ export const AsrResearchLabModal: React.FC<AsrResearchLabModalProps> = ({
 
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
                   <div className="p-2.5 rounded-md border border-[var(--avp-border)] bg-[var(--avp-bg-subtle)]">
-                    <div className="text-[var(--avp-text-secondary)]">دروازه Champion/Challenger</div>
-                    <div className="text-[var(--avp-success-text)] font-mono mt-1">
+                    <div className="text-[var(--avp-text-secondary)]">
+                      {isFa ? 'دروازه Champion/Challenger' : 'Champion/Challenger Gate'}
+                    </div>
+                    <div className="text-[var(--avp-success-text)] font-mono mt-1" dir="ltr">
                       {championGate.approvedForCanaryPromotion ? 'APPROVED' : 'REJECTED'} (+
                       {championGate.overallRelativeCerImprovementPercent}% Rel CER)
                     </div>
                   </div>
                   <div className="p-2.5 rounded-md border border-[var(--avp-border)] bg-[var(--avp-bg-subtle)]">
-                    <div className="text-[var(--avp-text-secondary)]">پایش PSI (کوهورت با ۱۴ نمونه)</div>
+                    <div className="text-[var(--avp-text-secondary)]">
+                      {isFa ? 'پایش PSI (کوهورت با ۱۴ نمونه)' : 'PSI Drift Check (14-sample cohort)'}
+                    </div>
                     <div className="text-[var(--avp-warning-text)] font-mono mt-1">
-                      {psiLowSampleDemo.status} (جلوگیری از آلارم کاذب &lt; 30 نمونه)
+                      {psiLowSampleDemo.status}{' '}
+                      {isFa ? '(جلوگیری از آلارم کاذب < 30 نمونه)' : '(False-alarm guard < 30 samples)'}
                     </div>
                   </div>
                   <div className="p-2.5 rounded-md border border-[var(--avp-border)] bg-[var(--avp-bg-subtle)] flex items-center justify-between gap-2">
@@ -1445,9 +1629,9 @@ export const AsrResearchLabModal: React.FC<AsrResearchLabModalProps> = ({
                           })
                         )
                       }
-                      className="px-2.5 py-1 rounded bg-[var(--avp-success-soft)] text-[var(--avp-success-text)] border border-[var(--avp-success)]/40 cursor-pointer"
+                      className="min-h-[44px] sm:min-h-[30px] px-2.5 py-1 rounded bg-[var(--avp-success-soft)] text-[var(--avp-success-text)] border border-[var(--avp-success)]/40 cursor-pointer"
                     >
-                      ارتقا
+                      {isFa ? 'ارتقا' : 'Promote'}
                     </button>
                   </div>
                 </div>

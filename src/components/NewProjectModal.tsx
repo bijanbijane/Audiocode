@@ -129,6 +129,7 @@ export const NewProjectModal: React.FC<NewProjectModalProps> = ({
     <AccessibleModal
       isOpen={isOpen}
       onClose={handleClose}
+      closeOnBackdropClick={!isSubmitting}
       dir={isFa ? 'rtl' : 'ltr'}
       labelledBy="new-project-modal-title"
       disableEscape={isSubmitting}
@@ -152,9 +153,9 @@ export const NewProjectModal: React.FC<NewProjectModalProps> = ({
           onClick={handleClose}
           disabled={isSubmitting}
           aria-label={isFa ? 'بستن پنجره' : 'Close dialog'}
-          className="p-2 rounded-lg text-[var(--avp-text-secondary)] hover:bg-[var(--avp-hover)] hover:text-[var(--avp-text)] disabled:opacity-40 cursor-pointer"
+          className="avp-btn-icon avp-touch-icon"
         >
-          <X className="w-4 h-4" />
+          <X className="w-4 h-4" aria-hidden="true" />
         </button>
       </div>
 
@@ -171,52 +172,30 @@ export const NewProjectModal: React.FC<NewProjectModalProps> = ({
               }}
               className="hidden"
             />
-            <div
-              onDragOver={(e) => {
-                e.preventDefault();
-                if (!isSubmitting) setIsDragging(true);
-              }}
-              onDragLeave={() => setIsDragging(false)}
-              onDrop={(e) => {
-                e.preventDefault();
-                setIsDragging(false);
-                if (!isSubmitting) {
-                  void inspectFile(e.dataTransfer.files?.[0]);
-                }
-              }}
-              onClick={() => {
-                if (!isSubmitting) fileInputRef.current?.click();
-              }}
-              role="button"
-              tabIndex={0}
-              onKeyDown={(e) => {
-                if ((e.key === 'Enter' || e.key === ' ') && !isSubmitting) {
+            {selectedFile && validation?.valid ? (
+              <div
+                onDragOver={(e) => {
                   e.preventDefault();
-                  fileInputRef.current?.click();
-                }
-              }}
-              className={`rounded-xl border-2 border-dashed p-6 text-center cursor-pointer transition-colors ${
-                isDragging
-                  ? 'border-[var(--avp-brand)] bg-[var(--avp-brand-soft)]'
-                  : validation && !validation.valid
-                    ? 'border-[var(--avp-error)] bg-[var(--avp-error-soft)]/50'
-                    : selectedFile && validation?.valid
-                      ? 'border-[var(--avp-brand)]/60 bg-[var(--avp-surface-2)]/60'
-                      : 'border-[var(--avp-border-strong)] bg-[var(--avp-bg)] hover:border-[var(--avp-brand)]/60 hover:bg-[var(--avp-hover)]/40'
-              }`}
-            >
-              {isValidating ? (
-                <div className="flex flex-col items-center gap-2 py-2">
-                  <Loader2 className="w-6 h-6 animate-spin text-[var(--avp-brand)]" />
-                  <p className="text-xs text-[var(--avp-text-secondary)]">
-                    {isFa ? 'در حال بررسی امضای باینری فایل صوتی...' : 'Inspecting binary audio signature...'}
-                  </p>
-                </div>
-              ) : selectedFile && validation?.valid ? (
+                  if (!isSubmitting) setIsDragging(true);
+                }}
+                onDragLeave={() => setIsDragging(false)}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  setIsDragging(false);
+                  if (!isSubmitting) {
+                    void inspectFile(e.dataTransfer.files?.[0]);
+                  }
+                }}
+                className={`rounded-xl border-2 border-dashed p-5 transition-colors ${
+                  isDragging
+                    ? 'border-[var(--avp-brand)] bg-[var(--avp-brand-soft)]'
+                    : 'border-[var(--avp-brand)]/60 bg-[var(--avp-surface-2)]/60'
+                }`}
+              >
                 <div className="flex items-center justify-between gap-3 text-start">
                   <div className="flex items-center gap-3 min-w-0">
                     <div className="w-10 h-10 rounded-xl bg-[var(--avp-brand-soft)] text-[var(--avp-brand)] flex items-center justify-center shrink-0">
-                      <FileAudio className="w-5 h-5" />
+                      <FileAudio className="w-5 h-5" aria-hidden="true" />
                     </div>
                     <div className="min-w-0">
                       <p className="text-sm font-semibold truncate" dir="auto">
@@ -224,7 +203,7 @@ export const NewProjectModal: React.FC<NewProjectModalProps> = ({
                       </p>
                       <div className="flex items-center gap-2 text-xs text-[var(--avp-text-secondary)] mt-0.5">
                         <span className="inline-flex items-center gap-1 text-[var(--avp-brand)] font-medium">
-                          <CheckCircle2 className="w-3.5 h-3.5" />
+                          <CheckCircle2 className="w-3.5 h-3.5" aria-hidden="true" />
                           {validation.container}
                         </span>
                         <span>·</span>
@@ -235,35 +214,76 @@ export const NewProjectModal: React.FC<NewProjectModalProps> = ({
                   <button
                     type="button"
                     disabled={isSubmitting}
-                    onClick={(e) => {
-                      e.stopPropagation();
+                    onClick={() => {
                       setSelectedFile(null);
                       setValidation(null);
                       if (fileInputRef.current) fileInputRef.current.value = '';
                     }}
-                    className="px-2.5 py-1.5 rounded-lg text-xs border border-[var(--avp-border)] bg-[var(--avp-surface)] text-[var(--avp-text-secondary)] hover:bg-[var(--avp-hover)] cursor-pointer shrink-0"
+                    className="avp-btn avp-btn-outline min-h-[44px] sm:min-h-[32px] shrink-0"
                   >
                     {isFa ? 'تغییر فایل' : 'Replace'}
                   </button>
                 </div>
-              ) : (
-                <div className="flex flex-col items-center gap-2">
-                  <div className="w-11 h-11 rounded-xl bg-[var(--avp-surface-2)] text-[var(--avp-brand)] flex items-center justify-center">
-                    <UploadCloud className="w-5 h-5" />
+              </div>
+            ) : (
+              <div
+                onDragOver={(e) => {
+                  e.preventDefault();
+                  if (!isSubmitting) setIsDragging(true);
+                }}
+                onDragLeave={() => setIsDragging(false)}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  setIsDragging(false);
+                  if (!isSubmitting) {
+                    void inspectFile(e.dataTransfer.files?.[0]);
+                  }
+                }}
+                onClick={() => {
+                  if (!isSubmitting) fileInputRef.current?.click();
+                }}
+                role="button"
+                tabIndex={0}
+                onKeyDown={(e) => {
+                  if ((e.key === 'Enter' || e.key === ' ') && !isSubmitting) {
+                    e.preventDefault();
+                    fileInputRef.current?.click();
+                  }
+                }}
+                className={`rounded-xl border-2 border-dashed p-6 text-center cursor-pointer transition-colors ${
+                  isDragging
+                    ? 'border-[var(--avp-brand)] bg-[var(--avp-brand-soft)]'
+                    : validation && !validation.valid
+                      ? 'border-[var(--avp-error)] bg-[var(--avp-error-soft)]/50'
+                      : 'border-[var(--avp-border-strong)] bg-[var(--avp-bg)] hover:border-[var(--avp-brand)]/60 hover:bg-[var(--avp-hover)]/40'
+                }`}
+              >
+                {isValidating ? (
+                  <div className="flex flex-col items-center gap-2 py-2">
+                    <Loader2 className="w-6 h-6 animate-spin text-[var(--avp-brand)]" aria-hidden="true" />
+                    <p className="text-xs text-[var(--avp-text-secondary)]">
+                      {isFa ? 'در حال بررسی امضای باینری فایل صوتی...' : 'Inspecting binary audio signature...'}
+                    </p>
                   </div>
-                  <p className="text-sm font-medium text-[var(--avp-text)]">
-                    {isFa
-                      ? 'فایل صوتی خود را اینجا رها کنید یا انتخاب کنید'
-                      : 'Drop your audio file here or click to browse'}
-                  </p>
-                  <p className="text-xs text-[var(--avp-text-muted)]">
-                    {isFa
-                      ? 'فرمت‌های مجاز: WAV، MP3، FLAC، OGG، M4A، WebM (حداکثر ۲۵۶ مگابایت)'
-                      : 'Supported: WAV, MP3, FLAC, OGG, M4A, WebM (max 256 MB)'}
-                  </p>
-                </div>
-              )}
-            </div>
+                ) : (
+                  <div className="flex flex-col items-center gap-2">
+                    <div className="w-11 h-11 rounded-xl bg-[var(--avp-surface-2)] text-[var(--avp-brand)] flex items-center justify-center">
+                      <UploadCloud className="w-5 h-5" aria-hidden="true" />
+                    </div>
+                    <p className="text-sm font-medium text-[var(--avp-text)]">
+                      {isFa
+                        ? 'فایل صوتی خود را اینجا رها کنید یا انتخاب کنید'
+                        : 'Drop your audio file here or click to browse'}
+                    </p>
+                    <p className="text-xs text-[var(--avp-text-muted)]">
+                      {isFa
+                        ? 'فرمت‌های مجاز: WAV، MP3، FLAC، OGG، M4A، WebM (حداکثر ۲۵۶ مگابایت)'
+                        : 'Supported: WAV, MP3, FLAC, OGG, M4A, WebM (max 256 MB)'}
+                    </p>
+                  </div>
+                )}
+              </div>
+            )}
 
             {validation && !validation.valid && (
               <div
@@ -297,7 +317,7 @@ export const NewProjectModal: React.FC<NewProjectModalProps> = ({
               disabled={isSubmitting}
               maxLength={100}
               placeholder={isFa ? 'مثلاً: اپیزود ۱۴ پادکست فناوری' : 'e.g., Tech Podcast Episode 14'}
-              className="w-full h-11 rounded-xl border border-[var(--avp-border)] bg-[var(--avp-bg)] px-3.5 text-sm text-[var(--avp-text)] placeholder:text-[var(--avp-text-muted)] focus:border-[var(--avp-brand)] focus:bg-[var(--avp-surface)] disabled:opacity-50"
+              className="avp-input w-full min-h-[44px] sm:min-h-[38px] px-3.5 text-sm disabled:opacity-50"
             />
             {nameError && (
               <p className="text-xs text-[var(--avp-error)]" role="alert">
@@ -311,7 +331,7 @@ export const NewProjectModal: React.FC<NewProjectModalProps> = ({
               role="alert"
               className="flex items-start gap-2 rounded-xl border border-[var(--avp-error)]/40 bg-[var(--avp-error-soft)] px-3.5 py-2.5 text-xs text-[var(--avp-error)]"
             >
-              <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+              <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" aria-hidden="true" />
               <span>{submitError}</span>
             </div>
           )}
@@ -322,7 +342,7 @@ export const NewProjectModal: React.FC<NewProjectModalProps> = ({
               type="button"
               onClick={handleClose}
               disabled={isSubmitting}
-              className="h-10 px-4 rounded-xl border border-[var(--avp-border)] bg-[var(--avp-surface)] text-xs font-medium text-[var(--avp-text-secondary)] hover:bg-[var(--avp-hover)] disabled:opacity-40 cursor-pointer"
+              className="avp-btn avp-btn-outline min-h-[44px] sm:min-h-[36px] px-4"
             >
               {isFa ? 'انصراف' : 'Cancel'}
             </button>
@@ -330,9 +350,9 @@ export const NewProjectModal: React.FC<NewProjectModalProps> = ({
               type="submit"
               data-testid="btn-confirm-create-project"
               disabled={!canCreate}
-              className="h-10 px-5 rounded-xl bg-[var(--avp-brand)] hover:bg-[var(--avp-brand-hover)] text-white dark:text-[#0B1419] text-xs font-semibold inline-flex items-center gap-2 disabled:opacity-40 cursor-pointer disabled:cursor-not-allowed"
+              className="avp-btn avp-btn-primary min-h-[44px] sm:min-h-[36px] px-5"
             >
-              {isSubmitting && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+              {isSubmitting && <Loader2 className="w-3.5 h-3.5 animate-spin" aria-hidden="true" />}
               <span>
                 {isSubmitting
                   ? isFa

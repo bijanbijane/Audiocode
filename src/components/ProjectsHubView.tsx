@@ -1,4 +1,4 @@
-import React, { useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   AlertCircle,
   CheckCircle2,
@@ -7,21 +7,16 @@ import {
   Edit3,
   FileAudio,
   FolderOpen,
-  Languages,
   LayoutGrid,
   List,
   Loader2,
-  Moon,
   MoreVertical,
   Play,
   Plus,
   RefreshCw,
   Search,
-  Settings,
-  ShieldCheck,
   Sparkles,
   Square,
-  Sun,
   Trash2,
   Wand2,
 } from 'lucide-react';
@@ -32,10 +27,13 @@ import {
   ProjectSortField,
   filterAndSortProjects,
 } from '../projects/projectLibraryLogic';
+import { projectLibraryStore } from '../projects/projectLibraryStore';
 import { GlobalAppBar } from './GlobalAppBar';
+import { ShellSystemCluster } from './ShellSystemCluster';
 import { AccessibleModal } from './AccessibleModal';
 import { OfflineIndicator, PWAInstallButton } from '../ui/pwa/PWAInstallControls';
 import { formatNumberForLocale, toPersianDigits } from '../utils/formatters';
+import { detectContentDirection, detectContentLang } from '../utils/bidi';
 
 interface ProjectsHubViewProps {
   locale: 'fa' | 'en';
@@ -56,6 +54,7 @@ interface ProjectsHubViewProps {
   onToggleLocale: () => void;
   onOpenSettings: () => void;
   onOpenLifecycleModal?: () => void;
+  onOpenShortcuts?: () => void;
 }
 
 type HubViewMode = 'grid' | 'table';
@@ -133,6 +132,7 @@ export const ProjectsHubView: React.FC<ProjectsHubViewProps> = ({
   onToggleLocale,
   onOpenSettings,
   onOpenLifecycleModal,
+  onOpenShortcuts,
 }) => {
   const isFa = locale === 'fa';
   const [searchQuery, setSearchQuery] = useState('');
@@ -145,13 +145,26 @@ export const ProjectsHubView: React.FC<ProjectsHubViewProps> = ({
   const [confirmDeleteItem, setConfirmDeleteItem] = useState<PersistedProjectSummary | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
   const [previewPlayingId, setPreviewPlayingId] = useState<string | null>(null);
+  const [previewModeNote, setPreviewModeNote] = useState<Record<string, 'audio' | 'pattern'>>({});
   const previewTimerRef = useRef<number | null>(null);
   const previewAudioCtxRef = useRef<AudioContext | null>(null);
+  const previewSourceNodeRef = useRef<AudioBufferSourceNode | null>(null);
+  const previewRequestSeqRef = useRef<number>(0);
 
   const stopPreviewAudio = () => {
+    previewRequestSeqRef.current += 1;
     if (previewTimerRef.current) {
       window.clearTimeout(previewTimerRef.current);
       previewTimerRef.current = null;
+    }
+    if (previewSourceNodeRef.current) {
+      try {
+        previewSourceNodeRef.current.stop();
+        previewSourceNodeRef.current.disconnect();
+      } catch {
+        // ignore if already stopped
+      }
+      previewSourceNodeRef.current = null;
     }
     if (previewAudioCtxRef.current) {
       previewAudioCtxRef.current.close().catch(() => {});
@@ -160,21 +173,94 @@ export const ProjectsHubView: React.FC<ProjectsHubViewProps> = ({
     setPreviewPlayingId(null);
   };
 
-  const handleToggleQuickPreview = (e: React.MouseEvent, item: PersistedProjectSummary) => {
+  useEffect(() => {
+    return () => {
+      stopPreviewAudio();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!openMenuId) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setOpenMenuId(null);
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [openMenuId]);
+
+  const handleToggleQuickPreview = async (
+    e: React.MouseEvent,
+    item: PersistedProjectSummary,
+  ) => {
     e.stopPropagation();
     if (previewPlayingId === item.id) {
       stopPreviewAudio();
       return;
     }
     stopPreviewAudio();
+    const requestSeq = ++previewRequestSeqRef.current;
     setPreviewPlayingId(item.id);
 
+    const AudioCtx =
+      window.AudioContext ||
+      (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+
+    if (!AudioCtx) {
+      setPreviewModeNote((prev) => ({ ...prev, [item.id]: 'pattern' }));
+      previewTimerRef.current = window.setTimeout(() => stopPreviewAudio(), 1800);
+      return;
+    }
+
+    let usedRealAudio = false;
     try {
-      const AudioCtx =
-        window.AudioContext ||
-        (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
-      if (AudioCtx) {
-        const ctx = new AudioCtx();
+      const { audioFile } = await projectLibraryStore.getProjectWithAudio(item.id);
+      if (previewRequestSeqRef.current !== requestSeq) return;
+      const arrBuf = await audioFile.arrayBuffer();
+      if (previewRequestSeqRef.current !== requestSeq) return;
+
+      const ctx = new AudioCtx();
+      previewAudioCtxRef.current = ctx;
+      const decoded = await ctx.decodeAudioData(arrBuf.slice(0));
+      if (previewRequestSeqRef.current !== requestSeq) {
+        ctx.close().catch(() => {});
+        return;
+      }
+
+      const source = ctx.createBufferSource();
+      source.buffer = decoded;
+      const gain = ctx.createGain();
+      gain.gain.setValueAtTime(0.9, ctx.currentTime);
+      const previewDur = Math.min(4, Math.max(0.4, decoded.duration));
+      if (previewDur > 0.3) {
+        gain.gain.setValueAtTime(0.9, ctx.currentTime + previewDur - 0.18);
+        gain.gain.linearRampToValueAtTime(0.001, ctx.currentTime + previewDur);
+      }
+      source.connect(gain);
+      gain.connect(ctx.destination);
+      source.onended = () => {
+        if (previewRequestSeqRef.current === requestSeq) {
+          stopPreviewAudio();
+        }
+      };
+      previewSourceNodeRef.current = source;
+      source.start(0, 0, previewDur);
+      usedRealAudio = true;
+      setPreviewModeNote((prev) => ({ ...prev, [item.id]: 'audio' }));
+      previewTimerRef.current = window.setTimeout(() => {
+        if (previewRequestSeqRef.current === requestSeq) {
+          stopPreviewAudio();
+        }
+      }, Math.ceil(previewDur * 1000) + 120);
+    } catch {
+      // Fall back honestly to waveform-envelope tone if blob decode fails or is unavailable
+    }
+
+    if (!usedRealAudio && previewRequestSeqRef.current === requestSeq) {
+      setPreviewModeNote((prev) => ({ ...prev, [item.id]: 'pattern' }));
+      try {
+        const ctx = previewAudioCtxRef.current ?? new AudioCtx();
         previewAudioCtxRef.current = ctx;
         const osc = ctx.createOscillator();
         const gain = ctx.createGain();
@@ -187,7 +273,7 @@ export const ProjectsHubView: React.FC<ProjectsHubViewProps> = ({
         peaks.slice(0, 12).forEach((p: number, idx: number) => {
           const t = ctx.currentTime + idx * 0.14;
           gain.gain.exponentialRampToValueAtTime(
-            Math.max(0.004, Math.min(0.06, p * 0.06)),
+            Math.max(0.004, Math.min(0.05, p * 0.05)),
             t,
           );
           osc.frequency.setValueAtTime(175 + Math.round(p * 110), t);
@@ -197,14 +283,15 @@ export const ProjectsHubView: React.FC<ProjectsHubViewProps> = ({
         gain.connect(ctx.destination);
         osc.start();
         osc.stop(ctx.currentTime + 1.8);
+      } catch {
+        // AudioContext may be blocked in restricted headless context
       }
-    } catch {
-      // AudioContext may be blocked in headless or restricted context; visual preview still runs
+      previewTimerRef.current = window.setTimeout(() => {
+        if (previewRequestSeqRef.current === requestSeq) {
+          stopPreviewAudio();
+        }
+      }, 1800);
     }
-
-    previewTimerRef.current = window.setTimeout(() => {
-      stopPreviewAudio();
-    }, 1800);
   };
 
   const filteredProjects = useMemo(() => {
@@ -246,12 +333,17 @@ export const ProjectsHubView: React.FC<ProjectsHubViewProps> = ({
       className="min-h-screen flex flex-col bg-[var(--avp-bg)] text-[var(--avp-text)]"
       onClick={() => setOpenMenuId(null)}
     >
+      {/* Accessible Skip-to-Main-Content Link (AUD-06 / WCAG 2.4.1) */}
+      <a href="#main-workspace" className="avp-skip-link">
+        {isFa ? 'پرش به محتوای اصلی' : 'Skip to main content'}
+      </a>
+
       {/* Unified 48px Global Application Header via GlobalAppBar */}
       <GlobalAppBar
-        className="sticky top-0 backdrop-blur-sm bg-[var(--avp-surface-shell)]/95"
+        className="sticky top-0 z-[var(--avp-z-sticky)] backdrop-blur-sm bg-[var(--avp-surface-shell)]/95"
         startSlot={
           <div className="flex items-center gap-2.5 min-w-0">
-            <div className="w-7 h-7 rounded-[var(--avp-radius-sm)] bg-[var(--avp-brand)] text-white flex items-center justify-center shadow-[var(--avp-shadow-xs)] shrink-0">
+            <div className="w-7 h-7 rounded-[var(--avp-radius-sm)] bg-[var(--avp-brand-solid)] text-[var(--avp-on-brand)] flex items-center justify-center shadow-[var(--avp-shadow-xs)] shrink-0">
               <svg viewBox="0 0 24 24" className="w-4 h-4" fill="none" aria-hidden="true">
                 <path
                   d="M4 12.5h2.2l1.8-5.5 2.6 10 2.4-7.5 1.8 4.2 1.7-1.2H20"
@@ -263,9 +355,9 @@ export const ProjectsHubView: React.FC<ProjectsHubViewProps> = ({
               </svg>
             </div>
             <div className="flex items-center gap-2 min-w-0">
-              <h1 className="text-[13px] font-bold tracking-tight text-[var(--avp-text)] leading-none whitespace-nowrap">
+              <span className="text-[13px] font-bold tracking-tight text-[var(--avp-text)] leading-none whitespace-nowrap">
                 {isFa ? 'آواپرداز' : 'Avapardaz'}
-              </h1>
+              </span>
               <span className="hidden sm:inline-block text-[11px] px-2 py-0.5 rounded-[var(--avp-radius-xs)] bg-[var(--avp-surface-2)] text-[var(--avp-text-secondary)] border border-[var(--avp-border-subtle)] font-medium truncate">
                 {isFa ? 'استودیوی تدوین گفتار و پادکست' : 'Persian Speech & Podcast Studio'}
               </span>
@@ -283,84 +375,41 @@ export const ProjectsHubView: React.FC<ProjectsHubViewProps> = ({
               type="button"
               data-testid="btn-new-project"
               onClick={onOpenNewProjectModal}
-              className="avp-btn avp-btn-sm avp-btn-primary px-3 shadow-[var(--avp-shadow-xs)]"
+              className="avp-btn avp-btn-sm avp-btn-primary px-3 shadow-[var(--avp-shadow-xs)] min-h-[44px] sm:min-h-0"
             >
               <Plus className="w-3.5 h-3.5" aria-hidden="true" />
               <span>{isFa ? 'پروژه جدید' : 'New Project'}</span>
             </button>
 
-            {/* Unified 4-Button System Utility Capsule: [EN/FA | Theme | System Health | Settings] */}
-            <div className="flex items-center gap-0.5 p-0.5 rounded-[var(--avp-radius-sm)] border border-[var(--avp-border)] bg-[var(--avp-surface-2)]">
-              <button
-                type="button"
-                onClick={onToggleLocale}
-                title={isFa ? 'Switch to English' : 'تغییر به فارسی'}
-                aria-label={isFa ? 'تغییر زبان به انگلیسی' : 'Switch language to Persian'}
-                className="h-6 px-1.5 rounded-[var(--avp-radius-xs)] text-[10px] font-semibold text-[var(--avp-text-secondary)] hover:bg-[var(--avp-hover)] hover:text-[var(--avp-text)] inline-flex items-center gap-1 cursor-pointer transition-colors"
-              >
-                <Languages className="w-3 h-3" />
-                <span>{isFa ? 'EN' : 'FA'}</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={onToggleTheme}
-                title={
-                  theme === 'dark'
-                    ? isFa
-                      ? 'حالت روشن'
-                      : 'Light mode'
-                    : isFa
-                      ? 'حالت تیره'
-                      : 'Dark mode'
-                }
-                aria-label={isFa ? 'تغییر تم روشن و تیره' : 'Toggle theme'}
-                className="w-6 h-6 rounded-[var(--avp-radius-xs)] text-[var(--avp-text-secondary)] hover:bg-[var(--avp-hover)] hover:text-[var(--avp-text)] inline-flex items-center justify-center cursor-pointer transition-colors"
-              >
-                {theme === 'dark' ? (
-                  <Sun className="w-3.5 h-3.5 text-amber-400" />
-                ) : (
-                  <Moon className="w-3.5 h-3.5" />
-                )}
-              </button>
-
-              {onOpenLifecycleModal && (
-                <button
-                  type="button"
-                  onClick={onOpenLifecycleModal}
-                  title={isFa ? 'سلامت سیستم و مدل‌های آفلاین' : 'System Health & Local Models'}
-                  aria-label={isFa ? 'سلامت سیستم و مدل‌های آفلاین' : 'System Health & Local Models'}
-                  className="w-6 h-6 rounded-[var(--avp-radius-xs)] text-[var(--avp-text-secondary)] hover:bg-[var(--avp-hover)] hover:text-[var(--avp-text)] inline-flex items-center justify-center cursor-pointer transition-colors"
-                >
-                  <ShieldCheck className="w-3.5 h-3.5 text-[var(--avp-brand)]" />
-                </button>
-              )}
-
-              <button
-                type="button"
-                data-testid="btn-open-settings-hub"
-                onClick={onOpenSettings}
-                title={isFa ? 'تنظیمات' : 'Settings'}
-                aria-label={isFa ? 'تنظیمات' : 'Settings'}
-                className="w-6 h-6 rounded-[var(--avp-radius-xs)] text-[var(--avp-text-secondary)] hover:bg-[var(--avp-hover)] hover:text-[var(--avp-text)] inline-flex items-center justify-center cursor-pointer transition-colors"
-              >
-                <Settings className="w-3.5 h-3.5" />
-              </button>
-            </div>
+            {/* Unified System Utility Capsule (AUD-14: System health lives in Settings for clean user header) */}
+            <ShellSystemCluster
+              locale={locale}
+              theme={theme}
+              onToggleLocale={onToggleLocale}
+              onToggleTheme={onToggleTheme}
+              onOpenShortcuts={onOpenShortcuts}
+              onOpenSettings={onOpenSettings}
+              settingsButtonTestId="btn-open-settings-hub"
+            />
           </div>
         }
       />
 
       {/* Main Content */}
-      <main className="flex-1 max-w-[1280px] w-full mx-auto px-4 sm:px-6 py-6 sm:py-8 space-y-6">
+      <main
+        id="main-workspace"
+        tabIndex={-1}
+        className="flex-1 max-w-[1280px] w-full mx-auto px-4 sm:px-6 py-6 sm:py-8 space-y-6 focus:outline-none"
+      >
         {/* Corrupted item warning */}
         {corruptedCount > 0 && (
           <div
             role="status"
+            aria-live="polite"
             className="p-3.5 rounded-xl border border-[var(--avp-warning)]/40 bg-[var(--avp-accent-soft)]/50 text-xs flex items-center justify-between gap-3"
           >
             <div className="flex items-center gap-2">
-              <AlertCircle className="w-4 h-4 text-[var(--avp-warning)] shrink-0" />
+              <AlertCircle className="w-4 h-4 text-[var(--avp-warning)] shrink-0" aria-hidden="true" />
               <span>
                 {isFa
                   ? `${corruptedCount} پروژه قدیمی یا آسیب‌دیده نادیده گرفته شد تا عملکرد برنامه مختل نشود.`
@@ -370,16 +419,39 @@ export const ProjectsHubView: React.FC<ProjectsHubViewProps> = ({
           </div>
         )}
 
-        {/* Loading state */}
+        {/* Loading state with stable H1 & Skeleton Grid (AUD-19) */}
         {isLoading && (
           <div
             data-testid="projects-loading-state"
-            className="py-20 flex flex-col items-center justify-center gap-3 text-[var(--avp-text-secondary)]"
+            role="status"
+            aria-live="polite"
+            className="space-y-5"
           >
-            <Loader2 className="w-7 h-7 animate-spin text-[var(--avp-brand)]" />
-            <p className="text-sm font-medium">
-              {isFa ? 'در حال بارگذاری پروژه‌ها...' : 'Loading your projects...'}
-            </p>
+            <div className="flex items-center justify-between gap-3">
+              <h1 className="text-lg font-bold flex items-center gap-2 text-[var(--avp-text)]">
+                <FolderOpen className="w-5 h-5 text-[var(--avp-brand)]" aria-hidden="true" />
+                <span>{isFa ? 'پروژه‌های شما' : 'Your Projects'}</span>
+              </h1>
+              <span className="inline-flex items-center gap-2 text-xs text-[var(--avp-text-secondary)]">
+                <Loader2 className="w-4 h-4 animate-spin text-[var(--avp-brand)]" aria-hidden="true" />
+                <span>{isFa ? 'در حال بارگذاری پروژه‌ها...' : 'Loading your projects...'}</span>
+              </span>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4" aria-hidden="true">
+              {[0, 1, 2].map((idx) => (
+                <div
+                  key={idx}
+                  className="rounded-2xl border border-[var(--avp-border)] bg-[var(--avp-surface)] p-5 space-y-4 animate-pulse"
+                >
+                  <div className="h-4 w-2/3 rounded bg-[var(--avp-surface-2)]" />
+                  <div className="h-14 w-full rounded-xl bg-[var(--avp-surface-2)]" />
+                  <div className="flex items-center justify-between">
+                    <div className="h-3 w-20 rounded bg-[var(--avp-surface-2)]" />
+                    <div className="h-3 w-16 rounded bg-[var(--avp-surface-2)]" />
+                  </div>
+                </div>
+              ))}
+            </div>
           </div>
         )}
 
@@ -389,19 +461,19 @@ export const ProjectsHubView: React.FC<ProjectsHubViewProps> = ({
             data-testid="projects-error-state"
             className="p-6 rounded-2xl border border-[var(--avp-error)]/40 bg-[var(--avp-surface)] text-center space-y-3"
           >
-            <AlertCircle className="w-8 h-8 text-[var(--avp-error)] mx-auto" />
-            <h2 className="text-base font-bold">
+            <AlertCircle className="w-8 h-8 text-[var(--avp-error)] mx-auto" aria-hidden="true" />
+            <h1 className="text-base font-bold">
               {isFa ? 'بارگذاری فهرست پروژه‌ها ناموفق بود' : 'Failed to load projects'}
-            </h2>
+            </h1>
             <p className="text-xs text-[var(--avp-text-secondary)] max-w-md mx-auto">
               {errorMessage}
             </p>
             <button
               type="button"
               onClick={onRetryLoad}
-              className="h-9 px-4 rounded-xl bg-[var(--avp-brand)] text-white text-xs font-semibold inline-flex items-center gap-1.5 cursor-pointer"
+              className="avp-btn avp-btn-primary min-h-[44px] sm:min-h-[36px] px-4"
             >
-              <RefreshCw className="w-3.5 h-3.5" />
+              <RefreshCw className="w-3.5 h-3.5" aria-hidden="true" />
               <span>{isFa ? 'تلاش دوباره' : 'Retry'}</span>
             </button>
           </div>
@@ -418,11 +490,11 @@ export const ProjectsHubView: React.FC<ProjectsHubViewProps> = ({
             </div>
 
             <div className="space-y-2 max-w-xl mx-auto">
-              <h2 className="text-xl sm:text-2xl font-bold text-[var(--avp-text)]">
+              <h1 className="text-xl sm:text-2xl font-bold text-[var(--avp-text)]">
                 {isFa
                   ? 'به استودیوی تدوین گفتار آواپرداز خوش آمدید'
                   : 'Welcome to Avapardaz Speech Editing Studio'}
-              </h2>
+              </h1>
               <p className="text-sm text-[var(--avp-text-secondary)] leading-relaxed">
                 {isFa
                   ? 'فایل صوتی گفتار یا پادکست خود را وارد کنید، متن زمان‌بندی‌شده را ببینید، تپق‌ها و مکث‌های اضافه را با یک کلیک اصلاح کنید و فایل صوتی تمیز تحویل بگیرید.'
@@ -435,9 +507,9 @@ export const ProjectsHubView: React.FC<ProjectsHubViewProps> = ({
                 type="button"
                 data-testid="btn-empty-create-project"
                 onClick={onOpenNewProjectModal}
-                className="h-11 px-6 rounded-xl bg-[var(--avp-brand)] hover:bg-[var(--avp-brand-hover)] text-white text-sm font-semibold inline-flex items-center gap-2 shadow-[var(--avp-shadow-xs)] cursor-pointer transition-colors"
+                className="avp-btn avp-btn-lg avp-btn-primary min-h-[44px] px-6 shadow-[var(--avp-shadow-xs)]"
               >
-                <Plus className="w-4 h-4" />
+                <Plus className="w-4 h-4" aria-hidden="true" />
                 <span>
                   {isFa
                     ? 'ایجاد اولین پروژه با فایل صوتی'
@@ -449,9 +521,9 @@ export const ProjectsHubView: React.FC<ProjectsHubViewProps> = ({
                 type="button"
                 data-testid="btn-open-sample-studio"
                 onClick={onOpenSampleStudio}
-                className="h-11 px-5 rounded-xl border border-[var(--avp-border)] bg-[var(--avp-surface-2)] hover:bg-[var(--avp-hover)] text-[var(--avp-text)] text-xs font-medium inline-flex items-center gap-2 cursor-pointer transition-colors"
+                className="avp-btn avp-btn-lg avp-btn-outline min-h-[44px] px-5"
               >
-                <Wand2 className="w-4 h-4 text-[var(--avp-brand)]" />
+                <Wand2 className="w-4 h-4 text-[var(--avp-brand)]" aria-hidden="true" />
                 <span>
                   {isFa ? 'آزمایش با نمونه صوتی آماده' : 'Try with Sample Persian Audio'}
                 </span>
@@ -513,13 +585,13 @@ export const ProjectsHubView: React.FC<ProjectsHubViewProps> = ({
             {/* Section Title & Filter Bar */}
             <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
               <div>
-                <h2 className="text-lg font-bold flex items-center gap-2">
+                <h1 className="text-lg font-bold flex items-center gap-2">
                   <FolderOpen className="w-5 h-5 text-[var(--avp-brand)]" />
                   <span>{isFa ? 'پروژه‌های شما' : 'Your Projects'}</span>
                   <span className="text-xs font-medium px-2 py-0.5 rounded-[var(--avp-radius-sm)] bg-[var(--avp-surface-2)] text-[var(--avp-text-secondary)] font-mono tabular-nums">
                     {formatNumberForLocale(projects.length, { persianDigits })}
                   </span>
-                </h2>
+                </h1>
                 <p className="text-xs text-[var(--avp-text-secondary)] mt-0.5">
                   {isFa
                     ? 'برای ادامه تدوین روی هر پروژه کلیک کنید یا پروژه جدیدی بسازید.'
@@ -530,7 +602,7 @@ export const ProjectsHubView: React.FC<ProjectsHubViewProps> = ({
               {/* Search, Status Filter, Sort & Grid/Table View Mode Switcher */}
               <div className="flex flex-wrap items-center gap-2">
                 <div className="relative flex-1 sm:flex-initial sm:w-64">
-                  <Search className="w-3.5 h-3.5 text-[var(--avp-text-muted)] absolute top-1/2 -translate-y-1/2 start-3 pointer-events-none" />
+                  <Search className="w-3.5 h-3.5 text-[var(--avp-text-muted)] absolute top-1/2 -translate-y-1/2 start-3 pointer-events-none" aria-hidden="true" />
                   <input
                     type="search"
                     data-testid="projects-search-input"
@@ -539,7 +611,7 @@ export const ProjectsHubView: React.FC<ProjectsHubViewProps> = ({
                     placeholder={
                       isFa ? 'جستجو در نام پروژه یا فایل...' : 'Search project or file...'
                     }
-                    className="w-full h-9 ps-8 pe-3 rounded-[var(--avp-radius-md)] border border-[var(--avp-border)] bg-[var(--avp-surface)] text-xs text-[var(--avp-text)] placeholder:text-[var(--avp-text-muted)] focus:outline-none focus:border-[var(--avp-brand)]"
+                    className="avp-input w-full min-h-[44px] lg:min-h-[36px] lg:h-9 ps-8 pe-3"
                   />
                 </div>
 
@@ -548,7 +620,7 @@ export const ProjectsHubView: React.FC<ProjectsHubViewProps> = ({
                   data-testid="projects-status-filter"
                   value={statusFilter}
                   onChange={(e) => setStatusFilter(e.target.value as ProjectFilterTab)}
-                  className="h-9 px-3 rounded-[var(--avp-radius-md)] border border-[var(--avp-border)] bg-[var(--avp-surface)] text-xs text-[var(--avp-text)] cursor-pointer"
+                  className="avp-select min-h-[44px] lg:min-h-[36px] lg:h-9 px-3 text-xs text-[var(--avp-text)]"
                 >
                   <option value="all">{isFa ? 'همه وضعیت‌ها' : 'All statuses'}</option>
                   <option value="recent">{isFa ? 'اخیر' : 'Recent'}</option>
@@ -561,7 +633,7 @@ export const ProjectsHubView: React.FC<ProjectsHubViewProps> = ({
                   data-testid="projects-sort-select"
                   value={sortBy}
                   onChange={(e) => setSortBy(e.target.value as ProjectSortField)}
-                  className="h-9 px-3 rounded-[var(--avp-radius-md)] border border-[var(--avp-border)] bg-[var(--avp-surface)] text-xs text-[var(--avp-text)] cursor-pointer"
+                  className="avp-select min-h-[44px] lg:min-h-[36px] lg:h-9 px-3 text-xs text-[var(--avp-text)]"
                 >
                   <option value="updatedAt">
                     {isFa ? 'آخرین ویرایش' : 'Last modified'}
@@ -640,15 +712,12 @@ export const ProjectsHubView: React.FC<ProjectsHubViewProps> = ({
                     <article
                       key={item.id}
                       data-testid={`project-card-${item.id}`}
-                      onClick={() => {
-                        if (!isRenaming) onOpenProject(item.id);
-                      }}
-                      className="group relative rounded-[var(--avp-radius-lg)] border border-[var(--avp-border)] bg-[var(--avp-surface)] hover:border-[var(--avp-brand)]/60 p-4 shadow-[var(--avp-shadow-xs)] hover:shadow-[var(--avp-shadow-sm)] transition-all flex flex-col justify-between gap-4 cursor-pointer"
+                      className="group relative rounded-[var(--avp-radius-lg)] border border-[var(--avp-border)] bg-[var(--avp-surface)] hover:border-[var(--avp-brand)]/60 focus-within:ring-2 focus-within:ring-[var(--avp-brand)] p-4 shadow-[var(--avp-shadow-xs)] hover:shadow-[var(--avp-shadow-sm)] transition-all flex flex-col justify-between gap-4"
                     >
                       {/* Top Header: Status Badge + Context Menu */}
                       <div className="flex items-start justify-between gap-2">
                         <span
-                          className={`inline-flex items-center gap-1.5 text-[11px] font-medium px-2.5 py-0.5 rounded-full border ${getStatusBadgeClasses(
+                          className={`inline-flex items-center gap-1.5 text-[11px] font-medium px-2.5 py-0.5 rounded-[var(--avp-radius-sm)] border ${getStatusBadgeClasses(
                             item.status,
                           )}`}
                         >
@@ -662,7 +731,7 @@ export const ProjectsHubView: React.FC<ProjectsHubViewProps> = ({
                         </span>
 
                         <div
-                          className="relative"
+                          className="relative z-10"
                           onClick={(e) => {
                             e.stopPropagation();
                           }}
@@ -670,11 +739,13 @@ export const ProjectsHubView: React.FC<ProjectsHubViewProps> = ({
                           <button
                             type="button"
                             data-testid={`project-menu-btn-${item.id}`}
+                            aria-haspopup="menu"
+                            aria-expanded={isMenuOpen}
                             aria-label={isFa ? 'عملیات پروژه' : 'Project actions'}
                             onClick={() =>
                               setOpenMenuId(isMenuOpen ? null : item.id)
                             }
-                            className="w-7 h-7 rounded-[var(--avp-radius-sm)] text-[var(--avp-text-secondary)] hover:bg-[var(--avp-hover)] hover:text-[var(--avp-text)] inline-flex items-center justify-center cursor-pointer"
+                            className="w-11 h-11 lg:w-7 lg:h-7 rounded-[var(--avp-radius-sm)] text-[var(--avp-text-secondary)] hover:bg-[var(--avp-hover)] hover:text-[var(--avp-text)] inline-flex items-center justify-center cursor-pointer"
                           >
                             <MoreVertical className="w-4 h-4" />
                           </button>
@@ -682,7 +753,27 @@ export const ProjectsHubView: React.FC<ProjectsHubViewProps> = ({
                           {isMenuOpen && (
                             <div
                               role="menu"
-                              className="absolute end-0 mt-1 w-44 rounded-[var(--avp-radius-md)] border border-[var(--avp-border)] bg-[var(--avp-surface)] shadow-[var(--avp-shadow-md)] py-1 z-20 text-xs"
+                              onKeyDown={(e) => {
+                                if (e.key === 'Escape') {
+                                  e.stopPropagation();
+                                  setOpenMenuId(null);
+                                  return;
+                                }
+                                if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+                                  e.preventDefault();
+                                  const items = Array.from(
+                                    e.currentTarget.querySelectorAll<HTMLButtonElement>('[role="menuitem"]'),
+                                  );
+                                  if (!items.length) return;
+                                  const idx = items.indexOf(document.activeElement as HTMLButtonElement);
+                                  const next =
+                                    e.key === 'ArrowDown'
+                                      ? (idx + 1) % items.length
+                                      : (idx - 1 + items.length) % items.length;
+                                  items[next].focus();
+                                }
+                              }}
+                              className="absolute end-0 mt-1 w-44 rounded-[var(--avp-radius-md)] border border-[var(--avp-border)] bg-[var(--avp-surface)] shadow-[var(--avp-shadow-md)] py-1 z-[var(--avp-z-popover)] text-xs"
                             >
                               <button
                                 type="button"
@@ -730,12 +821,13 @@ export const ProjectsHubView: React.FC<ProjectsHubViewProps> = ({
                       <div className="space-y-1.5">
                         {isRenaming ? (
                           <div
-                            className="flex items-center gap-1.5"
+                            className="relative z-10 flex items-center gap-1.5"
                             onClick={(e) => e.stopPropagation()}
                           >
                             <input
                               type="text"
                               autoFocus
+                              aria-label={isFa ? 'نام جدید پروژه' : 'New project name'}
                               value={renameDraft}
                               onChange={(e) => setRenameDraft(e.target.value)}
                               onKeyDown={(e) => {
@@ -753,9 +845,18 @@ export const ProjectsHubView: React.FC<ProjectsHubViewProps> = ({
                             </button>
                           </div>
                         ) : (
-                          <h3 className="text-base font-bold text-[var(--avp-text)] group-hover:text-[var(--avp-brand)] transition-colors line-clamp-1">
-                            {item.name}
-                          </h3>
+                          <button
+                            type="button"
+                            data-testid={`project-open-btn-${item.id}`}
+                            onClick={() => onOpenProject(item.id)}
+                            dir={detectContentDirection(item.name, isFa ? 'rtl' : 'ltr')}
+                            lang={detectContentLang(item.name)}
+                            className="text-start w-full cursor-pointer focus-visible:outline-none after:content-[''] after:absolute after:inset-0 after:z-0 after:rounded-[var(--avp-radius-lg)]"
+                          >
+                            <h2 className="text-base font-bold text-[var(--avp-text)] group-hover:text-[var(--avp-brand)] transition-colors line-clamp-1">
+                              {item.name}
+                            </h2>
+                          </button>
                         )}
 
                         <div className="flex items-center justify-between gap-2 text-xs text-[var(--avp-text-secondary)]">
@@ -765,24 +866,31 @@ export const ProjectsHubView: React.FC<ProjectsHubViewProps> = ({
                               {item.sourceFileName}
                             </span>
                           </div>
-                          <span className="shrink-0 font-mono text-[9.5px] px-1.5 py-0.5 rounded-[var(--avp-radius-xs)] bg-[var(--avp-surface-2)] border border-[var(--avp-border-subtle)] text-[var(--avp-text-secondary)]">
+                          <span className="shrink-0 font-mono text-[11px] px-1.5 py-0.5 rounded-[var(--avp-radius-xs)] bg-[var(--avp-surface-2)] border border-[var(--avp-border-subtle)] text-[var(--avp-text-secondary)]">
                             {Math.round((item.sampleRate || 48000) / 1000)}kHz · {extBadge}
                           </span>
                         </div>
                       </div>
 
-                      {/* Mini Waveform Preview Bar + 28x28 Quick Audition Play Button (Blueprint 1 - P2-1) */}
+                      {/* Mini Waveform Preview Bar + Quick Audition Play Button */}
                       <div
-                        aria-hidden="true"
-                        className="h-10 rounded-[var(--avp-radius-md)] bg-[var(--avp-bg)] border border-[var(--avp-border-subtle)] px-2.5 flex items-center gap-2"
+                        className="h-12 lg:h-10 rounded-[var(--avp-radius-md)] bg-[var(--avp-bg)] border border-[var(--avp-border-subtle)] px-2 flex items-center gap-2"
                       >
                         <button
                           type="button"
-                          onClick={(e) => handleToggleQuickPreview(e, item)}
+                          onClick={(e) => void handleToggleQuickPreview(e, item)}
                           data-testid={`project-preview-play-${item.id}`}
-                          title={isFa ? 'پیش‌شنود سریع صوت پروژه' : 'Quick Audio Audition'}
+                          title={
+                            previewModeNote[item.id] === 'pattern'
+                              ? isFa
+                                ? 'پیش‌شنود الگوی دامنه (فایل صوتی مستقیم در دسترس نبود)'
+                                : 'Envelope preview (raw audio unavailable)'
+                              : isFa
+                                ? 'پیش‌شنود سریع صوت پروژه (۴ ثانیه)'
+                                : 'Quick Audio Audition (4s)'
+                          }
                           aria-label={isFa ? 'پیش‌شنود سریع صوت پروژه' : 'Quick Audio Audition'}
-                          className={`w-7 h-7 rounded-[var(--avp-radius-sm)] shrink-0 flex items-center justify-center border transition-all cursor-pointer ${
+                          className={`relative z-10 w-11 h-11 lg:w-7 lg:h-7 rounded-[var(--avp-radius-sm)] shrink-0 flex items-center justify-center border transition-all cursor-pointer ${
                             isPlayingPreview
                               ? 'bg-[var(--avp-brand)] text-white border-[var(--avp-brand)] shadow-[var(--avp-shadow-xs)]'
                               : 'bg-[var(--avp-surface)] text-[var(--avp-brand)] border-[var(--avp-border)] hover:border-[var(--avp-brand)]/60 hover:bg-[var(--avp-brand-soft)]'
@@ -794,11 +902,11 @@ export const ProjectsHubView: React.FC<ProjectsHubViewProps> = ({
                             <Play className="w-3 h-3 fill-current" />
                           )}
                         </button>
-                        <div className="flex-1 h-full flex items-center gap-[3px] overflow-hidden">
+                        <div className="flex-1 h-full flex items-center gap-[3px] overflow-hidden" aria-hidden="true">
                           {peaks.slice(0, 28).map((amp: number, idx: number) => (
                             <span
                               key={idx}
-                              className={`flex-1 rounded-full transition-colors ${
+                              className={`flex-1 rounded-[var(--avp-radius-xs)] transition-colors ${
                                 isPlayingPreview
                                   ? 'bg-[var(--avp-brand)] animate-pulse'
                                   : 'bg-[var(--avp-brand)]/35 group-hover:bg-[var(--avp-brand)]/65'
@@ -809,6 +917,11 @@ export const ProjectsHubView: React.FC<ProjectsHubViewProps> = ({
                             />
                           ))}
                         </div>
+                        {isPlayingPreview && previewModeNote[item.id] === 'pattern' && (
+                          <span className="text-[11px] text-[var(--avp-text-muted)] shrink-0">
+                            {isFa ? 'الگوی موج' : 'Pattern'}
+                          </span>
+                        )}
                       </div>
 
                       {/* Bottom Metadata Footer */}
@@ -836,7 +949,7 @@ export const ProjectsHubView: React.FC<ProjectsHubViewProps> = ({
                           <span className="text-[var(--avp-text-muted)] font-normal">
                             {formatRelativeModifiedTime(item.updatedAtMs, locale, persianDigits)}
                           </span>
-                          <Play className="w-3 h-3 fill-current ms-1 opacity-0 group-hover:opacity-100 transition-opacity" />
+                          <Play className="w-3 h-3 fill-current ms-1 opacity-70 group-hover:opacity-100 transition-opacity" aria-hidden="true" />
                         </div>
                       </div>
                     </article>
@@ -878,20 +991,22 @@ export const ProjectsHubView: React.FC<ProjectsHubViewProps> = ({
                   <tbody className="divide-y divide-[var(--avp-border-subtle)]">
                     {filteredProjects.map((item) => {
                       const isPlayingPreview = previewPlayingId === item.id;
+                      const isRenaming = renamingId === item.id;
                       return (
                         <tr
                           key={item.id}
                           data-testid={`project-card-${item.id}`}
-                          onClick={() => onOpenProject(item.id)}
-                          className="h-12 hover:bg-[var(--avp-hover)] transition-colors cursor-pointer"
+                          className="h-12 hover:bg-[var(--avp-hover)] transition-colors"
                         >
                           <td className="px-3 font-bold text-[var(--avp-text)]">
                             <div className="flex items-center gap-2">
                               <button
                                 type="button"
-                                onClick={(e) => handleToggleQuickPreview(e, item)}
-                                className="w-6 h-6 rounded-[var(--avp-radius-xs)] bg-[var(--avp-surface-2)] border border-[var(--avp-border)] flex items-center justify-center text-[var(--avp-brand)] hover:bg-[var(--avp-brand-soft)] cursor-pointer"
-                                title={isFa ? 'پیش‌شنود سریع' : 'Quick Audition'}
+                                onClick={(e) => void handleToggleQuickPreview(e, item)}
+                                data-testid={`project-table-preview-play-${item.id}`}
+                                className="w-11 h-11 lg:w-7 lg:h-7 rounded-[var(--avp-radius-xs)] bg-[var(--avp-surface-2)] border border-[var(--avp-border)] flex items-center justify-center text-[var(--avp-brand)] hover:bg-[var(--avp-brand-soft)] cursor-pointer shrink-0"
+                                title={isFa ? 'پیش‌شنود سریع صوت' : 'Quick Audition'}
+                                aria-label={isFa ? 'پیش‌شنود سریع صوت' : 'Quick Audition'}
                               >
                                 {isPlayingPreview ? (
                                   <Square className="w-2.5 h-2.5 fill-current" />
@@ -899,7 +1014,40 @@ export const ProjectsHubView: React.FC<ProjectsHubViewProps> = ({
                                   <Play className="w-2.5 h-2.5 fill-current" />
                                 )}
                               </button>
-                              <span className="truncate max-w-[240px]">{item.name}</span>
+                              {isRenaming ? (
+                                <div className="flex items-center gap-1">
+                                  <input
+                                    type="text"
+                                    autoFocus
+                                    aria-label={isFa ? 'نام جدید پروژه' : 'New project name'}
+                                    value={renameDraft}
+                                    onChange={(e) => setRenameDraft(e.target.value)}
+                                    onKeyDown={(e) => {
+                                      if (e.key === 'Enter') void handleCommitRename(item.id);
+                                      if (e.key === 'Escape') setRenamingId(null);
+                                    }}
+                                    className="h-7 px-2 rounded border border-[var(--avp-brand)] bg-[var(--avp-bg)] text-xs font-semibold focus:outline-none"
+                                  />
+                                  <button
+                                    type="button"
+                                    onClick={() => void handleCommitRename(item.id)}
+                                    className="h-7 px-2 rounded bg-[var(--avp-brand)] text-white text-[11px] font-semibold cursor-pointer"
+                                  >
+                                    {isFa ? 'ثبت' : 'Save'}
+                                  </button>
+                                </div>
+                              ) : (
+                                <button
+                                  type="button"
+                                  data-testid={`project-open-btn-${item.id}`}
+                                  onClick={() => onOpenProject(item.id)}
+                                  dir={detectContentDirection(item.name, isFa ? 'rtl' : 'ltr')}
+                                  lang={detectContentLang(item.name)}
+                                  className="text-start truncate max-w-[240px] hover:text-[var(--avp-brand)] cursor-pointer min-h-[44px] lg:min-h-0"
+                                >
+                                  {item.name}
+                                </button>
+                              )}
                             </div>
                           </td>
                           <td
@@ -910,7 +1058,7 @@ export const ProjectsHubView: React.FC<ProjectsHubViewProps> = ({
                           </td>
                           <td className="px-3">
                             <span
-                              className={`inline-flex items-center gap-1 text-[10px] font-medium px-2 py-0.5 rounded-full border ${getStatusBadgeClasses(
+                              className={`inline-flex items-center gap-1 text-[11px] font-medium px-2 py-0.5 rounded-[var(--avp-radius-sm)] border ${getStatusBadgeClasses(
                                 item.status,
                               )}`}
                             >
@@ -926,23 +1074,42 @@ export const ProjectsHubView: React.FC<ProjectsHubViewProps> = ({
                           <td className="px-3 text-[var(--avp-text-muted)] hidden lg:table-cell">
                             {formatRelativeModifiedTime(item.updatedAtMs, locale, persianDigits)}
                           </td>
-                          <td
-                            className="px-3 text-end"
-                            onClick={(e) => e.stopPropagation()}
-                          >
-                            <div className="inline-flex items-center gap-1.5">
+                          <td className="px-3 text-end">
+                            <div className="inline-flex items-center gap-1">
                               <button
                                 type="button"
                                 onClick={() => onOpenProject(item.id)}
-                                className="h-7 px-2.5 rounded-[var(--avp-radius-sm)] bg-[var(--avp-brand-soft)] text-[var(--avp-brand)] text-[11px] font-semibold cursor-pointer"
+                                className="min-h-[44px] lg:min-h-0 lg:h-7 px-2.5 rounded-[var(--avp-radius-sm)] bg-[var(--avp-brand-soft)] text-[var(--avp-brand)] text-[11px] font-semibold cursor-pointer"
                               >
                                 {isFa ? 'ورود به استودیو' : 'Open'}
                               </button>
                               <button
                                 type="button"
+                                data-testid={`project-rename-btn-${item.id}`}
+                                onClick={() => handleStartRename(item)}
+                                title={isFa ? 'تغییر نام پروژه' : 'Rename project'}
+                                aria-label={isFa ? 'تغییر نام پروژه' : 'Rename project'}
+                                className="w-11 h-11 lg:w-7 lg:h-7 rounded-[var(--avp-radius-sm)] text-[var(--avp-text-secondary)] hover:text-[var(--avp-text)] hover:bg-[var(--avp-hover)] inline-flex items-center justify-center cursor-pointer"
+                              >
+                                <Edit3 className="w-3.5 h-3.5" />
+                              </button>
+                              <button
+                                type="button"
+                                data-testid={`project-duplicate-btn-${item.id}`}
+                                onClick={() => void onDuplicateProject(item.id)}
+                                title={isFa ? 'تکثیر پروژه' : 'Duplicate project'}
+                                aria-label={isFa ? 'تکثیر پروژه' : 'Duplicate project'}
+                                className="w-11 h-11 lg:w-7 lg:h-7 rounded-[var(--avp-radius-sm)] text-[var(--avp-text-secondary)] hover:text-[var(--avp-text)] hover:bg-[var(--avp-hover)] inline-flex items-center justify-center cursor-pointer"
+                              >
+                                <Copy className="w-3.5 h-3.5" />
+                              </button>
+                              <button
+                                type="button"
                                 data-testid={`project-menu-btn-${item.id}`}
                                 onClick={() => setConfirmDeleteItem(item)}
-                                className="w-7 h-7 rounded-[var(--avp-radius-sm)] text-[var(--avp-text-secondary)] hover:text-[var(--avp-error)] hover:bg-[var(--avp-error)]/10 inline-flex items-center justify-center cursor-pointer"
+                                title={isFa ? 'حذف پروژه' : 'Delete project'}
+                                aria-label={isFa ? 'حذف پروژه' : 'Delete project'}
+                                className="w-11 h-11 lg:w-7 lg:h-7 rounded-[var(--avp-radius-sm)] text-[var(--avp-text-secondary)] hover:text-[var(--avp-error)] hover:bg-[var(--avp-error)]/10 inline-flex items-center justify-center cursor-pointer"
                               >
                                 <Trash2 className="w-3.5 h-3.5" />
                               </button>

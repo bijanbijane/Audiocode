@@ -60,12 +60,12 @@ export const PersianTranscriptWorkspace: React.FC<WorkspaceProps> = ({
   };
 
   return (
-    <div dir="rtl" className="grid grid-cols-1 lg:grid-cols-12 gap-4 bg-slate-950 text-slate-100 p-4 rounded-xl">
+    <div dir="rtl" className="grid grid-cols-1 lg:grid-cols-12 gap-4 bg-[var(--avp-bg)] text-[var(--avp-text)] p-4 rounded-xl">
       {/* Transcript Panel */}
-      <div className="lg:col-span-7 bg-slate-900 border border-slate-800 rounded-lg p-4 max-h-[65vh] overflow-y-auto leading-9">
-        <div className="flex items-center justify-between mb-3 pb-2 border-b border-slate-800">
-          <h2 className="font-bold text-base text-slate-200">متن گفتار فارسی (همگام با نمونه صوتی)</h2>
-          <span className="text-xs text-slate-400">
+      <div className="lg:col-span-7 bg-[var(--avp-surface)] border border-[var(--avp-border)] rounded-lg p-4 max-h-[65vh] overflow-y-auto leading-9">
+        <div className="flex items-center justify-between mb-3 pb-2 border-b border-[var(--avp-border)]">
+          <h2 className="font-bold text-base text-[var(--avp-text)]">متن گفتار فارسی (همگام با نمونه صوتی)</h2>
+          <span className="text-xs text-[var(--avp-text-secondary)]">
             زمان جاری:{' '}
             <span dir="ltr" className="inline-block font-mono">
               {TimeMath.flicksToSeconds(playheadFlicks).toFixed(2)}s
@@ -109,7 +109,7 @@ export const PersianTranscriptWorkspace: React.FC<WorkspaceProps> = ({
                       setEditingTokenId(null);
                     }
                   }}
-                  className="px-2 py-0.5 text-sm rounded bg-slate-800 border border-sky-500 text-slate-100 outline-none"
+                  className="avp-input px-2 py-0.5 text-sm"
                 />
               );
             }
@@ -126,12 +126,12 @@ export const PersianTranscriptWorkspace: React.FC<WorkspaceProps> = ({
                 title={`اطمینان تشخیص: ${Math.round(token.confidence * 100)}% | متن خام: ${token.originalText}`}
                 className={`cursor-pointer px-1.5 py-0.5 rounded transition-colors select-text ${
                   isActive
-                    ? 'bg-sky-500 text-slate-950 font-semibold'
+                    ? 'bg-[var(--avp-brand-solid)] text-[var(--avp-on-brand)] font-semibold'
                     : linkedRec
-                      ? 'bg-rose-950/80 text-rose-300 underline decoration-wavy decoration-rose-500'
+                      ? 'bg-[var(--avp-danger-soft)] text-[var(--avp-danger-text)] underline decoration-wavy decoration-[var(--avp-danger)]'
                       : token.confidence < 0.65
-                        ? 'border-b border-dashed border-amber-500 text-amber-200'
-                        : 'hover:bg-slate-800'
+                        ? 'border-b border-dashed border-[var(--avp-warning)] text-[var(--avp-warning-text)]'
+                        : 'hover:bg-[var(--avp-surface-hover)]'
                 }`}
               >
                 {token.displayText}
@@ -142,16 +142,16 @@ export const PersianTranscriptWorkspace: React.FC<WorkspaceProps> = ({
       </div>
 
       {/* Smart Suggestions Panel */}
-      <div className="lg:col-span-5 bg-slate-900 border border-slate-800 rounded-lg p-4 max-h-[65vh] overflow-y-auto">
-        <div className="flex items-center justify-between mb-3 pb-2 border-b border-slate-800">
-          <h2 className="font-bold text-base text-slate-200">
+      <div className="lg:col-span-5 bg-[var(--avp-surface)] border border-[var(--avp-border)] rounded-lg p-4 max-h-[65vh] overflow-y-auto">
+        <div className="flex items-center justify-between mb-3 pb-2 border-b border-[var(--avp-border)]">
+          <h2 className="font-bold text-base text-[var(--avp-text)]">
             پیشنهادهای اصلاح هوشمند ({highConfidenceRecs.length})
           </h2>
           {lowConfidenceRecs.length > 0 && (
             <button
               type="button"
               onClick={() => setShowLowConfidence((prev) => !prev)}
-              className="text-xs px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-amber-300 cursor-pointer"
+              className="avp-btn avp-btn-sm avp-btn-warning-tonal"
             >
               {showLowConfidence
                 ? 'پنهان‌کردن پیشنهادهای کم‌اطمینان'
@@ -172,13 +172,13 @@ export const PersianTranscriptWorkspace: React.FC<WorkspaceProps> = ({
             return (
               <div
                 key={rec.id}
-                className="p-3 rounded-lg bg-slate-950 border border-slate-800 flex flex-col gap-2"
+                className="p-3 rounded-lg bg-[var(--avp-surface-secondary)] border border-[var(--avp-border)] flex flex-col gap-2"
               >
                 <div className="flex items-center justify-between text-xs">
-                  <span dir="ltr" className="font-semibold font-mono text-rose-400">
+                  <span dir="ltr" className="font-semibold font-mono text-[var(--avp-danger-text)]">
                     {rec.disfluencyType}
                   </span>
-                  <span className="text-slate-400">
+                  <span className="text-[var(--avp-text-secondary)]">
                     بازه:{' '}
                     <span dir="ltr" className="inline-block font-mono">
                       {startSec}s - {endSec}s
@@ -190,14 +190,14 @@ export const PersianTranscriptWorkspace: React.FC<WorkspaceProps> = ({
                   </span>
                 </div>
 
-                <div className="text-sm bg-slate-900 px-2.5 py-1.5 rounded text-slate-200">
+                <div className="text-sm bg-[var(--avp-surface)] px-2.5 py-1.5 rounded text-[var(--avp-text)]">
                   «{rec.associatedText}»
                 </div>
 
                 {rec.spliceDescriptor.prosodicWarnings.map((w) => (
                   <div
                     key={w}
-                    className="flex items-center gap-1.5 text-xs bg-amber-950/60 border border-amber-800 text-amber-300 px-2 py-1 rounded"
+                    className="flex items-center gap-1.5 text-xs bg-[var(--avp-warning-soft)] border border-[var(--avp-warning)]/40 text-[var(--avp-warning-text)] px-2 py-1 rounded"
                   >
                     <AlertTriangle className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
                     <span>{WARNING_LABELS[w]}</span>
@@ -208,7 +208,7 @@ export const PersianTranscriptWorkspace: React.FC<WorkspaceProps> = ({
                   <button
                     type="button"
                     onClick={() => handlePreviewClick(rec)}
-                    className="flex-1 inline-flex items-center justify-center gap-1.5 text-xs py-1.5 px-3 rounded bg-sky-900/60 hover:bg-sky-800 text-sky-200 font-medium cursor-pointer"
+                    className="avp-btn avp-btn-sm avp-btn-tonal flex-1"
                   >
                     <Volume2 className="w-3.5 h-3.5" aria-hidden="true" />
                     <span>شنیدن پیش‌نمایش اتصال</span>
@@ -216,14 +216,14 @@ export const PersianTranscriptWorkspace: React.FC<WorkspaceProps> = ({
                   <button
                     type="button"
                     onClick={() => onAcceptRecommendation(rec.id)}
-                    className="text-xs py-1.5 px-3 rounded bg-emerald-700 hover:bg-emerald-600 text-white font-medium cursor-pointer"
+                    className="avp-btn avp-btn-sm avp-btn-secondary"
                   >
                     تأیید و اعمال
                   </button>
                   <button
                     type="button"
                     onClick={() => onRejectRecommendation(rec.id)}
-                    className="text-xs py-1.5 px-3 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 cursor-pointer"
+                    className="avp-btn avp-btn-sm avp-btn-outline"
                   >
                     رد کردن
                   </button>

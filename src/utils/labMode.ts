@@ -3,7 +3,18 @@
  * OPFS Storage Broker, ASR Research Lab, Speech Security) are unlocked.
  * Disabled in normal creator sessions by default; enabled explicitly via `?mode=lab`.
  */
-export function isLabModeEnabled(search?: string): boolean {
+export function isLabModeEnabled(search?: string, pathname?: string): boolean {
+  const rawPath =
+    typeof pathname === 'string'
+      ? pathname
+      : typeof search === 'undefined' && typeof window !== 'undefined'
+        ? window.location.pathname
+        : '';
+
+  if (rawPath.startsWith('/lab/') || rawPath === '/lab') {
+    return true;
+  }
+
   const rawSearch =
     typeof search === 'string'
       ? search

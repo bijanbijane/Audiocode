@@ -65,19 +65,19 @@ export class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoun
       <div
         role="alert"
         dir={isFa ? 'rtl' : 'ltr'}
-        className="min-h-screen flex items-center justify-center bg-slate-50 dark:bg-[#0B0F17] text-slate-900 dark:text-slate-100 p-6"
+        className="min-h-screen flex items-center justify-center bg-[var(--avp-bg)] text-[var(--avp-text)] p-6"
       >
-        <div className="w-full max-w-lg rounded-lg border border-rose-500/40 bg-white dark:bg-[#131924] p-6 space-y-4">
+        <div className="w-full max-w-lg rounded-[var(--avp-radius-lg)] border border-[var(--avp-danger)]/40 bg-[var(--avp-surface)] shadow-[var(--avp-shadow-md)] p-6 space-y-4">
           <div className="flex items-start gap-3">
-            <AlertTriangle className="w-5 h-5 text-rose-500 shrink-0 mt-0.5" aria-hidden="true" />
+            <AlertTriangle className="w-5 h-5 text-[var(--avp-danger)] shrink-0 mt-0.5" aria-hidden="true" />
             <div className="space-y-1">
-              <h1 className="text-base font-bold">
+              <h1 className="text-base font-bold text-[var(--avp-text)]">
                 {failure?.title ??
                   (isFa
                     ? 'خطای غیرمنتظره در رابط کاربری'
                     : 'Unexpected User Interface Error')}
               </h1>
-              <p className="text-sm text-slate-600 dark:text-slate-300 leading-relaxed">
+              <p className="text-sm text-[var(--avp-text-secondary)] leading-relaxed">
                 {failure?.explanation ??
                   (isFa
                     ? 'بخشی از محیط کار دچار خطا شد. فایل صوتی و پروژه اصلی شما تغییر نکرده است.'
@@ -87,11 +87,11 @@ export class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoun
           </div>
 
           {failure && (
-            <div className="rounded border border-slate-200 dark:border-[#252F42] bg-slate-50 dark:bg-[#0E131D] px-3.5 py-2.5 text-xs space-y-1">
-              <div className="font-medium text-emerald-700 dark:text-emerald-300">
+            <div className="rounded-[var(--avp-radius-sm)] border border-[var(--avp-border)] bg-[var(--avp-surface-2)] px-3.5 py-2.5 text-xs space-y-1">
+              <div className="font-medium text-[var(--avp-success-text)]">
                 {failure.originalDataStatus}
               </div>
-              <div className="text-slate-500 dark:text-slate-400 font-mono" dir="ltr">
+              <div className="text-[var(--avp-text-muted)] font-mono" dir="ltr">
                 {failure.code}
               </div>
             </div>
@@ -101,7 +101,7 @@ export class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoun
             <button
               type="button"
               onClick={this.handleReset}
-              className="inline-flex items-center gap-2 px-4 py-2 text-xs font-semibold rounded-md bg-amber-400 text-slate-950 hover:bg-amber-300 cursor-pointer"
+              className="avp-btn avp-btn-primary min-h-[44px] sm:min-h-0"
             >
               <RotateCcw className="w-3.5 h-3.5" aria-hidden="true" />
               <span>{isFa ? 'بازیابی ایمن محیط کار' : 'Safely Restore Workspace'}</span>
@@ -109,7 +109,7 @@ export class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoun
             <button
               type="button"
               onClick={() => window.location.reload()}
-              className="px-4 py-2 text-xs font-medium rounded-md border border-slate-300 dark:border-[#252F42] text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-[#1E2738] cursor-pointer"
+              className="avp-btn avp-btn-outline min-h-[44px] sm:min-h-0"
             >
               {isFa ? 'بارگذاری مجدد صفحه' : 'Reload Page'}
             </button>

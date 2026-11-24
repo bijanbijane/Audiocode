@@ -32,6 +32,8 @@ import { SuggestionWaveformMiniCard } from './SuggestionWaveformMiniCard';
 import { AccessibleModal } from './AccessibleModal';
 import type { SuggestionCategoryFilter, SuggestionSortOrder } from '../settings/settingsStore';
 import { formatNumberForLocale, formatStudioTimecode } from '../utils/formatters';
+import { detectContentDirection, detectContentLang, hasRtlCharacters } from '../utils/bidi';
+import { getNextRovingTabIndex } from '../studio/layoutUtils';
 
 interface SuggestionsPanelProps {
   recommendations: SmartRecommendation[];
@@ -84,6 +86,17 @@ const LIFECYCLE_LABELS: Record<ReviewLifecycleState, { fa: string; en: string }>
   stale: { fa: 'منقضی', en: 'Stale' },
   conflict: { fa: 'تعارض', en: 'Conflict' },
 };
+
+function getLocalizedSuggestionReason(
+  item: AnalyzedSuggestionItem,
+  rec: SmartRecommendation,
+  isFa: boolean,
+): string {
+  if (isFa || !hasRtlCharacters(rec.reasonFa)) {
+    return rec.reasonFa;
+  }
+  return `${CATEGORY_LABELS[item.category].en} detected (${item.durationSec.toFixed(2)}s) — "${rec.relatedText}"`;
+}
 
 export const SuggestionsPanel: React.FC<SuggestionsPanelProps> = ({
   recommendations,
@@ -305,8 +318,8 @@ export const SuggestionsPanel: React.FC<SuggestionsPanelProps> = ({
           : 'avp-pane-shell flex flex-col h-full min-h-0 overflow-hidden'
       }
     >
-      {/* Slim Native Inspector Header (36px) */}
-      <div className="h-[36px] px-3 border-b border-[var(--avp-border)] flex items-center justify-between gap-2 shrink-0">
+      {/* Slim Native Inspector Header */}
+      <div className="min-h-[44px] sm:min-h-[36px] px-3 py-1 sm:py-0 border-b border-[var(--avp-border)] flex items-center justify-between gap-2 shrink-0">
         <div className="flex items-center gap-1.5 min-w-0">
           <h2 className="text-[12.5px] font-semibold text-[var(--avp-text)] truncate">
             {isFa ? 'پیشنهادهای هوشمند' : 'Smart Suggestions'}
@@ -326,7 +339,7 @@ export const SuggestionsPanel: React.FC<SuggestionsPanelProps> = ({
             aria-pressed={showSearchInput || Boolean(searchQuery)}
             title={isFa ? 'جستجو در پیشنهادها' : 'Search suggestions'}
             aria-label={isFa ? 'جستجو در پیشنهادها' : 'Search suggestions'}
-            className={`avp-btn-icon avp-btn-icon-sm ${
+            className={`avp-btn-icon avp-btn-icon-sm avp-touch-icon ${
               showSearchInput || searchQuery ? 'avp-btn-tonal' : ''
             }`}
           >
@@ -337,8 +350,9 @@ export const SuggestionsPanel: React.FC<SuggestionsPanelProps> = ({
             type="button"
             onClick={() => setShowFiltersDrawer((v) => !v)}
             aria-expanded={showFiltersDrawer}
+            aria-label={isFa ? 'فیلتر وضعیت و مرتب‌سازی' : 'Status filter & sort'}
             title={isFa ? 'فیلتر وضعیت و مرتب‌سازی' : 'Status filter & sort'}
-            className={`avp-btn-icon avp-btn-icon-sm ${
+            className={`avp-btn-icon avp-btn-icon-sm avp-touch-icon ${
               showFiltersDrawer || hasExtraFilterActive ? 'avp-btn-tonal' : ''
             }`}
           >
@@ -352,7 +366,7 @@ export const SuggestionsPanel: React.FC<SuggestionsPanelProps> = ({
               onClick={onRescanDeepDisfluencies}
               title={isFa ? 'اسکن مجدد تپق و مکث' : 'Rescan Disfluencies'}
               aria-label={isFa ? 'اسکن مجدد' : 'Rescan'}
-              className="avp-btn-icon avp-btn-icon-sm"
+              className="avp-btn-icon avp-btn-icon-sm avp-touch-icon"
             >
               <RefreshCw className="w-3.5 h-3.5" strokeWidth={1.75} aria-hidden="true" />
             </button>
@@ -367,7 +381,7 @@ export const SuggestionsPanel: React.FC<SuggestionsPanelProps> = ({
                 : 'Toggle before/after mini waveform diff'
             }
             aria-label={isFa ? 'پیش‌نمایش موجی' : 'Waveform diff preview'}
-            className={`avp-btn-icon avp-btn-icon-sm ${showMiniCard ? 'avp-btn-tonal' : ''}`}
+            className={`avp-btn-icon avp-btn-icon-sm avp-touch-icon ${showMiniCard ? 'avp-btn-tonal' : ''}`}
           >
             <Waves className="w-3.5 h-3.5" strokeWidth={1.75} aria-hidden="true" />
           </button>
@@ -376,10 +390,19 @@ export const SuggestionsPanel: React.FC<SuggestionsPanelProps> = ({
 
       {/* Compact 2-Tier Category Tabs & Batch Strip */}
       <div className="border-b border-[var(--avp-border)] bg-[var(--avp-surface)] shrink-0">
-        {/* Tier 1: Clean Underline Category Tabs with Counter Badges */}
+        {/* Tier 1: Clean Underline Category Tabs with Roving Keyboard Support */}
         <div
           role="tablist"
           aria-label={isFa ? 'دسته‌بندی پیشنهادها' : 'Suggestion categories'}
+          onKeyDown={(e) => {
+            const cats = ['all', 'filler', 'pause', 'repetition', 'breath'] as const;
+            const idx = cats.indexOf(categoryFilter);
+            const nextIdx = getNextRovingTabIndex(idx, cats.length, e.key, isFa, 'horizontal');
+            if (nextIdx !== null) {
+              e.preventDefault();
+              setCategoryFilter(cats[nextIdx]);
+            }
+          }}
           className="grid grid-cols-5 px-1.5 border-b border-[var(--avp-border-subtle)]"
         >
           {(['all', 'filler', 'pause', 'repetition', 'breath'] as const).map((cat) => {
@@ -392,8 +415,9 @@ export const SuggestionsPanel: React.FC<SuggestionsPanelProps> = ({
                 role="tab"
                 data-testid={`suggestion-cat-${cat}`}
                 aria-selected={active}
+                tabIndex={active ? 0 : -1}
                 onClick={() => setCategoryFilter(cat)}
-                className={`h-[30px] px-1 text-[11px] font-medium transition-colors flex items-center justify-center gap-1 border-b-2 -mb-px cursor-pointer whitespace-nowrap ${
+                className={`min-h-[44px] sm:min-h-[32px] sm:h-[32px] px-1 text-[11px] font-medium transition-colors flex items-center justify-center gap-1 border-b-2 -mb-px cursor-pointer whitespace-nowrap ${
                   active
                     ? 'border-[var(--avp-accent)] text-[var(--avp-accent-text)] font-semibold'
                     : 'border-transparent text-[var(--avp-text-muted)] hover:text-[var(--avp-text)]'
@@ -401,7 +425,7 @@ export const SuggestionsPanel: React.FC<SuggestionsPanelProps> = ({
               >
                 <span>{label}</span>
                 <span
-                  className={`inline-flex items-center justify-center min-w-[15px] h-[15px] px-1 rounded-full font-mono text-[9.5px] leading-none ${
+                  className={`inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full font-mono text-[11px] leading-none ${
                     active
                       ? 'bg-[var(--avp-accent-soft)] text-[var(--avp-accent-text)] font-bold'
                       : 'bg-[var(--avp-surface-secondary)] text-[var(--avp-text-muted)]'
@@ -416,7 +440,7 @@ export const SuggestionsPanel: React.FC<SuggestionsPanelProps> = ({
 
         {/* Optional Collapsible Search / Filter Drawers */}
         {(showSearchInput || Boolean(searchQuery) || showFiltersDrawer) && (
-          <div className="px-2.5 pt-1.5 pb-1 space-y-1.5 border-b border-[var(--avp-border-subtle)] bg-[var(--avp-surface-secondary)]/50">
+          <div className="px-2.5 pt-1.5 pb-1.5 space-y-1.5 border-b border-[var(--avp-border-subtle)] bg-[var(--avp-surface-secondary)]/50">
             {(showSearchInput || Boolean(searchQuery)) && (
               <div className="relative flex-1 min-w-0">
                 <Search
@@ -428,19 +452,20 @@ export const SuggestionsPanel: React.FC<SuggestionsPanelProps> = ({
                   type="text"
                   autoFocus={showSearchInput}
                   data-testid="input-suggestions-search"
+                  aria-label={isFa ? 'جستجو در پیشنهادها' : 'Filter suggestions'}
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
                   placeholder={isFa ? 'جستجو در پیشنهادها...' : 'Filter suggestions...'}
-                  className="avp-input h-[26px] w-full ps-8 pe-6 text-[11.5px]"
+                  className="avp-input min-h-[44px] sm:min-h-[28px] sm:h-[28px] w-full ps-8 pe-11 text-[11.5px]"
                 />
                 {searchQuery && (
                   <button
                     type="button"
                     onClick={() => setSearchQuery('')}
                     aria-label={isFa ? 'پاک‌کردن جستجو' : 'Clear search'}
-                    className="absolute top-1/2 -translate-y-1/2 end-1.5 text-[var(--avp-text-muted)] hover:text-[var(--avp-text)] cursor-pointer"
+                    className="inline-flex items-center justify-center min-w-[44px] min-h-[44px] sm:min-w-[24px] sm:min-h-[24px] absolute top-1/2 -translate-y-1/2 end-0.5 text-[var(--avp-text-muted)] hover:text-[var(--avp-text)] cursor-pointer"
                   >
-                    <X className="w-3 h-3" strokeWidth={1.75} />
+                    <X className="w-3.5 h-3.5" strokeWidth={1.75} />
                   </button>
                 )}
               </div>
@@ -452,7 +477,7 @@ export const SuggestionsPanel: React.FC<SuggestionsPanelProps> = ({
                   aria-label={isFa ? 'فیلتر وضعیت پیشنهاد' : 'Filter by status'}
                   value={statusFilter}
                   onChange={(e) => setStatusFilter(e.target.value as 'all' | ReviewLifecycleState)}
-                  className="avp-select w-full"
+                  className="avp-select min-h-[44px] sm:min-h-[28px] w-full"
                 >
                   <option value="all">{isFa ? 'همه وضعیت‌ها' : 'All Status'}</option>
                   <option value="pending">{isFa ? 'در انتظار' : 'Pending'}</option>
@@ -468,7 +493,7 @@ export const SuggestionsPanel: React.FC<SuggestionsPanelProps> = ({
                   onChange={(e) =>
                     setSortBy(e.target.value as 'time' | 'category' | 'confidence' | 'order')
                   }
-                  className="avp-select w-full"
+                  className="avp-select min-h-[44px] sm:min-h-[28px] w-full"
                 >
                   <option value="time">{isFa ? 'مرتب‌سازی: زمان' : 'Sort: Time'}</option>
                   <option value="confidence">{isFa ? 'مرتب‌سازی: اطمینان' : 'Sort: Confidence'}</option>
@@ -480,14 +505,14 @@ export const SuggestionsPanel: React.FC<SuggestionsPanelProps> = ({
           </div>
         )}
 
-        {/* Tier 2: Slim 30px Framed Batch Action Strip */}
-        <div className="px-2.5 h-[30px] flex items-center justify-between gap-1 bg-[var(--avp-surface-secondary)]/35">
-          <div className="flex items-center gap-1 min-w-0">
+        {/* Tier 2: Framed Batch Action Strip */}
+        <div className="px-2.5 min-h-[34px] py-1 flex flex-wrap items-center justify-between gap-1 bg-[var(--avp-surface-secondary)]/35">
+          <div className="flex flex-wrap items-center gap-1 min-w-0">
             <button
               type="button"
               data-testid="btn-batch-approve-suggestions"
               onClick={handleBatchApproveFiltered}
-              className="inline-flex items-center gap-1 h-[22px] px-2 rounded-md border border-[var(--avp-border)] bg-[var(--avp-surface)] hover:bg-[var(--avp-surface-hover)] text-[10.5px] font-medium text-[var(--avp-text)] cursor-pointer transition-colors"
+              className="inline-flex items-center justify-center gap-1 min-h-[44px] sm:min-h-[26px] px-2.5 sm:px-2 rounded-md border border-[var(--avp-border)] bg-[var(--avp-surface)] hover:bg-[var(--avp-surface-hover)] text-[11px] font-medium text-[var(--avp-text)] cursor-pointer transition-colors"
             >
               <CheckCheck
                 className="w-3 h-3 text-[var(--avp-accent)]"
@@ -509,7 +534,7 @@ export const SuggestionsPanel: React.FC<SuggestionsPanelProps> = ({
               <button
                 type="button"
                 onClick={handleBatchRejectSelected}
-                className="avp-btn avp-btn-sm avp-btn-danger-ghost px-1.5 text-[10.5px] h-[22px]"
+                className="avp-btn avp-btn-sm avp-btn-danger-ghost min-h-[44px] sm:min-h-[26px] px-2 text-[11px]"
               >
                 <X className="w-3 h-3" strokeWidth={1.75} aria-hidden="true" />
                 <span>{isFa ? 'رد' : 'Reject'}</span>
@@ -522,7 +547,7 @@ export const SuggestionsPanel: React.FC<SuggestionsPanelProps> = ({
                 data-testid="btn-soften-breaths-coughs"
                 onClick={onSoftenBreathsAndCoughs}
                 title={isFa ? 'نرم‌سازی صدای نفس‌ها (-10dB)' : 'Soften Breaths (-10dB)'}
-                className="inline-flex items-center gap-1 h-[22px] px-2 rounded-md border border-[var(--avp-border)] bg-[var(--avp-surface)] hover:bg-[var(--avp-surface-hover)] text-[10.5px] font-medium text-[var(--avp-text-secondary)] hover:text-[var(--avp-text)] cursor-pointer transition-colors"
+                className="inline-flex items-center justify-center gap-1 min-h-[44px] sm:min-h-[26px] px-2.5 sm:px-2 rounded-md border border-[var(--avp-border)] bg-[var(--avp-surface)] hover:bg-[var(--avp-surface-hover)] text-[11px] font-medium text-[var(--avp-text-secondary)] hover:text-[var(--avp-text)] cursor-pointer transition-colors"
               >
                 {isFa ? 'نرم‌سازی نفس' : 'Soften Breaths'}
               </button>
@@ -540,7 +565,7 @@ export const SuggestionsPanel: React.FC<SuggestionsPanelProps> = ({
                   handleConfirmExecuteEditPlan();
                 }
               }}
-              className="avp-btn avp-btn-sm avp-btn-tonal px-2 text-[10.5px] h-[22px]"
+              className="avp-btn avp-btn-sm avp-btn-tonal min-h-[44px] sm:min-h-[26px] px-2.5 text-[11px]"
             >
               <Sparkles className="w-3 h-3" strokeWidth={1.75} aria-hidden="true" />
               <span>
@@ -605,48 +630,56 @@ export const SuggestionsPanel: React.FC<SuggestionsPanelProps> = ({
               item.lifecycle === 'conflict';
             const isApproved = effectiveApprovedIds.has(rec.id);
             const hasValidConfidence = Number.isFinite(rec.confidence) && rec.confidence > 0;
+            const titleDir = detectContentDirection(rec.relatedText, isFa ? 'rtl' : 'ltr');
+            const titleLang = detectContentLang(rec.relatedText);
+            const reasonText = getLocalizedSuggestionReason(item, rec, isFa);
+            const contextJoin = [item.contextBefore, item.contextInside, item.contextAfter]
+              .filter(Boolean)
+              .join(' ');
+            const contextDir = detectContentDirection(contextJoin, titleDir);
+            const contextLang = detectContentLang(contextJoin);
 
             return (
-              <div
+              <article
                 key={rec.id}
                 data-testid={`suggestion-card-${rec.id}`}
-                tabIndex={0}
-                onClick={() => {
-                  onSelect(rec.id);
-                  if (onJumpToRange && item.isRangeValid) {
-                    onJumpToRange(item.startSec, item.endSec, rec.trackId);
-                  }
-                }}
-                onKeyDown={(e) => {
-                  if (e.target === e.currentTarget && (e.key === 'Enter' || e.key === ' ')) {
-                    e.preventDefault();
-                    onSelect(rec.id);
-                  }
-                }}
-                className={`group/card px-2.5 py-2 transition-colors cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--avp-accent)] ${
+                className={`group/card px-2.5 py-2 transition-colors ${
                   isSelected
                     ? 'bg-[var(--avp-accent-soft)]/45'
                     : 'hover:bg-[var(--avp-surface-shell)]/70'
                 }`}
               >
-                {/* Layer 1: Unified Single-Row Metadata (Checkbox + Category + Status | Time Range + Δ Savings) */}
-                <div className="flex items-center justify-between gap-1.5 text-[10.5px]">
-                  <div className="flex items-center gap-1.5 min-w-0">
+                {/* Layer 1: Unified Single-Row Metadata (Checkbox Label + Category + Status | Time Range + Δ Savings) */}
+                <div className="flex items-center justify-between gap-1.5 text-[11px]">
+                  <div className="flex items-center gap-1 min-w-0">
                     {isReviewable && (
-                      <input
-                        type="checkbox"
+                      <button
+                        type="button"
+                        role="checkbox"
+                        aria-checked={selectedBatchIds.has(rec.id) || isApproved}
                         data-testid={`btn-review-approve-${rec.id}`}
                         aria-label={
                           isFa ? `انتخاب دسته‌ای ${rec.relatedText}` : `Select ${rec.relatedText}`
                         }
-                        checked={selectedBatchIds.has(rec.id) || isApproved}
-                        onClick={(e) => e.stopPropagation()}
-                        onChange={() => {
+                        onClick={() => {
                           toggleBatchCheck(rec.id);
                           toggleApproveReview(rec.id);
                         }}
-                        className="rounded border-[var(--avp-border)] accent-[var(--avp-accent)] cursor-pointer shrink-0"
-                      />
+                        className="inline-flex items-center justify-center min-w-[44px] min-h-[44px] lg:min-w-[26px] lg:min-h-[26px] -ms-1.5 lg:-ms-0.5 rounded-md hover:bg-[var(--avp-surface-hover)] cursor-pointer shrink-0"
+                      >
+                        <span
+                          aria-hidden="true"
+                          className={`w-4 h-4 rounded-[4px] border flex items-center justify-center transition-colors ${
+                            selectedBatchIds.has(rec.id) || isApproved
+                              ? 'bg-[var(--avp-brand-solid)] border-[var(--avp-brand-solid)] text-[var(--avp-on-brand)]'
+                              : 'border-[var(--avp-border-strong)] bg-[var(--avp-surface)]'
+                          }`}
+                        >
+                          {(selectedBatchIds.has(rec.id) || isApproved) && (
+                            <Check className="w-3 h-3" strokeWidth={2.5} />
+                          )}
+                        </span>
+                      </button>
                     )}
                     <span className="font-bold text-[11px] text-[var(--avp-text)] truncate">
                       {CATEGORY_LABELS[item.category][locale]}
@@ -655,7 +688,7 @@ export const SuggestionsPanel: React.FC<SuggestionsPanelProps> = ({
                       ·
                     </span>
                     <span
-                      className={`text-[10px] font-medium whitespace-nowrap ${
+                      className={`text-[11px] font-medium whitespace-nowrap ${
                         item.lifecycle === 'approved' || item.lifecycle === 'applied'
                           ? 'text-[var(--avp-accent-text)]'
                           : item.lifecycle === 'conflict' || item.lifecycle === 'stale'
@@ -670,7 +703,7 @@ export const SuggestionsPanel: React.FC<SuggestionsPanelProps> = ({
                   {/* Consolidated Monospace Time Range & Δ Savings Capsule */}
                   <span
                     dir="ltr"
-                    className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-[var(--avp-surface-secondary)]/85 text-[10px] font-mono tabular-nums text-[var(--avp-text-secondary)] shrink-0"
+                    className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-[var(--avp-surface-secondary)]/85 text-[11px] font-mono tabular-nums text-[var(--avp-text-secondary)] shrink-0"
                     title={hasValidConfidence ? `${Math.round(rec.confidence * 100)}% confidence` : undefined}
                   >
                     <span>
@@ -684,29 +717,53 @@ export const SuggestionsPanel: React.FC<SuggestionsPanelProps> = ({
                   </span>
                 </div>
 
-                {/* Layer 2: Concise Title + Whisper Context Line */}
-                <p className="mt-1 text-[12px] font-semibold text-[var(--avp-text)] truncate">
-                  {rec.relatedText}
-                </p>
+                {/* Layer 2: Dedicated Semantic Selection Button (Zero Nested Interactive Elements) */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    onSelect(rec.id);
+                    if (onJumpToRange && item.isRangeValid) {
+                      onJumpToRange(item.startSec, item.endSec, rec.trackId);
+                    }
+                  }}
+                  aria-pressed={isSelected}
+                  className="w-full text-start mt-1 rounded-md py-0.5 focus-visible:outline-2 focus-visible:outline-[var(--avp-accent)] cursor-pointer block"
+                >
+                  <p
+                    dir={titleDir}
+                    lang={titleLang}
+                    className="text-[12.5px] font-semibold text-[var(--avp-text)] truncate"
+                  >
+                    {rec.relatedText}
+                  </p>
 
-                {showContextTranscript && (item.contextBefore || item.contextAfter) ? (
-                  <p className="text-[10.5px] text-[var(--avp-text-muted)] mt-0.5 truncate">
-                    {item.contextBefore ? <span>… {item.contextBefore} </span> : null}
-                    <mark className="px-1 rounded-xs bg-[var(--avp-warning-soft)] text-[var(--avp-text)] font-medium">
-                      {item.contextInside || rec.relatedText}
-                    </mark>
-                    {item.contextAfter ? <span> {item.contextAfter} …</span> : null}
-                  </p>
-                ) : (
-                  <p className="text-[10.5px] text-[var(--avp-text-muted)] mt-0.5 truncate">
-                    {rec.reasonFa}
-                  </p>
-                )}
+                  {showContextTranscript && (item.contextBefore || item.contextAfter) ? (
+                    <p
+                      dir={contextDir}
+                      lang={contextLang}
+                      className="text-[11px] text-[var(--avp-text-muted)] mt-0.5 truncate"
+                    >
+                      {item.contextBefore ? <span>… {item.contextBefore} </span> : null}
+                      <mark className="px-1 rounded-xs bg-[var(--avp-warning-soft)] text-[var(--avp-text)] font-medium">
+                        {item.contextInside || rec.relatedText}
+                      </mark>
+                      {item.contextAfter ? <span> {item.contextAfter} …</span> : null}
+                    </p>
+                  ) : (
+                    <p
+                      dir={detectContentDirection(reasonText, isFa ? 'rtl' : 'ltr')}
+                      lang={detectContentLang(reasonText)}
+                      className="text-[11px] text-[var(--avp-text-muted)] mt-0.5 truncate"
+                    >
+                      {reasonText}
+                    </p>
+                  )}
+                </button>
 
                 {/* Concise Warnings Only When Present */}
                 {item.conflictingIds.length > 0 && (
-                  <div className="mt-0.5 flex items-center gap-1 text-[10px] text-[var(--avp-warning-text)]">
-                    <AlertTriangle className="w-2.5 h-2.5 shrink-0" strokeWidth={1.75} aria-hidden="true" />
+                  <div className="mt-0.5 flex items-center gap-1 text-[11px] text-[var(--avp-warning-text)]">
+                    <AlertTriangle className="w-3 h-3 shrink-0" strokeWidth={1.75} aria-hidden="true" />
                     <span className="truncate">
                       {isFa
                         ? `هم‌پوشانی با ${item.conflictingIds.length} پیشنهاد دیگر`
@@ -716,8 +773,8 @@ export const SuggestionsPanel: React.FC<SuggestionsPanelProps> = ({
                 )}
 
                 {rec.boundary.trailingEzafeRisk && (
-                  <div className="mt-0.5 flex items-center gap-1 text-[10px] text-[var(--avp-danger)]">
-                    <AlertTriangle className="w-2.5 h-2.5 shrink-0" strokeWidth={1.75} aria-hidden="true" />
+                  <div className="mt-0.5 flex items-center gap-1 text-[11px] text-[var(--avp-danger)]">
+                    <AlertTriangle className="w-3 h-3 shrink-0" strokeWidth={1.75} aria-hidden="true" />
                     <span className="truncate">
                       {isFa
                         ? `خطر کسره اضافه روی «${rec.boundary.trailingEzafeWord}ِ»`
@@ -728,12 +785,11 @@ export const SuggestionsPanel: React.FC<SuggestionsPanelProps> = ({
 
                 {/* Layer 3: Crisp 2-Pole Action Footer (Right: Context/Cut Preview Pill | Left: Apply + Dismiss) */}
                 {isReviewable ? (
-                  <div className="mt-1.5 flex items-center justify-between gap-1.5">
+                  <div className="mt-1.5 flex flex-wrap items-center justify-between gap-1.5">
                     <div className="inline-flex items-center rounded-md border border-[var(--avp-border)] bg-[var(--avp-surface-secondary)]/55 p-0.5">
                       <button
                         type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
+                        onClick={() => {
                           if (onPreviewWithContext) {
                             onPreviewWithContext(rec, contextBeforeSec, contextAfterSec);
                           } else {
@@ -741,7 +797,7 @@ export const SuggestionsPanel: React.FC<SuggestionsPanelProps> = ({
                           }
                         }}
                         title={isFa ? 'پخش با بافت اطراف' : 'Play with context'}
-                        className="inline-flex items-center gap-1 h-[22px] px-2 rounded-[5px] text-[10.5px] font-medium text-[var(--avp-text-secondary)] hover:text-[var(--avp-text)] hover:bg-[var(--avp-surface)] cursor-pointer transition-colors"
+                        className="inline-flex items-center justify-center gap-1 min-h-[44px] sm:min-h-[26px] px-2.5 sm:px-2 rounded-[5px] text-[11px] font-medium text-[var(--avp-text-secondary)] hover:text-[var(--avp-text)] hover:bg-[var(--avp-surface)] cursor-pointer transition-colors"
                       >
                         <Play
                           className="w-2.5 h-2.5 text-[var(--avp-accent)]"
@@ -763,12 +819,9 @@ export const SuggestionsPanel: React.FC<SuggestionsPanelProps> = ({
 
                       <button
                         type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          onPreview(rec, 'after');
-                        }}
+                        onClick={() => onPreview(rec, 'after')}
                         title={isFa ? 'پیش‌شنوایی نتیجه پس از برش' : 'Preview cut splice'}
-                        className="inline-flex items-center gap-1 h-[22px] px-2 rounded-[5px] text-[10.5px] font-medium text-[var(--avp-text-secondary)] hover:text-[var(--avp-text)] hover:bg-[var(--avp-surface)] cursor-pointer transition-colors"
+                        className="inline-flex items-center justify-center gap-1 min-h-[44px] sm:min-h-[26px] px-2.5 sm:px-2 rounded-[5px] text-[11px] font-medium text-[var(--avp-text-secondary)] hover:text-[var(--avp-text)] hover:bg-[var(--avp-surface)] cursor-pointer transition-colors"
                       >
                         <Scissors className="w-2.5 h-2.5" strokeWidth={1.75} aria-hidden="true" />
                         <span>
@@ -787,40 +840,39 @@ export const SuggestionsPanel: React.FC<SuggestionsPanelProps> = ({
                       {onJumpToRange && (
                         <button
                           type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            onJumpToRange(item.startSec, item.endSec, rec.trackId);
-                          }}
+                          onClick={() => onJumpToRange(item.startSec, item.endSec, rec.trackId)}
                           title={isFa ? 'پرش روی تایم‌لاین' : 'Jump on timeline'}
                           aria-label={isFa ? 'پرش روی تایم‌لاین' : 'Jump on timeline'}
-                          className="avp-btn-icon avp-btn-icon-sm opacity-75 sm:opacity-0 sm:group-hover/card:opacity-100 focus-visible:opacity-100 transition-opacity"
+                          className="avp-btn-icon avp-btn-icon-sm avp-touch-icon opacity-75 hover:opacity-100 focus-visible:opacity-100 transition-opacity"
                         >
-                          <Crosshair className="w-3 h-3" strokeWidth={1.75} aria-hidden="true" />
+                          <Crosshair className="w-3.5 h-3.5" strokeWidth={1.75} aria-hidden="true" />
                         </button>
                       )}
 
                       <button
                         type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          onNudgeBoundary(rec.id, -40);
-                        }}
+                        onClick={() => onNudgeBoundary(rec.id, -40)}
                         title={isFa ? 'اصلاح مرز شروع (-40ms)' : 'Nudge start -40ms'}
-                        aria-label={`اصلاح مرز ${rec.relatedText}`}
-                        className="avp-btn-icon avp-btn-icon-sm opacity-75 sm:opacity-0 sm:group-hover/card:opacity-100 focus-visible:opacity-100 transition-opacity"
+                        aria-label={
+                          isFa ? `اصلاح مرز ${rec.relatedText}` : `Nudge boundary ${rec.relatedText}`
+                        }
+                        className="avp-btn-icon avp-btn-icon-sm avp-touch-icon opacity-75 hover:opacity-100 focus-visible:opacity-100 transition-opacity"
                       >
-                        <SlidersHorizontal className="w-3 h-3" strokeWidth={1.75} aria-hidden="true" />
+                        <SlidersHorizontal className="w-3.5 h-3.5" strokeWidth={1.75} aria-hidden="true" />
                       </button>
 
                       <button
                         type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
+                        onClick={() => {
                           onAccept(rec);
                           advanceFocusAfterReview(rec.id);
                         }}
-                        aria-label={`اعمال پیشنهاد ${rec.relatedText}`}
-                        className="avp-btn avp-btn-sm avp-btn-tonal h-[24px] px-2.5 text-[11px]"
+                        aria-label={
+                          isFa
+                            ? `اعمال پیشنهاد ${rec.relatedText}`
+                            : `Apply suggestion ${rec.relatedText}`
+                        }
+                        className="avp-btn avp-btn-sm avp-btn-tonal min-h-[44px] sm:min-h-[26px] px-2.5 text-[11px]"
                       >
                         <Check className="w-3 h-3" strokeWidth={2} aria-hidden="true" />
                         <span>{isFa ? 'اعمال' : 'Apply'}</span>
@@ -828,21 +880,24 @@ export const SuggestionsPanel: React.FC<SuggestionsPanelProps> = ({
 
                       <button
                         type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
+                        onClick={() => {
                           onReject(rec.id);
                           advanceFocusAfterReview(rec.id);
                         }}
-                        aria-label={`رد پیشنهاد ${rec.relatedText}`}
+                        aria-label={
+                          isFa
+                            ? `رد پیشنهاد ${rec.relatedText}`
+                            : `Dismiss suggestion ${rec.relatedText}`
+                        }
                         title={isFa ? 'رد پیشنهاد' : 'Dismiss'}
-                        className="avp-btn-icon avp-btn-icon-sm avp-btn-danger-ghost"
+                        className="avp-btn-icon avp-btn-icon-sm avp-btn-danger-ghost avp-touch-icon"
                       >
                         <X className="w-3.5 h-3.5" strokeWidth={1.75} aria-hidden="true" />
                       </button>
                     </div>
                   </div>
                 ) : (
-                  <div className="mt-1.5 text-[10.5px] font-medium text-[var(--avp-text-muted)]">
+                  <div className="mt-1.5 text-[11px] font-medium text-[var(--avp-text-muted)]">
                     {item.lifecycle === 'applied'
                       ? isFa
                         ? 'اعمال شد (قابل بازگشت با Undo)'
@@ -856,7 +911,7 @@ export const SuggestionsPanel: React.FC<SuggestionsPanelProps> = ({
                           : 'Rejected'}
                   </div>
                 )}
-              </div>
+              </article>
             );
           })
         )}

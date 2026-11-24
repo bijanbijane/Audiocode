@@ -117,11 +117,11 @@ export const AuditionTransportBar: React.FC<AuditionTransportBarProps> = ({
     <footer
       data-testid="audition-transport-deck"
       aria-label={isFa ? 'نوار کنترل پخش صوت' : 'Audio transport control bar'}
-      className="fixed bottom-0 inset-x-0 z-30 border-t border-[var(--avp-border)] bg-[var(--avp-surface-shell)]/96 backdrop-blur-md text-[var(--avp-text)]"
+      className="fixed bottom-0 inset-x-0 z-[var(--avp-z-transport)] border-t border-[var(--avp-border)] bg-[var(--avp-surface-shell)]/96 backdrop-blur-md text-[var(--avp-text)]"
     >
-      {/* Top Edge-Anchored Slim Progress Scrubber (3px resting, expands visually on hover) */}
+      {/* Top Edge-Anchored Slim Progress Scrubber (3px visual bar inside expanded 44px interactive hitbox) */}
       <div
-        className="group relative w-full h-2.5 -mt-1 flex items-center cursor-pointer"
+        className="group absolute -top-[21px] sm:-top-[13px] inset-x-0 h-11 sm:h-7 flex items-center cursor-pointer z-10 pointer-events-auto"
         dir="ltr"
       >
         <div className="w-full h-[3px] group-hover:h-[5px] bg-[var(--avp-border)] transition-all relative overflow-hidden">
@@ -154,19 +154,19 @@ export const AuditionTransportBar: React.FC<AuditionTransportBarProps> = ({
         />
       </div>
 
-      {/* Responsive Transport Row: 2 clean rows on < sm (390px), symmetrical 50px 3-zone grid on sm+ */}
-      <div className="w-full px-2.5 sm:px-4 py-1.5 sm:py-0 min-h-[50px] sm:h-[50px] flex flex-wrap sm:grid sm:grid-cols-[1fr_auto_1fr] items-center justify-between gap-1.5 sm:gap-2">
+      {/* Responsive Transport Row: compact 1-row on < sm (390px), symmetrical 50px 3-zone grid on sm+ */}
+      <div className="relative z-[var(--avp-z-sticky)] w-full px-1.5 sm:px-4 py-0.5 sm:py-0 min-h-[50px] sm:h-[50px] flex sm:grid sm:grid-cols-[1fr_auto_1fr] items-center justify-between gap-1 sm:gap-2">
         {/* Zone 1 (Start — Timecode HUD + Status + LED Output Meter) */}
-        <div className="order-2 sm:order-1 flex items-center gap-2 min-w-0 justify-self-start px-2 sm:px-2.5 py-1 rounded-xl border border-[var(--avp-border)] bg-[var(--avp-surface-secondary)]/65">
-          <div className="flex items-center gap-1.5" dir="ltr">
+        <div className="order-1 flex items-center gap-1.5 sm:gap-2 min-w-0 justify-self-start px-1.5 sm:px-2.5 py-1 rounded-xl border border-[var(--avp-border)] bg-[var(--avp-surface-secondary)]/65 shrink-0">
+          <div className="flex items-center gap-1 sm:gap-1.5" dir="ltr">
             <span
               data-testid="audition-timecode-hud"
-              className="avp-bidi-num text-[11.5px] sm:text-[12.5px] font-semibold text-[var(--avp-text)] sm:min-w-[72px]"
+              className="avp-bidi-num text-[11px] sm:text-[12.5px] font-semibold text-[var(--avp-text)] sm:min-w-[72px]"
             >
               {formattedPlayhead}
             </span>
-            <span className="text-[11px] text-[var(--avp-text-faint)]">/</span>
-            <span className="avp-bidi-num text-[10.5px] sm:text-[11px] text-[var(--avp-text-muted)]">
+            <span className="hidden sm:inline text-[11px] text-[var(--avp-text-faint)]">/</span>
+            <span className="hidden sm:inline avp-bidi-num text-[11px] text-[var(--avp-text-muted)]">
               {formattedTotal}
             </span>
           </div>
@@ -189,7 +189,7 @@ export const AuditionTransportBar: React.FC<AuditionTransportBarProps> = ({
                   ? 'bg-[var(--avp-warning)]'
                   : isPlaying
                     ? 'bg-[var(--avp-accent)]'
-                    : 'bg-emerald-500/70'
+                    : 'bg-[var(--avp-success)]/75'
               }`}
               aria-hidden="true"
             />
@@ -201,7 +201,7 @@ export const AuditionTransportBar: React.FC<AuditionTransportBarProps> = ({
               type="button"
               data-testid="btn-exit-preview-mode"
               onClick={onExitPreview}
-              className="avp-btn avp-btn-sm avp-btn-ghost"
+              className="avp-btn avp-btn-sm avp-btn-ghost min-h-[44px] sm:min-h-0"
             >
               <X className="w-3 h-3" strokeWidth={1.75} aria-hidden="true" />
               <span>{isFa ? 'پایان' : 'Exit'}</span>
@@ -227,7 +227,7 @@ export const AuditionTransportBar: React.FC<AuditionTransportBarProps> = ({
                     : 0;
                 return (
                   <div key={ch} className="flex items-center gap-1.5">
-                    <span className="text-[9px] font-mono font-bold leading-none text-[var(--avp-text-muted)] w-2.5">
+                    <span className="text-[11px] font-mono font-bold leading-none text-[var(--avp-text-muted)] w-3">
                       {ch}
                     </span>
                     <div className="flex items-center gap-[2px]">
@@ -235,16 +235,16 @@ export const AuditionTransportBar: React.FC<AuditionTransportBarProps> = ({
                         const isLit = segIdx < activeSegments;
                         const activeColor =
                           segIdx >= 10
-                            ? 'bg-rose-500'
+                            ? 'bg-[var(--avp-danger)]'
                             : segIdx >= 8
-                              ? 'bg-amber-400'
-                              : 'bg-emerald-500';
+                              ? 'bg-[var(--avp-warning)]'
+                              : 'bg-[var(--avp-success)]';
                         const idleColor =
                           segIdx >= 10
-                            ? 'bg-rose-500/20 dark:bg-rose-500/15'
+                            ? 'bg-[var(--avp-danger)]/20'
                             : segIdx >= 8
-                              ? 'bg-amber-500/20 dark:bg-amber-400/15'
-                              : 'bg-emerald-600/20 dark:bg-emerald-500/18';
+                              ? 'bg-[var(--avp-warning)]/20'
+                              : 'bg-[var(--avp-success)]/20';
                         return (
                           <span
                             key={segIdx}
@@ -259,15 +259,15 @@ export const AuditionTransportBar: React.FC<AuditionTransportBarProps> = ({
                 );
               })}
             </div>
-            <span className="avp-bidi-num text-[10px] font-medium text-[var(--avp-text-muted)] w-[38px]">
+            <span className="avp-bidi-num text-[11px] font-medium text-[var(--avp-text-muted)] w-[42px]">
               {peakDb <= -59 ? '-∞' : formatNumberForLocale(Math.round(peakDb), { persianDigits })} dB
             </span>
           </div>
         </div>
 
-        {/* Zone 2 (Exact Geometric Center on sm+ / Full-width primary row on < sm, LOCKED dir="ltr") */}
+        {/* Zone 2 (Exact Geometric Center on sm+ / Compact Primary Control Pill on < sm, LOCKED dir="ltr") */}
         <div
-          className="order-1 sm:order-2 w-full sm:w-auto flex items-center justify-center gap-1 sm:gap-0.5 justify-self-center px-2 py-1 rounded-xl border border-[var(--avp-border)] bg-[var(--avp-surface-secondary)]/75"
+          className="order-2 flex-1 sm:flex-initial min-w-0 sm:w-auto flex items-center justify-center gap-0.5 justify-self-center px-1 sm:px-2 py-1 rounded-xl border border-[var(--avp-border)] bg-[var(--avp-surface-secondary)]/75"
           dir="ltr"
         >
           <div className="hidden lg:inline-flex items-center gap-0.5 me-0.5 pe-1 border-e border-[var(--avp-border)]">
@@ -277,7 +277,7 @@ export const AuditionTransportBar: React.FC<AuditionTransportBarProps> = ({
               disabled={!hasAudio}
               onClick={onSetInAtPlayhead}
               title={isFa ? 'تنظیم شروع انتخاب (I)' : 'Set Selection In (I)'}
-              className="avp-btn avp-btn-sm avp-btn-ghost px-1.5 font-mono text-[11px]"
+              className="avp-btn avp-btn-sm avp-btn-ghost min-w-[26px] px-1.5 font-mono text-[11px]"
             >
               I
             </button>
@@ -287,7 +287,7 @@ export const AuditionTransportBar: React.FC<AuditionTransportBarProps> = ({
               disabled={!hasAudio}
               onClick={onSetOutAtPlayhead}
               title={isFa ? 'تنظیم پایان انتخاب (O)' : 'Set Selection Out (O)'}
-              className="avp-btn avp-btn-sm avp-btn-ghost px-1.5 font-mono text-[11px]"
+              className="avp-btn avp-btn-sm avp-btn-ghost min-w-[26px] px-1.5 font-mono text-[11px]"
             >
               O
             </button>
@@ -313,10 +313,10 @@ export const AuditionTransportBar: React.FC<AuditionTransportBarProps> = ({
               onClick={onStepBack}
               aria-label={isFa ? `${seekStepSec} ثانیه عقب` : `Back ${seekStepSec}s`}
               title={isFa ? `${seekStepSec} ثانیه عقب` : `Back ${seekStepSec}s`}
-              className="avp-btn min-h-[36px] sm:min-h-0 sm:avp-btn-sm avp-btn-ghost px-2 font-mono text-[11px]"
+              className="avp-btn min-h-[44px] min-w-[44px] sm:min-h-0 sm:min-w-0 sm:avp-btn-sm avp-btn-ghost px-1.5 sm:px-2 font-mono text-[11px]"
             >
               <SkipBack className="w-3.5 h-3.5" strokeWidth={1.75} aria-hidden="true" />
-              <span className="hidden xs:inline sm:inline">-{formatNumberForLocale(seekStepSec, { persianDigits })}s</span>
+              <span className="hidden sm:inline">-{formatNumberForLocale(seekStepSec, { persianDigits })}s</span>
             </button>
           )}
 
@@ -336,9 +336,9 @@ export const AuditionTransportBar: React.FC<AuditionTransportBarProps> = ({
                   : 'Start playback'
             }
             title={isFa ? 'پخش / مکث (Space)' : 'Play / Pause (Space)'}
-            className={`avp-btn h-[36px] sm:h-[var(--avp-ctrl-md)] min-w-[92px] sm:min-w-[86px] mx-0.5 sm:mx-1 ${
+            className={`avp-btn h-[44px] sm:h-[var(--avp-ctrl-md)] min-w-[68px] sm:min-w-[86px] px-2.5 sm:px-3 mx-0.5 sm:mx-1 ${
               isPlaying
-                ? 'bg-[var(--avp-warning)] text-slate-950 hover:opacity-90'
+                ? 'bg-[var(--avp-warning-soft)] border border-[var(--avp-warning)] text-[var(--avp-warning-text)] hover:opacity-90'
                 : 'avp-btn-primary'
             }`}
           >
@@ -363,9 +363,9 @@ export const AuditionTransportBar: React.FC<AuditionTransportBarProps> = ({
               onClick={onStepForward}
               aria-label={isFa ? `${seekStepSec} ثانیه جلو` : `Forward ${seekStepSec}s`}
               title={isFa ? `${seekStepSec} ثانیه جلو` : `Forward ${seekStepSec}s`}
-              className="avp-btn min-h-[36px] sm:min-h-0 sm:avp-btn-sm avp-btn-ghost px-2 font-mono text-[11px]"
+              className="avp-btn min-h-[44px] min-w-[44px] sm:min-h-0 sm:min-w-0 sm:avp-btn-sm avp-btn-ghost px-1.5 sm:px-2 font-mono text-[11px]"
             >
-              <span className="hidden xs:inline sm:inline">+{formatNumberForLocale(seekStepSec, { persianDigits })}s</span>
+              <span className="hidden sm:inline">+{formatNumberForLocale(seekStepSec, { persianDigits })}s</span>
               <SkipForward className="w-3.5 h-3.5" strokeWidth={1.75} aria-hidden="true" />
             </button>
           )}
@@ -388,6 +388,15 @@ export const AuditionTransportBar: React.FC<AuditionTransportBarProps> = ({
             disabled={!hasAudio}
             onClick={onToggleLoop}
             aria-pressed={loopSelection}
+            aria-label={
+              selection
+                ? isFa
+                  ? 'تکرار محدوده انتخابی'
+                  : 'Loop Selection'
+                : isFa
+                  ? 'تکرار کل فایل'
+                  : 'Loop Full Track'
+            }
             title={
               selection
                 ? isFa
@@ -397,7 +406,7 @@ export const AuditionTransportBar: React.FC<AuditionTransportBarProps> = ({
                   ? 'تکرار کل فایل (L)'
                   : 'Loop Full Track (L)'
             }
-            className={`avp-btn min-h-[36px] sm:min-h-0 sm:avp-btn-sm ms-0.5 ${loopSelection ? 'avp-btn-tonal' : 'avp-btn-ghost'}`}
+            className={`avp-btn min-h-[44px] min-w-[44px] sm:min-h-0 sm:min-w-0 sm:avp-btn-sm px-1.5 sm:px-2 ms-0.5 ${loopSelection ? 'avp-btn-tonal' : 'avp-btn-ghost'}`}
           >
             <Repeat className="w-3.5 h-3.5" strokeWidth={1.75} aria-hidden="true" />
             <span className="hidden md:inline">{isFa ? 'تکرار' : 'Loop'}</span>
@@ -405,7 +414,7 @@ export const AuditionTransportBar: React.FC<AuditionTransportBarProps> = ({
         </div>
 
         {/* Zone 3 (End — Selection Play + Marker Nav + Playback Rate) */}
-        <div className="order-3 flex items-center justify-end gap-1.5 shrink-0 justify-self-end">
+        <div className="order-3 flex items-center justify-end gap-1 sm:gap-1.5 shrink-0 justify-self-end">
           {selection && selectionLenSec >= 0.05 && (
             <>
               <div
@@ -433,7 +442,7 @@ export const AuditionTransportBar: React.FC<AuditionTransportBarProps> = ({
           )}
 
           {/* Framed Marker Step & Playback Speed Utility Capsule */}
-          <div className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-xl border border-[var(--avp-border)] bg-[var(--avp-surface-secondary)]/65">
+          <div className="inline-flex items-center gap-1 px-1 sm:px-1.5 py-0.5 rounded-xl border border-[var(--avp-border)] bg-[var(--avp-surface-secondary)]/65">
             <div className="hidden lg:inline-flex items-center gap-0.5 pe-1 border-e border-[var(--avp-border)]" dir="ltr">
               <button
                 type="button"
@@ -473,7 +482,7 @@ export const AuditionTransportBar: React.FC<AuditionTransportBarProps> = ({
                 value={playbackRate}
                 onChange={(e) => onChangePlaybackRate(Number(e.target.value))}
                 dir="ltr"
-                className="avp-select font-mono tabular-nums border-0 bg-transparent h-[26px]"
+                className="avp-select font-mono tabular-nums border-0 bg-transparent h-[44px] sm:h-[26px] px-1 sm:px-2 text-[11px] sm:text-xs"
               >
                 {SPEED_OPTIONS.map((rate) => (
                   <option key={rate} value={rate}>

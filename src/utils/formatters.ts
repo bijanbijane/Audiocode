@@ -20,12 +20,15 @@ export function toPersianDigits(input: string | number): string {
 }
 
 export function formatNumberForLocale(
-  value: number,
+  value: number | string,
   options?: {
     persianDigits?: boolean;
     maximumFractionDigits?: number;
   },
 ): string {
+  if (typeof value === 'string') {
+    return options?.persianDigits ? toPersianDigits(value) : value;
+  }
   const safeVal = Number.isFinite(value) ? value : 0;
   const formatted =
     typeof options?.maximumFractionDigits === 'number'

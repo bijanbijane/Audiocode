@@ -113,6 +113,7 @@
 
     /* --- 1. Surface Layers (Light-First, <5% cool neutral tint) --- */
     --avp-bg: #F5F6F8;
+    --avp-bg-subtle: #EEF1F4;
     --avp-surface-shell: #F5F6F8;       /* L0: Top bar, side rails, secondary chrome */
     --avp-surface: #FFFFFF;             /* L1: Primary editorial canvas & active panels */
     --avp-surface-2: #EEF1F4;           /* L1b: Subtle inset / segmented track */
@@ -126,18 +127,22 @@
     --avp-border-subtle: #EDF0F4;
     --avp-border-strong: #C9D3DC;
 
-    /* --- 3. Typography & Ink Hierarchy (WCAG AA Verified) --- */
+    /* --- 3. Typography & Ink Hierarchy (WCAG AA Verified >= 4.5:1) --- */
     --avp-text: #141C24;
-    --avp-text-secondary: #4D5966;
-    --avp-text-muted: #707D8A;
-    --avp-text-faint: #94A0AC;
+    --avp-text-secondary: #424E5B;
+    --avp-text-muted: #576370;
+    --avp-text-faint: #6D7986;
 
-    /* --- 4. Semantic Brand & State Tokens (10% Accent Budget) --- */
-    --avp-brand: #16816F;
-    --avp-brand-hover: #116D5D;
+    /* --- 4. Semantic Brand & State Tokens (10% Accent Budget · WCAG AA >= 4.5:1) --- */
+    --avp-brand: #0F766E;
+    --avp-brand-solid: #0F766E;
+    --avp-brand-solid-hover: #0C625B;
+    --avp-brand-hover: #0C625B;
+    --avp-brand-ink: #0F6254;
     --avp-brand-soft: #E5F4F0;
-    --avp-accent: #16816F;
-    --avp-accent-hover: #116D5D;
+    --avp-on-brand: #FFFFFF;
+    --avp-accent: #0F766E;
+    --avp-accent-hover: #0C625B;
     --avp-accent-soft: #E5F4F0;
     --avp-accent-text: #0F6254;
     --avp-ready-bg: #DDF4E7;
@@ -148,32 +153,38 @@
 
     --avp-warning: #D98A1C;
     --avp-warning-soft: #FEF5E6;
-    --avp-warning-text: #925B0D;
+    --avp-warning-text: #8A5309;
 
-    --avp-error: #D44F58;
+    --avp-error: #C83742;
     --avp-error-soft: #FDEEEF;
-    --avp-danger: #D44F58;
+    --avp-danger: #C83742;
     --avp-danger-soft: #FDEEEF;
+    --avp-danger-text: #9F1F2B;
 
     /* --- 5. Acoustic Stage (L2: Always Deep Navy for Signal Precision) --- */
     --avp-wave-bg: #0D1520;
     --avp-waveform-bg: #0D1520;
     --avp-wave-surface: #131E2D;
     --avp-wave-stroke: #1FA38B;
+    --avp-wave-stroke-secondary: #38BDF8;
     --avp-wave-selection: #E5A13B;
+    --avp-wave-grid: rgba(148, 163, 184, 0.18);
+    --avp-wave-playhead: #F43F5E;
+    --avp-track-host: #0F766E;
+    --avp-track-guest: #0284C7;
 
     /* --- 6. Elevation & Shadows (L3 Only) --- */
     --avp-shadow-xs: 0 1px 1px rgba(15, 23, 42, 0.04);
     --avp-shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.05);
     --avp-shadow-md: 0 8px 24px rgba(15, 23, 42, 0.10);
 
-    /* --- 7. Layout, Spacing, Control Heights & Radii --- */
+    /* --- 7. Layout, Spacing, Control Heights, Hit Targets & Radii --- */
     --avp-header-h: 48px;
     --avp-transport-h: 56px;
-    --avp-rail-w: 240px;
-    --avp-rail-dsp-w: 300px;
+    --avp-rail-w: 232px;
+    --avp-rail-dsp-w: 264px;
     --avp-rail-collapsed-w: 48px;
-    --avp-inspector-w: 340px;
+    --avp-inspector-w: 348px;
     --avp-track-header-w: 120px;
 
     --avp-space-1: 4px;
@@ -186,6 +197,8 @@
     --avp-ctrl-sm: 28px;
     --avp-ctrl-md: 32px;
     --avp-ctrl-lg: 36px;
+    --avp-hit-desktop: 24px;
+    --avp-hit-mobile: 44px;
 
     --avp-radius-xs: 4px;
     --avp-radius-sm: 6px;
@@ -193,9 +206,21 @@
     --avp-radius-lg: 10px;
     --avp-radius-xl: 14px;
 
-    /* --- 8. Typography Scale --- */
+    /* --- 8. Typography Scale (Strict >= 11px Floor) --- */
+    --avp-fs-micro: 11px;
+    --avp-fs-caption: 12px;
     --avp-transcript-size: 15.5px;
     --avp-transcript-lh: 2.05;
+
+    /* --- 9. Centralized Z-Index Layer Scale --- */
+    --avp-z-base: 10;
+    --avp-z-sticky: 20;
+    --avp-z-transport: 30;
+    --avp-z-popover: 40;
+    --avp-z-modal: 50;
+    --avp-z-confirm: 60;
+    --avp-z-toast: 70;
+    --avp-z-skip: 80;
   }
 
   html.dark {
@@ -203,6 +228,7 @@
 
     /* --- 1. Surface Layers (Dark Parity, Delta <= 12%) --- */
     --avp-bg: #0E141C;
+    --avp-bg-subtle: #17202B;
     --avp-surface-shell: #0E141C;
     --avp-surface: #131B24;
     --avp-surface-2: #1B2531;
@@ -218,19 +244,23 @@
 
     /* --- 3. Typography & Ink Hierarchy (Optical Dark Compensation) --- */
     --avp-text: #EDF2F7;
-    --avp-text-secondary: #A6B4C2;
-    --avp-text-muted: #7F8E9D;
-    --avp-text-faint: #5F6E7D;
+    --avp-text-secondary: #B0BECB;
+    --avp-text-muted: #93A2B2;
+    --avp-text-faint: #788898;
 
-    /* --- 4. Semantic Brand & State Tokens --- */
-    --avp-brand: #188E7A;
-    --avp-brand-hover: #1EA38C;
-    --avp-brand-soft: rgba(67, 199, 167, 0.15);
-    --avp-accent: #188E7A;
-    --avp-accent-hover: #1EA38C;
-    --avp-accent-soft: rgba(67, 199, 167, 0.15);
+    /* --- 4. Semantic Brand & State Tokens (Split Solid vs Ink for WCAG AA >= 4.5:1) --- */
+    --avp-brand: #34D3B7;              /* Ink / borders / icons on dark surface (~9.7:1) */
+    --avp-brand-ink: #34D3B7;
+    --avp-brand-solid: #0F7A6D;        /* Solid CTA fill with #FFFFFF text (~5.07:1 AA) */
+    --avp-brand-solid-hover: #0C675C;
+    --avp-brand-hover: #0C675C;
+    --avp-brand-soft: rgba(52, 211, 183, 0.16);
+    --avp-on-brand: #FFFFFF;
+    --avp-accent: #0F7A6D;
+    --avp-accent-hover: #0C675C;
+    --avp-accent-soft: rgba(52, 211, 183, 0.16);
     --avp-accent-text: #5EE0C0;
-    --avp-ready-bg: rgba(67, 199, 167, 0.16);
+    --avp-ready-bg: rgba(52, 211, 183, 0.16);
     --avp-ready-text: #6EE0C3;
     --avp-success: #16A34A;
     --avp-success-soft: rgba(52, 211, 153, 0.16);
@@ -243,7 +273,10 @@
     --avp-error: #E56F77;
     --avp-error-soft: rgba(229, 111, 119, 0.16);
     --avp-danger: #DC5C65;
+    --avp-track-host: #34D3B7;
+    --avp-track-guest: #38BDF8;
     --avp-danger-soft: rgba(229, 111, 119, 0.16);
+    --avp-danger-text: #FDA4AF;
 
     /* --- 5. Acoustic Stage --- */
     --avp-wave-bg: #090F17;
@@ -282,20 +315,26 @@
   }
 
   html.avp-high-contrast {
+    --avp-bg-subtle: #E4E8EE;
     --avp-border: #66727E;
     --avp-border-strong: #3E4A56;
-    --avp-text-secondary: #2B3742;
-    --avp-text-muted: #3F4B57;
+    --avp-text-secondary: #222E39;
+    --avp-text-muted: #35414D;
+    --avp-text-faint: #465360;
     --avp-brand: #0E695A;
     --avp-accent: #0E695A;
+    --avp-danger-text: #8E1520;
   }
   html.dark.avp-high-contrast {
+    --avp-bg-subtle: #182230;
     --avp-border: #7B8A97;
     --avp-border-strong: #9BAAB7;
-    --avp-text-secondary: #D3DCE6;
-    --avp-text-muted: #B6C4D2;
+    --avp-text-secondary: #DCE4ED;
+    --avp-text-muted: #C2D0DE;
+    --avp-text-faint: #9AA9B8;
     --avp-brand: #25B398;
     --avp-accent: #25B398;
+    --avp-danger-text: #FECDD3;
   }
 
   html {
@@ -460,17 +499,28 @@
 
   /* Tier 1: Primary Solid — STRICT BUDGET (Max 2 visible in Studio: Play & Export) */
   .avp-btn-primary {
-    background-color: var(--avp-accent);
-    color: #FFFFFF;
+    background-color: var(--avp-brand-solid);
+    color: var(--avp-on-brand);
     font-weight: 600;
     border: 1px solid transparent;
     box-shadow: var(--avp-shadow-sm);
   }
   .avp-btn-primary:hover:not(:disabled) {
-    background-color: var(--avp-accent-hover);
+    background-color: var(--avp-brand-solid-hover);
   }
 
-  /* Tier 2: Tonal Active — Soft accent surface, zero border noise */
+  /* Tier 2: Secondary Brand Tonal — Important panel actions without violating Primary CTA budget */
+  .avp-btn-secondary {
+    background-color: var(--avp-brand-soft);
+    color: var(--avp-accent-text);
+    font-weight: 600;
+    border: 1px solid color-mix(in srgb, var(--avp-brand) 32%, transparent);
+  }
+  .avp-btn-secondary:hover:not(:disabled) {
+    background-color: color-mix(in srgb, var(--avp-brand) 22%, transparent);
+  }
+
+  /* Tier 2b: Tonal Active — Soft accent surface, zero border noise */
   .avp-btn-tonal {
     background-color: var(--avp-accent-soft);
     color: var(--avp-accent-text);
@@ -646,6 +696,60 @@
   .avp-transcript-body {
     font-size: var(--avp-transcript-size);
     line-height: var(--avp-transcript-lh);
+  }
+
+  /* --- Accessible Skip-to-Main-Content Link (WCAG 2.4.1) --- */
+  .avp-skip-link {
+    position: fixed;
+    top: 8px;
+    inset-inline-start: 8px;
+    z-index: var(--avp-z-skip);
+    padding: 10px 16px;
+    border-radius: var(--avp-radius-md);
+    background-color: var(--avp-brand-solid);
+    color: var(--avp-on-brand);
+    font-size: 13px;
+    font-weight: 600;
+    box-shadow: var(--avp-shadow-md);
+    transform: translateY(-200%);
+    opacity: 0;
+    pointer-events: none;
+    transition: transform 0.14s ease, opacity 0.14s ease;
+  }
+  .avp-skip-link:focus,
+  .avp-skip-link:focus-visible {
+    transform: translateY(0);
+    opacity: 1;
+    pointer-events: auto;
+    outline: 2px solid var(--avp-on-brand);
+    outline-offset: 2px;
+  }
+
+  /* --- Responsive Pointer & Touch Target Enforcement (WCAG 2.2 SC 2.5.8 + 44px Touch) --- */
+  .avp-hit-desktop {
+    min-width: var(--avp-hit-desktop);
+    min-height: var(--avp-hit-desktop);
+  }
+  .avp-hit-touch,
+  .avp-touch-target {
+    min-width: var(--avp-ctrl-sm);
+    min-height: var(--avp-ctrl-sm);
+  }
+  .avp-touch-icon {
+    position: relative;
+    min-width: var(--avp-ctrl-sm);
+    min-height: var(--avp-ctrl-sm);
+  }
+  @media (max-width: 1023.98px), (pointer: coarse) {
+    .avp-hit-touch,
+    .avp-touch-target {
+      min-width: var(--avp-hit-mobile);
+      min-height: var(--avp-hit-mobile);
+    }
+    .avp-touch-icon {
+      min-width: var(--avp-hit-mobile);
+      min-height: var(--avp-hit-mobile);
+    }
   }
 }
 

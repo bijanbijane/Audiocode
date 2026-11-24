@@ -46,6 +46,7 @@ import {
   loadModelCtcVocabulary,
   saveModelCtcVocabulary,
 } from '../workflow/UnifiedLocalAsrWorkflowService';
+import { getNextRovingTabIndex } from '../studio/layoutUtils';
 
 export type LifecycleModalTab =
   | 'model'
@@ -115,9 +116,7 @@ export const LifecycleManagementModal: React.FC<LifecycleManagementModalProps> =
     };
   }, [isOpen, modelManager, onModelStateChanged]);
 
-  if (!isOpen) return null;
-
-  // Read snapshot after any modelTick update
+  // Read snapshot after any modelTick update; AccessibleModal manages render presence when !isOpen
   void modelTick;
   const modelSnap = modelManager.getSnapshot();
   const activeCtcVocab = modelSnap.activeModel
@@ -478,7 +477,9 @@ export const LifecycleManagementModal: React.FC<LifecycleManagementModalProps> =
         mode: backupMode,
       });
       if (!res.ok || !res.packageJson || !res.fileName) {
-        setStatusMessage(res.error ?? 'Backup creation failed.');
+        setStatusMessage(
+          res.error ?? (isFa ? 'ساخت بسته پشتیبان ناموفق بود.' : 'Backup creation failed.'),
+        );
         return;
       }
       const blob = new Blob([res.packageJson], { type: 'application/json;charset=utf-8' });
@@ -508,7 +509,9 @@ export const LifecycleManagementModal: React.FC<LifecycleManagementModalProps> =
     const perfMonitor = new LongSessionMonitor();
     const memSnap = getSharedMemoryBudgetManager().getSnapshot();
     const bundle = {
-      localOnlyNotice: 'Privacy-safe local diagnostics only. Zero audio/transcript content included.',
+      localOnlyNotice: isFa
+        ? 'گزارش عیب‌یابی محلی و ایمن؛ هیچ صوت یا متن کاربر در آن گنجانده نشده است.'
+        : 'Privacy-safe local diagnostics only. Zero audio/transcript content included.',
       appVersion: AVAPARDAZ_VERSION_CONTRACT.appVersion,
       modelRepository: {
         storageBackend: modelSnap.storageBackend,
@@ -575,6 +578,7 @@ export const LifecycleManagementModal: React.FC<LifecycleManagementModalProps> =
       dir={isFa ? 'rtl' : 'ltr'}
       dataTestId="lifecycle-management-modal"
       panelClassName="w-full max-w-4xl"
+      closeOnBackdropClick={!isInstallingModel}
     >
       <div className="w-full max-h-[88vh] flex flex-col rounded-2xl border border-[var(--avp-border)] bg-[var(--avp-surface)] text-[var(--avp-text)] shadow-[var(--avp-shadow-md)] overflow-hidden">
         {/* Header */}
@@ -593,36 +597,61 @@ export const LifecycleManagementModal: React.FC<LifecycleManagementModalProps> =
             type="button"
             onClick={onClose}
             aria-label={isFa ? 'بستن' : 'Close'}
-            className="avp-btn-icon avp-btn-icon-sm"
+            className="avp-touch-icon sm:w-8 sm:h-8 rounded-lg text-[var(--avp-text-secondary)] hover:text-[var(--avp-text)] hover:bg-[var(--avp-hover)] inline-flex items-center justify-center cursor-pointer"
           >
             <X className="w-4 h-4" />
           </button>
         </div>
 
         {/* Navigation tabs */}
-        <div className="px-5 pt-2 border-b border-[var(--avp-border)] flex items-center gap-4 overflow-x-auto shrink-0 bg-[var(--avp-surface)]">
-          {tabs.map((t) => (
-            <button
-              key={t.id}
-              type="button"
-              data-testid={`lifecycle-tab-${t.id}`}
-              onClick={() => setActiveTab(t.id)}
-              className={`pb-2.5 inline-flex items-center gap-1.5 text-xs font-medium whitespace-nowrap border-b-2 cursor-pointer transition-colors ${
-                activeTab === t.id
-                  ? 'border-[var(--avp-accent)] text-[var(--avp-accent-text)] font-semibold'
-                  : 'border-transparent text-[var(--avp-text-muted)] hover:text-[var(--avp-text)]'
-              }`}
-            >
-              {t.icon}
-              <span>{t.label}</span>
-            </button>
-          ))}
+        <div
+          role="tablist"
+          aria-label={isFa ? 'بخش‌های مدیریت مدل و سلامت' : 'Lifecycle and Health Sections'}
+          className="px-5 pt-2 border-b border-[var(--avp-border)] flex items-center gap-3 overflow-x-auto shrink-0 bg-[var(--avp-surface)]"
+        >
+          {tabs.map((t, idx) => {
+            const active = activeTab === t.id;
+            return (
+              <button
+                key={t.id}
+                type="button"
+                role="tab"
+                aria-selected={active}
+                tabIndex={active ? 0 : -1}
+                data-testid={`lifecycle-tab-${t.id}`}
+                onClick={() => setActiveTab(t.id)}
+                onKeyDown={(e) => {
+                  const nextIdx = getNextRovingTabIndex(idx, tabs.length, e.key, isFa, 'horizontal');
+                  if (nextIdx !== null) {
+                    e.preventDefault();
+                    const nextId = tabs[nextIdx].id;
+                    setActiveTab(nextId);
+                    const el = e.currentTarget
+                      .closest('[role="tablist"]')
+                      ?.querySelector<HTMLButtonElement>(`[data-testid="lifecycle-tab-${nextId}"]`);
+                    el?.focus();
+                  }
+                }}
+                className={`min-h-[44px] sm:min-h-[36px] pb-2 pt-1.5 px-1 inline-flex items-center gap-1.5 text-xs font-medium whitespace-nowrap border-b-2 cursor-pointer transition-colors ${
+                  active
+                    ? 'border-[var(--avp-accent)] text-[var(--avp-accent-text)] font-semibold'
+                    : 'border-transparent text-[var(--avp-text-muted)] hover:text-[var(--avp-text)]'
+                }`}
+              >
+                {t.icon}
+                <span>{t.label}</span>
+              </button>
+            );
+          })}
         </div>
 
         {/* Body */}
         <div className="p-5 overflow-y-auto flex-1 space-y-4 text-xs">
           {statusMessage && (
             <div
+              role="status"
+              aria-live="polite"
+              aria-atomic="true"
               data-testid="lifecycle-status-message"
               className="rounded-lg border border-[var(--avp-accent)]/35 bg-[var(--avp-accent-soft)] px-3 py-2 text-[var(--avp-accent-text)] font-medium"
             >
@@ -643,8 +672,11 @@ export const LifecycleManagementModal: React.FC<LifecycleManagementModalProps> =
                       {modelSnap.state}
                     </span>
                   </div>
-                  <div className="font-mono text-[11px] text-[var(--avp-text-muted)]" dir="ltr">
-                    Storage: {modelSnap.storageBackend} · Runtime Ready: {String(modelSnap.runtimeReady)}
+                  <div className="font-mono text-[11px] text-[var(--avp-text-muted)]" dir={isFa ? 'rtl' : 'ltr'}>
+                    {isFa ? 'مخزن:' : 'Storage:'}{' '}
+                    <span dir="ltr">{modelSnap.storageBackend}</span> ·{' '}
+                    {isFa ? 'آماده اجرا:' : 'Runtime Ready:'}{' '}
+                    <span dir="ltr">{String(modelSnap.runtimeReady)}</span>
                   </div>
                 </div>
 
@@ -657,11 +689,11 @@ export const LifecycleManagementModal: React.FC<LifecycleManagementModalProps> =
                     dir="ltr"
                   >
                     <div>
-                      Active Model: {modelSnap.activeModel.modelId} (v{modelSnap.activeModel.version}) ·{' '}
+                      {isFa ? 'مدل فعال:' : 'Active Model:'} {modelSnap.activeModel.modelId} (v{modelSnap.activeModel.version}) ·{' '}
                       {modelSnap.activeModel.architecture}
                     </div>
                     <div>
-                      File: {modelSnap.activeModel.fileName} · Size:{' '}
+                      {isFa ? 'فایل:' : 'File:'} {modelSnap.activeModel.fileName} · {isFa ? 'حجم:' : 'Size:'}{' '}
                       {(modelSnap.activeModel.fileSizeBytes / (1024 * 1024)).toFixed(2)} MB (
                       {modelSnap.activeModel.fileSizeBytes} B)
                     </div>
@@ -671,11 +703,13 @@ export const LifecycleManagementModal: React.FC<LifecycleManagementModalProps> =
                       CTC Vocabulary (tokens.txt):{' '}
                       {activeCtcVocab && activeCtcVocab.length > 0 ? (
                         <span className="text-[var(--avp-success-text)]">
-                          Loaded ({activeCtcVocab.length} tokens)
+                          {isFa ? `بارگذاری شد (${activeCtcVocab.length} توکن)` : `Loaded (${activeCtcVocab.length} tokens)`}
                         </span>
                       ) : (
                         <span className="text-[var(--avp-warning-text)]">
-                          Missing — import tokens.txt or click auto-install
+                          {isFa
+                            ? 'یافت نشد — فایل tokens.txt را وارد کنید یا نصب خودکار را بزنید'
+                            : 'Missing — import tokens.txt or click auto-install'}
                         </span>
                       )}
                     </div>
@@ -689,16 +723,19 @@ export const LifecycleManagementModal: React.FC<LifecycleManagementModalProps> =
                     dir="ltr"
                   >
                     <div>
-                      Previous Verified Model (Rollback Ready): {modelSnap.previousVerifiedModel.modelId} (v
+                      {isFa ? 'مدل قبلی تأییدشده (آماده بازگشت):' : 'Previous Verified Model (Rollback Ready):'}{' '}
+                      {modelSnap.previousVerifiedModel.modelId} (v
                       {modelSnap.previousVerifiedModel.version})
                     </div>
-                    <div>Previous SHA-256: {modelSnap.previousVerifiedModel.verifiedSha256Hex}</div>
+                    <div>{isFa ? 'هش قبلی SHA-256:' : 'Previous SHA-256:'} {modelSnap.previousVerifiedModel.verifiedSha256Hex}</div>
                   </div>
                 )}
 
                 {isInstallingModel && installProgressPct !== null && (
-                  <div className="pt-1 font-mono text-[11px] text-[var(--avp-accent-text)]" dir="ltr">
-                    Streaming chunks to OPFS & verifying SHA-256... {installProgressPct}%
+                  <div className="pt-1 font-mono text-[11px] text-[var(--avp-accent-text)]" dir={isFa ? 'rtl' : 'ltr'}>
+                    {isFa
+                      ? `در حال ذخیره تکه‌ای در OPFS و بررسی اصالت SHA-256... ${installProgressPct}%`
+                      : `Streaming chunks to OPFS & verifying SHA-256... ${installProgressPct}%`}
                   </div>
                 )}
               </div>
@@ -709,7 +746,7 @@ export const LifecycleManagementModal: React.FC<LifecycleManagementModalProps> =
                   data-testid="btn-install-browser-persian-model"
                   disabled={isInstallingModel}
                   onClick={handleAutoInstallBrowserShenavaModel}
-                  className="avp-btn avp-btn-primary"
+                  className="avp-btn avp-btn-primary min-h-[44px] sm:min-h-[36px]"
                 >
                   <Download className="w-3.5 h-3.5" />
                   <span>

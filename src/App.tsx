@@ -1,16 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  Play,
-  Pause,
-  RotateCcw,
-  Undo2,
-  Redo2,
-  Upload,
-  Sparkles,
-  Mic,
-  Waves,
-} from 'lucide-react';
-import {
   EphemeralDspParams,
   FlickRange,
   PersianWordToken,
@@ -26,38 +15,23 @@ import {
   ProjectSaveStatus,
   WorkspaceTab,
 } from './components/HeaderNav';
-import { WaveformCanvas } from './components/WaveformCanvas';
-import {
-  AsrInlineFeedbackState,
-  TranscriptPanel,
-} from './components/TranscriptPanel';
-import {
-  UnifiedEditorialInspector,
-  type EditorialInspectorFocus,
-} from './components/UnifiedEditorialInspector';
-import { DspControlRack } from './components/DspControlRack';
-import { ProcessingGraphView } from './components/ProcessingGraphView';
-import { StorageBrokerView } from './components/StorageBrokerView';
-import { ShahabLabView } from './components/ShahabLabView';
-import { AsrResearchLabModal } from './components/AsrResearchLabModal';
-import { SpeechSecurityModal } from './components/SpeechSecurityModal';
+import type { AsrInlineFeedbackState } from './components/TranscriptPanel';
+import type { EditorialInspectorFocus } from './components/UnifiedEditorialInspector';
+import type { AuditionDockTabId } from './components/AuditionSideDock';
 import { AuditionTransportBar, WaveformSelectionState } from './components/AuditionTransportBar';
-import { AuditionDockTabId, AuditionSideDock } from './components/AuditionSideDock';
 import {
   formatAsrShortStatus,
   StudioWorkflowStepId,
   WorkflowStageBar,
 } from './components/WorkflowStageBar';
-import { RenderExportModal } from './components/RenderExportModal';
 import { ProjectsHubView } from './components/ProjectsHubView';
-import { NewProjectModal } from './components/NewProjectModal';
-import { SettingsCenterModal } from './components/SettingsCenterModal';
 import {
   applyAccessibilityAttributesToDocument,
   applyThemeToDocument,
   resolveEffectiveTheme,
 } from './utils/themePreference';
 import { isLabModeEnabled } from './utils/labMode';
+import { buildStudioRouteUrl, parseStudioRoute } from './utils/studioRouter';
 import { matchesShortcutBinding } from './utils/shortcuts';
 import { usePWAInstall } from './ui/pwa/PWAInstallControls';
 import {
@@ -77,9 +51,17 @@ import {
 import { buildCompanionTranscriptTokens } from './utils/transcriptDisplay';
 import {
   createSharedLocalModelLifecycleManager,
-  LifecycleManagementModal,
-  LifecycleModalTab,
+  type LifecycleModalTab,
 } from './components/LifecycleManagementModal';
+import { StudioMainWorkspace } from './studio/StudioMainWorkspace';
+import { StudioLabRouterView } from './studio/StudioLabRouterView';
+import { StudioModalsHost } from './studio/StudioModalsHost';
+import { StudioToast } from './studio/components/StudioToast';
+import { useStudioToast } from './studio/hooks/useStudioToast';
+import {
+  shouldCollapseLeftRailByDefault,
+  shouldShowStudioWorkbenchChrome,
+} from './studio/layoutUtils';
 import {
   buildTranscriptSegmentsFromTokens,
   createBrowserLocalProjectStore,
@@ -203,7 +185,10 @@ const DEFAULT_DSP_PARAMS: EphemeralDspParams = {
 };
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState<WorkspaceTab>('studio');
+  const initialRoute = useMemo(() => parseStudioRoute(), []);
+  const [activeTab, setActiveTab] = useState<WorkspaceTab>(() =>
+    initialRoute.isLabMode ? initialRoute.activeTab : 'studio',
+  );
   const [project, setProject] = useState<LoadedStudioProject>(() =>
     buildDefaultPersianPodcastProject(),
   );
@@ -233,8 +218,8 @@ export default function App() {
   const [englishRenderMode, setEnglishRenderMode] =
     useState<EnglishScriptRenderMode>('LATIN_TECHNICAL');
 
-  // Unified Global Settings (Light-First default) & Lab Mode gate
-  const isLabMode = useMemo(() => isLabModeEnabled(), []);
+  // Unified Global Settings (Light-First default) & Reactive Lab Mode
+  const [isLabMode, setIsLabMode] = useState<boolean>(() => initialRoute.isLabMode);
   const { isInstallable: canInstallPwa, install: triggerInstallPwa } = usePWAInstall();
   const [globalSettings, setGlobalSettings] = useState<GlobalSettingsV1>(() => loadGlobalSettings());
   const [inspectorRequestedFocus, setInspectorRequestedFocus] =
@@ -245,7 +230,22 @@ export default function App() {
   const [playheadSec, setPlayheadSec] = useState(0);
   const [zoom, setZoom] = useState(1);
   const [previewingId, setPreviewingId] = useState<string | null>(null);
-  const [statusNotice, setStatusNotice] = useState<string | null>(null);
+  const {
+    toast: studioToast,
+    showToast,
+    dismissToast,
+    setToastPaused,
+  } = useStudioToast(5200);
+  const setStatusNotice = useCallback(
+    (msg: string | null) => {
+      if (!msg) {
+        dismissToast();
+      } else {
+        showToast(msg);
+      }
+    },
+    [dismissToast, showToast],
+  );
   const [detectedSyncOffsetMs, setDetectedSyncOffsetMs] = useState<number>(38.5);
   const [detectedClockDriftPpm, setDetectedClockDriftPpm] = useState<number>(14.2);
   const [selection, setSelection] = useState<WaveformSelectionState | null>(null);
@@ -308,18 +308,10 @@ export default function App() {
   const [settingsSaveStatus, setSettingsSaveStatus] = useState<'saved' | 'saving' | 'error'>('saved');
   const [settingsSaveError, setSettingsSaveError] = useState<string | null>(null);
 
-  const [appView, setAppView] = useState<'projects' | 'studio'>(() => {
-    if (typeof window === 'undefined') return 'projects';
-    const params = new URLSearchParams(window.location.search);
-    if (params.get('view') === 'studio' || params.get('project')) {
-      return 'studio';
-    }
-    return 'projects';
-  });
-  const [activePersistedProjectId, setActivePersistedProjectId] = useState<string | null>(() => {
-    if (typeof window === 'undefined') return null;
-    return new URLSearchParams(window.location.search).get('project');
-  });
+  const [appView, setAppView] = useState<'projects' | 'studio'>(() => initialRoute.appView);
+  const [activePersistedProjectId, setActivePersistedProjectId] = useState<string | null>(
+    () => initialRoute.projectId,
+  );
   const [projectSaveStatus, setProjectSaveStatus] = useState<ProjectSaveStatus>('sample');
   const [hubProjects, setHubProjects] = useState<PersistedProjectSummary[]>([]);
   const [hubLoading, setHubLoading] = useState<boolean>(true);
@@ -329,7 +321,24 @@ export default function App() {
   const [activeWorkflowStep, setActiveWorkflowStep] = useState<StudioWorkflowStepId>('review');
   const [customMarkers, setCustomMarkers] = useState<Array<{ id: string; label: string; startSec: number }>>([]);
   const [mobileStudioPane, setMobileStudioPane] = useState<'center' | 'suggestions' | 'files'>('center');
-  const [leftRailCollapsed, setLeftRailCollapsed] = useState<boolean>(false);
+  const [leftRailCollapsed, setLeftRailCollapsed] = useState<boolean>(() =>
+    typeof window !== 'undefined' && shouldCollapseLeftRailByDefault(window.innerWidth),
+  );
+  const lastCompactBreakpointRef = useRef<boolean>(
+    typeof window !== 'undefined' && shouldCollapseLeftRailByDefault(window.innerWidth),
+  );
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const syncRailOnBreakpoint = () => {
+      const nextCompact = shouldCollapseLeftRailByDefault(window.innerWidth);
+      if (nextCompact !== lastCompactBreakpointRef.current) {
+        lastCompactBreakpointRef.current = nextCompact;
+        setLeftRailCollapsed(nextCompact);
+      }
+    };
+    window.addEventListener('resize', syncRailOnBreakpoint);
+    return () => window.removeEventListener('resize', syncRailOnBreakpoint);
+  }, []);
   const [sideDockTab, setSideDockTab] = useState<AuditionDockTabId>('files');
   const [trackHeightPx, setTrackHeightPx] = useState<number>(82);
 
@@ -359,6 +368,8 @@ export default function App() {
   const [lifecycleInitialTab, setLifecycleInitialTab] = useState<LifecycleModalTab>('health');
   const [asrLabOpen, setAsrLabOpen] = useState(false);
   const [securityOpen, setSecurityOpen] = useState(false);
+  const [shortcutsModalOpen, setShortcutsModalOpen] = useState(false);
+  const [devPortalOpen, setDevPortalOpen] = useState(false);
   const [isTestingLru, setIsTestingLru] = useState(false);
 
   // Mission 07/09/10/Unified Processing state controllers (Light-First default!)
@@ -995,26 +1006,39 @@ export default function App() {
     void refreshProjectsHub();
   }, [refreshProjectsHub]);
 
-  const syncBrowserUrlForView = useCallback((view: 'projects' | 'studio', projectId?: string | null) => {
-    if (typeof window === 'undefined') return;
-    try {
-      const url = new URL(window.location.href);
-      if (view === 'projects') {
-        url.searchParams.delete('view');
-        url.searchParams.delete('project');
-      } else {
-        url.searchParams.set('view', 'studio');
-        if (projectId) url.searchParams.set('project', projectId);
-        else url.searchParams.delete('project');
+  const navigateRoute = useCallback(
+    (
+      target: {
+        appView: 'projects' | 'studio';
+        projectId?: string | null;
+        activeTab?: WorkspaceTab;
+      },
+      options?: { replace?: boolean },
+    ) => {
+      if (typeof window === 'undefined') return;
+      try {
+        const nextUrl = buildStudioRouteUrl({
+          appView: target.appView,
+          projectId: target.projectId,
+          activeTab: target.activeTab,
+          preserveLabMode: isLabMode,
+        });
+        const currentRelative = `${window.location.pathname}${window.location.search}`;
+        if (currentRelative === nextUrl) return;
+        if (options?.replace) {
+          window.history.replaceState({}, '', nextUrl);
+        } else {
+          window.history.pushState({}, '', nextUrl);
+        }
+      } catch {
+        // Ignore restricted history APIs
       }
-      window.history.replaceState({}, '', url.toString());
-    } catch {
-      // Ignore restricted history APIs
-    }
-  }, []);
+    },
+    [isLabMode],
+  );
 
   const handleOpenHubProject = useCallback(
-    async (projectId: string) => {
+    async (projectId: string, options?: { skipHistoryPush?: boolean; replaceHistory?: boolean }) => {
       try {
         setStatusNotice('در حال بارگذاری پروژه از حافظه محلی...');
         const loadedRec = await projectLibraryStore.getProjectWithAudio(projectId);
@@ -1067,7 +1091,12 @@ export default function App() {
         setProjectSaveStatus('saved');
         setAppView('studio');
         setActiveTab('studio');
-        syncBrowserUrlForView('studio', loadedRec.record.id);
+        if (!options?.skipHistoryPush) {
+          navigateRoute(
+            { appView: 'studio', projectId: loadedRec.record.id, activeTab: 'studio' },
+            { replace: options?.replaceHistory },
+          );
+        }
         setStatusNotice(`پروژه «${loadedRec.record.name}» بارگذاری شد.`);
       } catch (err) {
         const msg = err instanceof Error ? err.message : 'باز کردن پروژه ناموفق بود.';
@@ -1078,17 +1107,40 @@ export default function App() {
     [
       globalSettings.playback.loopEnabledByDefault,
       globalSettings.workspace.resetZoomOnProjectOpen,
-      syncBrowserUrlForView,
+      navigateRoute,
     ],
   );
 
-  // Auto-open persisted project if URL contains ?project=<id>
+  // Sync browser Back/Forward history navigation cleanly with Studio & Lab routes
+  const activePersistedProjectIdRef = useRef<string | null>(activePersistedProjectId);
+  activePersistedProjectIdRef.current = activePersistedProjectId;
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const handlePopState = () => {
+      const parsed = parseStudioRoute();
+      setIsLabMode(parsed.isLabMode);
+      setAppView(parsed.appView);
+      setActiveTab(parsed.isLabMode ? parsed.activeTab : 'studio');
+      if (parsed.appView === 'studio' && parsed.projectId) {
+        if (parsed.projectId !== activePersistedProjectIdRef.current) {
+          void handleOpenHubProject(parsed.projectId, { skipHistoryPush: true });
+        }
+      } else if (parsed.appView === 'studio' && !parsed.projectId) {
+        setActivePersistedProjectId(null);
+      }
+    };
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, [handleOpenHubProject]);
+
+  // Auto-open persisted project if URL contains /studio/:id or ?project=<id>
   const initialProjectLoadRef = useRef(false);
   useEffect(() => {
     if (initialProjectLoadRef.current) return;
     initialProjectLoadRef.current = true;
     if (activePersistedProjectId) {
-      void handleOpenHubProject(activePersistedProjectId);
+      void handleOpenHubProject(activePersistedProjectId, { replaceHistory: true });
     }
   }, [activePersistedProjectId, handleOpenHubProject]);
 
@@ -1146,15 +1198,15 @@ export default function App() {
       setNewProjectModalOpen(false);
       setAppView('studio');
       setActiveTab('studio');
-      syncBrowserUrlForView('studio', created.id);
+      navigateRoute({ appView: 'studio', projectId: created.id, activeTab: 'studio' });
       setStatusNotice(`پروژه «${created.name}» ایجاد و ذخیره شد.`);
       void refreshProjectsHub();
     },
     [
       globalSettings.playback.loopEnabledByDefault,
       globalSettings.workspace.resetZoomOnProjectOpen,
+      navigateRoute,
       refreshProjectsHub,
-      syncBrowserUrlForView,
     ],
   );
 
@@ -1218,16 +1270,16 @@ export default function App() {
       }
     }
     setAppView('projects');
-    syncBrowserUrlForView('projects');
+    navigateRoute({ appView: 'projects' });
     void refreshProjectsHub();
   }, [
     activePersistedProjectId,
     customMarkers,
     globalSettings.storage.autoSaveProjectEdits,
+    navigateRoute,
     project.projectName,
     recommendations,
     refreshProjectsHub,
-    syncBrowserUrlForView,
     tokens,
     tracks,
     zoom,
@@ -1242,11 +1294,11 @@ export default function App() {
     }
     setAppView('studio');
     setActiveTab('studio');
-    syncBrowserUrlForView('studio', null);
+    navigateRoute({ appView: 'studio', projectId: null, activeTab: 'studio' });
   }, [
     globalSettings.playback.loopEnabledByDefault,
     globalSettings.workspace.resetZoomOnProjectOpen,
-    syncBrowserUrlForView,
+    navigateRoute,
   ]);
 
   // Debounced autosave to IndexedDB for persisted projects
@@ -4292,9 +4344,19 @@ export default function App() {
       setStatusNotice('بافر صوتی برای رندر و خروجی نهایی در دسترس نیست.');
       return;
     }
-    const { pcm } = resolved;
+    const { targetTrack: primaryTrack, pcm } = resolved;
+    const ctrl = workflowRef.current!;
 
-    await workflowRef.current!.startRender({
+    if (!ctrl.getState().edlSnapshot) {
+      await ctrl.analyzeSpeechEventsAndBuildEdl({
+        trackId: primaryTrack.id,
+        pcmMono: pcm,
+        sampleRate: (project.sampleRate as SampleRate) || 48000,
+        wordTokens: tokens,
+      });
+    }
+
+    await ctrl.startRender({
       pcmChannels: [pcm],
       config,
       resumeCheckpoint: resumeFromCheckpoint ? workflowState.recoverableCheckpoint : null,
@@ -4330,7 +4392,20 @@ export default function App() {
       newProjectModalOpen ||
       lifecycleModalOpen ||
       asrLabOpen ||
-      securityOpen;
+      securityOpen ||
+      shortcutsModalOpen ||
+      devPortalOpen;
+
+    if (
+      !hasOpenModal &&
+      ((e.key === '?' && !e.ctrlKey && !e.metaKey && !e.altKey) ||
+        ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && e.code === 'KeyK'))
+    ) {
+      e.preventDefault();
+      setShortcutsModalOpen(true);
+      return;
+    }
+
     if (hasOpenModal || appView !== 'studio') {
       return;
     }
@@ -4412,6 +4487,9 @@ export default function App() {
   const isFa = currentLocale === 'fa';
   const showSuggestionsPanel = globalSettings.workspace.showSuggestionsPanel;
   const showFilesPanel = globalSettings.workspace.showFilesPanel;
+  const inspectorSide = globalSettings.workspace.inspectorSide ?? 'auto';
+  const inspectorVisualRight = inspectorSide === 'auto' ? isFa : inspectorSide === 'right';
+  const inspectorOnFlexStart = isFa ? inspectorVisualRight : !inspectorVisualRight;
   const hasAudioLoaded = tracks.length > 0 && totalDurationSec > 0;
   const hasTranscriptWords = tokens.length > 0;
   const pendingSuggestionsCount = recommendations.filter((r) => r.status === 'Pending').length;
@@ -4451,27 +4529,34 @@ export default function App() {
     },
   ];
 
+  const showStudioChrome = shouldShowStudioWorkbenchChrome(isLabMode, activeTab);
+
   const handleSelectWorkflowStep = (step: StudioWorkflowStepId) => {
     setActiveWorkflowStep(step);
     if (step === 'file') {
       setMobileStudioPane('files');
       setLeftRailCollapsed(false);
       setSideDockTab('files');
-      setTrackHeightPx(124);
     } else if (step === 'transcribe') {
       setMobileStudioPane('center');
-      setTrackHeightPx(50);
     } else if (step === 'review') {
       setMobileStudioPane('suggestions');
       setInspectorRequestedFocus('unified');
-      setTrackHeightPx(82);
     } else if (step === 'export') {
       setRenderModalOpen(true);
     }
   };
 
   const handleOpenDeveloperViewFromSettings = (
-    target: 'graph' | 'storage' | 'shahab' | 'asr-lab' | 'security' | 'lifecycle' | 'companion',
+    target:
+      | 'graph'
+      | 'storage'
+      | 'shahab'
+      | 'asr-lab'
+      | 'security'
+      | 'dev-portal'
+      | 'lifecycle'
+      | 'companion',
   ) => {
     setSettingsModalOpen(false);
     if (target === 'lifecycle') {
@@ -4485,10 +4570,13 @@ export default function App() {
     } else if (target === 'graph' || target === 'storage' || target === 'shahab') {
       setAppView('studio');
       setActiveTab(target);
+      navigateRoute({ appView: 'studio', projectId: activePersistedProjectId, activeTab: target });
     } else if (target === 'asr-lab') {
       setAsrLabOpen(true);
     } else if (target === 'security') {
       setSecurityOpen(true);
+    } else if (target === 'dev-portal') {
+      setDevPortalOpen(true);
     }
   };
 
@@ -4520,6 +4608,7 @@ export default function App() {
           onToggleTheme={handleToggleThemeQuick}
           onToggleLocale={() => handleToggleLocaleQuick()}
           onOpenSettings={() => setSettingsModalOpen(true)}
+          onOpenShortcuts={() => setShortcutsModalOpen(true)}
           onOpenLifecycleModal={() => {
             setLifecycleInitialTab('health');
             setLifecycleModalOpen(true);
@@ -4527,6 +4616,10 @@ export default function App() {
         />
       ) : (
         <>
+          <a href="#main-workspace" className="avp-skip-link">
+            {isFa ? 'پرش به فضای کاری اصلی' : 'Skip to main workspace'}
+          </a>
+
           {/* Hidden audio file input preserved for direct Studio import & E2E */}
           <input
             ref={fileInputRef}
@@ -4547,10 +4640,25 @@ export default function App() {
             saveStatus={projectSaveStatus}
             activeTab={isLabMode ? activeTab : 'studio'}
             isLabMode={isLabMode}
-            onSelectTab={(tab) => setActiveTab(isLabMode ? tab : 'studio')}
+            onSelectTab={(tab) => {
+              const nextTab = isLabMode ? tab : 'studio';
+              setActiveTab(nextTab);
+              navigateRoute({
+                appView: 'studio',
+                projectId: activePersistedProjectId,
+                activeTab: nextTab,
+              });
+            }}
             onBackToProjects={() => void handleReturnToProjectsHub()}
             onOpenExport={() => setRenderModalOpen(true)}
             onOpenSettings={() => setSettingsModalOpen(true)}
+            onOpenShortcuts={() => setShortcutsModalOpen(true)}
+            onOpenLabModal={(target) => {
+              if (!isLabMode) return;
+              if (target === 'asr-lab') setAsrLabOpen(true);
+              else if (target === 'security') setSecurityOpen(true);
+              else if (target === 'dev-portal') setDevPortalOpen(true);
+            }}
             onOpenLifecycleModal={(tab) => {
               setLifecycleInitialTab(tab ?? 'health');
               setLifecycleModalOpen(true);
@@ -4559,6 +4667,8 @@ export default function App() {
             workflowSteps={headerWorkflowSteps}
             activeWorkflowStep={activeWorkflowStep}
             onSelectWorkflowStep={handleSelectWorkflowStep}
+            canInstallPwa={canInstallPwa}
+            onTriggerInstallPwa={() => void triggerInstallPwa()}
             asrStatusLabel={asrStatusLabel}
             asrReady={asrReady}
             canUndo={historyRef.current.canUndo()}
@@ -4574,544 +4684,483 @@ export default function App() {
             onToggleLocale={handleToggleLocaleQuick}
           />
 
-          {/* 2. Mobile-only Compact Stepper + Honest Failure Banner (Zero desktop chrome tax) */}
-          <WorkflowStageBar
-            workflowState={workflowState}
-            executionMode={executionMode}
-            cloudProviderStatusLabel={
-              isFa ? 'سیاست ۱۰۰٪ محلی فعال' : '100% Local-Only Policy'
-            }
-            cloudAsrConfigured={cloudAsrConfigured}
-            hasAudioLoaded={hasAudioLoaded}
-            hasTranscriptWords={hasTranscriptWords}
-            pendingSuggestionsCount={pendingSuggestionsCount}
-            acceptedSuggestionsCount={acceptedSuggestionsCount}
-            activeStep={activeWorkflowStep}
-            onSelectStep={handleSelectWorkflowStep}
-            activeFailure={activeFailure}
-            canInstallPwa={canInstallPwa}
-            onTriggerInstallPwa={() => void triggerInstallPwa()}
-            onDismissFailure={() => setActiveFailure(null)}
-            onRecoverFailure={() => {
-              setLifecycleInitialTab('model');
-              setLifecycleModalOpen(true);
-            }}
-            onImportAudioClick={() => fileInputRef.current?.click()}
-            onOpenLifecycleModal={(tab) => {
-              setLifecycleInitialTab(tab ?? 'health');
-              setLifecycleModalOpen(true);
-            }}
-            persianDigits={globalSettings.language.persianDigits}
-          />
-
-          {/* Inline Full-Bleed Status Strip (only when active) */}
-          {statusNotice && (
-            <div
-              role="status"
-              data-testid="studio-status-notice"
-              className="px-4 py-1.5 border-b border-[var(--avp-accent)]/25 bg-[var(--avp-accent-soft)]/70 text-xs text-[var(--avp-text)] flex items-center justify-between gap-3 shrink-0"
-            >
-              <span className="truncate">{statusNotice}</span>
-              <button
-                type="button"
-                onClick={() => setStatusNotice(null)}
-                className="text-[var(--avp-accent-text)] font-medium hover:underline cursor-pointer shrink-0"
-              >
-                {isFa ? 'بستن' : 'Dismiss'}
-              </button>
-            </div>
+          {/* 2. Honest User-Facing Failure Banner (only when an actual reliability failure occurred) */}
+          {showStudioChrome && (
+            <WorkflowStageBar
+              workflowState={workflowState}
+              cloudAsrConfigured={cloudAsrConfigured}
+              activeFailure={activeFailure}
+              onDismissFailure={() => setActiveFailure(null)}
+              onRecoverFailure={() => {
+                setLifecycleInitialTab('model');
+                setLifecycleModalOpen(true);
+              }}
+              onOpenLifecycleModal={(tab) => {
+                setLifecycleInitialTab(tab ?? 'health');
+                setLifecycleModalOpen(true);
+              }}
+            />
           )}
 
-          {/* 3. Main Edge-to-Edge Split-Pane Studio Workspace (Reserved bottom space for docked Transport) */}
-          <main className="flex-1 min-h-0 w-full flex flex-col pb-[108px] sm:pb-[64px] lg:pb-[56px]">
-            {(!isLabMode || activeTab === 'studio') && (
-              <>
-                {/* Mobile/Tablet Compact Pane Switcher */}
-                <div className="flex lg:hidden items-center px-3 py-1.5 border-b border-[var(--avp-border)] bg-[var(--avp-surface)]">
-                  <div className="avp-segmented w-full">
-                    {(
-                      [
-                        { id: 'center', label: isFa ? 'تایملاین و متن' : 'Timeline & Text' },
-                        { id: 'suggestions', label: isFa ? 'پیشنهادها' : 'Suggestions' },
-                        { id: 'files', label: isFa ? 'فایل‌ها و افکت' : 'Files & DSP' },
-                      ] as const
-                    ).map((tab) => (
-                      <button
-                        key={tab.id}
-                        type="button"
-                        onClick={() => setMobileStudioPane(tab.id)}
-                        aria-pressed={mobileStudioPane === tab.id}
-                        className="avp-segmented-item flex-1"
-                      >
-                        {tab.label}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                {/* Full-Bleed Native Desktop 3-Pane Split Workspace (Hairline 1px Dividers)
-                    Start/Right: Unified AI & Editorial Inspector
-                    Center (flex-1 dominant): Audio Timeline + 6px Interactive Split Sash + Editorial Transcript
-                    End/Left: Files, Tracks, Effects & Markers */}
-                <div className="flex-1 min-h-0 flex flex-col lg:flex-row">
-                  {/* Pane 1 (Right in RTL): Unified AI & Editorial Inspector */}
-                  {showSuggestionsPanel && (
-                    <div
-                      className={`lg:w-[288px] xl:w-[348px] shrink-0 min-w-0 lg:h-full lg:border-e border-[var(--avp-border)] bg-[var(--avp-surface)] ${
-                        mobileStudioPane === 'suggestions'
-                          ? 'flex flex-col'
-                          : 'hidden lg:flex lg:flex-col'
-                      }`}
-                    >
-                      <UnifiedEditorialInspector
-                        recommendations={recommendations}
-                        selectedRecId={selectedRecId}
-                        previewingId={previewingId}
-                        tracks={tracks}
-                        assets={project.assets}
-                        pcmSources={project.pcmSources}
-                        tokens={tokens}
-                        sampleRate={project.sampleRate}
-                        totalDurationSec={totalDurationSec}
-                        locale={currentLocale}
-                        persianDigits={globalSettings.language.persianDigits}
-                        timecodeFormat={globalSettings.language.timecodeFormat}
-                        contextBeforeSec={globalSettings.playback.contextBeforeSec}
-                        contextAfterSec={globalSettings.playback.contextAfterSec}
-                        defaultCategory={globalSettings.suggestions.defaultCategory}
-                        defaultSort={globalSettings.suggestions.defaultSort}
-                        showContextTranscript={globalSettings.suggestions.showContextTranscript}
-                        confirmBeforeApply={globalSettings.suggestions.confirmBeforeApply}
-                        autoExpandDetails={globalSettings.suggestions.autoExpandDetails}
-                        focusNextAfterReview={globalSettings.suggestions.focusNextAfterReview}
-                        speechEventResult={workflowState.speechEventResult}
-                        edlSnapshot={workflowState.edlSnapshot}
-                        isAnalyzingEdl={workflowState.isAnalyzingEvents}
-                        canUndoEdl={workflowState.edlUndoStack.length > 0}
-                        canRedoEdl={workflowState.edlRedoStack.length > 0}
-                        requestedFocus={inspectorRequestedFocus}
-                        onSelectSuggestion={(id) => setSelectedRecId(id)}
-                        onPreviewSuggestion={handlePreviewRecommendation}
-                        onPreviewSuggestionWithContext={handlePreviewSuggestionWithContext}
-                        onAcceptSuggestion={handleAcceptRecommendation}
-                        onApplyApprovedBatch={handleApplyApprovedBatch}
-                        onRejectSuggestion={handleRejectRecommendation}
-                        onNudgeSuggestionBoundary={handleNudgeBoundary}
-                        onJumpToRange={(startSec, endSec, trackId) => {
-                          setSelection(
-                            clampSelectionRange({
-                              startSec,
-                              endSec,
-                              trackId,
-                              scope: 'all',
-                            }),
-                          );
-                          handleSeekSec(startSec);
-                        }}
-                        onRescanDeepDisfluencies={handleRescanDeepDisfluencies}
-                        onSoftenBreathsAndCoughs={handleSoftenBreathsAndCoughs}
-                        onRunEdlAnalysis={handleRunMissionEdlAnalysis}
-                        onApproveEdlProposal={(proposalId) => {
-                          if (isReadOnlyLocked) {
-                            setStatusNotice('ویرایش غیرفعال است: پروژه بدون قفل انحصاری در حالت فقط‌خواندنی قرار دارد.');
-                            return;
-                          }
-                          const r = workflowRef.current!.applyHumanDecision({
-                            action: 'APPROVE',
-                            proposalId,
-                          });
-                          if (!r.ok && r.failure) {
-                            setStatusNotice(`تأیید پیشنهاد مسدود شد: ${r.failure.message}`);
-                          }
-                        }}
-                        onRejectEdlProposal={(proposalId) => {
-                          if (isReadOnlyLocked) {
-                            setStatusNotice('ویرایش غیرفعال است: پروژه بدون قفل انحصاری در حالت فقط‌خواندنی قرار دارد.');
-                            return;
-                          }
-                          const r = workflowRef.current!.applyHumanDecision({
-                            action: 'REJECT',
-                            proposalId,
-                          });
-                          if (!r.ok && r.failure) {
-                            setStatusNotice(`رد پیشنهاد ناموفق بود: ${r.failure.message}`);
-                          }
-                        }}
-                        onRequestReviewEdlProposal={(proposalId) => {
-                          if (isReadOnlyLocked) {
-                            setStatusNotice('ویرایش غیرفعال است: پروژه بدون قفل انحصاری در حالت فقط‌خواندنی قرار دارد.');
-                            return;
-                          }
-                          const r = workflowRef.current!.applyHumanDecision({
-                            action: 'REQUEST_REVIEW',
-                            proposalId,
-                          });
-                          if (!r.ok && r.failure) {
-                            setStatusNotice(`ثبت درخواست بازبینی ناموفق بود: ${r.failure.message}`);
-                          }
-                        }}
-                        onReviseEdlBoundaryMs={(proposalId, dStartMs, dEndMs) => {
-                          if (isReadOnlyLocked) {
-                            setStatusNotice('ویرایش غیرفعال است: پروژه بدون قفل انحصاری در حالت فقط‌خواندنی قرار دارد.');
-                            return;
-                          }
-                          const prop = workflowState.edlSnapshot?.proposals.find(
-                            (p) => p.proposalId === proposalId,
-                          );
-                          if (!prop) return;
-                          const activeRange = prop.proposedRange ?? prop.originalRange;
-                          if (!activeRange) return;
-                          const deltaStart = Math.round((dStartMs / 1000) * project.sampleRate);
-                          const deltaEnd = Math.round((dEndMs / 1000) * project.sampleRate);
-                          const r = workflowRef.current!.reviseProposalBoundaries({
-                            proposalId,
-                            newStartSample: Math.max(0, activeRange.startSample + deltaStart),
-                            newEndSample: Math.min(
-                              workflowState.sourceAudio?.totalSamples ?? activeRange.endSample + deltaEnd,
-                              activeRange.endSample + deltaEnd,
-                            ),
-                          });
-                          if (!r.ok && r.failure) {
-                            setStatusNotice(`تغییر مرز پیشنهاد مجاز نیست: ${r.failure.message}`);
-                          }
-                        }}
-                        onPreviewEdlProposal={handlePreviewEdlProposal}
-                        onSeekSec={handleSeekSec}
-                        onUndoEdl={() => {
-                          if (isReadOnlyLocked) {
-                            setStatusNotice('ویرایش غیرفعال است: پروژه بدون قفل انحصاری در حالت فقط‌خواندنی قرار دارد.');
-                            return;
-                          }
-                          workflowRef.current!.undoEdlDecision();
-                        }}
-                        onRedoEdl={() => {
-                          if (isReadOnlyLocked) {
-                            setStatusNotice('ویرایش غیرفعال است: پروژه بدون قفل انحصاری در حالت فقط‌خواندنی قرار دارد.');
-                            return;
-                          }
-                          workflowRef.current!.redoEdlDecision();
-                        }}
-                        onApplyLinguisticBatchUpdates={handleBatchUpdateTokenDisplayTexts}
-                      />
-                    </div>
-                  )}
-
-                  {/* Pane 2 (Center Dominant): Locked Split Container -> Audio Timeline + 6px Split Sash + Editorial Transcript */}
-                  <div
-                    className={`flex-1 min-w-0 lg:h-full lg:overflow-hidden bg-[var(--avp-surface)] ${
-                      mobileStudioPane === 'center' ? 'flex flex-col' : 'hidden lg:flex lg:flex-col'
-                    }`}
-                  >
-                    <WaveformCanvas
-                      tracks={tracks}
-                      assets={project.assets}
-                      pcmSources={project.pcmSources}
-                      recommendations={recommendations}
-                      selectedRecId={selectedRecId}
-                      playheadSec={playheadSec}
-                      totalDurationSec={totalDurationSec}
-                      zoom={zoom}
-                      locale={currentLocale}
-                      showGrid={globalSettings.appearance.showWaveformGrid}
-                      showRuler={globalSettings.workspace.showTimelineRuler}
-                      showMarkers={globalSettings.workspace.showTimelineMarkers}
-                      showEditRegions={globalSettings.workspace.showEditRegions}
-                      markers={auditionMarkers}
-                      onZoomChange={setZoom}
-                      onSeekSec={handleSeekSec}
-                      onToggleTrackMute={handleToggleTrackMute}
-                      onToggleTrackSolo={handleToggleTrackSolo}
-                      onSelectRecommendation={(id) => setSelectedRecId(id)}
-                      onAddMarkerAtPlayhead={handleAddMarkerAtPlayhead}
-                      onSplitAtPlayhead={handleSplitAtPlayhead}
-                      onCutWaveformRange={handleCutWaveformRange}
-                      detectedSyncOffsetMs={detectedSyncOffsetMs}
-                      detectedClockDriftPpm={detectedClockDriftPpm}
-                      onAutoAlignSyncedTracks={handleAutoAlignSyncedTracks}
-                      onNudgeSyncedTracksMs={handleNudgeSyncedTracksMs}
-                      selection={selection}
-                      onSelectionChange={(nextSel) => setSelection(clampSelectionRange(nextSel))}
-                      onPlaySelectionRange={(sel) => handlePlaySelectionRange(clampSelectionRange(sel))}
-                      trackHeightPx={trackHeightPx}
-                      onTrackHeightChange={setTrackHeightPx}
-                    />
-
-                    {/* 6px Interactive Horizontal Split Sash (P0-3) */}
-                    <div
-                      role="separator"
-                      aria-orientation="horizontal"
-                      aria-label={isFa ? 'تغییر ارتفاع تایملاین و بوم متن' : 'Resize timeline and transcript split'}
-                      data-testid="center-split-sash"
-                      onMouseDown={handleStartSplitSashDrag}
-                      onDoubleClick={() => setTrackHeightPx(82)}
-                      title={
-                        isFa
-                          ? 'کشیدن برای تنظیم نسبت تایملاین و متن (دابل‌کلیک: بازنشانی به 30/70)'
-                          : 'Drag to resize timeline/transcript split (Double-click: reset 30/70)'
-                      }
-                      className="hidden lg:flex avp-split-sash"
-                    >
-                      <span className="avp-split-sash-pill" />
-                    </div>
-
-                    <TranscriptPanel
-                      tokens={tokens}
-                      tracks={tracks}
-                      pcmSources={project.pcmSources}
-                      sampleRate={project.sampleRate}
-                      playheadSec={playheadSec}
-                      totalDurationSec={totalDurationSec}
-                      locale={currentLocale}
-                      persianDigits={globalSettings.language.persianDigits}
-                      timecodeFormat={globalSettings.language.timecodeFormat}
-                      showTimestamps={true}
-                      autoFollowPlayhead={true}
-                      timelineSelection={selection}
-                      onSyncTimelineSelection={(nextSel) => setSelection(clampSelectionRange(nextSel))}
-                      onPlaySelectionRange={(sel) => handlePlaySelectionRange(clampSelectionRange(sel))}
-                      isTranscribingAsr={isTranscribingAsr}
-                      hasBrowserInstalledModel={hasBrowserInstalledModel}
-                      shahabRuntimeStatus={shahabRuntimeStatus}
-                      isInstallingBrowserModel={isInstallingBrowserModel}
-                      browserModelInstallPct={browserModelInstallPct}
-                      executionMode={executionMode}
-                      cloudAsrConfigured={cloudAsrConfigured}
-                      projectSessionNonce={projectSessionNonce}
-                      asrInlineFeedback={asrInlineFeedback}
-                      onDismissAsrInlineFeedback={() => setAsrInlineFeedback(null)}
-                      onInstallBrowserPersianModel={handleInstallBrowserPersianModel}
-                      onLoadAndTranscribeSamplePersianAudio={handleLoadAndTranscribeSamplePersianAudio}
-                      onRunAcousticSegmentation={handleRunAcousticSegmentation}
-                      onOpenLocalModelInstaller={() => {
-                        setLifecycleInitialTab('model');
-                        setLifecycleModalOpen(true);
-                      }}
-                      onSwitchToLocalExecutionMode={() => handleChangeExecutionMode('LOCAL')}
-                      onSeekSec={handleSeekSec}
-                      onCutSelectedWords={handleCutSelectedWords}
-                      onUpdateTokenDisplayText={handleUpdateTokenDisplayText}
-                      onRunPersianAsr={handleRunPersianAsr}
-                      onRunForcedAlignment={handleRunForcedAlignment}
-                      onRestoreProsodicPunctuation={handleRestoreProsodicPunctuation}
-                      onConvertColloquialToFormal={handleConvertColloquialToFormal}
-                      onNormalizeNumbersAndCompounds={handleNormalizeNumbersAndCompounds}
-                      onRedactSelectedWords={handleRedactSelectedWords}
-                      prosodyAndChaptersReport={prosodyAndChaptersReport}
-                      onApplyCustomLexicon={handleApplyCustomLexicon}
-                      onWsolaTimeStretchSelectedWords={handleWsolaTimeStretchSelectedWords}
-                      onPunchInSpectralMatchSelectedWords={handlePunchInSpectralMatchSelectedWords}
-                      onOptimizeTrilingualAsr={handleOptimizeTrilingualAsr}
-                      englishRenderMode={englishRenderMode}
-                    />
-                  </div>
-
-                  {/* Pane 3 (Left in RTL): Collapsible & Adaptive Files / DSP Effects / History Rail */}
-                  {showFilesPanel && (
-                    <div
-                      className={`${
-                        leftRailCollapsed
-                          ? 'lg:w-[48px]'
-                          : sideDockTab === 'effects'
-                            ? 'lg:w-[264px] xl:w-[312px]'
-                            : 'lg:w-[232px] xl:w-[248px]'
-                      } shrink-0 min-w-0 lg:h-full lg:border-s border-[var(--avp-border)] bg-[var(--avp-surface)] transition-[width] duration-150 flex flex-col`}
-                    >
-                      <AuditionSideDock
-                        tracks={tracks}
-                        assets={project.assets}
-                        sampleRate={project.sampleRate}
-                        history={historyRef.current.getHistory()}
-                        markers={auditionMarkers}
-                        locale={currentLocale}
-                        persianDigits={globalSettings.language.persianDigits}
-                        timecodeFormat={globalSettings.language.timecodeFormat}
-                        collapsed={leftRailCollapsed}
-                        activeDockTab={sideDockTab}
-                        onDockTabChange={setSideDockTab}
-                        onToggleCollapse={() => setLeftRailCollapsed((v) => !v)}
-                        onImportAudioClick={() => fileInputRef.current?.click()}
-                        onSeekSec={handleSeekSec}
-                        onToggleTrackMute={handleToggleTrackMute}
-                        onToggleTrackSolo={handleToggleTrackSolo}
-                        onAddMarker={handleAddMarkerAtPlayhead}
-                        onRenameMarker={handleRenameMarker}
-                        onDeleteMarker={handleDeleteMarker}
-                        onSelectTrackRange={(trackId, startSec, endSec) => {
-                          setSelection({
-                            startSec: Number(startSec.toFixed(2)),
-                            endSec: Number(endSec.toFixed(2)),
-                            trackId,
-                            scope: 'track',
-                          });
-                          handleSeekSec(startSec);
-                        }}
-                        dspRackNode={
-                          <DspControlRack
-                            ephemeralParams={ephemeralDsp}
-                            committedParams={committedDsp}
-                            isGestureActive={isGestureActive}
-                            sampleRate={project.sampleRate}
-                            locale={currentLocale}
-                            persianDigits={globalSettings.language.persianDigits}
-                            history={historyRef.current.getHistory()}
-                            acousticAdvisor={acousticAdvisor}
-                            eqResponseCurveDb={eqResponseCurveDb}
-                            phaseDiagnostic={phaseDiagnostic}
-                            onEphemeralChange={handleEphemeralDspChange}
-                            onCommitGesture={handleCommitDspGesture}
-                            onResetDefaults={handleResetDsp}
-                            onApplyAcousticAdvisorPreset={handleApplyAcousticAdvisorPreset}
-                            onApply8BandPersianVoiceEq={handleApply8BandPersianVoiceEq}
-                          />
-                        }
-                      />
-                    </div>
-                  )}
-                </div>
-              </>
-            )}
-
-            {isLabMode && activeTab === 'graph' && (
-              <div className="flex-1 min-h-0 overflow-y-auto max-w-[1440px] w-full mx-auto px-4 py-4">
-                <ProcessingGraphView
-                  nodes={graphNodes}
-                  edges={defaultGraph.edges}
+          {/* 3. Main Edge-to-Edge Split-Pane Studio Workspace or Dedicated Lab View */}
+          <main
+            id="main-workspace"
+            tabIndex={-1}
+            className={`flex-1 min-h-0 w-full flex flex-col focus:outline-none ${
+              showStudioChrome ? 'pb-[56px] sm:pb-[54px] lg:pb-[56px]' : 'pb-4'
+            }`}
+          >
+            {showStudioChrome ? (
+              <StudioMainWorkspace
+                isFa={isFa}
+                mobileStudioPane={mobileStudioPane}
+                onChangeMobileStudioPane={setMobileStudioPane}
+                showSuggestionsPanel={showSuggestionsPanel}
+                showFilesPanel={showFilesPanel}
+                inspectorOnFlexStart={inspectorOnFlexStart}
+                leftRailCollapsed={leftRailCollapsed}
+                sideDockTab={sideDockTab}
+                onStartSplitSashDrag={handleStartSplitSashDrag}
+                onResetTrackHeight={() => setTrackHeightPx(82)}
+                inspectorProps={{
+                  recommendations,
+                  selectedRecId,
+                  previewingId,
+                  tracks,
+                  assets: project.assets,
+                  pcmSources: project.pcmSources,
+                  tokens,
+                  sampleRate: project.sampleRate,
+                  totalDurationSec,
+                  locale: currentLocale,
+                  persianDigits: globalSettings.language.persianDigits,
+                  timecodeFormat: globalSettings.language.timecodeFormat,
+                  contextBeforeSec: globalSettings.playback.contextBeforeSec,
+                  contextAfterSec: globalSettings.playback.contextAfterSec,
+                  defaultCategory: globalSettings.suggestions.defaultCategory,
+                  defaultSort: globalSettings.suggestions.defaultSort,
+                  showContextTranscript: globalSettings.suggestions.showContextTranscript,
+                  confirmBeforeApply: globalSettings.suggestions.confirmBeforeApply,
+                  autoExpandDetails: globalSettings.suggestions.autoExpandDetails,
+                  focusNextAfterReview: globalSettings.suggestions.focusNextAfterReview,
+                  speechEventResult: workflowState.speechEventResult,
+                  edlSnapshot: workflowState.edlSnapshot,
+                  isAnalyzingEdl: workflowState.isAnalyzingEvents,
+                  canUndoEdl: workflowState.edlUndoStack.length > 0,
+                  canRedoEdl: workflowState.edlRedoStack.length > 0,
+                  requestedFocus: inspectorRequestedFocus,
+                  onSelectSuggestion: (id) => setSelectedRecId(id),
+                  onPreviewSuggestion: handlePreviewRecommendation,
+                  onPreviewSuggestionWithContext: handlePreviewSuggestionWithContext,
+                  onAcceptSuggestion: handleAcceptRecommendation,
+                  onApplyApprovedBatch: handleApplyApprovedBatch,
+                  onRejectSuggestion: handleRejectRecommendation,
+                  onNudgeSuggestionBoundary: handleNudgeBoundary,
+                  onJumpToRange: (startSec, endSec, trackId) => {
+                    setSelection(
+                      clampSelectionRange({
+                        startSec,
+                        endSec,
+                        trackId,
+                        scope: 'all',
+                      }),
+                    );
+                    handleSeekSec(startSec);
+                  },
+                  onRescanDeepDisfluencies: handleRescanDeepDisfluencies,
+                  onSoftenBreathsAndCoughs: handleSoftenBreathsAndCoughs,
+                  onRunEdlAnalysis: handleRunMissionEdlAnalysis,
+                  onApproveEdlProposal: (proposalId) => {
+                    if (isReadOnlyLocked) {
+                      setStatusNotice('ویرایش غیرفعال است: پروژه بدون قفل انحصاری در حالت فقط‌خواندنی قرار دارد.');
+                      return;
+                    }
+                    const r = workflowRef.current!.applyHumanDecision({
+                      action: 'APPROVE',
+                      proposalId,
+                    });
+                    if (!r.ok && r.failure) {
+                      setStatusNotice(`تأیید پیشنهاد مسدود شد: ${r.failure.message}`);
+                    }
+                  },
+                  onRejectEdlProposal: (proposalId) => {
+                    if (isReadOnlyLocked) {
+                      setStatusNotice('ویرایش غیرفعال است: پروژه بدون قفل انحصاری در حالت فقط‌خواندنی قرار دارد.');
+                      return;
+                    }
+                    const r = workflowRef.current!.applyHumanDecision({
+                      action: 'REJECT',
+                      proposalId,
+                    });
+                    if (!r.ok && r.failure) {
+                      setStatusNotice(`رد پیشنهاد ناموفق بود: ${r.failure.message}`);
+                    }
+                  },
+                  onRequestReviewEdlProposal: (proposalId) => {
+                    if (isReadOnlyLocked) {
+                      setStatusNotice('ویرایش غیرفعال است: پروژه بدون قفل انحصاری در حالت فقط‌خواندنی قرار دارد.');
+                      return;
+                    }
+                    const r = workflowRef.current!.applyHumanDecision({
+                      action: 'REQUEST_REVIEW',
+                      proposalId,
+                    });
+                    if (!r.ok && r.failure) {
+                      setStatusNotice(`ثبت درخواست بازبینی ناموفق بود: ${r.failure.message}`);
+                    }
+                  },
+                  onReviseEdlBoundaryMs: (proposalId, dStartMs, dEndMs) => {
+                    if (isReadOnlyLocked) {
+                      setStatusNotice('ویرایش غیرفعال است: پروژه بدون قفل انحصاری در حالت فقط‌خواندنی قرار دارد.');
+                      return;
+                    }
+                    const prop = workflowState.edlSnapshot?.proposals.find(
+                      (p) => p.proposalId === proposalId,
+                    );
+                    if (!prop) return;
+                    const activeRange = prop.proposedRange ?? prop.originalRange;
+                    if (!activeRange) return;
+                    const deltaStart = Math.round((dStartMs / 1000) * project.sampleRate);
+                    const deltaEnd = Math.round((dEndMs / 1000) * project.sampleRate);
+                    const r = workflowRef.current!.reviseProposalBoundaries({
+                      proposalId,
+                      newStartSample: Math.max(0, activeRange.startSample + deltaStart),
+                      newEndSample: Math.min(
+                        workflowState.sourceAudio?.totalSamples ?? activeRange.endSample + deltaEnd,
+                        activeRange.endSample + deltaEnd,
+                      ),
+                    });
+                    if (!r.ok && r.failure) {
+                      setStatusNotice(`تغییر مرز پیشنهاد مجاز نیست: ${r.failure.message}`);
+                    }
+                  },
+                  onPreviewEdlProposal: handlePreviewEdlProposal,
+                  onSeekSec: handleSeekSec,
+                  onUndoEdl: () => {
+                    if (isReadOnlyLocked) {
+                      setStatusNotice('ویرایش غیرفعال است: پروژه بدون قفل انحصاری در حالت فقط‌خواندنی قرار دارد.');
+                      return;
+                    }
+                    workflowRef.current!.undoEdlDecision();
+                  },
+                  onRedoEdl: () => {
+                    if (isReadOnlyLocked) {
+                      setStatusNotice('ویرایش غیرفعال است: پروژه بدون قفل انحصاری در حالت فقط‌خواندنی قرار دارد.');
+                      return;
+                    }
+                    workflowRef.current!.redoEdlDecision();
+                  },
+                  onApplyLinguisticBatchUpdates: handleBatchUpdateTokenDisplayTexts,
+                }}
+                waveformProps={{
+                  tracks,
+                  assets: project.assets,
+                  pcmSources: project.pcmSources,
+                  recommendations,
+                  selectedRecId,
+                  playheadSec,
+                  totalDurationSec,
+                  zoom,
+                  locale: currentLocale,
+                  showGrid: globalSettings.appearance.showWaveformGrid,
+                  showRuler: globalSettings.workspace.showTimelineRuler,
+                  showMarkers: globalSettings.workspace.showTimelineMarkers,
+                  showEditRegions: globalSettings.workspace.showEditRegions,
+                  markers: auditionMarkers,
+                  onZoomChange: setZoom,
+                  onSeekSec: handleSeekSec,
+                  onToggleTrackMute: handleToggleTrackMute,
+                  onToggleTrackSolo: handleToggleTrackSolo,
+                  onSelectRecommendation: (id) => setSelectedRecId(id),
+                  onAddMarkerAtPlayhead: handleAddMarkerAtPlayhead,
+                  onSplitAtPlayhead: handleSplitAtPlayhead,
+                  onCutWaveformRange: handleCutWaveformRange,
+                  detectedSyncOffsetMs,
+                  detectedClockDriftPpm,
+                  onAutoAlignSyncedTracks: handleAutoAlignSyncedTracks,
+                  onNudgeSyncedTracksMs: handleNudgeSyncedTracksMs,
+                  selection,
+                  onSelectionChange: (nextSel) => setSelection(clampSelectionRange(nextSel)),
+                  onPlaySelectionRange: (sel) => handlePlaySelectionRange(clampSelectionRange(sel)),
+                  trackHeightPx,
+                  onTrackHeightChange: setTrackHeightPx,
+                }}
+                transcriptProps={{
+                  tokens,
+                  tracks,
+                  pcmSources: project.pcmSources,
+                  sampleRate: project.sampleRate,
+                  playheadSec,
+                  totalDurationSec,
+                  locale: currentLocale,
+                  persianDigits: globalSettings.language.persianDigits,
+                  timecodeFormat: globalSettings.language.timecodeFormat,
+                  showTimestamps: true,
+                  autoFollowPlayhead: true,
+                  timelineSelection: selection,
+                  onSyncTimelineSelection: (nextSel) => setSelection(clampSelectionRange(nextSel)),
+                  onPlaySelectionRange: (sel) => handlePlaySelectionRange(clampSelectionRange(sel)),
+                  isTranscribingAsr,
+                  hasBrowserInstalledModel,
+                  shahabRuntimeStatus,
+                  isInstallingBrowserModel,
+                  browserModelInstallPct,
+                  executionMode,
+                  cloudAsrConfigured,
+                  projectSessionNonce,
+                  asrInlineFeedback,
+                  onDismissAsrInlineFeedback: () => setAsrInlineFeedback(null),
+                  onInstallBrowserPersianModel: handleInstallBrowserPersianModel,
+                  onLoadAndTranscribeSamplePersianAudio: handleLoadAndTranscribeSamplePersianAudio,
+                  onRunAcousticSegmentation: handleRunAcousticSegmentation,
+                  onOpenLocalModelInstaller: () => {
+                    setLifecycleInitialTab('model');
+                    setLifecycleModalOpen(true);
+                  },
+                  onSwitchToLocalExecutionMode: () => handleChangeExecutionMode('LOCAL'),
+                  onSeekSec: handleSeekSec,
+                  onCutSelectedWords: handleCutSelectedWords,
+                  onUpdateTokenDisplayText: handleUpdateTokenDisplayText,
+                  onRunPersianAsr: handleRunPersianAsr,
+                  onRunForcedAlignment: handleRunForcedAlignment,
+                  onRestoreProsodicPunctuation: handleRestoreProsodicPunctuation,
+                  onConvertColloquialToFormal: handleConvertColloquialToFormal,
+                  onNormalizeNumbersAndCompounds: handleNormalizeNumbersAndCompounds,
+                  onRedactSelectedWords: handleRedactSelectedWords,
+                  prosodyAndChaptersReport,
+                  onApplyCustomLexicon: handleApplyCustomLexicon,
+                  onWsolaTimeStretchSelectedWords: handleWsolaTimeStretchSelectedWords,
+                  onPunchInSpectralMatchSelectedWords: handlePunchInSpectralMatchSelectedWords,
+                  onOptimizeTrilingualAsr: handleOptimizeTrilingualAsr,
+                  englishRenderMode,
+                }}
+                sideDockProps={{
+                  tracks,
+                  assets: project.assets,
+                  sampleRate: project.sampleRate,
+                  history: historyRef.current.getHistory(),
+                  markers: auditionMarkers,
+                  locale: currentLocale,
+                  persianDigits: globalSettings.language.persianDigits,
+                  timecodeFormat: globalSettings.language.timecodeFormat,
+                  collapsed: leftRailCollapsed,
+                  activeDockTab: sideDockTab,
+                  onDockTabChange: setSideDockTab,
+                  onToggleCollapse: () => setLeftRailCollapsed((v) => !v),
+                  onImportAudioClick: () => fileInputRef.current?.click(),
+                  onSeekSec: handleSeekSec,
+                  onToggleTrackMute: handleToggleTrackMute,
+                  onToggleTrackSolo: handleToggleTrackSolo,
+                  onAddMarker: handleAddMarkerAtPlayhead,
+                  onRenameMarker: handleRenameMarker,
+                  onDeleteMarker: handleDeleteMarker,
+                  onSelectTrackRange: (trackId, startSec, endSec) => {
+                    setSelection({
+                      startSec: Number(startSec.toFixed(2)),
+                      endSec: Number(endSec.toFixed(2)),
+                      trackId,
+                      scope: 'track',
+                    });
+                    handleSeekSec(startSec);
+                  },
+                }}
+                dspRackProps={{
+                  ephemeralParams: ephemeralDsp,
+                  committedParams: committedDsp,
+                  isGestureActive,
+                  sampleRate: project.sampleRate,
+                  locale: currentLocale,
+                  persianDigits: globalSettings.language.persianDigits,
+                  history: historyRef.current.getHistory(),
+                  acousticAdvisor,
+                  eqResponseCurveDb,
+                  phaseDiagnostic,
+                  onEphemeralChange: handleEphemeralDspChange,
+                  onCommitGesture: handleCommitDspGesture,
+                  onResetDefaults: handleResetDsp,
+                  onApplyAcousticAdvisorPreset: handleApplyAcousticAdvisorPreset,
+                  onApply8BandPersianVoiceEq: handleApply8BandPersianVoiceEq,
+                }}
+              />
+            ) : (
+              isLabMode &&
+              activeTab !== 'studio' && (
+                <StudioLabRouterView
+                  activeTab={activeTab}
+                  graphNodes={graphNodes}
+                  graphEdges={defaultGraph.edges}
                   sampleRate={project.sampleRate}
                   resamplerStats={project.resamplerStats}
                   onToggleNodeBypass={handleToggleNodeBypass}
-                />
-              </div>
-            )}
-
-            {isLabMode && activeTab === 'storage' && (
-              <div className="flex-1 min-h-0 overflow-y-auto max-w-[1440px] w-full mx-auto px-4 py-4">
-                <StorageBrokerView
                   capabilities={capabilities}
                   telemetry={telemetry}
                   assets={project.assets}
                   isTestingLru={isTestingLru}
                   onRunBrokerConcurrencyTest={handleRunBrokerConcurrencyTest}
                   onSimulateLruCacheFill={handleSimulateLruCacheFill}
+                  locale={currentLocale}
+                  persianDigits={globalSettings.language.persianDigits}
                 />
-              </div>
-            )}
-
-            {isLabMode && activeTab === 'shahab' && (
-              <div className="flex-1 min-h-0 overflow-y-auto max-w-[1440px] w-full mx-auto px-4 py-4">
-                <ShahabLabView />
-              </div>
+              )
             )}
           </main>
 
-          {/* 4. Docked Bottom Studio Audio Transport Bar */}
-          <AuditionTransportBar
-            isPlaying={isPlaying}
-            hasAudio={tracks.length > 0 && totalDurationSec > 0}
-            isPreviewMode={Boolean(previewingId)}
-            previewLabel={isFa ? 'پیش‌شنوایی پیشنهاد' : 'Previewing Suggestion'}
-            playheadSec={playheadSec}
-            totalDurationSec={totalDurationSec}
-            selection={selection}
-            loopSelection={loopSelection}
-            playbackRate={playbackRate}
-            seekStepSec={globalSettings.playback.seekStepSec}
-            peakDb={meterDb.peakDb}
-            rmsDb={meterDb.rmsDb}
+          {/* Floating Non-Disruptive Studio Toast (replaces 36px top status banner per AUD-15) */}
+          <StudioToast
+            toast={studioToast}
             locale={currentLocale}
-            timecodeFormat={globalSettings.language.timecodeFormat}
-            persianDigits={globalSettings.language.persianDigits}
-            onTogglePlay={handleTogglePlay}
-            onPlaySelection={() => handlePlaySelectionRange(selection)}
-            onStopAndReset={handleStopAndReset}
-            onExitPreview={handleStopAndReset}
-            onSeekSec={handleSeekSec}
-            onStepBack={handleStepBack}
-            onStepForward={handleStepForward}
-            onToggleLoop={handleToggleLoopSelection}
-            onChangePlaybackRate={handleChangePlaybackRate}
-            onJumpPrevMarker={handleJumpPrevMarker}
-            onJumpNextMarker={handleJumpNextMarker}
-            onSetInAtPlayhead={handleSetInAtPlayhead}
-            onSetOutAtPlayhead={handleSetOutAtPlayhead}
+            onDismiss={dismissToast}
+            onPauseChange={setToastPaused}
           />
 
-          <RenderExportModal
-            isOpen={renderModalOpen}
-            onClose={() => setRenderModalOpen(false)}
-            workflowState={workflowState}
-            locale={currentLocale}
-            persianDigits={globalSettings.language.persianDigits}
-            projectTitle={project.projectName}
-            projectSampleRate={(project.sampleRate as SampleRate) || 48000}
-            totalDurationSec={totalDurationSec}
-            tracks={tracks}
-            assets={project.assets}
-            tokens={tokens}
-            markers={auditionMarkers}
-            defaultFormat={globalSettings.exportDefaults.format}
-            defaultSampleRate={
-              globalSettings.exportDefaults.sampleRate === 'source'
-                ? (project.sampleRate as SampleRate) || 48000
-                : globalSettings.exportDefaults.sampleRate
-            }
-            defaultCrossfadeMs={globalSettings.exportDefaults.defaultCrossfadeMs}
-            defaultFilenamePrefix={globalSettings.exportDefaults.filenamePrefix}
-            onStartRender={handleStartMission06Render}
-            onPauseRender={() => workflowRef.current?.requestPauseRender()}
-            onCancelRender={() => workflowRef.current?.cancelRender()}
-            onMarkDownloaded={(fileName) => workflowRef.current?.markExportSaved(fileName)}
-          />
-
-          {isLabMode && (
-            <>
-              <AsrResearchLabModal
-                isOpen={asrLabOpen}
-                onClose={() => setAsrLabOpen(false)}
-                studioPcm={
-                  project.pcmSources[tracks[0]?.clips[0]?.assetId ?? Object.keys(project.pcmSources)[0]] ??
-                  null
-                }
-                studioSampleRate={project.sampleRate}
-                referenceTranscript={tokens.map((t) => t.displayText).join(' ')}
-                modelManager={modelManagerRef.current}
-              />
-
-              <SpeechSecurityModal
-                isOpen={securityOpen}
-                onClose={() => setSecurityOpen(false)}
-              />
-            </>
+          {/* 4. Docked Bottom Studio Audio Transport Bar (Studio Workbench only) */}
+          {showStudioChrome && (
+            <AuditionTransportBar
+              isPlaying={isPlaying}
+              hasAudio={tracks.length > 0 && totalDurationSec > 0}
+              isPreviewMode={Boolean(previewingId)}
+              previewLabel={isFa ? 'پیش‌شنوایی پیشنهاد' : 'Previewing Suggestion'}
+              playheadSec={playheadSec}
+              totalDurationSec={totalDurationSec}
+              selection={selection}
+              loopSelection={loopSelection}
+              playbackRate={playbackRate}
+              seekStepSec={globalSettings.playback.seekStepSec}
+              peakDb={meterDb.peakDb}
+              rmsDb={meterDb.rmsDb}
+              locale={currentLocale}
+              timecodeFormat={globalSettings.language.timecodeFormat}
+              persianDigits={globalSettings.language.persianDigits}
+              onTogglePlay={handleTogglePlay}
+              onPlaySelection={() => handlePlaySelectionRange(selection)}
+              onStopAndReset={handleStopAndReset}
+              onExitPreview={handleStopAndReset}
+              onSeekSec={handleSeekSec}
+              onStepBack={handleStepBack}
+              onStepForward={handleStepForward}
+              onToggleLoop={handleToggleLoopSelection}
+              onChangePlaybackRate={handleChangePlaybackRate}
+              onJumpPrevMarker={handleJumpPrevMarker}
+              onJumpNextMarker={handleJumpNextMarker}
+              onSetInAtPlayhead={handleSetInAtPlayhead}
+              onSetOutAtPlayhead={handleSetOutAtPlayhead}
+            />
           )}
         </>
       )}
 
-      {/* Shared Application Modals across Projects Hub & Studio */}
-      <NewProjectModal
-        isOpen={newProjectModalOpen}
+      {/* Unified Modals Host across Projects Hub & Studio */}
+      <StudioModalsHost
+        appView={appView}
+        isLabMode={isLabMode}
         locale={currentLocale}
-        onClose={() => setNewProjectModalOpen(false)}
-        onCreateProject={handleCreateHubProject}
-      />
-
-      <SettingsCenterModal
-        isOpen={settingsModalOpen}
-        onClose={() => setSettingsModalOpen(false)}
-        settings={globalSettings}
-        onUpdateSettings={handleUpdateGlobalSettings}
-        saveStatus={settingsSaveStatus}
-        saveError={settingsSaveError}
-        onOpenDeveloperView={handleOpenDeveloperViewFromSettings}
-      />
-
-      <LifecycleManagementModal
-        isOpen={lifecycleModalOpen}
-        initialTab={lifecycleInitialTab}
-        onClose={() => setLifecycleModalOpen(false)}
-        workflowState={workflowState}
-        modelManager={modelManagerRef.current}
-        onModelStateChanged={syncModelSnapshotToWorkflow}
-        companionEndpoint={companionEndpoint}
-        onChangeCompanionEndpoint={handleChangeCompanionEndpoint}
+        persianDigits={globalSettings.language.persianDigits}
+        renderExportProps={
+          appView === 'studio'
+            ? {
+                isOpen: renderModalOpen,
+                onClose: () => setRenderModalOpen(false),
+                workflowState,
+                locale: currentLocale,
+                persianDigits: globalSettings.language.persianDigits,
+                projectTitle: project.projectName,
+                projectSampleRate: (project.sampleRate as SampleRate) || 48000,
+                totalDurationSec,
+                tracks,
+                assets: project.assets,
+                tokens,
+                markers: auditionMarkers,
+                defaultFormat: globalSettings.exportDefaults.format,
+                defaultSampleRate:
+                  globalSettings.exportDefaults.sampleRate === 'source'
+                    ? (project.sampleRate as SampleRate) || 48000
+                    : globalSettings.exportDefaults.sampleRate,
+                defaultCrossfadeMs: globalSettings.exportDefaults.defaultCrossfadeMs,
+                defaultFilenamePrefix: globalSettings.exportDefaults.filenamePrefix,
+                onStartRender: handleStartMission06Render,
+                onPauseRender: () => workflowRef.current?.requestPauseRender(),
+                onCancelRender: () => workflowRef.current?.cancelRender(),
+                onMarkDownloaded: (fileName) => workflowRef.current?.markExportSaved(fileName),
+              }
+            : undefined
+        }
+        asrResearchLabProps={
+          appView === 'studio' && isLabMode
+            ? {
+                isOpen: asrLabOpen,
+                onClose: () => setAsrLabOpen(false),
+                studioPcm:
+                  project.pcmSources[tracks[0]?.clips[0]?.assetId ?? Object.keys(project.pcmSources)[0]] ??
+                  null,
+                studioSampleRate: project.sampleRate,
+                referenceTranscript: tokens.map((t) => t.displayText).join(' '),
+                modelManager: modelManagerRef.current,
+                locale: currentLocale,
+                persianDigits: globalSettings.language.persianDigits,
+              }
+            : undefined
+        }
+        speechSecurityProps={
+          appView === 'studio' && isLabMode
+            ? {
+                isOpen: securityOpen,
+                onClose: () => setSecurityOpen(false),
+                locale: currentLocale,
+                persianDigits: globalSettings.language.persianDigits,
+              }
+            : undefined
+        }
+        developerPortalProps={
+          appView === 'studio' && isLabMode
+            ? {
+                isOpen: devPortalOpen,
+                onClose: () => setDevPortalOpen(false),
+                locale: currentLocale,
+              }
+            : undefined
+        }
+        newProjectProps={{
+          isOpen: newProjectModalOpen,
+          locale: currentLocale,
+          onClose: () => setNewProjectModalOpen(false),
+          onCreateProject: handleCreateHubProject,
+        }}
+        settingsProps={{
+          isOpen: settingsModalOpen,
+          onClose: () => setSettingsModalOpen(false),
+          settings: globalSettings,
+          onUpdateSettings: handleUpdateGlobalSettings,
+          saveStatus: settingsSaveStatus,
+          saveError: settingsSaveError,
+          isLabMode,
+          onOpenShortcutsCheatSheet: () => setShortcutsModalOpen(true),
+          onOpenDeveloperView: handleOpenDeveloperViewFromSettings,
+        }}
+        shortcutsProps={{
+          isOpen: shortcutsModalOpen,
+          onClose: () => setShortcutsModalOpen(false),
+          locale: currentLocale,
+          shortcuts: globalSettings.shortcuts,
+          onNavigateProjects:
+            appView === 'studio'
+              ? () => {
+                  setShortcutsModalOpen(false);
+                  void handleReturnToProjectsHub();
+                }
+              : undefined,
+          onOpenSettings: () => setSettingsModalOpen(true),
+          onOpenExport: appView === 'studio' ? () => setRenderModalOpen(true) : undefined,
+        }}
+        lifecycleProps={{
+          isOpen: lifecycleModalOpen,
+          initialTab: lifecycleInitialTab,
+          onClose: () => setLifecycleModalOpen(false),
+          workflowState,
+          modelManager: modelManagerRef.current,
+          onModelStateChanged: syncModelSnapshotToWorkflow,
+          companionEndpoint,
+          onChangeCompanionEndpoint: handleChangeCompanionEndpoint,
+        }}
       />
     </div>
   );

@@ -14,6 +14,7 @@ import {
   PoCTechnologyEvaluationReport,
 } from '../quality-gate/AutomatedQualityGateRunner';
 import { OfflineLicenseCard } from './OfflineLicenseCard';
+import { formatNumberForLocale } from '../utils/formatters';
 
 interface StorageBrokerViewProps {
   capabilities: RuntimeCapabilities;
@@ -22,6 +23,8 @@ interface StorageBrokerViewProps {
   isTestingLru?: boolean;
   onRunBrokerConcurrencyTest: () => void;
   onSimulateLruCacheFill: () => void;
+  locale?: 'fa' | 'en';
+  persianDigits?: boolean;
 }
 
 interface BenchmarkMetrics {
@@ -42,7 +45,11 @@ export const StorageBrokerView: React.FC<StorageBrokerViewProps> = ({
   isTestingLru = false,
   onRunBrokerConcurrencyTest,
   onSimulateLruCacheFill,
+  locale = 'fa',
+  persianDigits = false,
 }) => {
+  const isFa = locale === 'fa';
+  const fmt = (n: number | string) => formatNumberForLocale(n, { persianDigits });
   const [bench, setBench] = useState<BenchmarkMetrics | null>(null);
   const [gateReport, setGateReport] = useState<PoCTechnologyEvaluationReport | null>(null);
   const [isRunningBench, setIsRunningBench] = useState(false);
@@ -145,18 +152,35 @@ export const StorageBrokerView: React.FC<StorageBrokerViewProps> = ({
   };
 
   return (
-    <div dir="rtl" className="space-y-6">
-      {/* Acceptance Gate Benchmark Runner (PoC #1, #2 & #3) */}
+    <div dir={isFa ? 'rtl' : 'ltr'} className="space-y-6">
+      <div className="border border-[var(--avp-border)] bg-[var(--avp-surface)] rounded-xl p-4 sm:p-5">
+        <h1 className="text-lg font-bold tracking-tight text-[var(--avp-text)]">
+          {isFa
+            ? 'کارگزار ذخیره‌سازی محلی (OPFS)، کش و لایسنس آفلاین'
+            : 'Local Storage Broker (OPFS), Cache & Offline License'}
+        </h1>
+        <p className="text-xs text-[var(--avp-text-secondary)] mt-1">
+          {isFa
+            ? 'پایش حافظه چرخشی PCM، هماهنگی دسترسی هم‌زمان OPFS و اعتبارسنجی رمزنگاری آفلاین'
+            : 'Rolling PCM cache telemetry, exclusive OPFS lock brokerage, and asymmetric offline license checks'}
+        </p>
+      </div>
+
+      {/* Acceptance Gate Benchmark Runner */}
       <section className="border border-[var(--avp-border)] bg-[var(--avp-surface)] rounded-lg p-5 space-y-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-2">
             <Gauge className="w-4 h-4 text-[var(--avp-brand)]" aria-hidden="true" />
             <div>
               <h2 className="text-sm font-semibold text-[var(--avp-text)]">
-                بنچمارک معیارهای قبولی (Acceptance Gate — PoC #1, #2 & #3)
+                {isFa
+                  ? 'بنچمارک معیارهای قبولی هسته صدا و حافظه'
+                  : 'Core Audio & Storage Acceptance Gate Benchmarks'}
               </h2>
               <p className="text-xs text-[var(--avp-text-secondary)] mt-0.5">
-                سنجش واقعی Ring Buffer، Seek Index، هرم Peak، بودجه OPFS و فیلتر ضد Aliasing
+                {isFa
+                  ? 'سنجش واقعی Ring Buffer، Seek Index، هرم Peak، بودجه OPFS و فیلتر ضد Aliasing'
+                  : 'Live verification of Ring Buffer, Seek Index, Peak Pyramid, OPFS Budget, and Anti-Aliasing Filter'}
               </p>
             </div>
           </div>
@@ -166,100 +190,120 @@ export const StorageBrokerView: React.FC<StorageBrokerViewProps> = ({
               <button
                 type="button"
                 onClick={downloadEvaluationReport}
-                className="avp-btn avp-btn-outline text-xs"
+                className="avp-btn avp-btn-outline text-xs min-h-[44px] sm:min-h-[34px]"
               >
-                <span>دریافت گزارش PoC (JSON)</span>
+                <span>{isFa ? 'دریافت گزارش ارزیابی (JSON)' : 'Download Evaluation Report (JSON)'}</span>
               </button>
             )}
             <button
               type="button"
               onClick={runAcceptanceGateBenchmark}
               disabled={isRunningBench}
-              className="avp-btn avp-btn-primary text-xs font-semibold"
+              className="avp-btn avp-btn-primary text-xs font-semibold min-h-[44px] sm:min-h-[34px]"
             >
               <Play className="w-3.5 h-3.5" aria-hidden="true" />
-              <span>{isRunningBench ? 'در حال اجرا...' : 'اجرای بنچمارک معیارهای قبولی'}</span>
+              <span>
+                {isRunningBench
+                  ? isFa
+                    ? 'در حال اجرا...'
+                    : 'Running...'
+                  : isFa
+                    ? 'اجرای بنچمارک معیارهای قبولی'
+                    : 'Run Acceptance Benchmarks'}
+              </span>
             </button>
           </div>
         </div>
 
         {bench && (
           <div className="overflow-x-auto border border-[var(--avp-border)] rounded-md">
-            <table className="w-full text-right text-xs">
+            <table className="w-full text-start text-xs">
               <thead className="bg-[var(--avp-bg-subtle)] text-[var(--avp-text-secondary)] border-b border-[var(--avp-border)]">
                 <tr>
-                  <th className="py-2.5 px-4 font-medium">شاخص سنجش</th>
-                  <th className="py-2.5 px-4 font-medium">حد قبولی (Pass Gate)</th>
-                  <th className="py-2.5 px-4 font-medium">مقدار اندازه‌گیری‌شده</th>
-                  <th className="py-2.5 px-4 font-medium">نتیجه</th>
+                  <th className="py-2.5 px-4 font-medium">{isFa ? 'شاخص سنجش' : 'Metric'}</th>
+                  <th className="py-2.5 px-4 font-medium">{isFa ? 'حد قبولی (Pass Gate)' : 'Pass Threshold'}</th>
+                  <th className="py-2.5 px-4 font-medium">{isFa ? 'مقدار اندازه‌گیری‌شده' : 'Measured'}</th>
+                  <th className="py-2.5 px-4 font-medium">{isFa ? 'نتیجه' : 'Result'}</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-[var(--avp-border-subtle)] font-mono">
                 <tr>
-                  <td className="py-2.5 px-4 font-sans text-[var(--avp-text)]">پرش صوتی Ring Buffer (Underrun)</td>
+                  <td className="py-2.5 px-4 font-sans text-[var(--avp-text)]">
+                    {isFa ? 'پرش صوتی Ring Buffer (Underrun)' : 'Ring Buffer Audio Underruns'}
+                  </td>
                   <td className="py-2.5 px-4 text-[var(--avp-text-secondary)]">
-                    دقیقاً <span dir="ltr" className="inline-block">0</span>
+                    {isFa ? 'دقیقاً ' : 'Exactly '}
+                    <span dir="ltr" className="inline-block">0</span>
                   </td>
                   <td className="py-2.5 px-4 text-[var(--avp-text)]">
-                    <span dir="ltr" className="inline-block">{bench.ringBufferUnderruns}</span>
+                    <span dir="ltr" className="inline-block">{fmt(bench.ringBufferUnderruns)}</span>
                   </td>
                   <td className="py-2.5 px-4 text-[var(--avp-success-text)] font-sans">
-                    <CheckCircle2 className="w-3.5 h-3.5 inline ml-1" />
-                    قبول ({bench.ringBufferShared ? 'SharedArrayBuffer' : 'Fallback Buffer'})
+                    <CheckCircle2 className="w-3.5 h-3.5 inline me-1" aria-hidden="true" />
+                    {isFa ? 'قبول' : 'Pass'} ({bench.ringBufferShared ? 'SharedArrayBuffer' : 'Fallback Buffer'})
                   </td>
                 </tr>
                 <tr>
-                  <td className="py-2.5 px-4 font-sans text-[var(--avp-text)]">زمان جستجو در ثانیه ۷۰۰۰ (Seek Latency)</td>
+                  <td className="py-2.5 px-4 font-sans text-[var(--avp-text)]">
+                    {isFa ? 'زمان جستجو در ثانیه ۷۰۰۰ (Seek Latency)' : 'Seek Latency at 7,000s'}
+                  </td>
                   <td className="py-2.5 px-4 text-[var(--avp-text-secondary)]">
                     <span dir="ltr" className="inline-block">&lt; 40 ms</span>
                   </td>
                   <td className="py-2.5 px-4 text-[var(--avp-text)]">
-                    <span dir="ltr" className="inline-block">{bench.seekLatencyMs} ms</span>
+                    <span dir="ltr" className="inline-block">{fmt(bench.seekLatencyMs)} ms</span>
                   </td>
                   <td className="py-2.5 px-4 text-[var(--avp-success-text)] font-sans">
-                    <CheckCircle2 className="w-3.5 h-3.5 inline ml-1" />
-                    قبول
+                    <CheckCircle2 className="w-3.5 h-3.5 inline me-1" aria-hidden="true" />
+                    {isFa ? 'قبول' : 'Pass'}
                   </td>
                 </tr>
                 <tr>
-                  <td className="py-2.5 px-4 font-sans text-[var(--avp-text)]">ساخت هرم Peak (بخش ۲ ثانیه‌ای ۴۸kHz)</td>
+                  <td className="py-2.5 px-4 font-sans text-[var(--avp-text)]">
+                    {isFa ? 'ساخت هرم Peak (بخش ۲ ثانیه‌ای ۴۸kHz)' : 'Peak Pyramid Build (2s @ 48kHz chunk)'}
+                  </td>
                   <td className="py-2.5 px-4 text-[var(--avp-text-secondary)]">
-                    <span dir="ltr" className="inline-block">&lt; 2500 ms</span> (کل ۲ ساعت)
+                    <span dir="ltr" className="inline-block">&lt; 2500 ms</span>{' '}
+                    {isFa ? '(کل ۲ ساعت)' : '(full 2h)'}
                   </td>
                   <td className="py-2.5 px-4 text-[var(--avp-text)]">
-                    <span dir="ltr" className="inline-block">{bench.peakPyramidMs} ms</span>
+                    <span dir="ltr" className="inline-block">{fmt(bench.peakPyramidMs)} ms</span>
                   </td>
                   <td className="py-2.5 px-4 text-[var(--avp-success-text)] font-sans">
-                    <CheckCircle2 className="w-3.5 h-3.5 inline ml-1" />
-                    قبول
+                    <CheckCircle2 className="w-3.5 h-3.5 inline me-1" aria-hidden="true" />
+                    {isFa ? 'قبول' : 'Pass'}
                   </td>
                 </tr>
                 <tr>
-                  <td className="py-2.5 px-4 font-sans text-[var(--avp-text)]">تضعیف ۱۴kHz در Resampler به ۱۶kHz</td>
+                  <td className="py-2.5 px-4 font-sans text-[var(--avp-text)]">
+                    {isFa ? 'تضعیف ۱۴kHz در Resampler به ۱۶kHz' : '14kHz Attenuation in 16kHz Resampler'}
+                  </td>
                   <td className="py-2.5 px-4 text-[var(--avp-text-secondary)]">
                     <span dir="ltr" className="inline-block">&gt; 45 dB</span>
                   </td>
                   <td className="py-2.5 px-4 text-[var(--avp-text)]">
-                    <span dir="ltr" className="inline-block">-{bench.aliasingAttenuationDb} dB</span>
+                    <span dir="ltr" className="inline-block">-{fmt(bench.aliasingAttenuationDb)} dB</span>
                   </td>
                   <td className="py-2.5 px-4 text-[var(--avp-success-text)] font-sans">
-                    <CheckCircle2 className="w-3.5 h-3.5 inline ml-1" />
-                    قبول
+                    <CheckCircle2 className="w-3.5 h-3.5 inline me-1" aria-hidden="true" />
+                    {isFa ? 'قبول' : 'Pass'}
                   </td>
                 </tr>
                 <tr>
-                  <td className="py-2.5 px-4 font-sans text-[var(--avp-text)]">سقف بودجه RAM / OPFS (مدل ۲ ساعته)</td>
+                  <td className="py-2.5 px-4 font-sans text-[var(--avp-text)]">
+                    {isFa ? 'سقف بودجه RAM / OPFS (مدل ۲ ساعته)' : 'RAM / OPFS Budget Ceiling (2h project)'}
+                  </td>
                   <td className="py-2.5 px-4 text-[var(--avp-text-secondary)]">
                     <span dir="ltr" className="inline-block">&lt; 150 MB RAM · &lt; 400 MB OPFS</span>
                   </td>
                   <td className="py-2.5 px-4 text-[var(--avp-text)]">
                     <span dir="ltr" className="inline-block">
-                      {bench.estimated2HrRamMb} MB RAM · {bench.estimated2HrOpfsMb} MB OPFS
+                      {fmt(bench.estimated2HrRamMb)} MB RAM · {fmt(bench.estimated2HrOpfsMb)} MB OPFS
                     </span>
                   </td>
                   <td className="py-2.5 px-4 text-[var(--avp-success-text)] font-sans">
-                    <CheckCircle2 className="w-3.5 h-3.5 inline ml-1" />
-                    قبول
+                    <CheckCircle2 className="w-3.5 h-3.5 inline me-1" aria-hidden="true" />
+                    {isFa ? 'قبول' : 'Pass'}
                   </td>
                 </tr>
                 {gateReport?.results.map((gate) => (
@@ -284,8 +328,8 @@ export const StorageBrokerView: React.FC<StorageBrokerViewProps> = ({
                         gate.passed ? 'text-[var(--avp-success-text)]' : 'text-[var(--avp-danger-text)]'
                       }`}
                     >
-                      <CheckCircle2 className="w-3.5 h-3.5 inline ml-1" />
-                      {gate.passed ? 'قبول' : 'رد'}
+                      <CheckCircle2 className="w-3.5 h-3.5 inline me-1" aria-hidden="true" />
+                      {gate.passed ? (isFa ? 'قبول' : 'Pass') : (isFa ? 'رد' : 'Fail')}
                     </td>
                   </tr>
                 ))}
@@ -295,29 +339,31 @@ export const StorageBrokerView: React.FC<StorageBrokerViewProps> = ({
         )}
       </section>
 
-      <OfflineLicenseCard />
+      <OfflineLicenseCard locale={locale} />
 
       {/* Runtime Capabilities & Isolation Matrix */}
       <section className="border border-[var(--avp-border)] bg-[var(--avp-surface)] rounded-lg p-5">
         <div className="flex items-center gap-2 mb-4">
           <Cpu className="w-4 h-4 text-[var(--avp-brand)]" aria-hidden="true" />
           <h2 className="text-sm font-semibold text-[var(--avp-text)]">
-            قابلیت‌های واقعی مرورگر و ایزوله‌سازی اجرایی (Runtime Capabilities)
+            {isFa
+              ? 'قابلیت‌های واقعی مرورگر و ایزوله‌سازی اجرایی (Runtime Capabilities)'
+              : 'Browser Runtime Capabilities & Execution Isolation'}
           </h2>
         </div>
 
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
           <div className="p-3 rounded border border-[var(--avp-border)] bg-[var(--avp-bg-subtle)]">
-            <div className="text-[var(--avp-text-secondary)]">مسیر انتقال صدا</div>
-            <div dir="ltr" className="font-mono text-[var(--avp-text)] mt-1 text-right">{capabilities.transportMode}</div>
+            <div className="text-[var(--avp-text-secondary)]">{isFa ? 'مسیر انتقال صدا' : 'Audio Transport'}</div>
+            <div dir="ltr" className="font-mono text-[var(--avp-text)] mt-1 text-start">{capabilities.transportMode}</div>
           </div>
           <div className="p-3 rounded border border-[var(--avp-border)] bg-[var(--avp-bg-subtle)]">
-            <div className="text-[var(--avp-text-secondary)]">شتاب‌دهنده پردازش</div>
-            <div dir="ltr" className="font-mono text-[var(--avp-accent-text)] mt-1 text-right">{capabilities.gpuFallbackMode}</div>
+            <div className="text-[var(--avp-text-secondary)]">{isFa ? 'شتاب‌دهنده پردازش' : 'Compute Backend'}</div>
+            <div dir="ltr" className="font-mono text-[var(--avp-accent-text)] mt-1 text-start">{capabilities.gpuFallbackMode}</div>
           </div>
           <div className="p-3 rounded border border-[var(--avp-border)] bg-[var(--avp-bg-subtle)]">
             <div className="text-[var(--avp-text-secondary)]">OPFS & SyncAccessHandle</div>
-            <div dir="ltr" className={`font-mono mt-1 text-right ${telemetry.opfsSupported ? 'text-[var(--avp-success-text)]' : 'text-[var(--avp-warning-text)]'}`}>
+            <div dir="ltr" className={`font-mono mt-1 text-start ${telemetry.opfsSupported ? 'text-[var(--avp-success-text)]' : 'text-[var(--avp-warning-text)]'}`}>
               {telemetry.opfsSupported
                 ? telemetry.syncAccessHandleSupported
                   ? 'OPFS SyncActive'
@@ -326,8 +372,8 @@ export const StorageBrokerView: React.FC<StorageBrokerViewProps> = ({
             </div>
           </div>
           <div className="p-3 rounded border border-[var(--avp-border)] bg-[var(--avp-bg-subtle)]">
-            <div className="text-[var(--avp-text-secondary)]">رده سخت‌افزار</div>
-            <div dir="ltr" className="font-mono text-[var(--avp-text)] mt-1 text-right">
+            <div className="text-[var(--avp-text-secondary)]">{isFa ? 'رده سخت‌افزار' : 'Hardware Tier'}</div>
+            <div dir="ltr" className="font-mono text-[var(--avp-text)] mt-1 text-start">
               {capabilities.deviceTier} ({capabilities.hardwareConcurrency} Threads)
             </div>
           </div>
@@ -341,45 +387,55 @@ export const StorageBrokerView: React.FC<StorageBrokerViewProps> = ({
             <div className="flex items-center gap-2">
               <HardDrive className="w-4 h-4 text-[var(--avp-success)]" aria-hidden="true" />
               <h2 className="text-sm font-semibold text-[var(--avp-text)]">
-                کش چرخشی بلوک‌های PCM (Rolling LRU Cache)
+                {isFa ? 'کش چرخشی بلوک‌های PCM (Rolling LRU Cache)' : 'Rolling LRU PCM Block Cache'}
               </h2>
             </div>
             <button
               type="button"
               onClick={onSimulateLruCacheFill}
               disabled={isTestingLru}
-              className="avp-btn avp-btn-sm avp-btn-outline text-xs"
+              className="avp-btn avp-btn-sm avp-btn-outline text-xs min-h-[44px] sm:min-h-[30px]"
             >
               <Play className="w-3 h-3" aria-hidden="true" />
-              <span>{isTestingLru ? 'در حال پرکردن کش...' : 'آزمون پرشدن و تخلیه LRU'}</span>
+              <span>
+                {isTestingLru
+                  ? isFa
+                    ? 'در حال پرکردن کش...'
+                    : 'Filling cache...'
+                  : isFa
+                    ? 'آزمون پرشدن و تخلیه LRU'
+                    : 'Test LRU Fill & Eviction'}
+              </span>
             </button>
           </div>
 
           <p className="text-xs text-[var(--avp-text-secondary)] leading-relaxed">
-            برای جلوگیری از اشغال چند گیگابایت فضای دیسک توسط Float32 خام، فقط بلوک‌های فعال اطراف Playhead در کش با سقف حجمی مشخص نگهداری و بلوک‌های قدیمی‌تر به‌صورت LRU تخلیه می‌شوند.
+            {isFa
+              ? 'برای جلوگیری از اشغال چند گیگابایت فضای دیسک توسط Float32 خام، فقط بلوک‌های فعال اطراف Playhead در کش با سقف حجمی مشخص نگهداری و بلوک‌های قدیمی‌تر به‌صورت LRU تخلیه می‌شوند.'
+              : 'To prevent unbounded disk footprint from raw Float32 blocks, only active windows near the playhead stay cached up to a bounded byte cap with LRU eviction.'}
           </p>
 
           <div>
             <div className="flex justify-between text-xs mb-1.5 font-mono">
               <span className="text-[var(--avp-text)]">
-                مصرف فعلی:{' '}
+                {isFa ? 'مصرف فعلی:' : 'Current usage:'}{' '}
                 <span dir="ltr" className="inline-block">{usedBytesLabel}</span>
               </span>
               <span className="text-[var(--avp-text-secondary)]">
-                سقف کش فعال:{' '}
+                {isFa ? 'سقف کش فعال:' : 'Active cap:'}{' '}
                 <span dir="ltr" className="inline-block">
-                  {(telemetry.cacheStats.maxBytes / (1024 * 1024)).toFixed(1)} MB
+                  {fmt((telemetry.cacheStats.maxBytes / (1024 * 1024)).toFixed(1))} MB
                 </span>
                 {telemetry.totalAudioCacheBudgetBytes ? (
                   <>
                     {' '}
-                    / بودجه کل:{' '}
+                    / {isFa ? 'بودجه کل:' : 'Total budget:'}{' '}
                     <span dir="ltr" className="inline-block">
-                      {(telemetry.totalAudioCacheBudgetBytes / (1024 * 1024)).toFixed(1)} MB
+                      {fmt((telemetry.totalAudioCacheBudgetBytes / (1024 * 1024)).toFixed(1))} MB
                     </span>
                   </>
                 ) : null}{' '}
-                (<span dir="ltr" className="inline-block">{cachePct}%</span>)
+                (<span dir="ltr" className="inline-block">{fmt(cachePct)}%</span>)
               </span>
             </div>
             <div className="h-2 w-full bg-[var(--avp-bg-subtle)] rounded overflow-hidden border border-[var(--avp-border)]">
@@ -393,19 +449,19 @@ export const StorageBrokerView: React.FC<StorageBrokerViewProps> = ({
           <div className="grid grid-cols-4 gap-2 text-xs font-mono text-center">
             <div className="p-2 rounded bg-[var(--avp-bg-subtle)] border border-[var(--avp-border)]">
               <div className="text-[var(--avp-text-muted)] text-[11px]">Blocks</div>
-              <div className="text-[var(--avp-text)] mt-0.5">{telemetry.cacheStats.cachedBlocks}</div>
+              <div className="text-[var(--avp-text)] mt-0.5">{fmt(telemetry.cacheStats.cachedBlocks)}</div>
             </div>
             <div className="p-2 rounded bg-[var(--avp-bg-subtle)] border border-[var(--avp-border)]">
               <div className="text-[var(--avp-text-muted)] text-[11px]">Hits</div>
-              <div className="text-[var(--avp-success-text)] mt-0.5">{telemetry.cacheStats.hits}</div>
+              <div className="text-[var(--avp-success-text)] mt-0.5">{fmt(telemetry.cacheStats.hits)}</div>
             </div>
             <div className="p-2 rounded bg-[var(--avp-bg-subtle)] border border-[var(--avp-border)]">
               <div className="text-[var(--avp-text-muted)] text-[11px]">Misses</div>
-              <div className="text-[var(--avp-warning-text)] mt-0.5">{telemetry.cacheStats.misses}</div>
+              <div className="text-[var(--avp-warning-text)] mt-0.5">{fmt(telemetry.cacheStats.misses)}</div>
             </div>
             <div className="p-2 rounded bg-[var(--avp-bg-subtle)] border border-[var(--avp-border)]">
               <div className="text-[var(--avp-text-muted)] text-[11px]">Evictions</div>
-              <div className="text-[var(--avp-danger-text)] mt-0.5">{telemetry.cacheStats.evictions}</div>
+              <div className="text-[var(--avp-danger-text)] mt-0.5">{fmt(telemetry.cacheStats.evictions)}</div>
             </div>
           </div>
         </section>
@@ -415,30 +471,40 @@ export const StorageBrokerView: React.FC<StorageBrokerViewProps> = ({
             <div className="flex items-center gap-2">
               <Shield className="w-4 h-4 text-[var(--avp-accent)]" aria-hidden="true" />
               <h2 className="text-sm font-semibold text-[var(--avp-text)]">
-                کارگزار I/O در OPFS (پیشگیری از قفل انحصاری)
+                {isFa ? 'کارگزار I/O در OPFS (پیشگیری از قفل انحصاری)' : 'OPFS I/O Broker (Lock Conflict Prevention)'}
               </h2>
             </div>
             <button
               type="button"
               onClick={onRunBrokerConcurrencyTest}
-              className="avp-btn avp-btn-sm border border-[var(--avp-accent)]/40 bg-[var(--avp-accent-soft)] text-[var(--avp-accent-text)] hover:opacity-90 text-xs"
+              className="avp-btn avp-btn-sm min-h-[44px] sm:min-h-[30px] border border-[var(--avp-accent)]/40 bg-[var(--avp-accent-soft)] text-[var(--avp-accent-text)] hover:opacity-90 text-xs"
             >
               <Play className="w-3 h-3" aria-hidden="true" />
-              <span>تست هم‌زمانی ۲ Worker</span>
+              <span>{isFa ? 'تست هم‌زمانی ۲ Worker' : 'Test 2-Worker Concurrency'}</span>
             </button>
           </div>
 
           <p className="text-xs text-[var(--avp-text-secondary)] leading-relaxed">
-            متد <code className="font-mono text-[var(--avp-text)]">createSyncAccessHandle()</code> روی هر فایل قفل انحصاری می‌گذارد. تمام دسترسی‌های <code className="font-mono text-[var(--avp-text)]">playback-feeder</code> و <code className="font-mono text-[var(--avp-text)]">ai-worker</code> از طریق یک Broker متمرکز صف‌بندی می‌شوند تا خطای <code className="font-mono text-[var(--avp-danger-text)]">NoModificationAllowedError</code> هرگز رخ ندهد.
+            {isFa ? (
+              <>
+                متد <code className="font-mono text-[var(--avp-text)]">createSyncAccessHandle()</code> روی هر فایل قفل انحصاری می‌گذارد. تمام دسترسی‌های <code className="font-mono text-[var(--avp-text)]">playback-feeder</code> و <code className="font-mono text-[var(--avp-text)]">ai-worker</code> از طریق یک Broker متمرکز صف‌بندی می‌شوند تا خطای <code className="font-mono text-[var(--avp-danger-text)]">NoModificationAllowedError</code> هرگز رخ ندهد.
+              </>
+            ) : (
+              <>
+                <code className="font-mono text-[var(--avp-text)]">createSyncAccessHandle()</code> holds an exclusive file lock. Requests from <code className="font-mono text-[var(--avp-text)]">playback-feeder</code> and <code className="font-mono text-[var(--avp-text)]">ai-worker</code> are queued by a central broker to prevent <code className="font-mono text-[var(--avp-danger-text)]">NoModificationAllowedError</code>.
+              </>
+            )}
           </p>
 
           <div className="flex items-center justify-between p-3 rounded bg-[var(--avp-bg-subtle)] border border-[var(--avp-border)] text-xs">
-            <span className="text-[var(--avp-text)]">وضعیت ذخیره‌سازی پایدار (Eviction Protection):</span>
+            <span className="text-[var(--avp-text)]">
+              {isFa ? 'وضعیت ذخیره‌سازی پایدار (Eviction Protection):' : 'Persistent Storage Status:'}
+            </span>
             <span className={`font-mono ${telemetry.opfsSupported ? 'text-[var(--avp-success-text)]' : 'text-[var(--avp-warning-text)]'}`}>
               {!telemetry.opfsSupported
-                ? 'OPFS Unavailable (غیرماندگار)'
+                ? 'OPFS Unavailable'
                 : telemetry.persistentStorageGranted === true
-                  ? 'Granted (محافظت‌شده)'
+                  ? 'Granted (Protected)'
                   : telemetry.persistentStorageGranted === false
                     ? 'Best-Effort'
                     : 'Checked'}
@@ -446,7 +512,9 @@ export const StorageBrokerView: React.FC<StorageBrokerViewProps> = ({
           </div>
 
           <div className="text-xs font-mono text-[var(--avp-text-secondary)]">
-            تعداد تداخل‌های قفل پیش‌گیری‌شده: {telemetry.lockConflictsPrevented} · آخرین اجاره‌های دستگیره: {telemetry.activeLeases.length}
+            {isFa
+              ? `تعداد تداخل‌های قفل پیش‌گیری‌شده: ${telemetry.lockConflictsPrevented} · آخرین اجاره‌های دستگیره: ${telemetry.activeLeases.length}`
+              : `Lock Conflicts Prevented: ${telemetry.lockConflictsPrevented} · Active Handle Leases: ${telemetry.activeLeases.length}`}
           </div>
         </section>
       </div>
@@ -457,12 +525,12 @@ export const StorageBrokerView: React.FC<StorageBrokerViewProps> = ({
           <div className="flex items-center gap-2 px-5 py-3.5 border-b border-[var(--avp-border)]">
             <Database className="w-4 h-4 text-[var(--avp-text-secondary)]" aria-hidden="true" />
             <h2 className="text-sm font-semibold text-[var(--avp-text)]">
-              جدول جستجوی دقیق نمونه (Sample-Accurate Seek Table)
+              {isFa ? 'جدول جستجوی دقیق نمونه (Sample-Accurate Seek Table)' : 'Sample-Accurate Seek Table'}
             </h2>
           </div>
           {primaryAsset ? (
             <div className="overflow-x-auto max-h-[260px]">
-              <table className="w-full text-right text-xs font-mono">
+              <table className="w-full text-start text-xs font-mono">
                 <thead className="bg-[var(--avp-bg-subtle)] text-[var(--avp-text-secondary)] border-b border-[var(--avp-border)]">
                   <tr>
                     <th className="py-2 px-4">Block</th>
@@ -492,7 +560,9 @@ export const StorageBrokerView: React.FC<StorageBrokerViewProps> = ({
               </table>
             </div>
           ) : (
-            <div className="p-4 text-xs text-[var(--avp-text-secondary)]">فایلی بارگذاری نشده است.</div>
+            <div className="p-4 text-xs text-[var(--avp-text-secondary)]">
+              {isFa ? 'فایلی بارگذاری نشده است.' : 'No audio asset loaded.'}
+            </div>
           )}
         </section>
 
@@ -500,7 +570,7 @@ export const StorageBrokerView: React.FC<StorageBrokerViewProps> = ({
           <div className="flex items-center gap-2 px-5 py-3.5 border-b border-[var(--avp-border)]">
             <FileCode2 className="w-4 h-4 text-[var(--avp-brand)]" aria-hidden="true" />
             <h2 className="text-sm font-semibold text-[var(--avp-text)]">
-              پیش‌نویس قراردادهای فنی هسته (Core Draft Contracts v0.1)
+              {isFa ? 'پیش‌نویس قراردادهای فنی هسته (Core Draft Contracts v0.1)' : 'Core Draft Contracts (v0.1)'}
             </h2>
           </div>
           <pre
