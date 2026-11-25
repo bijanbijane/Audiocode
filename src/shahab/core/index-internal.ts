@@ -8,3 +8,4 @@ export * from './ShahabCoreDecoder';
 export * from './ShahabCoreFbank';
 export * from './ShahabCoreWavDecoder';
 export * from './ShahabCoreChunkMerger';
+export * from './ShahabCoreVad';
