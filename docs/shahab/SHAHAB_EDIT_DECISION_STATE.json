@@ -1,0 +1,529 @@
+{
+  "missionId": "SHAHAB-029",
+  "contractVersion": "1.0.0",
+  "edpSchemaVersion": "1.0.0",
+  "generatedAtUtc": "2026-11-21T21:46:10.006Z",
+  "finalStatus": "PARTIALLY_VERIFIED",
+  "statusRationale": "All 9 versioned editorial profiles, evidence-backed pause/Persian-filler/repetition/false-start/defect detectors, rhetorical emphasis protection, conflict & cycle detection, stale invalidation, approval/rejection/protection workflows, and immutable EDP revisions are verified; real-world editorial preference validation on large diverse Persian corpora requires human editor panels.",
+  "availableProfiles": [
+    {
+      "profileId": "VERBATIM_PRESERVATION",
+      "profileVersion": "1.0.0",
+      "displayName": "Verbatim Preservation",
+      "displayNameFa": "حفظ عین گفتار (Verbatim)",
+      "description": "Review-only preservation policy; flags defects/gaps without proposing destructive speech edits.",
+      "minLongPauseMs": 3000,
+      "targetPauseAfterTrimMs": 900,
+      "breathMarginMs": 120,
+      "allowLongPauseCandidate": false,
+      "allowFillerCandidate": false,
+      "allowRepetitionCandidate": false,
+      "allowFalseStartCandidate": false,
+      "allowLowRiskAutoEligiblePauses": false,
+      "preserveEmphasisAndQuotes": true,
+      "conservativeDefault": true
+    },
+    {
+      "profileId": "LIGHT_CLEANUP",
+      "profileVersion": "1.0.0",
+      "displayName": "Light Cleanup",
+      "displayNameFa": "پاک‌سازی ملایم",
+      "description": "Suggests trimming only clearly excessive dead silence while keeping natural pacing and breaths.",
+      "minLongPauseMs": 1800,
+      "targetPauseAfterTrimMs": 650,
+      "breathMarginMs": 110,
+      "allowLongPauseCandidate": true,
+      "allowFillerCandidate": false,
+      "allowRepetitionCandidate": false,
+      "allowFalseStartCandidate": false,
+      "allowLowRiskAutoEligiblePauses": false,
+      "preserveEmphasisAndQuotes": true,
+      "conservativeDefault": true
+    },
+    {
+      "profileId": "CONVERSATIONAL_CLEANUP",
+      "profileVersion": "1.0.0",
+      "displayName": "Conversational Cleanup",
+      "displayNameFa": "پاک‌سازی محاوره‌ای",
+      "description": "Detects long pauses, isolated hesitations/fillers, and clear stutter repetitions for review.",
+      "minLongPauseMs": 1400,
+      "targetPauseAfterTrimMs": 500,
+      "breathMarginMs": 90,
+      "allowLongPauseCandidate": true,
+      "allowFillerCandidate": true,
+      "allowRepetitionCandidate": true,
+      "allowFalseStartCandidate": true,
+      "allowLowRiskAutoEligiblePauses": false,
+      "preserveEmphasisAndQuotes": true,
+      "conservativeDefault": true
+    },
+    {
+      "profileId": "PODCAST_EDITING",
+      "profileVersion": "1.0.0",
+      "displayName": "Podcast Editing",
+      "displayNameFa": "تدوین پادکست",
+      "description": "Balanced podcast tightening for long pauses, isolated Persian fillers, stutters, and signal defects.",
+      "minLongPauseMs": 1300,
+      "targetPauseAfterTrimMs": 450,
+      "breathMarginMs": 95,
+      "allowLongPauseCandidate": true,
+      "allowFillerCandidate": true,
+      "allowRepetitionCandidate": true,
+      "allowFalseStartCandidate": true,
+      "allowLowRiskAutoEligiblePauses": true,
+      "preserveEmphasisAndQuotes": true,
+      "conservativeDefault": true
+    },
+    {
+      "profileId": "INTERVIEW_EDITING",
+      "profileVersion": "1.0.0",
+      "displayName": "Interview Editing",
+      "displayNameFa": "تدوین مصاحبه",
+      "description": "Protects turn-taking and multi-speaker overlaps; flags long dead-air gaps and stutters for human approval.",
+      "minLongPauseMs": 1600,
+      "targetPauseAfterTrimMs": 550,
+      "breathMarginMs": 100,
+      "allowLongPauseCandidate": true,
+      "allowFillerCandidate": true,
+      "allowRepetitionCandidate": true,
+      "allowFalseStartCandidate": false,
+      "allowLowRiskAutoEligiblePauses": false,
+      "preserveEmphasisAndQuotes": true,
+      "conservativeDefault": true
+    },
+    {
+      "profileId": "LECTURE_EDITING",
+      "profileVersion": "1.0.0",
+      "displayName": "Lecture Editing",
+      "displayNameFa": "تدوین سخنرانی و آموزش",
+      "description": "Preserves pedagogical pauses while identifying excessive silence (>2.0s), restarts, and technical dropouts.",
+      "minLongPauseMs": 2000,
+      "targetPauseAfterTrimMs": 700,
+      "breathMarginMs": 110,
+      "allowLongPauseCandidate": true,
+      "allowFillerCandidate": true,
+      "allowRepetitionCandidate": true,
+      "allowFalseStartCandidate": true,
+      "allowLowRiskAutoEligiblePauses": false,
+      "preserveEmphasisAndQuotes": true,
+      "conservativeDefault": true
+    },
+    {
+      "profileId": "PRESENTATION_EDITING",
+      "profileVersion": "1.0.0",
+      "displayName": "Presentation Editing",
+      "displayNameFa": "تدوین ارائه و ویدیو",
+      "description": "Tightens pacing around long dead silence and flags hesitations/false starts with mandatory review.",
+      "minLongPauseMs": 1200,
+      "targetPauseAfterTrimMs": 420,
+      "breathMarginMs": 85,
+      "allowLongPauseCandidate": true,
+      "allowFillerCandidate": true,
+      "allowRepetitionCandidate": true,
+      "allowFalseStartCandidate": true,
+      "allowLowRiskAutoEligiblePauses": true,
+      "preserveEmphasisAndQuotes": true,
+      "conservativeDefault": true
+    },
+    {
+      "profileId": "ARCHIVAL_PRESERVATION",
+      "profileVersion": "1.0.0",
+      "displayName": "Archival Preservation",
+      "displayNameFa": "آرشیو تاریخی (بدون حذف)",
+      "description": "Strict archival mode: never proposes speech removal; emits review-only quality markers.",
+      "minLongPauseMs": 4000,
+      "targetPauseAfterTrimMs": 1500,
+      "breathMarginMs": 150,
+      "allowLongPauseCandidate": false,
+      "allowFillerCandidate": false,
+      "allowRepetitionCandidate": false,
+      "allowFalseStartCandidate": false,
+      "allowLowRiskAutoEligiblePauses": false,
+      "preserveEmphasisAndQuotes": true,
+      "conservativeDefault": true
+    },
+    {
+      "profileId": "CUSTOM_USER_POLICY",
+      "profileVersion": "1.0.0",
+      "displayName": "Custom User Policy",
+      "displayNameFa": "سیاست سفارشی کاربر",
+      "description": "User-customized parameters grounded in conservative safety bounds.",
+      "minLongPauseMs": 1500,
+      "targetPauseAfterTrimMs": 500,
+      "breathMarginMs": 100,
+      "allowLongPauseCandidate": true,
+      "allowFillerCandidate": true,
+      "allowRepetitionCandidate": true,
+      "allowFalseStartCandidate": true,
+      "allowLowRiskAutoEligiblePauses": false,
+      "preserveEmphasisAndQuotes": true,
+      "conservativeDefault": true
+    }
+  ],
+  "samplePlan": {
+    "planId": "edp_92fda99fe0",
+    "edpSchemaVersion": "1.0.0",
+    "plannerContractVersion": "1.0.0",
+    "planRevision": 6,
+    "supersedesPlanId": "edp_ecb46ff38b",
+    "projectId": "avapardaz-proj-editorial-01",
+    "audioId": "avapardaz-editorial-fixture-stereo-01",
+    "sourceRevisionId": "src_rev_001",
+    "sourcePcmSha256": "62f042bdd936b4ae2797aacc35b13d409ad21176eb9ebbac2bcb1b00f934567f",
+    "transcriptRevisionId": "tr_rev_001",
+    "audioSceneAnalysisId": "audintel_8e0362c2f9",
+    "sampleRateHz": 16000,
+    "totalSourceFrames": 152000,
+    "profile": {
+      "profileId": "PODCAST_EDITING",
+      "profileVersion": "1.0.0",
+      "displayName": "Podcast Editing",
+      "displayNameFa": "تدوین پادکست",
+      "description": "Balanced podcast tightening for long pauses, isolated Persian fillers, stutters, and signal defects.",
+      "minLongPauseMs": 1300,
+      "targetPauseAfterTrimMs": 450,
+      "breathMarginMs": 95,
+      "allowLongPauseCandidate": true,
+      "allowFillerCandidate": true,
+      "allowRepetitionCandidate": true,
+      "allowFalseStartCandidate": true,
+      "allowLowRiskAutoEligiblePauses": true,
+      "preserveEmphasisAndQuotes": true,
+      "conservativeDefault": true
+    },
+    "validityState": "VALID",
+    "staleReason": null,
+    "consistencyReport": {
+      "status": "CONSISTENT_WITH_AVAILABLE_EVIDENCE",
+      "wordTimingAvailable": true,
+      "untranscribedSpeechCount": 0,
+      "alignmentWarnings": [],
+      "note": "Acoustic events and word-aligned transcript evidence are consistent for editorial planning."
+    },
+    "operations": [
+      {
+        "operationId": "edop_0001",
+        "operationType": "TRIM_SILENCE_OR_PAUSE",
+        "sourceRange": {
+          "startSample": 35840,
+          "endSample": 62480,
+          "sampleRateHz": 16000,
+          "startSec": 2.24,
+          "endSec": 3.905,
+          "durationMs": 1665,
+          "intervalSemantics": "HALF_OPEN_[startSample,endSample)"
+        },
+        "affectedText": null,
+        "riskLevel": "MEDIUM_RISK",
+        "automationEligibility": "HUMAN_REVIEW_REQUIRED",
+        "approvalState": "USER_APPROVED",
+        "dependsOnOperationIds": [],
+        "transitionHint": {
+          "recommendedFadeMs": 12,
+          "zeroCrossingSnapAllowed": true,
+          "reason": "Short equal-power crossfade across pause splice prevents DC step clicks."
+        },
+        "evidence": {
+          "acousticEventIds": [
+            "audintel_8e0362c2f9_ev_0010"
+          ],
+          "transcriptUnitRef": null,
+          "excerptText": null,
+          "evidenceClasses": [
+            "DIRECT_SIGNAL_MEASUREMENT",
+            "CONSISTENCY_CROSS_CHECK"
+          ],
+          "calibratedConfidenceAvailable": false,
+          "linguisticContextNote": "Pause contains adjacent low-energy or overlap context; flagged for mandatory human review.",
+          "breathProtectionApplied": true,
+          "timingPrecisionAvailable": "SAMPLE_EXACT_ACOUSTIC"
+        },
+        "rationale": "Shorten 2115ms pause by 1665ms while preserving 450ms natural margin.",
+        "rejectionHistory": [],
+        "approvedAtUtc": "2026-11-21T21:46:10.521Z",
+        "approvedBy": "shahab-verification-harness"
+      },
+      {
+        "operationId": "edop_0002",
+        "operationType": "REMOVE_FILLER_CANDIDATE",
+        "sourceRange": {
+          "startSample": 8960,
+          "endSample": 12480,
+          "sampleRateHz": 16000,
+          "startSec": 0.56,
+          "endSec": 0.78,
+          "durationMs": 220,
+          "intervalSemantics": "HALF_OPEN_[startSample,endSample)"
+        },
+        "affectedText": "ام",
+        "riskLevel": "MEDIUM_RISK",
+        "automationEligibility": "HUMAN_REVIEW_REQUIRED",
+        "approvalState": "USER_APPROVED",
+        "dependsOnOperationIds": [],
+        "transitionHint": {
+          "recommendedFadeMs": 15,
+          "zeroCrossingSnapAllowed": true,
+          "reason": "Voice boundary splice requires short equal-power crossfade and human listening check."
+        },
+        "evidence": {
+          "acousticEventIds": [],
+          "transcriptUnitRef": "w_002",
+          "excerptText": "سلام [ام] امروز",
+          "evidenceClasses": [
+            "TRANSCRIPT_LEXICAL_RULE",
+            "ALIGNMENT_TIMING_CHECK"
+          ],
+          "calibratedConfidenceAvailable": false,
+          "linguisticContextNote": "Isolated Persian hesitation filler candidate; requires human approval before execution.",
+          "breathProtectionApplied": true,
+          "timingPrecisionAvailable": "WORD_ALIGNED"
+        },
+        "rationale": "Detected isolated Persian hesitation filler \"ام\".",
+        "rejectionHistory": [],
+        "approvedAtUtc": "2026-11-21T21:46:10.521Z",
+        "approvedBy": "shahab-verification-harness"
+      },
+      {
+        "operationId": "edop_0003",
+        "operationType": "REMOVE_REPETITION_CANDIDATE",
+        "sourceRange": {
+          "startSample": 66400,
+          "endSample": 69600,
+          "sampleRateHz": 16000,
+          "startSec": 4.15,
+          "endSec": 4.35,
+          "durationMs": 200,
+          "intervalSemantics": "HALF_OPEN_[startSample,endSample)"
+        },
+        "affectedText": "ما",
+        "riskLevel": "MEDIUM_RISK",
+        "automationEligibility": "HUMAN_REVIEW_REQUIRED",
+        "approvalState": "USER_APPROVED",
+        "dependsOnOperationIds": [],
+        "transitionHint": {
+          "recommendedFadeMs": 14,
+          "zeroCrossingSnapAllowed": true,
+          "reason": "Remove first stuttered occurrence while preserving clean second utterance."
+        },
+        "evidence": {
+          "acousticEventIds": [],
+          "transcriptUnitRef": "w_007",
+          "excerptText": "[ما] ما",
+          "evidenceClasses": [
+            "TRANSCRIPT_LEXICAL_RULE",
+            "ALIGNMENT_TIMING_CHECK"
+          ],
+          "calibratedConfidenceAvailable": false,
+          "linguisticContextNote": "Immediate lexical repetition detected; verified not in Persian rhetorical reduplication emphasis list (\"خیلی خیلی\", etc.).",
+          "breathProtectionApplied": true,
+          "timingPrecisionAvailable": "WORD_ALIGNED"
+        },
+        "rationale": "Detected immediate word repetition \"ما ما\" (70ms gap).",
+        "rejectionHistory": [],
+        "approvedAtUtc": "2026-11-21T21:46:10.521Z",
+        "approvedBy": "shahab-verification-harness"
+      },
+      {
+        "operationId": "edop_0004",
+        "operationType": "REMOVE_FILLER_CANDIDATE",
+        "sourceRange": {
+          "startSample": 74560,
+          "endSample": 78720,
+          "sampleRateHz": 16000,
+          "startSec": 4.66,
+          "endSec": 4.92,
+          "durationMs": 260,
+          "intervalSemantics": "HALF_OPEN_[startSample,endSample)"
+        },
+        "affectedText": "یعنی",
+        "riskLevel": "HIGH_RISK",
+        "automationEligibility": "HUMAN_REVIEW_REQUIRED",
+        "approvalState": "USER_REJECTED",
+        "dependsOnOperationIds": [],
+        "transitionHint": {
+          "recommendedFadeMs": 15,
+          "zeroCrossingSnapAllowed": true,
+          "reason": "Voice boundary splice requires short equal-power crossfade and human listening check."
+        },
+        "evidence": {
+          "acousticEventIds": [],
+          "transcriptUnitRef": "w_009",
+          "excerptText": "ما [یعنی] نسخه",
+          "evidenceClasses": [
+            "TRANSCRIPT_LEXICAL_RULE",
+            "ALIGNMENT_TIMING_CHECK"
+          ],
+          "calibratedConfidenceAvailable": false,
+          "linguisticContextNote": "Context-sensitive Persian discourse marker (\"یعنی\") may carry rhetorical/explanatory meaning; high risk — human review mandatory.",
+          "breathProtectionApplied": true,
+          "timingPrecisionAvailable": "WORD_ALIGNED"
+        },
+        "rationale": "Detected context-sensitive discourse marker \"یعنی\" (potential filler vs meaningful lexical item).",
+        "rejectionHistory": [
+          {
+            "rejectedAtUtc": "2026-11-21T21:46:10.521Z",
+            "actor": "shahab-verification-harness",
+            "reason": "Meaningful Persian discourse marker retained by editor"
+          }
+        ],
+        "approvedAtUtc": null,
+        "approvedBy": null
+      },
+      {
+        "operationId": "edop_0005",
+        "operationType": "FLAG_QUALITY_DEFECT_REVIEW",
+        "sourceRange": {
+          "startSample": 99200,
+          "endSample": 99440,
+          "sampleRateHz": 16000,
+          "startSec": 6.2,
+          "endSec": 6.215,
+          "durationMs": 15,
+          "intervalSemantics": "HALF_OPEN_[startSample,endSample)"
+        },
+        "affectedText": null,
+        "riskLevel": "CRITICAL_PRESERVE_ONLY",
+        "automationEligibility": "NEVER_AUTO_APPLY",
+        "approvalState": "PROPOSED_PENDING_REVIEW",
+        "dependsOnOperationIds": [],
+        "transitionHint": {
+          "recommendedFadeMs": 0,
+          "zeroCrossingSnapAllowed": false,
+          "reason": "Review flag only — no automatic audio deletion."
+        },
+        "evidence": {
+          "acousticEventIds": [
+            "audintel_8e0362c2f9_ev_0002"
+          ],
+          "transcriptUnitRef": null,
+          "excerptText": null,
+          "evidenceClasses": [
+            "DIRECT_SIGNAL_MEASUREMENT",
+            "DIARIZATION_OVERLAP_GUARD"
+          ],
+          "calibratedConfidenceAvailable": false,
+          "linguisticContextNote": "Technical signal defect (CLIPPING, 15ms) flagged for review.",
+          "breathProtectionApplied": true,
+          "timingPrecisionAvailable": "SAMPLE_EXACT_ACOUSTIC"
+        },
+        "rationale": "Technical signal defect (CLIPPING, 15ms) flagged for review.",
+        "rejectionHistory": [],
+        "approvedAtUtc": null,
+        "approvedBy": null
+      },
+      {
+        "operationId": "edop_0006",
+        "operationType": "FLAG_OVERLAP_REVIEW",
+        "sourceRange": {
+          "startSample": 96320,
+          "endSample": 104000,
+          "sampleRateHz": 16000,
+          "startSec": 6.02,
+          "endSec": 6.5,
+          "durationMs": 480,
+          "intervalSemantics": "HALF_OPEN_[startSample,endSample)"
+        },
+        "affectedText": null,
+        "riskLevel": "CRITICAL_PRESERVE_ONLY",
+        "automationEligibility": "NEVER_AUTO_APPLY",
+        "approvalState": "PROPOSED_PENDING_REVIEW",
+        "dependsOnOperationIds": [],
+        "transitionHint": {
+          "recommendedFadeMs": 0,
+          "zeroCrossingSnapAllowed": false,
+          "reason": "Review flag only — no automatic audio deletion."
+        },
+        "evidence": {
+          "acousticEventIds": [
+            "audintel_8e0362c2f9_ev_0008"
+          ],
+          "transcriptUnitRef": null,
+          "excerptText": null,
+          "evidenceClasses": [
+            "DIRECT_SIGNAL_MEASUREMENT",
+            "DIARIZATION_OVERLAP_GUARD"
+          ],
+          "calibratedConfidenceAvailable": false,
+          "linguisticContextNote": "Overlapping speech region (480ms) flagged for manual editorial handling.",
+          "breathProtectionApplied": true,
+          "timingPrecisionAvailable": "SAMPLE_EXACT_ACOUSTIC"
+        },
+        "rationale": "Overlapping speech region (480ms) flagged for manual editorial handling.",
+        "rejectionHistory": [],
+        "approvedAtUtc": null,
+        "approvedBy": null
+      },
+      {
+        "operationId": "edop_0007",
+        "operationType": "FLAG_QUALITY_DEFECT_REVIEW",
+        "sourceRange": {
+          "startSample": 94400,
+          "endSample": 96560,
+          "sampleRateHz": 16000,
+          "startSec": 5.9,
+          "endSec": 6.035,
+          "durationMs": 135,
+          "intervalSemantics": "HALF_OPEN_[startSample,endSample)"
+        },
+        "affectedText": null,
+        "riskLevel": "CRITICAL_PRESERVE_ONLY",
+        "automationEligibility": "NEVER_AUTO_APPLY",
+        "approvalState": "PROPOSED_PENDING_REVIEW",
+        "dependsOnOperationIds": [],
+        "transitionHint": {
+          "recommendedFadeMs": 0,
+          "zeroCrossingSnapAllowed": false,
+          "reason": "Review flag only — no automatic audio deletion."
+        },
+        "evidence": {
+          "acousticEventIds": [
+            "audintel_8e0362c2f9_ev_0009"
+          ],
+          "transcriptUnitRef": null,
+          "excerptText": null,
+          "evidenceClasses": [
+            "DIRECT_SIGNAL_MEASUREMENT",
+            "DIARIZATION_OVERLAP_GUARD"
+          ],
+          "calibratedConfidenceAvailable": false,
+          "linguisticContextNote": "Technical signal defect (SIGNAL_DROPOUT, 135ms) flagged for review.",
+          "breathProtectionApplied": true,
+          "timingPrecisionAvailable": "SAMPLE_EXACT_ACOUSTIC"
+        },
+        "rationale": "Technical signal defect (SIGNAL_DROPOUT, 135ms) flagged for review.",
+        "rejectionHistory": [],
+        "approvedAtUtc": null,
+        "approvedBy": null
+      }
+    ],
+    "protectedRanges": [
+      {
+        "protectionId": "prot_33d6d98c",
+        "startSample": 120000,
+        "endSample": 131200,
+        "sampleRateHz": 16000,
+        "reason": "User-protected rhetorical emphasis (\"خیلی خیلی\")",
+        "createdBy": "shahab-verification-harness",
+        "createdAtUtc": "2026-11-21T21:46:10.520Z"
+      }
+    ],
+    "conflicts": [],
+    "planDigestSha256": "bcf2ba86f3c5b8f3f6940e9c4caf0cabce1d16bc4a3791d7cc14205482e9cbbc",
+    "summary": {
+      "totalCandidates": 7,
+      "approvedCutCount": 3,
+      "pendingReviewCount": 3,
+      "rejectedCount": 1,
+      "protectedRangeCount": 1,
+      "estimatedRemovableMsIfAllApproved": 2085
+    },
+    "createdAtUtc": "2026-11-21T21:46:10.519Z",
+    "updatedAtUtc": "2026-11-21T21:46:10.521Z"
+  },
+  "stageSeparationAudit": {
+    "mutatesSourceAudio": false,
+    "mutatesRawTranscript": false,
+    "executesAudioCutsDirectly": false,
+    "fabricatesConfidencePercentages": false
+  }
+}

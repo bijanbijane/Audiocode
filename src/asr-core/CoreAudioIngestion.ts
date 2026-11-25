@@ -7,7 +7,7 @@
  * so out-of-phase L/R cancellation or single-dead-channel stereo recordings are never destroyed.
  */
 
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -27,7 +27,8 @@ export function detectAudioContainerFormat(bytes: Buffer, filename = ''): AudioC
   if (bytes.length >= 12) {
     const riff = bytes.subarray(0, 4).toString('ascii');
     const wave = bytes.subarray(8, 12).toString('ascii');
-    if (riff === 'RIFF' && wave === 'WAVE') return 'wav';
+    if ((riff === 'RIFF' || riff === 'RF64') && wave === 'WAVE') return 'wav';
+    if (riff === 'FORM' && (wave === 'AIFF' || wave === 'AIFC')) return 'aiff';
   }
   if (bytes.length >= 4) {
     const magic4 = bytes.subarray(0, 4).toString('ascii');
@@ -44,9 +45,11 @@ export function detectAudioContainerFormat(bytes: Buffer, filename = ''): AudioC
     }
   }
   const ext = path.extname(filename).toLowerCase().replace('.', '');
-  if (ext === 'wav' || ext === 'mp3' || ext === 'flac' || ext === 'ogg' || ext === 'm4a' || ext === 'webm') {
+  if (ext === 'wav' || ext === 'mp3' || ext === 'flac' || ext === 'ogg' || ext === 'm4a' || ext === 'webm' || ext === 'aiff') {
     return ext;
   }
+  if (ext === 'aif') return 'aiff';
+  if (ext === 'mp4' || ext === 'aac') return 'm4a';
   return 'unknown';
 }
 
@@ -109,7 +112,7 @@ function rmsDbOfFloat32(samples: Float32Array): number {
  * Inspects multi-channel PCM at 16kHz BEFORE downmixing so out-of-phase or dead-channel
  * stereo files don't silently attenuate to silence.
  */
-export function inspectAndDownmixChannels(channels: Float32Array[]): {
+export function inspectAndDownmixChannels(channels: readonly Float32Array[]): {
   monoFloat32: Float32Array;
   inspection: StereoChannelInspection;
 } {
@@ -347,7 +350,21 @@ export function ingestAudioBufferToCanonical16kMono(params: {
   const warnings: string[] = [];
 
   if (rawPcm16Hint) {
+    if (rawBytes.length % 2 !== 0) {
+      throw new Error('AUDIO_INGEST_INVALID_PCM16: Raw PCM16 payload must have an even byte length.');
+    }
+    if (rawBytes.length > MAX_DECODED_PCM_BYTES) {
+      throw new Error(
+        `AUDIO_INGEST_DECODED_LIMIT_EXCEEDED: Raw PCM16 payload exceeds ${MAX_DECODED_PCM_BYTES} bytes.`,
+      );
+    }
     const f32 = pcm16BufferToFloat32(rawBytes);
+    const durationSec = f32.length / TARGET_SR;
+    if (durationSec > MAX_DECODED_DURATION_SEC) {
+      throw new Error(
+        `AUDIO_INGEST_DECODED_LIMIT_EXCEEDED: Raw PCM16 duration (${durationSec.toFixed(1)}s) exceeds ${MAX_DECODED_DURATION_SEC}s.`,
+      );
+    }
     const health = computeSignalHealth(f32);
     if (health.isSilent) warnings.push('Audio signal RMS is below -65 dBFS (near-silent input).');
     return {
@@ -362,7 +379,7 @@ export function ingestAudioBufferToCanonical16kMono(params: {
       canonicalPcm16: rawBytes,
       canonicalFloat32: f32,
       sampleCount: f32.length,
-      durationSec: Number((f32.length / TARGET_SR).toFixed(4)),
+      durationSec: Number(durationSec.toFixed(4)),
       audioSha256,
       stereoInspection: inspectAndDownmixChannels([f32]).inspection,
       signalHealth: health,
@@ -387,9 +404,12 @@ export function ingestAudioBufferToCanonical16kMono(params: {
   try {
     fs.writeFileSync(inputPath, rawBytes);
     const streamInfo = probeAudioStreamInfo(inputPath);
-    const probeChannels = Math.max(1, Math.min(2, streamInfo.channels));
+    // Preserve 2 channels for stereo so L/R Stereo Phase Guard runs;
+    // for >2ch surround (e.g. 5.1/7.1), let FFmpeg downmix ALL channels to mono (-ac 1)
+    // instead of truncating channels 3..N (such as the center dialogue channel).
+    const probeChannels = streamInfo.channels === 2 ? 2 : 1;
 
-    // Decode via ffmpeg preserving up to 2 channels at 16kHz with strict duration & output size caps
+    // Decode via ffmpeg at 16kHz with strict duration & output size caps
     execFileSync(
       'ffmpeg',
       [
@@ -403,6 +423,8 @@ export function ingestAudioBufferToCanonical16kMono(params: {
         String(MAX_DECODED_DURATION_SEC),
         '-fs',
         String(MAX_DECODED_PCM_BYTES),
+        '-af',
+        'aresample=resampler=soxr:precision=28',
         '-acodec',
         'pcm_s16le',
         '-ar',
@@ -473,6 +495,363 @@ export function ingestAudioBufferToCanonical16kMono(params: {
   }
 }
 
+async function runProcessWithPipeBytes(params: {
+  readonly bin: 'ffmpeg' | 'ffprobe';
+  readonly args: readonly string[];
+  readonly stdinBytes?: Buffer;
+  readonly maxStdoutBytes: number;
+  readonly timeoutMs: number;
+  readonly signal?: AbortSignal;
+}): Promise<{ readonly stdout: Buffer; readonly stderr: string }> {
+  const { bin, args, stdinBytes, maxStdoutBytes, timeoutMs, signal } = params;
+  if (signal?.aborted) {
+    throw new Error('AUDIO_INGEST_CANCELLED: Audio decoding cancelled before start.');
+  }
+  return await new Promise((resolve, reject) => {
+    const child = spawn(bin, args, {
+      stdio: [stdinBytes ? 'pipe' : 'ignore', 'pipe', 'pipe'],
+    });
+
+    const stdoutChunks: Buffer[] = [];
+    const stderrChunks: Buffer[] = [];
+    let stdoutLen = 0;
+    let settled = false;
+
+    const cleanup = () => {
+      clearTimeout(timer);
+      signal?.removeEventListener('abort', onAbort);
+    };
+
+    const fail = (err: Error) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      if (!child.killed) {
+        try {
+          child.kill('SIGKILL');
+        } catch {
+          // Ignore kill error
+        }
+      }
+      reject(err);
+    };
+
+    const onAbort = () => {
+      fail(new Error('AUDIO_INGEST_CANCELLED: Audio decoding cancelled via AbortSignal.'));
+    };
+    signal?.addEventListener('abort', onAbort, { once: true });
+
+    const timer = setTimeout(() => {
+      fail(new Error(`AUDIO_INGEST_TIMEOUT: ${bin} exceeded ${timeoutMs}ms timeout.`));
+    }, timeoutMs);
+
+    child.stdout?.on('data', (chunk: Buffer) => {
+      stdoutLen += chunk.length;
+      if (stdoutLen > maxStdoutBytes) {
+        fail(
+          new Error(
+            `AUDIO_INGEST_DECODED_LIMIT_EXCEEDED: Decoded stream exceeds ${maxStdoutBytes} bytes.`,
+          ),
+        );
+        return;
+      }
+      stdoutChunks.push(chunk);
+    });
+
+    child.stderr?.on('data', (chunk: Buffer) => {
+      if (stderrChunks.reduce((acc, b) => acc + b.length, 0) < 16_384) {
+        stderrChunks.push(chunk);
+      }
+    });
+
+    child.on('error', (err) => {
+      fail(err instanceof Error ? err : new Error(String(err)));
+    });
+
+    child.on('close', (code) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      const stderrText = Buffer.concat(stderrChunks).toString('utf8').trim();
+      if (code !== 0) {
+        reject(new Error(`FFMPEG_PIPE_EXIT_${code}: ${stderrText || 'Unknown error'}`));
+        return;
+      }
+      resolve({
+        stdout: Buffer.concat(stdoutChunks, stdoutLen),
+        stderr: stderrText,
+      });
+    });
+
+    if (stdinBytes && child.stdin) {
+      child.stdin.on('error', () => {
+        // Ignore EPIPE when ffmpeg exits early on invalid stream
+      });
+      child.stdin.end(stdinBytes);
+    }
+  });
+}
+
+async function probeAudioStreamInfoAsync(params: {
+  readonly inputSource: { readonly kind: 'pipe'; readonly bytes: Buffer } | { readonly kind: 'file'; readonly filePath: string };
+  readonly signal?: AbortSignal;
+}): Promise<{
+  readonly sampleRateHz: number;
+  readonly channels: number;
+  readonly codecName: string;
+}> {
+  try {
+    const targetArg = params.inputSource.kind === 'pipe' ? 'pipe:0' : params.inputSource.filePath;
+    const { stdout } = await runProcessWithPipeBytes({
+      bin: 'ffprobe',
+      args: [
+        '-v',
+        'error',
+        '-select_streams',
+        'a:0',
+        '-show_entries',
+        'stream=sample_rate,channels,codec_name',
+        '-of',
+        'json',
+        targetArg,
+      ],
+      stdinBytes: params.inputSource.kind === 'pipe' ? params.inputSource.bytes : undefined,
+      maxStdoutBytes: 256 * 1024,
+      timeoutMs: 8_000,
+      signal: params.signal,
+    });
+    const parsed = JSON.parse(stdout.toString('utf8')) as {
+      streams?: Array<{ sample_rate?: string; channels?: number; codec_name?: string }>;
+    };
+    const s = parsed.streams?.[0];
+    return {
+      sampleRateHz: Number(s?.sample_rate) || TARGET_SR,
+      channels: Number(s?.channels) || 1,
+      codecName: s?.codec_name ?? 'unknown',
+    };
+  } catch (err) {
+    if (err instanceof Error && err.message.includes('AUDIO_INGEST_CANCELLED')) {
+      throw err;
+    }
+    return { sampleRateHz: TARGET_SR, channels: 1, codecName: 'unknown' };
+  }
+}
+
+/**
+ * Non-blocking async multi-format ingestion via FFmpeg `pipe:0 -> pipe:1` (`f32le` + `soxr:precision=28`).
+ * Avoids blocking the Node.js event loop and writes ZERO temporary files for streamable containers
+ * (MP3, FLAC, OGG, WebM, WAV, AIFF). Uses a `0o600` temp file fallback only if pipe demuxing fails
+ * (e.g., non-faststart MP4/M4A moov-at-end).
+ */
+export async function ingestAudioBufferToCanonical16kMonoAsync(params: {
+  recordingId?: string;
+  filename: string;
+  rawBytes: Buffer;
+  rawPcm16Hint?: boolean;
+  signal?: AbortSignal;
+  includePcm16?: boolean;
+}): Promise<CoreAudioIngestResult> {
+  const { filename, rawBytes, rawPcm16Hint = false, signal, includePcm16 = true } = params;
+  const recordingId = params.recordingId ?? `rec_${crypto.randomBytes(6).toString('hex')}`;
+
+  if (signal?.aborted) {
+    throw new Error('AUDIO_INGEST_CANCELLED: Audio decoding cancelled before start.');
+  }
+  if (!rawBytes || rawBytes.length === 0) {
+    throw new Error('AUDIO_INGEST_EMPTY: Audio payload is empty.');
+  }
+  if (rawBytes.length > MAX_INGEST_BYTES) {
+    throw new Error(`AUDIO_INGEST_LIMIT_EXCEEDED: Payload exceeds ${MAX_INGEST_BYTES} bytes.`);
+  }
+
+  if (rawPcm16Hint) {
+    const syncRes = ingestAudioBufferToCanonical16kMono({
+      recordingId,
+      filename,
+      rawBytes,
+      rawPcm16Hint: true,
+    });
+    return includePcm16
+      ? syncRes
+      : { ...syncRes, canonicalPcm16: Buffer.alloc(0) };
+  }
+
+  const audioSha256 = crypto.createHash('sha256').update(rawBytes).digest('hex');
+  const warnings: string[] = [];
+  const detectedFormat = detectAudioContainerFormat(rawBytes, filename);
+  if (detectedFormat === 'unknown') {
+    throw new Error('AUDIO_INGEST_UNSUPPORTED_MAGIC: File signature does not match supported audio containers.');
+  }
+
+  const maxFloatStdoutBytes = MAX_DECODED_PCM_BYTES * 2;
+  const buildFfmpegArgs = (inputArg: string, probeChannels: number): string[] => [
+    '-y',
+    '-v',
+    'error',
+    '-i',
+    inputArg,
+    '-vn',
+    '-t',
+    String(MAX_DECODED_DURATION_SEC),
+    '-af',
+    'aresample=resampler=soxr:precision=28',
+    '-acodec',
+    'pcm_f32le',
+    '-ar',
+    String(TARGET_SR),
+    '-ac',
+    String(probeChannels),
+    '-f',
+    'f32le',
+    'pipe:1',
+  ];
+
+  let streamInfo: { readonly sampleRateHz: number; readonly channels: number; readonly codecName: string };
+  let probeChannels: number;
+  let decodedFloatBuf: Buffer;
+
+  const tryPipeDecode = async () => {
+    const probed = await probeAudioStreamInfoAsync({
+      inputSource: { kind: 'pipe', bytes: rawBytes },
+      signal,
+    });
+    const pChannels = probed.channels === 2 ? 2 : 1;
+    const { stdout } = await runProcessWithPipeBytes({
+      bin: 'ffmpeg',
+      args: buildFfmpegArgs('pipe:0', pChannels),
+      stdinBytes: rawBytes,
+      maxStdoutBytes: maxFloatStdoutBytes,
+      timeoutMs: 25_000,
+      signal,
+    });
+    return { probed, pChannels, stdout };
+  };
+
+  const ext = detectedFormat === 'pcm16' ? 'wav' : detectedFormat;
+  if (detectedFormat !== 'm4a') {
+    try {
+      const pipeRes = await tryPipeDecode();
+      streamInfo = pipeRes.probed;
+      probeChannels = pipeRes.pChannels;
+      decodedFloatBuf = pipeRes.stdout;
+    } catch (pipeErr) {
+      if (
+        pipeErr instanceof Error &&
+        (pipeErr.message.includes('AUDIO_INGEST_CANCELLED') ||
+          pipeErr.message.includes('AUDIO_INGEST_DECODED_LIMIT_EXCEEDED'))
+      ) {
+        throw pipeErr;
+      }
+      // Re-try with 0o600 temp file only when pipe demux cannot seek cleanly
+      const tmpDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'avapardaz-ingest-'));
+      await fs.promises.chmod(tmpDir, 0o700).catch(() => {});
+      const inputPath = path.join(tmpDir, `input.${ext}`);
+      try {
+        await fs.promises.writeFile(inputPath, rawBytes, { mode: 0o600 });
+        streamInfo = await probeAudioStreamInfoAsync({
+          inputSource: { kind: 'file', filePath: inputPath },
+          signal,
+        });
+        probeChannels = streamInfo.channels === 2 ? 2 : 1;
+        const { stdout } = await runProcessWithPipeBytes({
+          bin: 'ffmpeg',
+          args: buildFfmpegArgs(inputPath, probeChannels),
+          maxStdoutBytes: maxFloatStdoutBytes,
+          timeoutMs: 25_000,
+          signal,
+        });
+        decodedFloatBuf = stdout;
+      } finally {
+        await fs.promises.rm(tmpDir, { recursive: true, force: true }).catch(() => {});
+      }
+    }
+  } else {
+    // M4A/MP4 often places moov atom at EOF; try pipe first, fallback cleanly to 0o600 temp file if unseekable
+    try {
+      const pipeRes = await tryPipeDecode();
+      streamInfo = pipeRes.probed;
+      probeChannels = pipeRes.pChannels;
+      decodedFloatBuf = pipeRes.stdout;
+    } catch (pipeErr) {
+      if (
+        pipeErr instanceof Error &&
+        (pipeErr.message.includes('AUDIO_INGEST_CANCELLED') ||
+          pipeErr.message.includes('AUDIO_INGEST_DECODED_LIMIT_EXCEEDED'))
+      ) {
+        throw pipeErr;
+      }
+      const tmpDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'avapardaz-ingest-'));
+      await fs.promises.chmod(tmpDir, 0o700).catch(() => {});
+      const inputPath = path.join(tmpDir, `input.${ext}`);
+      try {
+        await fs.promises.writeFile(inputPath, rawBytes, { mode: 0o600 });
+        streamInfo = await probeAudioStreamInfoAsync({
+          inputSource: { kind: 'file', filePath: inputPath },
+          signal,
+        });
+        probeChannels = streamInfo.channels === 2 ? 2 : 1;
+        const { stdout } = await runProcessWithPipeBytes({
+          bin: 'ffmpeg',
+          args: buildFfmpegArgs(inputPath, probeChannels),
+          maxStdoutBytes: maxFloatStdoutBytes,
+          timeoutMs: 25_000,
+          signal,
+        });
+        decodedFloatBuf = stdout;
+      } finally {
+        await fs.promises.rm(tmpDir, { recursive: true, force: true }).catch(() => {});
+      }
+    }
+  }
+
+  const totalSamplesAllCh = Math.floor(decodedFloatBuf.length / 4);
+  const frames = Math.floor(totalSamplesAllCh / probeChannels);
+  const channels: Float32Array[] = [];
+  for (let c = 0; c < probeChannels; c++) {
+    channels.push(new Float32Array(frames));
+  }
+  const view = new DataView(decodedFloatBuf.buffer, decodedFloatBuf.byteOffset, decodedFloatBuf.byteLength);
+  for (let i = 0; i < frames; i++) {
+    for (let c = 0; c < probeChannels; c++) {
+      const s = view.getFloat32((i * probeChannels + c) * 4, true);
+      channels[c][i] = Number.isFinite(s) ? Math.max(-1, Math.min(1, s)) : 0;
+    }
+  }
+
+  const { monoFloat32, inspection } = inspectAndDownmixChannels(channels);
+  const canonicalPcm16 = includePcm16 ? float32ToPcm16Buffer(monoFloat32) : Buffer.alloc(0);
+  const signalHealth = computeSignalHealth(monoFloat32);
+
+  if (inspection.phaseInversionRisk) {
+    warnings.push('Phase inversion risk between L/R channels mitigated via primary-channel guard.');
+  }
+  if (signalHealth.clippingRatio > 0.01) {
+    warnings.push(`Clipping ratio elevated (${(signalHealth.clippingRatio * 100).toFixed(2)}%).`);
+  }
+  if (signalHealth.isSilent) {
+    warnings.push('Audio signal RMS is below -65 dBFS (near-silent input).');
+  }
+
+  return {
+    recordingId,
+    sourceFilename: path.basename(filename || `audio.${ext}`),
+    detectedFormat,
+    decoderUsed: 'ffmpeg',
+    originalSampleRateHz: streamInfo.sampleRateHz,
+    originalChannels: streamInfo.channels,
+    canonicalSampleRateHz: TARGET_SR,
+    canonicalChannels: 1,
+    canonicalPcm16,
+    canonicalFloat32: monoFloat32,
+    sampleCount: monoFloat32.length,
+    durationSec: Number((monoFloat32.length / TARGET_SR).toFixed(4)),
+    audioSha256,
+    stereoInspection: inspection,
+    signalHealth,
+    warnings,
+  };
+}
+
 /**
  * Helper to synthesize deterministic multi-formant speech-like waveform in CPU
  * (for hermetic multi-format encoding & acoustic recognition evaluation without pre-recorded MP3/FLAC on disk).
@@ -509,4 +888,43 @@ export function encodeFloat32ToContainerWithFfmpeg(
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
+}
+
+/**
+ * Removes orphaned `avapardaz-ingest-*` / `avapardaz-enc-*` temporary directories left behind
+ * in `os.tmpdir()` after abrupt process termination (SIGKILL/OOM). Safe to call at server startup.
+ */
+export function cleanupOrphanedCoreIngestionTempFiles(options?: {
+  readonly tmpRoot?: string;
+  readonly maxAgeMs?: number;
+}): { readonly removedCount: number; readonly removedPaths: readonly string[] } {
+  const tmpRoot = options?.tmpRoot ?? os.tmpdir();
+  const maxAgeMs = Math.max(0, options?.maxAgeMs ?? 15 * 60 * 1000);
+  const cutoffMs = Date.now() - maxAgeMs;
+  const removedPaths: string[] = [];
+
+  let entries: fs.Dirent[];
+  try {
+    entries = fs.readdirSync(tmpRoot, { withFileTypes: true });
+  } catch {
+    return { removedCount: 0, removedPaths };
+  }
+
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue;
+    if (!entry.name.startsWith('avapardaz-ingest-') && !entry.name.startsWith('avapardaz-enc-')) {
+      continue;
+    }
+    const fullPath = path.join(tmpRoot, entry.name);
+    try {
+      const stat = fs.statSync(fullPath);
+      if (maxAgeMs === 0 || stat.mtimeMs <= cutoffMs) {
+        fs.rmSync(fullPath, { recursive: true, force: true });
+        removedPaths.push(fullPath);
+      }
+    } catch {
+      // Ignore transient races with concurrent cleanup
+    }
+  }
+  return { removedCount: removedPaths.length, removedPaths };
 }

@@ -14,6 +14,7 @@
  */
 
 import type { PersianWordToken } from '../contracts/v1_2';
+import { resampleTo16kMono } from '../engine/resampler';
 import { msToFlicks, secondsToFlicks } from '../engine/timebase';
 import {
   DEFAULT_SHAHAB_CHUNK_SEC,
@@ -22,6 +23,7 @@ import {
   planAudioChunks,
   type ChunkWordBucket,
 } from './ShahabChunkMerger';
+import { normalizeCanonicalPersianUtterance } from '../shahab/core/ShahabCorePersianNormalizer';
 
 export interface ShahabLocalRuntimeStatusResponse {
   readonly available: boolean;
@@ -220,15 +222,14 @@ export function encodeMonoFloat32To16kWavBytes(
   if (Math.round(safeRate) === targetRate) {
     mono16k = pcm;
   } else {
-    const outLen = Math.max(1, Math.round((pcm.length * targetRate) / safeRate));
-    mono16k = new Float32Array(outLen);
-    const ratio = safeRate / targetRate;
-    for (let i = 0; i < outLen; i++) {
-      const pos = i * ratio;
-      const lo = Math.min(pcm.length - 1, Math.floor(pos));
-      const hi = Math.min(pcm.length - 1, lo + 1);
-      const frac = pos - lo;
-      mono16k[i] = pcm[lo] * (1 - frac) + pcm[hi] * frac;
+    // Anti-aliased Kaiser-windowed sinc resampling prevents high-frequency Persian sibilant aliasing
+    const resampled = resampleTo16kMono([pcm], safeRate, targetRate).samples;
+    if (resampled.length > 0) {
+      mono16k = resampled;
+    } else if (pcm.length > 0) {
+      mono16k = new Float32Array([Number.isFinite(pcm[0]) ? pcm[0] : 0]);
+    } else {
+      mono16k = new Float32Array(0);
     }
   }
 
@@ -261,6 +262,67 @@ export function encodeMonoFloat32To16kWavBytes(
     const clamped = Math.max(-1, Math.min(1, mono16k[i]));
     view.setInt16(offset, clamped < 0 ? Math.round(clamped * 32768) : Math.round(clamped * 32767), true);
     offset += 2;
+  }
+
+  return new Uint8Array(buffer);
+}
+
+/**
+ * Losslessly resamples/encodes mono Float32 PCM to 16 kHz mono IEEE Float32 RIFF WAV bytes
+ * (`audioFormat = 3`, 32-bit float, ~64 KB/sec), eliminating Int16 quantization loss on
+ * low-amplitude speech over local HTTP transport while passing standard `RIFF...WAVE` checks (SHB-F10).
+ */
+export function encodeMonoFloat32To16kFloat32WavBytes(
+  pcm: Float32Array,
+  sourceSampleRate: number,
+): Uint8Array {
+  const targetRate = 16000;
+  const safeRate = Number.isFinite(sourceSampleRate) && sourceSampleRate > 0 ? sourceSampleRate : targetRate;
+
+  let mono16k: Float32Array;
+  if (Math.round(safeRate) === targetRate) {
+    mono16k = pcm;
+  } else {
+    const resampled = resampleTo16kMono([pcm], safeRate, targetRate).samples;
+    if (resampled.length > 0) {
+      mono16k = resampled;
+    } else if (pcm.length > 0) {
+      mono16k = new Float32Array([Number.isFinite(pcm[0]) ? pcm[0] : 0]);
+    } else {
+      mono16k = new Float32Array(0);
+    }
+  }
+
+  const dataByteLength = mono16k.length * 4;
+  const buffer = new ArrayBuffer(44 + dataByteLength);
+  const view = new DataView(buffer);
+
+  const writeStr = (offset: number, s: string) => {
+    for (let i = 0; i < s.length; i++) {
+      view.setUint8(offset + i, s.charCodeAt(i));
+    }
+  };
+
+  writeStr(0, 'RIFF');
+  view.setUint32(4, 36 + dataByteLength, true);
+  writeStr(8, 'WAVE');
+  writeStr(12, 'fmt ');
+  view.setUint32(16, 16, true); // fmt chunk size
+  view.setUint16(20, 3, true); // IEEE Float format
+  view.setUint16(22, 1, true); // mono
+  view.setUint32(24, targetRate, true);
+  view.setUint32(28, targetRate * 4, true); // byte rate
+  view.setUint16(32, 4, true); // block align
+  view.setUint16(34, 32, true); // bits per sample
+  writeStr(36, 'data');
+  view.setUint32(40, dataByteLength, true);
+
+  let offset = 44;
+  for (let i = 0; i < mono16k.length; i++) {
+    const raw = Number.isFinite(mono16k[i]) ? mono16k[i] : 0;
+    const clamped = Math.max(-1, Math.min(1, raw));
+    view.setFloat32(offset, clamped, true);
+    offset += 4;
   }
 
   return new Uint8Array(buffer);
@@ -337,6 +399,9 @@ export function mapShahabResponseToPersianWordTokens(params: {
   return tokens.map((tok, idx) => {
     const startF = secondsToFlicks(Math.max(0, tok.startSec));
     const endF = Math.max(startF + msToFlicks(40), secondsToFlicks(Math.max(tok.startSec, tok.endSec)));
+    const hasRealConfidence =
+      typeof tok.confidence === 'number' && Number.isFinite(tok.confidence);
+    const isWordGranularity = tok.timestampGranularity === 'WORD';
     return {
       id: `tok_shahab_${idx}`,
       trackId: params.trackId,
@@ -348,8 +413,12 @@ export function mapShahabResponseToPersianWordTokens(params: {
         startFlicks: startF,
         endFlicks: endF,
       },
-      confidence: tok.confidence ?? 0.85,
-      alignmentSource: tok.timestampGranularity === 'WORD' ? 'ASR' : 'AcousticSnap',
+      // Never fabricate synthetic confidence (e.g. 0.85) when the model emits null
+      confidence: hasRealConfidence ? Math.max(0, Math.min(1, tok.confidence!)) : 0,
+      confidenceAvailable: hasRealConfidence,
+      // Never mislabel proportionally distributed segment estimates as AcousticSnap
+      alignmentSource: isWordGranularity ? 'ASR' : 'Estimated',
+      alignmentPrecision: isWordGranularity ? 'model_timestamps' : 'distributed_segment',
       detectedLanguage: /[A-Za-z]/.test(tok.rawText) ? 'EN' : 'FA',
     };
   });
@@ -405,10 +474,113 @@ async function ensureLocalAudioSessionToken(signal?: AbortSignal, forceRefresh =
   return null;
 }
 
+/**
+ * Builds authenticated headers for protected SHAHAB local/hosted API calls using
+ * only an ephemeral in-memory session token (never persisted to web storage).
+ */
+export async function buildAuthorizedShahabRequestHeaders(options?: {
+  readonly contentType?: string;
+  readonly includeReplayHeaders?: boolean;
+  readonly forceRefresh?: boolean;
+  readonly bearerToken?: string;
+  readonly signal?: AbortSignal;
+}): Promise<Record<string, string>> {
+  const activeToken =
+    options?.bearerToken ??
+    (await ensureLocalAudioSessionToken(options?.signal, Boolean(options?.forceRefresh)));
+  const headers: Record<string, string> = {
+    Accept: 'application/json',
+  };
+  if (options?.contentType) {
+    headers['Content-Type'] = options.contentType;
+  }
+  if (activeToken) {
+    headers['Authorization'] = `Bearer ${activeToken}`;
+  }
+  if (options?.includeReplayHeaders) {
+    headers['X-Request-Nonce'] = generateRequestNonce();
+    headers['X-Request-Timestamp'] = String(Date.now());
+  }
+  return headers;
+}
+
+/**
+ * Browser-safe authenticated fetch wrapper for `/api/shahab/*` control/state routes.
+ * Automatically attaches the ephemeral in-memory Bearer token and fresh replay headers
+ * for state-changing HTTP methods, with one automatic refresh retry on HTTP 401.
+ */
+export async function authorizedShahabFetch(
+  url: string,
+  init?: RequestInit & { readonly bearerToken?: string },
+): Promise<Response> {
+  const method = (init?.method ?? 'GET').toUpperCase();
+  const isMutating = method === 'POST' || method === 'PUT' || method === 'PATCH' || method === 'DELETE';
+  const baseHeaders = new Headers(init?.headers);
+
+  const attempt = async (forceRefresh: boolean): Promise<Response> => {
+    const authHeaders = await buildAuthorizedShahabRequestHeaders({
+      includeReplayHeaders: isMutating,
+      forceRefresh,
+      bearerToken: init?.bearerToken,
+      signal: init?.signal ?? undefined,
+    });
+    const merged = new Headers(baseHeaders);
+    for (const [k, v] of Object.entries(authHeaders)) {
+      if (k === 'Accept' && merged.has('Accept')) continue;
+      merged.set(k, v);
+    }
+    return fetch(url, {
+      ...init,
+      credentials: init?.credentials ?? 'same-origin',
+      cache: init?.cache ?? 'no-store',
+      headers: merged,
+    });
+  };
+
+  const first = await attempt(false);
+  if (first.status === 401 && !init?.bearerToken) {
+    inMemoryLocalSession = null;
+    return attempt(true);
+  }
+  return first;
+}
+
+async function computeFullPcmFingerprintHex(pcm: Float32Array, sampleRate: number): Promise<string> {
+  const rawView = new Uint8Array(pcm.buffer, pcm.byteOffset, pcm.byteLength);
+  if (typeof globalThis.crypto?.subtle?.digest === 'function') {
+    try {
+      // Prefix with sample rate so identical sample arrays at different rates hash distinctly
+      const payload = new Uint8Array(4 + rawView.byteLength);
+      new DataView(payload.buffer).setUint32(0, Math.round(sampleRate) >>> 0, true);
+      payload.set(rawView, 4);
+      const digest = await globalThis.crypto.subtle.digest('SHA-256', payload);
+      return Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, '0')).join('');
+    } catch {
+      // Fall through to deterministic non-crypto 256-bit fingerprint if SubtleCrypto is unavailable
+    }
+  }
+  // Deterministic 4-lane 64-bit mixing fallback (zero Math.random)
+  let h0 = BigInt('0xcbf29ce484222325') ^ BigInt(Math.round(sampleRate) >>> 0);
+  let h1 = BigInt('0x84222325cbf29ce4') ^ BigInt(pcm.length);
+  let h2 = BigInt('0x100000001b300001');
+  let h3 = BigInt('0x9e3779b97f4a7c15');
+  const prime = BigInt('0x100000001b3');
+  const mask64 = BigInt('0xffffffffffffffff');
+  for (let i = 0; i < rawView.byteLength; i++) {
+    const b = BigInt(rawView[i]);
+    if ((i & 3) === 0) h0 = ((h0 ^ b) * prime) & mask64;
+    else if ((i & 3) === 1) h1 = ((h1 ^ b) * prime) & mask64;
+    else if ((i & 3) === 2) h2 = ((h2 ^ b) * prime) & mask64;
+    else h3 = ((h3 ^ b) * prime) & mask64;
+  }
+  return [h0, h1, h2, h3].map((v) => v.toString(16).padStart(16, '0')).join('');
+}
+
 async function postSingleWavChunkToShahab(params: {
   readonly wavBytes: Uint8Array;
   readonly filename: string;
   readonly decodePolicy: 'SPEED' | 'BALANCED' | 'PRECISION' | 'VERBATIM';
+  readonly projectId?: string;
   readonly signal?: AbortSignal;
   readonly timeoutMs?: number;
   readonly bearerToken?: string;
@@ -449,6 +621,9 @@ async function postSingleWavChunkToShahab(params: {
     };
     if (activeToken) {
       requestHeaders.Authorization = `Bearer ${activeToken}`;
+    }
+    if (params.projectId && params.projectId.trim().length > 0) {
+      requestHeaders['X-Project-Id'] = params.projectId.trim();
     }
 
     let res: Response;
@@ -527,7 +702,9 @@ export async function transcribePcmWithShahabLocal(params: {
   readonly trackId: string;
   readonly speakerName: string;
   readonly filename?: string;
+  readonly projectId?: string;
   readonly decodePolicy?: 'SPEED' | 'BALANCED' | 'PRECISION' | 'VERBATIM';
+  readonly transportEncoding?: 'float32' | 'pcm16';
   readonly signal?: AbortSignal;
   readonly onProgress?: (progress: {
     readonly percent: number;
@@ -541,6 +718,10 @@ export async function transcribePcmWithShahabLocal(params: {
   const safeRate = Number.isFinite(params.sampleRate) && params.sampleRate > 0 ? params.sampleRate : 16000;
   const filename = params.filename ?? 'studio-track.wav';
   const decodePolicy = params.decodePolicy ?? 'BALANCED';
+  const encodeChunk =
+    params.transportEncoding === 'pcm16'
+      ? encodeMonoFloat32To16kWavBytes
+      : encodeMonoFloat32To16kFloat32WavBytes;
 
   const plannedChunks = planAudioChunks({
     totalSamples: params.pcm.length,
@@ -552,11 +733,12 @@ export async function transcribePcmWithShahabLocal(params: {
   // Fast single-request path for clips <= 25s (1 chunk)
   if (plannedChunks.length <= 1) {
     params.onProgress?.({ percent: 15, currentChunk: 1, totalChunks: 1 });
-    const wavBytes = encodeMonoFloat32To16kWavBytes(params.pcm, safeRate);
+    const wavBytes = encodeChunk(params.pcm, safeRate);
     const response = await postSingleWavChunkToShahab({
       wavBytes,
       filename,
       decodePolicy,
+      projectId: params.projectId,
       signal: params.signal,
     });
     params.onProgress?.({ percent: 100, currentChunk: 1, totalChunks: 1 });
@@ -568,7 +750,7 @@ export async function transcribePcmWithShahabLocal(params: {
     return { response, tokens };
   }
 
-  // Chunked path for longer audio (>24s): keeps every request <800 KB and merges cleanly
+  // Chunked path for longer audio (>24s): keeps every request <1.6 MB and merges cleanly
   const buckets: ChunkWordBucket<ShahabServerTranscriptToken>[] = [];
   let totalProcessingMs = 0;
   let lastResp: ShahabServerTranscribeResponse | null = null;
@@ -576,7 +758,7 @@ export async function transcribePcmWithShahabLocal(params: {
   for (let idx = 0; idx < plannedChunks.length; idx++) {
     const chunk = plannedChunks[idx];
     const slice = params.pcm.subarray(chunk.startSample, chunk.endSample);
-    const wavBytes = encodeMonoFloat32To16kWavBytes(slice, safeRate);
+    const wavBytes = encodeChunk(slice, safeRate);
 
     params.onProgress?.({
       percent: Math.round((idx / plannedChunks.length) * 100),
@@ -588,6 +770,7 @@ export async function transcribePcmWithShahabLocal(params: {
       wavBytes,
       filename: `${filename}#chunk${idx + 1}`,
       decodePolicy,
+      projectId: params.projectId,
       signal: params.signal,
     });
 
@@ -620,6 +803,8 @@ export async function transcribePcmWithShahabLocal(params: {
   }
 
   const finalDurationSec = params.pcm.length / safeRate;
+  const fullAudioHash = await computeFullPcmFingerprintHex(params.pcm, safeRate);
+  const fullAudioId = `aud_${fullAudioHash.slice(0, 16)}`;
   const mergedRaw = mergeChunkedTranscriptWords({
     buckets,
     totalDurationSec: finalDurationSec,
@@ -634,15 +819,17 @@ export async function transcribePcmWithShahabLocal(params: {
   const combinedRtf =
     finalDurationSec > 0 ? Number(((totalProcessingMs / 1000) / finalDurationSec).toFixed(4)) : 0;
   const rawText = mergedServerTokens.map((t) => t.rawText).join(' ').trim();
-  const normalizedText = mergedServerTokens.map((t) => t.normalizedText).join(' ').trim();
+  // SHB-F06: Run the exact same canonical utterance normalizer as single-chunk server execution
+  // so multi-word ZWNJ/orthography rules never diverge between 1-chunk and N-chunk audio.
+  const normalizedText = normalizeCanonicalPersianUtterance(rawText);
 
   const response: ShahabServerTranscribeResponse = {
     ok: true,
     transcript: {
       schemaVersion: 'avp.transcript.v1',
       transcriptVersion: lastResp?.transcript.transcriptVersion ?? `tr_shahab_${Date.now()}`,
-      sourceAudioId: lastResp?.transcript.sourceAudioId ?? 'aud_chunked',
-      sourceAudioHash: lastResp?.transcript.sourceAudioHash ?? '',
+      sourceAudioId: fullAudioId,
+      sourceAudioHash: fullAudioHash,
       sampleRate: safeRate,
       totalSourceSamples: params.pcm.length,
       language: lastResp?.transcript.language ?? 'fa',

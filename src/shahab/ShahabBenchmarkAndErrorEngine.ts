@@ -63,6 +63,8 @@ export interface ShahabDatasetSample {
   readonly recordingConditions: string;
   readonly properNouns?: readonly string[];
   readonly numericTokens?: readonly string[];
+  readonly derivedFromSampleId?: string | null;
+  readonly isDerivedVariant?: boolean;
 }
 
 export interface ShahabDatasetManifest {
@@ -80,14 +82,45 @@ export interface ShahabLeakageReport {
   readonly duplicateTranscriptsAcrossRecordings: readonly { readonly normalizedTranscript: string; readonly sampleIds: readonly string[] }[];
   readonly speakerSplitOverlap: readonly { readonly speakerId: string; readonly splits: readonly ShahabDatasetSplit[] }[];
   readonly sessionSplitOverlap: readonly { readonly sessionId: string; readonly splits: readonly ShahabDatasetSplit[] }[];
+  readonly crossSplitTranscriptLeaks?: readonly {
+    readonly normalizedTranscript: string;
+    readonly splits: readonly ShahabDatasetSplit[];
+    readonly sampleIds: readonly string[];
+  }[];
+  readonly crossSplitLineageLeaks?: readonly {
+    readonly rootSampleId: string;
+    readonly splits: readonly ShahabDatasetSplit[];
+    readonly sampleIds: readonly string[];
+  }[];
   readonly warnings: readonly string[];
 }
 
 export function detectDatasetLeakage(manifest: ShahabDatasetManifest): ShahabLeakageReport {
+  const sampleById = new Map<string, ShahabDatasetSample>(
+    manifest.samples.map((s) => [s.sampleId, s]),
+  );
+  const resolveRootSampleId = (sampleId: string): string => {
+    let currentId = sampleId;
+    const visited = new Set<string>([currentId]);
+    while (true) {
+      const record = sampleById.get(currentId);
+      const parentId = record?.derivedFromSampleId?.trim();
+      if (!parentId || visited.has(parentId)) {
+        return currentId;
+      }
+      visited.add(parentId);
+      currentId = parentId;
+    }
+  };
+
   const byAudioHash = new Map<string, string[]>();
-  const byTranscript = new Map<string, { sampleIds: string[]; audioHashes: Set<string> }>();
+  const byTranscript = new Map<
+    string,
+    { sampleIds: string[]; audioHashes: Set<string>; splits: Set<ShahabDatasetSplit> }
+  >();
   const speakerSplits = new Map<string, Set<ShahabDatasetSplit>>();
   const sessionSplits = new Map<string, Set<ShahabDatasetSplit>>();
+  const lineageSplits = new Map<string, { splits: Set<ShahabDatasetSplit>; sampleIds: string[] }>();
 
   for (const s of manifest.samples) {
     const arr = byAudioHash.get(s.audioSha256) ?? [];
@@ -95,9 +128,14 @@ export function detectDatasetLeakage(manifest: ShahabDatasetManifest): ShahabLea
     byAudioHash.set(s.audioSha256, arr);
 
     const normRef = normalizeForTrackB(s.referenceTranscriptVerbatim).text;
-    const tEntry = byTranscript.get(normRef) ?? { sampleIds: [], audioHashes: new Set<string>() };
+    const tEntry = byTranscript.get(normRef) ?? {
+      sampleIds: [],
+      audioHashes: new Set<string>(),
+      splits: new Set<ShahabDatasetSplit>(),
+    };
     tEntry.sampleIds.push(s.sampleId);
     tEntry.audioHashes.add(s.audioSha256);
+    tEntry.splits.add(s.split);
     byTranscript.set(normRef, tEntry);
 
     if (s.speakerId) {
@@ -110,6 +148,15 @@ export function detectDatasetLeakage(manifest: ShahabDatasetManifest): ShahabLea
       set.add(s.split);
       sessionSplits.set(s.sessionId, set);
     }
+
+    const rootId = resolveRootSampleId(s.sampleId);
+    const lEntry = lineageSplits.get(rootId) ?? {
+      splits: new Set<ShahabDatasetSplit>(),
+      sampleIds: [],
+    };
+    lEntry.splits.add(s.split);
+    lEntry.sampleIds.push(s.sampleId);
+    lineageSplits.set(rootId, lEntry);
   }
 
   const duplicateAudioHashes = Array.from(byAudioHash.entries())
@@ -117,8 +164,24 @@ export function detectDatasetLeakage(manifest: ShahabDatasetManifest): ShahabLea
     .map(([audioSha256, sampleIds]) => ({ audioSha256, sampleIds }));
 
   const duplicateTranscriptsAcrossRecordings = Array.from(byTranscript.entries())
-    .filter(([, v]) => v.sampleIds.length > 1)
+    .filter(([norm, v]) => norm.length > 0 && v.sampleIds.length > 1)
     .map(([normalizedTranscript, v]) => ({ normalizedTranscript, sampleIds: v.sampleIds }));
+
+  const crossSplitTranscriptLeaks = Array.from(byTranscript.entries())
+    .filter(([norm, v]) => norm.length > 0 && v.splits.size > 1)
+    .map(([normalizedTranscript, v]) => ({
+      normalizedTranscript,
+      splits: Array.from(v.splits),
+      sampleIds: v.sampleIds,
+    }));
+
+  const crossSplitLineageLeaks = Array.from(lineageSplits.entries())
+    .filter(([, v]) => v.splits.size > 1)
+    .map(([rootSampleId, v]) => ({
+      rootSampleId,
+      splits: Array.from(v.splits),
+      sampleIds: v.sampleIds,
+    }));
 
   const speakerSplitOverlap = Array.from(speakerSplits.entries())
     .filter(([, splits]) => splits.size > 1)
@@ -138,6 +201,16 @@ export function detectDatasetLeakage(manifest: ShahabDatasetManifest): ShahabLea
   if (sessionSplitOverlap.length > 0) {
     warnings.push(`${sessionSplitOverlap.length} session(s) overlap across multiple splits.`);
   }
+  if (crossSplitLineageLeaks.length > 0) {
+    warnings.push(
+      `${crossSplitLineageLeaks.length} derived-sample lineage group(s) leak across multiple splits.`,
+    );
+  }
+  if (crossSplitTranscriptLeaks.length > 0) {
+    warnings.push(
+      `${crossSplitTranscriptLeaks.length} identical reference transcript(s) leak across multiple splits.`,
+    );
+  }
   if (duplicateTranscriptsAcrossRecordings.length > 0) {
     warnings.push(
       `${duplicateTranscriptsAcrossRecordings.length} repeated reference transcript(s) observed across recordings.`,
@@ -148,11 +221,15 @@ export function detectDatasetLeakage(manifest: ShahabDatasetManifest): ShahabLea
     clean:
       duplicateAudioHashes.length === 0 &&
       speakerSplitOverlap.length === 0 &&
-      sessionSplitOverlap.length === 0,
+      sessionSplitOverlap.length === 0 &&
+      crossSplitLineageLeaks.length === 0 &&
+      crossSplitTranscriptLeaks.length === 0,
     duplicateAudioHashes,
     duplicateTranscriptsAcrossRecordings,
     speakerSplitOverlap,
     sessionSplitOverlap,
+    crossSplitTranscriptLeaks,
+    crossSplitLineageLeaks,
     warnings,
   };
 }

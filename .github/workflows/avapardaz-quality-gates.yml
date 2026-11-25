@@ -81,7 +81,7 @@ jobs:
             src/host-bridge/companion/__tests__/CompanionProductionIpcAndCep.test.ts \
             src/security/ArchitectureAndSecurityGuardrails.test.ts \
             src/host-bridge/companion/__tests__/LocalCompanionAndSecurity.test.ts \
-            src/studio-workflow/__tests__/StudioWorkflowController.pass4.test.ts
+            src/workflow/StudioWorkflowController.pass4.test.ts
       - name: Verify no bundled model weights or secrets in web bundle
         run: |
           test -z "$(find src public dist -type f \( -name '*.onnx' -o -name '*.bin' -o -name '*.pt' \))"

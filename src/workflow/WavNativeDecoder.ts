@@ -92,6 +92,26 @@ export function decodeNativeWavToPlanar(bytes: Buffer | Uint8Array): DecodedNati
       byteRate = view.getUint32(payloadStart + 8, true);
       blockAlign = view.getUint16(payloadStart + 12, true);
       bitsPerSample = view.getUint16(payloadStart + 14, true);
+      // Support WAVE_FORMAT_EXTENSIBLE (0xFFFE) for PCM (0x0001) and IEEE Float (0x0003)
+      if (audioFormat === 0xfffe && chunkSize >= 40 && payloadStart + 40 <= bytes.byteLength) {
+        const subFormatTag = view.getUint16(payloadStart + 24, true);
+        // Standard Microsoft KSDATAFORMAT_SUBTYPE tail: 0000-0010-8000-00aa00389b71
+        const validExtGuidTail =
+          view.getUint16(payloadStart + 26, true) === 0x0000 &&
+          view.getUint16(payloadStart + 28, true) === 0x0000 &&
+          view.getUint16(payloadStart + 30, true) === 0x0010 &&
+          bytes[payloadStart + 32] === 0x80 &&
+          bytes[payloadStart + 33] === 0x00 &&
+          bytes[payloadStart + 34] === 0x00 &&
+          bytes[payloadStart + 35] === 0xaa &&
+          bytes[payloadStart + 36] === 0x00 &&
+          bytes[payloadStart + 37] === 0x38 &&
+          bytes[payloadStart + 38] === 0x9b &&
+          bytes[payloadStart + 39] === 0x71;
+        if (validExtGuidTail && (subFormatTag === 1 || subFormatTag === 3)) {
+          audioFormat = subFormatTag;
+        }
+      }
       foundFmt = true;
     } else if (chunkId === 'data') {
       dataOffset = payloadStart;

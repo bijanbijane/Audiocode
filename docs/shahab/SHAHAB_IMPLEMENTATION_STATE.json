@@ -3,11 +3,11 @@
   "programVersion": "0.9.0-shahab-foundation",
   "productName": "SHAHAB — Avapardaz Native Speech Recognition Engine",
   "releaseId": null,
-  "currentMissionId": "SHAHAB-001",
-  "currentPhase": "Project Discovery and Implementation State",
-  "currentTask": "Initialized baseline state",
+  "currentMissionId": "SHAHAB-027",
+  "currentPhase": "SHAHAB-025/026/027 — Alignment, Diarization & Subtitle Engineering",
+  "currentTask": "Persisted honest evidence states, SDK contracts, adapters, and LAB diagnostics",
   "lastVerifiedEventId": null,
-  "lastUpdatedUtc": "2026-11-21T19:06:01.311Z",
+  "lastUpdatedUtc": "2026-11-21T20:53:23.309Z",
   "hardwareEnvironment": {
     "capturedAtUtc": "2026-11-21T19:06:01.014Z",
     "osKernel": "linux 4.19.0-gvisor",
@@ -414,6 +414,90 @@
       "artifactPaths": [
         "src/shahab/adapters/AdobeAuditionHostAdapter.ts",
         "docs/shahab/SHAHAB_ADOBE_INTEGRATION_STATE.json"
+      ]
+    },
+    "SHAHAB-025": {
+      "missionId": "SHAHAB-025",
+      "title": "Acoustic Forced Alignment, Word-Level Timing and Sample-Accurate Synchronization",
+      "status": "COMPLETED_UNVERIFIED",
+      "verifiedTaskCount": 8,
+      "totalTaskCount": 10,
+      "startedAtUtc": "2026-11-21T20:53:23.309Z",
+      "verifiedAtUtc": null,
+      "acceptancePassed": false,
+      "blockers": [
+        "Dedicated Persian CTC/phoneme forced-alignment ONNX checkpoint not bundled on disk (SEPARATE_ALIGNER_REQUIRED for phoneme-exact word alignment).",
+        "Human-annotated Persian word-boundary gold corpus not bundled on disk."
+      ]
+    },
+    "SHAHAB-026": {
+      "missionId": "SHAHAB-026",
+      "title": "Speaker Diarization, Multi-Speaker Attribution and Overlap Intelligence",
+      "status": "COMPLETED_UNVERIFIED",
+      "verifiedTaskCount": 8,
+      "totalTaskCount": 10,
+      "startedAtUtc": "2026-11-21T20:53:23.309Z",
+      "verifiedAtUtc": null,
+      "acceptancePassed": false,
+      "blockers": [
+        "Pretrained neural speaker-embedding ONNX model (ECAPA-TDNN/WeSpeaker) not bundled on disk.",
+        "Human-annotated real-world Persian multi-speaker evaluation corpus not bundled on disk."
+      ]
+    },
+    "SHAHAB-027": {
+      "missionId": "SHAHAB-027",
+      "title": "Professional Subtitle and Caption Engineering, Persian RTL Layout and Verified Export",
+      "status": "COMPLETED_UNVERIFIED",
+      "verifiedTaskCount": 9,
+      "totalTaskCount": 10,
+      "startedAtUtc": "2026-11-21T20:53:23.309Z",
+      "verifiedAtUtc": null,
+      "acceptancePassed": false,
+      "blockers": [
+        "Human Persian subtitle editorial review panel not yet conducted (NOT_TESTED).",
+        "Live installed Adobe Audition desktop GUI import test not available in Linux container (NOT_TESTED)."
+      ]
+    },
+    "SHAHAB-028": {
+      "missionId": "SHAHAB-028",
+      "title": "Acoustic Scene Intelligence, Audio Event Detection, Speech Activity Analysis and Temporal Audio Structure",
+      "status": "PARTIALLY_VERIFIED",
+      "verifiedTaskCount": 10,
+      "totalTaskCount": 10,
+      "verifiedAtUtc": "2026-11-21T21:46:10.006Z",
+      "acceptancePassed": true,
+      "verifiedSummary": "Multi-label acoustic scene analysis (13 events, 18 overlaps, F1=1); external neural SED honestly marked UNSUPPORTED.",
+      "artifactPaths": [
+        "docs/shahab/SHAHAB_AUDIO_INTELLIGENCE_STATE.json",
+        "docs/shahab/SHAHAB_AUDIO_INTELLIGENCE_ARCHITECTURE.md"
+      ]
+    },
+    "SHAHAB-029": {
+      "missionId": "SHAHAB-029",
+      "title": "Transcript-Aware Editorial Intelligence, Speech-Content Analysis, Edit Decision Planning and Reversible Edit Policy",
+      "status": "PARTIALLY_VERIFIED",
+      "verifiedTaskCount": 10,
+      "totalTaskCount": 10,
+      "verifiedAtUtc": "2026-11-21T21:46:10.006Z",
+      "acceptancePassed": true,
+      "verifiedSummary": "9 editorial profiles, Persian filler/repetition/emphasis guards, immutable EDP (3 approved cuts, 0 conflicts), approve/reject/protect lifecycle.",
+      "artifactPaths": [
+        "docs/shahab/SHAHAB_EDIT_DECISION_STATE.json",
+        "docs/shahab/SHAHAB_EDITORIAL_PLANNER_SPEC.md"
+      ]
+    },
+    "SHAHAB-030": {
+      "missionId": "SHAHAB-030",
+      "title": "Non-Destructive Audio Editing Engine, Sample-Accurate Edit Execution, Render Graph and Precision Export",
+      "status": "PARTIALLY_VERIFIED",
+      "verifiedTaskCount": 10,
+      "totalTaskCount": 10,
+      "verifiedAtUtc": "2026-11-21T21:46:10.006Z",
+      "acceptancePassed": true,
+      "verifiedSummary": "Non-destructive Render Graph (WAV_PCM_32F), independent WAV reopen validation=RENDER_VALIDATED, bit-exact=true, source immutable=true.",
+      "artifactPaths": [
+        "docs/shahab/SHAHAB_RENDER_STATE.json",
+        "docs/shahab/SHAHAB_NON_DESTRUCTIVE_RENDER_SPEC.md"
       ]
     }
   },
@@ -1400,7 +1484,7 @@
       "summary": "Upstream ramin-mahmoodi/persian-zipformer-asr repo publishes inference-only ONNX files and no PyTorch/Icefall .pt checkpoint."
     }
   ],
-  "updatedAtUtc": "2026-11-21T19:07:46.715Z",
+  "updatedAtUtc": "2026-11-21T21:46:10.006Z",
   "currentMission": "SHAHAB-024",
   "engineRelease": "SHAHAB-R2.0.0-RELEASE-CANDIDATE",
   "neuralCoreIdentity": "INHERITED-PERSIAN-ASR-CORE",

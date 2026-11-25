@@ -98,6 +98,7 @@ function isNotFoundError(err: unknown): boolean {
  */
 export class WebWorkerOrtRuntimeProvider implements OrtRuntimeProvider {
   public readonly configuredNumThreads: number;
+  private loadedOrtBinding: OrtWebBindingLike | null = null;
 
   constructor(
     private readonly wasmAssetsBasePath: string = '/ort/',
@@ -125,8 +126,9 @@ export class WebWorkerOrtRuntimeProvider implements OrtRuntimeProvider {
     data: Float32Array | Int32Array | BigInt64Array,
     dims: readonly number[],
   ): OrtTensorLike {
-    if (this.customOrtWebBinding) {
-      return new this.customOrtWebBinding.Tensor(type, data, dims);
+    const binding = this.customOrtWebBinding ?? this.loadedOrtBinding;
+    if (binding) {
+      return new binding.Tensor(type, data, dims);
     }
     return {
       type,
@@ -166,10 +168,14 @@ export class WebWorkerOrtRuntimeProvider implements OrtRuntimeProvider {
   }
 
   private async loadDynamicOrtWeb(): Promise<OrtWebBindingLike> {
+    if (this.loadedOrtBinding) {
+      return this.loadedOrtBinding;
+    }
     const ort = (await import('onnxruntime-web')) as unknown as OrtWebBindingLike;
     ort.env.wasm.wasmPaths = this.wasmAssetsBasePath;
     ort.env.wasm.simd = true;
     ort.env.wasm.numThreads = this.configuredNumThreads;
+    this.loadedOrtBinding = ort;
     return ort;
   }
 

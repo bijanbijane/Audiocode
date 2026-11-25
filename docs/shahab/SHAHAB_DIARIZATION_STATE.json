@@ -1,0 +1,211 @@
+{
+  "missionId": "SHAHAB-026",
+  "generatedAtUtc": "2026-11-21T20:53:23.309Z",
+  "contractVersion": "1.0.0",
+  "capabilities": {
+    "contractVersion": "1.0.0",
+    "inspectedAtUtc": "2026-11-21T20:53:23.374Z",
+    "neuralEmbeddingWeightsOnDisk": false,
+    "neuralOverlapWeightsOnDisk": false,
+    "capabilityStatus": "SEPARATE_DIARIZATION_MODEL_REQUIRED",
+    "overlapDetectionStatus": "OVERLAP_DETECTION_EXPERIMENTAL_PROXY",
+    "streamingStatus": "STREAMING_DIARIZATION_UNAVAILABLE",
+    "stageSeparation": {
+      "vad": "AVAILABLE_DETERMINISTIC_ENERGY_ZCR",
+      "speechSegmentation": "AVAILABLE_DETERMINISTIC_TURN_WINDOWING",
+      "diarizationClustering": "AVAILABLE_AHC_WITH_PLUGGABLE_EMBEDDING_PROVIDER",
+      "overlapDetection": "OVERLAP_DETECTION_EXPERIMENTAL_PROXY",
+      "speakerSeparation": "NOT_SUPPORTED",
+      "speakerIdentification": "PROHIBITED_BY_POLICY"
+    },
+    "privacyGuarantees": {
+      "recordingScopedIdsOnly": true,
+      "crossRecordingVoiceprintMatchingProhibited": true,
+      "persistentVoiceprintStorageProhibited": true,
+      "ephemeralEmbeddingsPurgedAfterClustering": true,
+      "rawAudioAndEmbeddingsExcludedFromDiagnostics": true
+    },
+    "limitations": [
+      "No pretrained neural speaker-embedding ONNX model (e.g. ECAPA-TDNN / WeSpeaker / pyannote) is bundled in models/speaker-embedding/.",
+      "Without a neural embedding checkpoint, the built-in acoustic spectral-profile AHC backend separates distinct pitch/timbre profiles deterministically, but real-world Persian multi-speaker DER requires a dedicated neural embedding model.",
+      "Overlap detection without a neural overlap detector relies only on explicit multi-track/user annotations or uncalibrated spectral-complexity proxy flags.",
+      "Streaming real-time diarization is explicitly marked STREAMING_DIARIZATION_UNAVAILABLE; batch offline clustering only.",
+      "No human-annotated real-world Persian multi-speaker diarization benchmark corpus is bundled on disk."
+    ],
+    "recommendedNextStep": "Acquire a permissively licensed ONNX speaker embedding model (e.g. WeSpeaker ResNet34 / ECAPA-TDNN Apache-2.0) and evaluate Persian DER/JER/Overlap P&R on real Persian interview & podcast recordings."
+  },
+  "sampleRun": {
+    "requestId": "diar_1795294403374_2981b264",
+    "revisionId": "diar_rev_1_cf461c",
+    "recordingScopeId": "rec_shahab026_podcast_demo",
+    "backendMode": "ACOUSTIC_SPECTRAL_PROXY_AHC",
+    "detectedSpeakerCount": 2,
+    "turnCount": 4,
+    "speechDurationMs": 7800,
+    "overlapDurationMs": 1200,
+    "unknownSpeakerDurationMs": 0,
+    "nonSpeechDurationMs": 2200,
+    "speakers": [
+      {
+        "speakerId": "speaker_1",
+        "recordingScopeId": "rec_shahab026_podcast_demo",
+        "anonymousCanonicalId": "speaker_1",
+        "localDisplayLabel": null,
+        "totalSpeakingMs": 5400,
+        "turnCount": 3,
+        "mergedFromIds": [],
+        "origin": "AUTOMATIC_CLUSTERING"
+      },
+      {
+        "speakerId": "speaker_2",
+        "recordingScopeId": "rec_shahab026_podcast_demo",
+        "anonymousCanonicalId": "speaker_2",
+        "localDisplayLabel": null,
+        "totalSpeakingMs": 3600,
+        "turnCount": 2,
+        "mergedFromIds": [],
+        "origin": "AUTOMATIC_CLUSTERING"
+      }
+    ],
+    "turns": [
+      {
+        "turnId": "turn_1",
+        "recordingScopeId": "rec_shahab026_podcast_demo",
+        "kind": "SINGLE_SPEAKER",
+        "speakerId": "speaker_1",
+        "activeSpeakerIds": [
+          "speaker_1"
+        ],
+        "range": {
+          "startSample": 6400,
+          "endSample": 44800,
+          "sampleRateHz": 16000,
+          "startSec": 0.4,
+          "endSec": 2.8,
+          "durationMs": 2400,
+          "startFlicks": 282240000,
+          "endFlicks": 1975680000
+        },
+        "origin": "AUTOMATIC_CLUSTERING",
+        "rawClusterSimilarity": 0.9956,
+        "rawScoreCalibrationState": "UNCALIBRATED_ACOUSTIC_SIMILARITY",
+        "notes": "Assigned via acoustic spectral-proxy AHC clustering (recording-scoped anonymous ID; neural speaker model recommended for production Persian multi-speaker DER)."
+      },
+      {
+        "turnId": "turn_2",
+        "recordingScopeId": "rec_shahab026_podcast_demo",
+        "kind": "SINGLE_SPEAKER",
+        "speakerId": "speaker_2",
+        "activeSpeakerIds": [
+          "speaker_2"
+        ],
+        "range": {
+          "startSample": 52800,
+          "endSample": 91200,
+          "sampleRateHz": 16000,
+          "startSec": 3.3,
+          "endSec": 5.7,
+          "durationMs": 2400,
+          "startFlicks": 2328480000,
+          "endFlicks": 4021920000
+        },
+        "origin": "AUTOMATIC_CLUSTERING",
+        "rawClusterSimilarity": 1,
+        "rawScoreCalibrationState": "UNCALIBRATED_ACOUSTIC_SIMILARITY",
+        "notes": "Assigned via acoustic spectral-proxy AHC clustering (recording-scoped anonymous ID; neural speaker model recommended for production Persian multi-speaker DER)."
+      },
+      {
+        "turnId": "turn_3",
+        "recordingScopeId": "rec_shahab026_podcast_demo",
+        "kind": "OVERLAPPING_SPEECH",
+        "speakerId": "speaker_1",
+        "activeSpeakerIds": [
+          "speaker_1",
+          "speaker_2"
+        ],
+        "range": {
+          "startSample": 97600,
+          "endSample": 116800,
+          "sampleRateHz": 16000,
+          "startSec": 6.1,
+          "endSec": 7.3,
+          "durationMs": 1200,
+          "startFlicks": 4304160000,
+          "endFlicks": 5150880000
+        },
+        "origin": "AUTOMATIC_CLUSTERING",
+        "rawClusterSimilarity": 0.9822,
+        "rawScoreCalibrationState": "UNCALIBRATED_ACOUSTIC_SIMILARITY",
+        "notes": "Concurrent speech (speaker_1 + speaker_2); preserved without forcing sequential single-speaker turn."
+      },
+      {
+        "turnId": "turn_4",
+        "recordingScopeId": "rec_shahab026_podcast_demo",
+        "kind": "SINGLE_SPEAKER",
+        "speakerId": "speaker_1",
+        "activeSpeakerIds": [
+          "speaker_1"
+        ],
+        "range": {
+          "startSample": 123200,
+          "endSample": 152000,
+          "sampleRateHz": 16000,
+          "startSec": 7.7,
+          "endSec": 9.5,
+          "durationMs": 1800,
+          "startFlicks": 5433120000,
+          "endFlicks": 6703200000
+        },
+        "origin": "AUTOMATIC_CLUSTERING",
+        "rawClusterSimilarity": 0.9956,
+        "rawScoreCalibrationState": "UNCALIBRATED_ACOUSTIC_SIMILARITY",
+        "notes": "Assigned via acoustic spectral-proxy AHC clustering (recording-scoped anonymous ID; neural speaker model recommended for production Persian multi-speaker DER)."
+      }
+    ],
+    "privacyAudit": {
+      "explicitUserConsentGranted": true,
+      "recordingScopedOnly": true,
+      "embeddingsRetained": false,
+      "ephemeralEmbeddingsPurgedAtUtc": "2026-11-21T20:53:23.404Z",
+      "diagnosticsContainsBiometrics": false
+    },
+    "controlledFixtureMetrics": {
+      "datasetLabel": "controlled-two-speaker-overlap-fixture",
+      "evaluationSource": "CONTROLLED_MULTI_SPEAKER_SYNTHETIC_FIXTURE",
+      "totalScoredSpeechSec": 9,
+      "missedSpeechRate": 0,
+      "falseAlarmRate": 0,
+      "speakerConfusionRate": 0,
+      "diarizationErrorRate": 0,
+      "jaccardErrorRate": 0,
+      "turnBoundaryMaeMs": 0,
+      "overlapPrecision": 1,
+      "overlapRecall": 1,
+      "uncalibratedScoreNotice": "Cluster cosine similarities are raw uncalibrated acoustic scores and are never reported as confidence percentages."
+    },
+    "manualReviewConflictProtected": true,
+    "wordAttributionRefusedWithoutWordAlignment": true,
+    "latencyMs": 41.036
+  },
+  "persianEvaluationCategories": [
+    "TWO_SPEAKER_INTERVIEW",
+    "THREE_PLUS_ROUNDTABLE_PODCAST",
+    "RAPID_TURN_TAKING",
+    "OVERLAPPING_ARGUMENTS",
+    "SIMILAR_TIMBRE_SPEAKERS",
+    "TELEPHONE_COMPRESSED",
+    "NOISY_CAFE_ROOM_REVERB",
+    "SINGLE_SPEAKER_FALSE_SPLIT_CHECK",
+    "LONG_FORM_DRIFT_CHECK"
+  ],
+  "realWorldPersianMultiSpeakerDerStatus": "NOT_MEASURED_NEURAL_EMBEDDING_AND_CORPUS_REQUIRED",
+  "finalStatus": "PARTIALLY_VERIFIED",
+  "knownLimitations": [
+    "No pretrained neural speaker-embedding ONNX model (e.g. ECAPA-TDNN / WeSpeaker / pyannote) is bundled in models/speaker-embedding/.",
+    "Without a neural embedding checkpoint, the built-in acoustic spectral-profile AHC backend separates distinct pitch/timbre profiles deterministically, but real-world Persian multi-speaker DER requires a dedicated neural embedding model.",
+    "Overlap detection without a neural overlap detector relies only on explicit multi-track/user annotations or uncalibrated spectral-complexity proxy flags.",
+    "Streaming real-time diarization is explicitly marked STREAMING_DIARIZATION_UNAVAILABLE; batch offline clustering only.",
+    "No human-annotated real-world Persian multi-speaker diarization benchmark corpus is bundled on disk.",
+    "Controlled synthetic multi-speaker fixture verifies AHC, overlap preservation, UNKNOWN_SPEAKER policy, and DER/JER calculation; real-world Persian podcast/interview DER remains NOT_MEASURED until neural speaker embeddings and human-annotated Persian audio are evaluated."
+  ]
+}

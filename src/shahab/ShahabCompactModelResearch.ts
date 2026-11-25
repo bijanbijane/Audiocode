@@ -61,6 +61,7 @@ export function runShahab020CompactModelResearch(params: {
   readonly variantBTotalBytes: number;
   readonly variantBHash: string;
   readonly variantDGzipBytes: number;
+  readonly measuredParameterCount?: number | null;
   readonly measuredColdLoadMs: number;
   readonly measuredWarmRtf: number;
   readonly measuredPeakRssMiB: number;
@@ -75,6 +76,10 @@ export function runShahab020CompactModelResearch(params: {
   const activeMiB = mib(params.activeModelTotalBytes);
   const varBMiB = mib(params.variantBTotalBytes);
   const varDGzMiB = mib(params.variantDGzipBytes);
+  const measuredParamCount =
+    typeof params.measuredParameterCount === 'number' && Number.isFinite(params.measuredParameterCount)
+      ? params.measuredParameterCount
+      : null;
 
   const candidates: ShahabCompactModelCandidate[] = [
     {
@@ -87,7 +92,7 @@ export function runShahab020CompactModelResearch(params: {
       completePackageMiBUncompressed: activeMiB,
       transportCompressedMiB: varDGzMiB,
       sub100MiBUncompressedAchieved: activeMiB < 100,
-      parameterCount: 11470768,
+      parameterCount: measuredParamCount,
       runtimeDependencyFootprint: 'onnxruntime-web@1.31.1 WASM + tokens.txt (1024 BPE)',
       peakMemoryMiB: params.measuredPeakRssMiB,
       startupDurationMs: params.measuredColdLoadMs,
@@ -110,7 +115,7 @@ export function runShahab020CompactModelResearch(params: {
       completePackageMiBUncompressed: varBMiB,
       transportCompressedMiB: varDGzMiB,
       sub100MiBUncompressedAchieved: varBMiB < 100,
-      parameterCount: 11470768,
+      parameterCount: measuredParamCount,
       runtimeDependencyFootprint: 'onnxruntime-web@1.31.1 WASM + tokens.txt',
       peakMemoryMiB: params.measuredPeakRssMiB,
       startupDurationMs: params.measuredColdLoadMs,
@@ -133,7 +138,7 @@ export function runShahab020CompactModelResearch(params: {
       completePackageMiBUncompressed: null,
       transportCompressedMiB: null,
       sub100MiBUncompressedAchieved: false,
-      parameterCount: 11470768,
+      parameterCount: measuredParamCount,
       runtimeDependencyFootprint: 'Requires ONNX MatMulNBits operator + Python onnxruntime-genai / optimum quantizer',
       peakMemoryMiB: null,
       startupDurationMs: null,
@@ -156,8 +161,8 @@ export function runShahab020CompactModelResearch(params: {
       completePackageMiBUncompressed: activeMiB,
       transportCompressedMiB: varDGzMiB,
       sub100MiBUncompressedAchieved: false,
-      parameterCount: 11470768,
-      runtimeDependencyFootprint: 'Decompresses to 110.41 MiB on disk/RAM prior to ONNX load',
+      parameterCount: measuredParamCount,
+      runtimeDependencyFootprint: `Decompresses to ${activeMiB} MiB on disk/RAM prior to ONNX load`,
       peakMemoryMiB: params.measuredPeakRssMiB,
       startupDurationMs: params.measuredColdLoadMs,
       rtf: params.measuredWarmRtf,
@@ -181,8 +186,7 @@ export function runShahab020CompactModelResearch(params: {
       (c) => c.sub100MiBUncompressedAchieved && c.eligibility === 'RELEASE_CANDIDATE_ELIGIBLE',
     ),
     candidates,
-    recommendation:
-      'Retain verified Variant A (110.41 MiB uncompressed, Apache-2.0) as active baseline; use Variant D gzip (55.66 MiB) solely for network transport compression; keep Variant C INT4 BLOCKED until external quantization + Persian WER evaluation is verified.',
+    recommendation: `Retain verified Variant A (${activeMiB} MiB uncompressed, Apache-2.0) as active baseline; use Variant D gzip (${varDGzMiB} MiB) solely for network transport compression; keep Variant C INT4 BLOCKED until external quantization + Persian WER evaluation is verified.`,
     finalStatus: 'VERIFIED',
   };
 

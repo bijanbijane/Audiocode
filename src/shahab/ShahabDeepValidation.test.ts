@@ -81,8 +81,10 @@ test('D1: Corrupt model assets fail SHA-256 check, flip available=false with int
 
     const rt = new ShahabZipformerAsrRuntime({ modelDir: tmpModelDir });
     const initial = rt.getRuntimeStatus();
-    assert.equal(initial.available, true);
-    assert.equal(initial.integrityError, null);
+    // Eager SHA-256 integrity verification must detect corrupted weights immediately before the first transcribe()
+    assert.equal(initial.available, false);
+    assert.equal(initial.integrityVerified, false);
+    assert.ok(initial.integrityError && initial.integrityError.length > 0);
 
     const sampleBytes = fs.readFileSync(SAMPLE_WAV_PATH);
     const hash = crypto.createHash('sha256').update(sampleBytes).digest('hex');
@@ -102,13 +104,15 @@ test('D1: Corrupt model assets fail SHA-256 check, flip available=false with int
     const afterFailure = rt.getRuntimeStatus();
     assert.equal(afterFailure.available, false);
     assert.equal(afterFailure.modelLoaded, false);
+    assert.equal(afterFailure.integrityVerified, false);
     assert.ok(afterFailure.integrityError && afterFailure.integrityError.length > 0);
 
-    // Simulate file replacement on disk -> integrity error clears so runtime can re-verify
+    // Replacing tokens.txt with still-corrupted content triggers re-verification and remains unavailable
     fs.writeFileSync(path.join(tmpModelDir, 'tokens.txt'), Buffer.from('updated-tokens-content'));
     const afterChange = rt.getRuntimeStatus();
-    assert.equal(afterChange.integrityError, null);
-    assert.equal(afterChange.available, true);
+    assert.equal(afterChange.available, false);
+    assert.equal(afterChange.integrityVerified, false);
+    assert.ok(afterChange.integrityError && afterChange.integrityError.length > 0);
 
     await rt.dispose();
   } finally {

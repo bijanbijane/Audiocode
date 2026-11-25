@@ -21,6 +21,7 @@ import path from 'node:path';
 import {
   normalizePersianTextDeterministic,
 } from './ShahabContracts';
+import { conditionPcmTo16kMono } from './core/ShahabCoreAudioConditioner';
 import {
   SHAHABComputeBudgetController,
   SHAHABDecodePolicyManager,
@@ -368,20 +369,6 @@ export interface ShahabVariantDirectoryMap {
   };
 }
 
-function resamplePcmLinear(input: Float32Array, fromRate: number, toRate: number): Float32Array {
-  if (fromRate === toRate || input.length === 0) return input;
-  const ratio = fromRate / toRate;
-  const outLen = Math.max(1, Math.round(input.length / ratio));
-  const out = new Float32Array(outLen);
-  for (let i = 0; i < outLen; i++) {
-    const pos = i * ratio;
-    const i0 = Math.floor(pos);
-    const i1 = Math.min(input.length - 1, i0 + 1);
-    const frac = pos - i0;
-    out[i] = input[i0] * (1 - frac) + input[i1] * frac;
-  }
-  return out;
-}
 
 /**
  * Local Native Execution Adapter (runs verified frozen Zipformer INT8 ONNX graphs on local Node/WASM CPU).
@@ -418,7 +405,7 @@ export class SHAHABNativeExecutionAdapter implements SHAHABExecutionAdapter {
       supportedModelVariants: supportedVariants,
       supportedDecodePolicies: ['SPEED', 'BALANCED', 'PRECISION', 'VOCABULARY', 'VERBATIM'],
       supportedTensorPrecisions: ['INT8_DYNAMIC_QUANTIZED_ONNX', 'FLOAT32_ACTIVATIONS'],
-      executionProvider: 'onnxruntime-web@1.31.1 (WASM CPU, Node v22)',
+      executionProvider: 'onnxruntime-web@1.31.1 (WASM single-thread CPU; native C++ runtime unavailable)',
       streamingCapability: {
         nativeStreamingGraph: false,
         chunkedOverlapStreaming: true,
@@ -1125,7 +1112,19 @@ export class SHAHABEngine {
             recoveryGuidance: 'Resample audio to 16000 Hz mono PCM.',
           });
         }
-        pcm16k = sr === 16000 ? request.audioSource.pcmFloat32 : resamplePcmLinear(request.audioSource.pcmFloat32, sr, 16000);
+        try {
+          pcm16k = conditionPcmTo16kMono({
+            pcm: request.audioSource.pcmFloat32,
+            sampleRateHz: sr,
+            channels: request.audioSource.channels ?? 1,
+          }).pcm16k;
+        } catch (err) {
+          throw new SHAHABEngineError({
+            code: 'INVALID_AUDIO',
+            message: err instanceof Error ? err.message : String(err),
+            recoveryGuidance: 'Provide finite Float32 PCM samples within 8000–192000 Hz.',
+          });
+        }
       } else {
         throw new SHAHABEngineError({
           code: 'INVALID_AUDIO',
@@ -1223,7 +1222,7 @@ export class SHAHABEngine {
       const rawTranscript = acousticOut.rawHypothesis.rawText;
       let contextAssistedTranscript: string | null = null;
       const blockedByGuard: string[] = [];
-      let falseInsertionAudit = null;
+      let falseInsertionAudit: ReturnType<typeof this.falseInsertionGuard.evaluate> | null = null;
 
       if (acousticOut.contextHypothesis) {
         falseInsertionAudit = this.falseInsertionGuard.evaluate({
@@ -1508,7 +1507,11 @@ export class SHAHABEngine {
       pcm16k = decodeWavToMono16k(request.audioSource.wavBytes).pcm16k;
     } else if (request.audioSource.pcmFloat32) {
       const sr = request.audioSource.sampleRateHz ?? 16000;
-      pcm16k = sr === 16000 ? request.audioSource.pcmFloat32 : resamplePcmLinear(request.audioSource.pcmFloat32, sr, 16000);
+      pcm16k = conditionPcmTo16kMono({
+        pcm: request.audioSource.pcmFloat32,
+        sampleRateHz: sr,
+        channels: request.audioSource.channels ?? 1,
+      }).pcm16k;
     } else {
       throw new SHAHABEngineError({
         code: 'INVALID_AUDIO',

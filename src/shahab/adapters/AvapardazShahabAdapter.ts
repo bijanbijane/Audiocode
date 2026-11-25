@@ -27,7 +27,18 @@ import {
   type ShahabSdkTranscriptResult,
 } from '../sdk/ShahabSdk.ts';
 import { ShahabEvidenceStore } from '../ShahabEvidenceStore.ts';
-import { decodeWavToMono16k } from '../ShahabZipformerEngine.ts';
+import { decodeWavToMono16k } from '../core/ShahabCoreWavDecoder.ts';
+import type { AlignmentRequestInput, AlignmentResult } from '../ShahabAlignmentEngine.ts';
+import type { DiarizationRequestInput, DiarizationResult } from '../ShahabDiarizationEngine.ts';
+import type {
+  ShahabSubtitleDocument,
+  SubtitleExportArtifact,
+  SubtitleExportFormat,
+  SubtitleGenerationInput,
+} from '../ShahabSubtitleEngine.ts';
+import type { AudioSceneAnalysisInput, AudioSceneAnalysisResult } from '../ShahabAudioIntelligenceEngine.ts';
+import type { EditDecisionPlan, EditPlanGenerationInput } from '../ShahabEditorialPlannerEngine.ts';
+import type { RenderExecutionRequest, RenderExecutionResult } from '../ShahabRenderEngine.ts';
 import { SHAHABEditorStreamingBridge } from '../ShahabStreamingEngine.ts';
 import { auditPersianOrthographyTransformation } from '../ShahabPersianFidelity.ts';
 import { normalizePersianTextDeterministic } from '../ShahabContracts.ts';
@@ -593,6 +604,99 @@ export class AvapardazShahabAdapter {
 
   public getJobProgressSnapshot(jobId: string) {
     return this.projectJobProgress.get(jobId) ?? null;
+  }
+
+  /** SHAHAB-025 §13 — Maps SDK alignment result cleanly onto Avapardaz integer sample & flick timeline. */
+  public alignAndMapToAvapardazTimeline(
+    input: AlignmentRequestInput,
+    timelineOffsetFlicks = 0,
+  ): {
+    readonly alignment: AlignmentResult;
+    readonly timelineSegments: readonly {
+      readonly segmentId: string;
+      readonly text: string;
+      readonly granularity: AlignmentResult['effectiveGranularity'];
+      readonly timelineStartFlicks: number | null;
+      readonly timelineEndFlicks: number | null;
+      readonly status: AlignmentResult['overallStatus'];
+    }[];
+  } {
+    const alignment = this.sdk.submitAlignment(input);
+    const timelineSegments = alignment.segments.map((seg) => ({
+      segmentId: seg.segmentId,
+      text: seg.text,
+      granularity: seg.granularity,
+      timelineStartFlicks: seg.acousticRange
+        ? timelineOffsetFlicks + seg.acousticRange.startFlicks
+        : null,
+      timelineEndFlicks: seg.acousticRange
+        ? timelineOffsetFlicks + seg.acousticRange.endFlicks
+        : null,
+      status: seg.status,
+    }));
+    return { alignment, timelineSegments };
+  }
+
+  /** SHAHAB-026 §14 — Runs recording-scoped diarization through SDK and maps turns onto timeline flicks. */
+  public diarizeForAvapardazTracks(
+    input: DiarizationRequestInput,
+    timelineOffsetFlicks = 0,
+  ): {
+    readonly diarization: DiarizationResult;
+    readonly timelineTurns: readonly {
+      readonly turnId: string;
+      readonly speakerId: string;
+      readonly kind: DiarizationResult['turns'][number]['kind'];
+      readonly timelineStartFlicks: number;
+      readonly timelineEndFlicks: number;
+    }[];
+  } {
+    const diarization = this.sdk.submitDiarization(input);
+    const timelineTurns = diarization.turns.map((t) => ({
+      turnId: t.turnId,
+      speakerId: t.speakerId,
+      kind: t.kind,
+      timelineStartFlicks: timelineOffsetFlicks + t.range.startFlicks,
+      timelineEndFlicks: timelineOffsetFlicks + t.range.endFlicks,
+    }));
+    return { diarization, timelineTurns };
+  }
+
+  /** SHAHAB-027 §16 — Generates and exports Avapardaz subtitle package through SDK. */
+  public generateAvapardazSubtitlePackage(
+    input: SubtitleGenerationInput,
+    exportFormats: readonly SubtitleExportFormat[] = ['SRT_UTF8', 'WEBVTT_UTF8', 'JSON_SIDECAR'],
+  ): {
+    readonly document: ShahabSubtitleDocument;
+    readonly exports: Readonly<Record<string, SubtitleExportArtifact>>;
+  } {
+    const document = this.sdk.generateSubtitles(input);
+    const exports: Record<string, SubtitleExportArtifact> = {};
+    for (const fmt of exportFormats) {
+      exports[fmt] = this.sdk.exportSubtitles(document, fmt);
+    }
+    return { document, exports };
+  }
+
+  /** SHAHAB-028 — Runs acoustic scene intelligence through SDK without editorial cuts. */
+  public analyzeAudioSceneForAvapardaz(input: AudioSceneAnalysisInput): AudioSceneAnalysisResult {
+    return this.sdk.analyzeAudioScene(input);
+  }
+
+  /** SHAHAB-029 — Generates a versioned Edit Decision Plan through SDK without mutating source audio. */
+  public planAvapardazEdits(input: EditPlanGenerationInput): EditDecisionPlan {
+    return this.sdk.generateEditDecisionPlan(input);
+  }
+
+  /** SHAHAB-030 — Executes an approved Edit Decision Plan non-destructively via SDK. */
+  public executeAvapardazNonDestructiveRender(
+    req: Omit<RenderExecutionRequest, 'renderMode'>,
+    mode: 'PREVIEW_RENDER' | 'FINAL_EXPORT_RENDER' = 'FINAL_EXPORT_RENDER',
+  ): RenderExecutionResult {
+    if (mode === 'PREVIEW_RENDER') {
+      return this.sdk.previewNonDestructiveRender(req);
+    }
+    return this.sdk.submitFinalNonDestructiveRender(req);
   }
 }
 

@@ -182,7 +182,7 @@ export interface AvapardazTranscriptSegment {
   readonly rawText: string;
   readonly normalizedText: string;
   readonly language: string;
-  readonly confidence: number;
+  readonly confidence: number | null;
   readonly timestampGranularity: 'WORD' | 'SEGMENT' | 'RECORDING' | 'UNAVAILABLE';
   readonly words: readonly AvapardazWordSpan[];
 }

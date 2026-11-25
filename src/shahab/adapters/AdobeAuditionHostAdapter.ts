@@ -36,7 +36,12 @@ import {
   type ShahabSdkTranscriptResult,
 } from '../sdk/ShahabSdk.ts';
 import { ShahabEvidenceStore } from '../ShahabEvidenceStore.ts';
-import { decodeWavToMono16k } from '../ShahabZipformerEngine.ts';
+import { decodeWavToMono16k } from '../core/ShahabCoreWavDecoder.ts';
+import {
+  exportSubtitleDocument,
+  type ShahabSubtitleDocument,
+  type SubtitleExportArtifact,
+} from '../ShahabSubtitleEngine.ts';
 
 export type AdobeCapabilityVerificationState =
   | 'OFFICIALLY_DOCUMENTED'
@@ -807,3 +812,49 @@ ${checks.map((c) => `- **${c.checkId} (${c.area})**: ${c.passed ? 'PASS' : 'FAIL
 
   return artifact;
 }
+
+/**
+ * SHAHAB-027 §16 — Generates Adobe Audition companion subtitle & marker interchange package
+ * from a verified SHAHAB-027 document (live Audition GUI import remains honestly NOT_TESTED).
+ */
+export function buildAuditionSubtitleInterchangePackage(
+  doc: ShahabSubtitleDocument,
+  auditionSessionStartOffsetSec = 0,
+): {
+  readonly documentId: string;
+  readonly revisionId: string;
+  readonly liveAuditionHostImportTested: false;
+  readonly auditionMarkersCsvTabDelimited: string;
+  readonly srt: SubtitleExportArtifact;
+  readonly webvtt: SubtitleExportArtifact;
+  readonly ttml: SubtitleExportArtifact;
+  readonly jsonSidecar: SubtitleExportArtifact;
+} {
+  const formatAuditionDecimal = (sec: number): string => {
+    const safe = Math.max(0, sec);
+    const mins = Math.floor(safe / 60);
+    const rem = (safe - mins * 60).toFixed(3).padStart(6, '0');
+    return `${mins}:${rem}`;
+  };
+  const header = 'Name\tStart\tDuration\tTime Format\tType\tDescription';
+  const rows = doc.cues.map((cue) => {
+    const startSec = auditionSessionStartOffsetSec + cue.displayRange.startMs / 1000;
+    const durSec = cue.displayRange.durationMs / 1000;
+    const desc = cue.lines.join(' / ').replace(/[\t\r\n]+/g, ' ');
+    const name = cue.speakerDisplayLabel
+      ? `Cue ${cue.index} (${cue.speakerDisplayLabel})`
+      : `Cue ${cue.index}`;
+    return `${name}\t${formatAuditionDecimal(startSec)}\t${formatAuditionDecimal(durSec)}\tdecimal\tCue\t${desc}`;
+  });
+  return {
+    documentId: doc.documentId,
+    revisionId: doc.revisionId,
+    liveAuditionHostImportTested: false,
+    auditionMarkersCsvTabDelimited: `\uFEFF${[header, ...rows].join('\r\n')}\r\n`,
+    srt: exportSubtitleDocument(doc, 'SRT_UTF8'),
+    webvtt: exportSubtitleDocument(doc, 'WEBVTT_UTF8'),
+    ttml: exportSubtitleDocument(doc, 'TTML_XML'),
+    jsonSidecar: exportSubtitleDocument(doc, 'JSON_SIDECAR'),
+  };
+}
+

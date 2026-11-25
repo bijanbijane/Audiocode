@@ -320,7 +320,11 @@ export function issueSignedAudioSessionToken(params: {
       (params.issuer ?? (params.mode === 'local' ? DEFAULT_LOCAL_TOKEN_ISSUER : 'avapardaz-hosted-idp')).trim() ||
       DEFAULT_LOCAL_TOKEN_ISSUER,
     mode: params.mode,
-    scopes: params.scopes ?? ['shahab:transcribe', 'smart-edit:*'],
+    scopes:
+      params.scopes ??
+      (params.mode === 'local'
+        ? ['shahab:transcribe', 'shahab:admin', 'smart-edit:*', 'asr-core:*', 'processing:*']
+        : ['shahab:transcribe', 'smart-edit:*']),
     iat: now,
     exp: expiresAtMs,
   };
@@ -507,9 +511,10 @@ export function validateBinaryAudioPayload(
     };
   }
 
+  const riffTag = buf.byteLength >= 12 ? buf.subarray(0, 4).toString('ascii') : '';
   const isWav =
     buf.byteLength >= 44 &&
-    buf.subarray(0, 4).toString('ascii') === 'RIFF' &&
+    (riffTag === 'RIFF' || riffTag === 'RF64') &&
     buf.subarray(8, 12).toString('ascii') === 'WAVE';
   if (isWav) {
     return { ok: true, format: 'wav' };
@@ -518,7 +523,7 @@ export function validateBinaryAudioPayload(
     return {
       ok: false,
       code: 'INVALID_AUDIO_INPUT',
-      message: 'ساختار فایل WAV معتبر نیست (هدر RIFF/WAVE یافت نشد).',
+      message: 'ساختار فایل WAV معتبر نیست (هدر RIFF/RF64 WAVE یافت نشد).',
     };
   }
 
@@ -1217,11 +1222,16 @@ export class AudioApiSecurityGuard {
       }
 
       // Same-origin proxy check is only valid when the backend socket received a trusted/loopback Host
-      // and a reverse proxy forwarded X-Forwarded-Host matching Origin.
+      // and a reverse proxy forwarded an explicitly trusted X-Forwarded-Host matching Origin.
+      // Never trust an arbitrary client-spoofed X-Forwarded-Host header.
+      const rawForwardedHostIsTrusted =
+        Boolean(rawForwardedHost) &&
+        (isAllowedLoopbackHostHeader(rawForwardedHost) ||
+          this.config.trustedProxyHosts.includes(rawForwardedHost));
       const proxyForwardedOriginMatch =
         this.config.allowSameOriginProxyHost &&
         Boolean(originHost) &&
-        ((Boolean(rawForwardedHost) && originHost === rawForwardedHost) ||
+        ((rawForwardedHostIsTrusted && originHost === rawForwardedHost) ||
           (rawHostIsExplicitTrustedProxy && originHost === rawHost));
 
       // 3. Origin check (strictly required on /api/local-auth/session)

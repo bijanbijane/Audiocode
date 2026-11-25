@@ -11,7 +11,11 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import type { SampleRate } from '../contracts/timebase.contract';
-import { ingestAudioBufferToCanonical16kMono } from '../asr-core/CoreAudioIngestion';
+import {
+  ingestAudioBufferToCanonical16kMono,
+  inspectAndDownmixChannels,
+} from '../asr-core/CoreAudioIngestion';
+import { resampleTo16kMono } from '../engine/resampler';
 import { ShahabLocalAsrRuntime } from '../asr-core/ShahabModelManifest';
 import { EditDecisionEngine } from '../ai-engine/edit-decision/EditDecisionEngine';
 import { analyzeShahabOutputWithEngine02 } from '../ai-engine/edit-decision/ShahabToEngine02Adapter';
@@ -167,8 +171,30 @@ export class SmartAudioEditPipeline {
       // Defensive copy so caller mutations to external buffer cannot silently corrupt hash checks unless explicit
       rawBytes = Buffer.from(params.audioBytes);
     } else if (params.audioFilePath) {
-      rawBytes = fs.readFileSync(params.audioFilePath);
-      filename = path.basename(params.audioFilePath);
+      if (params.audioFilePath.includes('\0')) {
+        throw new SmartAudioEditError(
+          'INVALID_AUDIO_INPUT',
+          'INVALID_AUDIO_INPUT: Audio file path contains invalid characters.',
+        );
+      }
+      const resolvedPath = path.resolve(params.audioFilePath);
+      let stat: fs.Stats;
+      try {
+        stat = fs.statSync(resolvedPath);
+      } catch {
+        throw new SmartAudioEditError(
+          'INVALID_AUDIO_INPUT',
+          'INVALID_AUDIO_INPUT: Audio file path does not exist.',
+        );
+      }
+      if (!stat.isFile()) {
+        throw new SmartAudioEditError(
+          'INVALID_AUDIO_INPUT',
+          'INVALID_AUDIO_INPUT: Audio path must point to a regular file.',
+        );
+      }
+      rawBytes = fs.readFileSync(resolvedPath);
+      filename = path.basename(resolvedPath);
     } else {
       throw new SmartAudioEditError(
         'INVALID_AUDIO_INPUT',
@@ -187,20 +213,40 @@ export class SmartAudioEditPipeline {
 
     const tNorm = performance.now();
     const nativeWav = decodeNativeWavToPlanar(rawBytes);
-    const canonical = ingestAudioBufferToCanonical16kMono({ filename, rawBytes });
 
-    // Preserve native WAV sample rate AND channel count (mono/stereo) when supported natively
-    const useNativeWav =
-      nativeWav !== null && isSupportedExactSampleRate(nativeWav.rawSampleRateHz);
-    const effectiveRate: SampleRate = useNativeWav ? nativeWav.sampleRate : 16000;
-    const renderChannels: readonly Float32Array[] = useNativeWav
-      ? nativeWav.channels
-      : [canonical.canonicalFloat32];
+    let canonical16kMono: Float32Array;
+    let effectiveRate: SampleRate;
+    let renderChannels: readonly Float32Array[];
+    let waveformPeaks: readonly number[];
+
+    if (nativeWav !== null) {
+      // Zero-FFmpeg, zero-tempfile in-process canonicalization for native PCM/Float32 WAVs
+      const { monoFloat32 } = inspectAndDownmixChannels(nativeWav.channels);
+      canonical16kMono =
+        nativeWav.rawSampleRateHz === 16000
+          ? monoFloat32
+          : resampleTo16kMono([monoFloat32], nativeWav.rawSampleRateHz, 16000).samples;
+      if (canonical16kMono.length === 0 && monoFloat32.length > 0) {
+        canonical16kMono = new Float32Array([monoFloat32[0]]);
+      }
+
+      const useNativeRate = isSupportedExactSampleRate(nativeWav.rawSampleRateHz);
+      effectiveRate = useNativeRate ? nativeWav.sampleRate : 16000;
+      renderChannels = useNativeRate ? nativeWav.channels : [canonical16kMono];
+      waveformPeaks = computeRealWaveformPeaks(
+        useNativeRate ? monoFloat32 : canonical16kMono,
+        240,
+      );
+    } else {
+      // Non-WAV containers (MP3/FLAC/OGG/M4A/WebM/AIFF) or unsupported WAV encodings -> FFmpeg canonical ingestion
+      const canonical = ingestAudioBufferToCanonical16kMono({ filename, rawBytes });
+      canonical16kMono = canonical.canonicalFloat32;
+      effectiveRate = 16000;
+      renderChannels = [canonical16kMono];
+      waveformPeaks = computeRealWaveformPeaks(canonical16kMono, 240);
+    }
+
     const totalSourceSamples = renderChannels[0].length;
-    const waveformPeaks = computeRealWaveformPeaks(
-      useNativeWav ? nativeWav.monoDownmix : canonical.canonicalFloat32,
-      240,
-    );
 
     const pcmSource = createPlanarArrayPcmSource({
       sourceAudioId,
@@ -222,7 +268,7 @@ export class SmartAudioEditPipeline {
         stage: 'LOCAL_AUDIO_NORMALIZATION',
         status: 'COMPLETED',
         durationMs: normMs,
-        detail: `native=${effectiveRate}Hz/${renderChannels.length}ch (${totalSourceSamples} samples), asr16k=${canonical.canonicalFloat32.length} samples`,
+        detail: `native=${effectiveRate}Hz/${renderChannels.length}ch (${totalSourceSamples} samples), asr16k=${canonical16kMono.length} samples (${nativeWav ? 'in-process-wav' : 'ffmpeg'})`,
       },
     ];
 
@@ -261,7 +307,7 @@ export class SmartAudioEditPipeline {
         sourceChannels: renderChannels.length,
         totalSourceSamples,
         sourceDurationSec: session.sourceDurationSec,
-        canonical16kMono: canonical.canonicalFloat32,
+        canonical16kMono,
         waveformPeaks,
         pcmSource,
       },
@@ -275,6 +321,7 @@ export class SmartAudioEditPipeline {
     readonly job: AudioEditJob;
     readonly session: SmartAudioEditSession;
     readonly audio: ImportedAudioContext;
+    readonly ownerId?: string;
     readonly languageHint?: 'fa' | 'en' | 'fa-en' | 'auto';
     readonly unloadAfterTranscribe?: boolean;
     readonly signal?: AbortSignal;
@@ -302,7 +349,10 @@ export class SmartAudioEditPipeline {
         sourceSampleRate: params.audio.sourceSampleRate,
         totalSourceSamples: params.audio.totalSourceSamples,
         audioBytes: params.audio.rawBytes,
+        canonicalPcm16kMono: params.audio.canonical16kMono,
         filename: params.audio.filename,
+        ownerId: params.ownerId,
+        projectId: params.session.projectId,
         languageHint: params.languageHint ?? 'fa',
         unloadAfterTranscribe: params.unloadAfterTranscribe,
         signal: params.signal,
@@ -401,6 +451,7 @@ export class SmartAudioEditPipeline {
     readonly job: AudioEditJob;
     readonly session: SmartAudioEditSession;
     readonly audio: ImportedAudioContext;
+    readonly signal?: AbortSignal;
     readonly nowMs?: number;
     readonly onJobUpdate?: (job: AudioEditJob) => void;
   }): Promise<ManagedSmartEditState & { readonly analysis: SmartEditAnalysisResult }> {
@@ -415,66 +466,90 @@ export class SmartAudioEditPipeline {
     params.onJobUpdate?.(job);
 
     const t0 = performance.now();
-    const analysis = await this.decisionEngine.analyzeAndGenerateEdl({
-      projectId: params.session.projectId,
-      trackId: params.session.trackId,
-      transcript: params.session.transcript,
-      pcmMonoForAcousticAnalysis: params.audio.canonical16kMono,
-      analysisSampleRate: 16000,
-      channelLayout: params.audio.sourceChannels === 2 ? 'stereo' : 'mono',
-      nowMs: params.nowMs,
-    });
-    const elapsedMs = Number((performance.now() - t0).toFixed(2));
+    try {
+      if (params.signal?.aborted) {
+        throw new SmartAudioEditError('ANALYSIS_CANCELLED', 'Analysis cancelled before start.');
+      }
 
-    if (analysis.edl.proposals.some((p) => p.risk.automaticApprovalEligible !== false)) {
-      throw new SmartAudioEditError(
-        'SAFETY_INVARIANT_VIOLATION',
-        'SAFETY_INVARIANT_VIOLATION: automaticApprovalEligible must remain false.',
-      );
+      const analysis = await this.decisionEngine.analyzeAndGenerateEdl({
+        projectId: params.session.projectId,
+        trackId: params.session.trackId,
+        transcript: params.session.transcript,
+        pcmMonoForAcousticAnalysis: params.audio.canonical16kMono,
+        analysisSampleRate: 16000,
+        channelLayout: params.audio.sourceChannels === 2 ? 'stereo' : 'mono',
+        signal: params.signal,
+        nowMs: params.nowMs,
+      });
+      const elapsedMs = Number((performance.now() - t0).toFixed(2));
+
+      if (params.signal?.aborted) {
+        throw new SmartAudioEditError('ANALYSIS_CANCELLED', 'Analysis cancelled during execution.');
+      }
+
+      if (analysis.edl.proposals.some((p) => p.risk.automaticApprovalEligible !== false)) {
+        throw new SmartAudioEditError(
+          'SAFETY_INVARIANT_VIOLATION',
+          'SAFETY_INVARIANT_VIOLATION: automaticApprovalEligible must remain false.',
+        );
+      }
+
+      job = transitionAudioEditJob(job, 'GENERATING_EDL', {
+        progress: 78,
+        editDecisionId: analysis.edl.edlId,
+        edlId: analysis.edl.edlId,
+      });
+      params.onJobUpdate?.(job);
+
+      job = transitionAudioEditJob(job, 'WAITING_USER_APPROVAL', {
+        progress: 82,
+        edlId: analysis.edl.edlId,
+      });
+      params.onJobUpdate?.(job);
+
+      const nextTrace: SmartAudioEditStageTrace[] = [
+        ...params.session.stageTrace,
+        {
+          stage: 'ENGINE_02_SMART_EDIT_DECISION',
+          status: 'COMPLETED',
+          durationMs: elapsedMs,
+          detail: `events=${analysis.speechEvents.events.length}`,
+        },
+        {
+          stage: 'EDL_GENERATION',
+          status: 'COMPLETED',
+          durationMs: 0,
+          detail: `edlId=${analysis.edl.edlId}, proposals=${analysis.edl.proposals.length}, lowRisk=${analysis.proposalSummary.lowRiskCount}`,
+        },
+      ];
+
+      return {
+        job,
+        analysis,
+        session: {
+          ...params.session,
+          speechEvents: analysis.speechEvents,
+          edl: analysis.edl,
+          edlHistory: [analysis.edl],
+          edlHistoryIndex: 0,
+          stageTrace: nextTrace,
+          updatedAtMs: Date.now(),
+        },
+      };
+    } catch (err) {
+      if (isAbortError(err, params.signal)) {
+        job = transitionAudioEditJob(job, 'CANCELLED', {
+          errorMessage: 'فرآیند تحلیل گفتار و تولید EDL توسط کاربر لغو شد.',
+        });
+        params.onJobUpdate?.(job);
+        throw new SmartAudioEditError('ANALYSIS_CANCELLED', 'ANALYSIS_CANCELLED');
+      }
+      const code = extractErrorCode(err, 'ANALYSIS_FAILED');
+      const message = err instanceof Error ? err.message : String(err);
+      job = transitionAudioEditJob(job, 'FAILED', { errorCode: code, errorMessage: message });
+      params.onJobUpdate?.(job);
+      throw new SmartAudioEditError(code, message);
     }
-
-    job = transitionAudioEditJob(job, 'GENERATING_EDL', {
-      progress: 78,
-      editDecisionId: analysis.edl.edlId,
-      edlId: analysis.edl.edlId,
-    });
-    params.onJobUpdate?.(job);
-
-    job = transitionAudioEditJob(job, 'WAITING_USER_APPROVAL', {
-      progress: 82,
-      edlId: analysis.edl.edlId,
-    });
-    params.onJobUpdate?.(job);
-
-    const nextTrace: SmartAudioEditStageTrace[] = [
-      ...params.session.stageTrace,
-      {
-        stage: 'ENGINE_02_SMART_EDIT_DECISION',
-        status: 'COMPLETED',
-        durationMs: elapsedMs,
-        detail: `events=${analysis.speechEvents.events.length}`,
-      },
-      {
-        stage: 'EDL_GENERATION',
-        status: 'COMPLETED',
-        durationMs: 0,
-        detail: `edlId=${analysis.edl.edlId}, proposals=${analysis.edl.proposals.length}, lowRisk=${analysis.proposalSummary.lowRiskCount}`,
-      },
-    ];
-
-    return {
-      job,
-      analysis,
-      session: {
-        ...params.session,
-        speechEvents: analysis.speechEvents,
-        edl: analysis.edl,
-        edlHistory: [analysis.edl],
-        edlHistoryIndex: 0,
-        stageTrace: nextTrace,
-        updatedAtMs: Date.now(),
-      },
-    };
   }
 
   /**

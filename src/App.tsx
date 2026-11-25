@@ -168,7 +168,10 @@ import { CompanionWebClient } from './host-bridge/companion/CompanionWebClient';
 import { BrowserOnnxAsrRuntimeAdapter } from './asr-core/BrowserOnnxAsrRuntimeAdapter';
 import { NativeCompanionAsrRuntimeAdapter } from './asr-core/NativeCompanionAsrRuntimeAdapter';
 import { UnifiedLocalAsrWorkflowService } from './workflow/UnifiedLocalAsrWorkflowService';
-import { installShenavaRizehInBrowser } from './lifecycle/BrowserPersianModelInstaller';
+import {
+  fetchBundledBrowserSampleWav,
+  installShenavaRizehInBrowser,
+} from './lifecycle/BrowserPersianModelInstaller';
 import {
   fetchShahabRuntimeStatus,
   fetchShahabSampleAudioFile,
@@ -2400,6 +2403,29 @@ export default function App() {
       memoryBudgetManager: getSharedMemoryBudgetManager(),
     });
 
+    const mapOutcomeCodeToFailureCode = (
+      code?: string,
+    ): NonNullable<Parameters<typeof classifyError>[1]>['defaultCode'] => {
+      switch (code) {
+        case 'MODEL_NOT_INSTALLED':
+          return 'MODEL_NOT_INSTALLED';
+        case 'MODEL_INTEGRITY_FAILURE':
+          return 'MODEL_CHECKSUM_MISMATCH';
+        case 'MODEL_INCOMPATIBLE':
+          return 'MODEL_LOAD_FAILED';
+        case 'WORKER_CRASHED':
+          return 'WORKER_CRASHED';
+        case 'INFERENCE_TIMEOUT':
+          return 'WORKER_TIMEOUT';
+        case 'RESOURCE_LIMIT_EXCEEDED':
+          return 'MEMORY_BUDGET_EXCEEDED';
+        case 'RUNTIME_UNAVAILABLE':
+          return 'ASR_RUNTIME_UNAVAILABLE';
+        default:
+          return 'ASR_INFERENCE_FAILED';
+      }
+    };
+
     if (!modelManagerRef.current.getSnapshot().initialized) {
       await modelManagerRef.current.initialize();
       syncModelSnapshotToWorkflow();
@@ -2457,7 +2483,10 @@ export default function App() {
             });
             setActiveFailure(
               buildUserFacingFailure(
-                classifyError(new Error('MODEL_NOT_INSTALLED'), { subsystem: 'ASR_MODEL' }),
+                classifyError(new Error('MODEL_NOT_INSTALLED'), {
+                  subsystem: 'ASR_MODEL',
+                  defaultCode: 'MODEL_NOT_INSTALLED',
+                }),
                 workflowState.locale,
               ),
             );
@@ -2483,9 +2512,11 @@ export default function App() {
 
     setIsTranscribingAsr(true);
     setActiveFailure(null);
-    setStatusNotice('در حال آماده‌سازی موتور ۱۰۰٪ محلی آواپرداز (مرورگر ONNX / Companion)...');
+    setAsrInlineFeedback(null);
+    setStatusNotice('در حال آماده‌سازی و اجرای موتور محلی مرورگر (ONNX/WASM)...');
 
     try {
+      // Browser ONNX / Companion local runtime
       const outcome = await workflowService.runTranscription({
         jobId,
         projectId: workflowState.projectId,
@@ -2511,13 +2542,21 @@ export default function App() {
 
       if (!outcome.ok || !outcome.result) {
         const isNotInstalled = outcome.errorCode === 'MODEL_NOT_INSTALLED';
+        const isRuntimeUnavailable = outcome.errorCode === 'RUNTIME_UNAVAILABLE';
         workflowRef.current?.setAsrState({
-          state: isNotInstalled ? 'MODEL_NOT_INSTALLED' : 'INFERENCE_FAILED',
+          state: isNotInstalled
+            ? 'MODEL_NOT_INSTALLED'
+            : isRuntimeUnavailable
+              ? 'RUNTIME_UNAVAILABLE'
+              : 'INFERENCE_FAILED',
           message: outcome.errorMessageFa ?? outcome.errorMessageEn ?? 'Local ASR failed.',
         });
         const err = classifyError(
           new Error(outcome.errorMessageEn ?? outcome.errorCode ?? 'LOCAL_ASR_FAILED'),
-          { subsystem: isNotInstalled ? 'ASR_MODEL' : 'ASR_RUNTIME' },
+          {
+            subsystem: isNotInstalled ? 'ASR_MODEL' : 'ASR_RUNTIME',
+            defaultCode: mapOutcomeCodeToFailureCode(outcome.errorCode),
+          },
         );
         getSharedDiagnosticLogger().log({
           severity: isNotInstalled ? 'INFO' : 'ERROR',
@@ -2643,14 +2682,35 @@ export default function App() {
     setIsTranscribingAsr(true);
     setActiveFailure(null);
     setAsrInlineFeedback(null);
-    setStatusNotice('در حال بارگذاری نمونه صوتی واقعی فارسی و اجرای موتور شهاب (Zipformer INT8)...');
 
     const sampleAbort = new AbortController();
     activeShahabTranscribeAbortRef.current?.abort();
     activeShahabTranscribeAbortRef.current = sampleAbort;
 
+    let browserAdapter: BrowserOnnxAsrRuntimeAdapter | null = null;
     try {
-      const sampleFile = await fetchShahabSampleAudioFile(sampleAbort.signal);
+      const liveShahab = shahabRuntimeStatus ?? (await fetchShahabRuntimeStatus());
+      if (liveShahab && !shahabRuntimeStatus) {
+        setShahabRuntimeStatus(liveShahab);
+      }
+
+      const useShahabServer = Boolean(liveShahab?.available);
+      setStatusNotice(
+        useShahabServer
+          ? 'در حال بارگذاری نمونه صوتی واقعی فارسی و اجرای موتور شهاب (Zipformer INT8)...'
+          : 'در حال بارگذاری نمونه صوتی واقعی فارسی برای اجرای محلی در مرورگر...',
+      );
+
+      let sampleFile: File;
+      if (useShahabServer) {
+        sampleFile = await fetchShahabSampleAudioFile(sampleAbort.signal);
+      } else {
+        const bundled = await fetchBundledBrowserSampleWav({ signal: sampleAbort.signal });
+        const wavCopy = new Uint8Array(bundled.wavBytes.byteLength);
+        wavCopy.set(bundled.wavBytes);
+        sampleFile = new File([wavCopy], bundled.filename, { type: bundled.mimeType });
+      }
+
       const loaded = await importAudioProject(sampleFile, {
         broker: brokerRef.current,
         brokerReady: brokerReadyPromiseRef.current,
@@ -2663,7 +2723,7 @@ export default function App() {
       const samplePcm = primaryAsset ? loaded.pcmSources[primaryAsset.id] : undefined;
       if (!primaryAsset || !primaryTrack || !samplePcm) {
         loaded.runtimeResourceLease?.dispose();
-        throw new Error('بارگذاری داده‌های PCM فایل صوتی نمونه شهاب ناموفق بود.');
+        throw new Error('بارگذاری داده‌های PCM فایل صوتی نمونه ناموفق بود.');
       }
 
       transportRef.current?.stop();
@@ -2685,40 +2745,127 @@ export default function App() {
       setEqResponseCurveDb(null);
       setHistoryTick((v) => v + 1);
 
-      setStatusNotice('فایل نمونه صوتی فارسی بارگذاری شد — در حال استنتاج با موتور شهاب (Zipformer INT8)...');
+      if (useShahabServer) {
+        setStatusNotice('فایل نمونه صوتی فارسی بارگذاری شد — در حال استنتاج با موتور شهاب (Zipformer INT8)...');
 
-      const { response, tokens: nextTokens } = await transcribePcmWithShahabLocal({
-        pcm: samplePcm,
-        sampleRate: loaded.sampleRate,
-        trackId: primaryTrack.id,
-        speakerName: primaryTrack.speakerLabel || primaryTrack.name || 'گوینده فارسی',
-        filename: sampleFile.name,
-        decodePolicy: 'BALANCED',
-        signal: sampleAbort.signal,
-      });
+        const { response, tokens: nextTokens } = await transcribePcmWithShahabLocal({
+          pcm: samplePcm,
+          sampleRate: loaded.sampleRate,
+          trackId: primaryTrack.id,
+          speakerName: primaryTrack.speakerLabel || primaryTrack.name || 'گوینده فارسی',
+          filename: sampleFile.name,
+          decodePolicy: 'BALANCED',
+          signal: sampleAbort.signal,
+        });
 
-      await refreshShahabRuntimeStatus(false);
+        await refreshShahabRuntimeStatus(false);
 
-      setTokens(nextTokens);
-      syncWorkflowTranscript(nextTokens, `رونویسی شهاب روی نمونه صوتی فارسی (${response.transcript.modelId})`);
-      workflowRef.current?.setAsrState({
-        state: nextTokens.length > 0 ? 'TRANSCRIPTION_COMPLETED' : 'NO_SPEECH_DETECTED',
-        modelId: response.transcript.modelId,
-        modelVersion: response.transcript.modelVersion,
-        message: `رونویسی شهاب انجام شد (${nextTokens.length} واژه | RTF=${response.metrics.realTimeFactor}).`,
-      });
-      setStatusNotice(
-        `رونویسی موتور شهاب کامل شد (${nextTokens.length} واژه | ${response.transcript.modelId} | RTF=${response.metrics.realTimeFactor})`,
-      );
+        setTokens(nextTokens);
+        syncWorkflowTranscript(nextTokens, `رونویسی شهاب روی نمونه صوتی فارسی (${response.transcript.modelId})`);
+        workflowRef.current?.setAsrState({
+          state: nextTokens.length > 0 ? 'TRANSCRIPTION_COMPLETED' : 'NO_SPEECH_DETECTED',
+          modelId: response.transcript.modelId,
+          modelVersion: response.transcript.modelVersion,
+          message: `رونویسی شهاب انجام شد (${nextTokens.length} واژه | RTF=${response.metrics.realTimeFactor}).`,
+        });
+        setStatusNotice(
+          `رونویسی موتور شهاب کامل شد (${nextTokens.length} واژه | ${response.transcript.modelId} | RTF=${response.metrics.realTimeFactor})`,
+        );
+      } else {
+        if (!modelManagerRef.current.getSnapshot().initialized) {
+          await modelManagerRef.current.initialize();
+          syncModelSnapshotToWorkflow();
+        }
+        if (!modelManagerRef.current.getSnapshot().activeModel) {
+          setIsInstallingBrowserModel(true);
+          try {
+            const installOutcome = await installShenavaRizehInBrowser({
+              modelManager: modelManagerRef.current,
+              abortSignal: sampleAbort.signal,
+              onProgress: (pct) => {
+                setBrowserModelInstallPct(pct);
+                setStatusNotice(`در حال نصب مدل فارسی در مرورگر (${pct}٪)...`);
+              },
+            });
+            syncModelSnapshotToWorkflow();
+            if (!installOutcome.ok) {
+              throw new Error(
+                installOutcome.errorMessageFa ?? installOutcome.errorMessageEn ?? 'MODEL_NOT_INSTALLED',
+              );
+            }
+          } finally {
+            setIsInstallingBrowserModel(false);
+            setBrowserModelInstallPct(null);
+          }
+        }
+
+        browserAdapter = new BrowserOnnxAsrRuntimeAdapter({
+          modelManager: modelManagerRef.current,
+          memoryBudgetManager: getSharedMemoryBudgetManager(),
+          wasmAssetsBasePath: '/ort/',
+        });
+        const nativeAdapter = new NativeCompanionAsrRuntimeAdapter({
+          companionClient: new CompanionWebClient(companionEndpoint),
+          memoryBudgetManager: getSharedMemoryBudgetManager(),
+        });
+        const workflowService = new UnifiedLocalAsrWorkflowService({
+          browserAdapter,
+          nativeCompanionAdapter: nativeAdapter,
+          modelManager: modelManagerRef.current,
+        });
+
+        setStatusNotice('فایل نمونه صوتی فارسی بارگذاری شد — در حال رونویسی محلی با ONNX/WASM...');
+        const outcome = await workflowService.runTranscription({
+          jobId: `sample_asr_${Date.now()}`,
+          projectId: loaded.projectName,
+          trackId: primaryTrack.id,
+          speakerName: primaryTrack.speakerLabel || primaryTrack.name || 'گوینده فارسی',
+          sourceAssetId: primaryAsset.id,
+          sourceAssetSha256: primaryAsset.contentHash,
+          fileName: sampleFile.name,
+          sampleRate: loaded.sampleRate,
+          totalSamples: samplePcm.length,
+          readSourceRange: async (startSample, count) => {
+            const safeStart = Math.max(0, Math.min(samplePcm.length, Math.floor(startSample)));
+            const safeEnd = Math.max(safeStart, Math.min(samplePcm.length, safeStart + Math.floor(count)));
+            return samplePcm.subarray(safeStart, safeEnd);
+          },
+          preference: 'BROWSER_ONLY',
+          requestedCloudMode: false,
+          languageHint: 'fa',
+          signal: sampleAbort.signal,
+          onProgress: (ev) => {
+            setStatusNotice(`${ev.messageFa} (${ev.percent}٪)`);
+          },
+        });
+
+        if (!outcome.ok || !outcome.result) {
+          throw new Error(outcome.errorMessageFa ?? outcome.errorMessageEn ?? 'Local ASR failed.');
+        }
+
+        const nextTokens = outcome.tokens;
+        setTokens(nextTokens);
+        syncWorkflowTranscript(nextTokens, `رونویسی محلی روی نمونه فارسی (${outcome.result.modelId})`);
+        workflowRef.current?.setAsrState({
+          state: nextTokens.length > 0 ? 'TRANSCRIPTION_COMPLETED' : 'NO_SPEECH_DETECTED',
+          modelId: outcome.result.modelId,
+          modelVersion: outcome.result.modelVersion,
+          message: `رونویسی محلی انجام شد (${nextTokens.length} واژه | RTF=${outcome.result.realTimeFactor}).`,
+        });
+        setStatusNotice(
+          `رونویسی نمونه فارسی کامل شد (${nextTokens.length} واژه | ${outcome.result.modelId} | RTF=${outcome.result.realTimeFactor})`,
+        );
+      }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       setAsrInlineFeedback({
         kind: 'INFERENCE_ERROR',
-        titleFa: 'خطا در اجرای نمونه صوتی با موتور شهاب',
+        titleFa: 'خطا در اجرای نمونه صوتی محلی',
         messageFa: msg,
       });
-      setStatusNotice(`خطا در اجرای نمونه صوتی شهاب: ${msg}`);
+      setStatusNotice(`خطا در اجرای نمونه صوتی: ${msg}`);
     } finally {
+      await browserAdapter?.dispose().catch(() => {});
       if (activeShahabTranscribeAbortRef.current === sampleAbort) {
         activeShahabTranscribeAbortRef.current = null;
       }

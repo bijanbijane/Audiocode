@@ -78,6 +78,12 @@ export function createInitialMissionMap(): Record<ShahabMissionId, ShahabMission
     ['SHAHAB-022', 'Stable Engine SDK, Versioned API Contract and Host-Neutral Integration Boundary', 10],
     ['SHAHAB-023', 'Avapardaz Native Integration, Timeline-Aware Transcription and Non-Destructive Editing Workflow', 10],
     ['SHAHAB-024', 'Adobe Audition Integration, Official Extensibility Research and Host Adapter Engineering', 10],
+    ['SHAHAB-025', 'Acoustic Forced Alignment, Word-Level Timing and Sample-Accurate Synchronization', 10],
+    ['SHAHAB-026', 'Speaker Diarization, Multi-Speaker Attribution and Overlap Intelligence', 10],
+    ['SHAHAB-027', 'Professional Subtitle and Caption Engineering, Persian RTL Layout and Verified Export', 10],
+    ['SHAHAB-028', 'Acoustic Scene Intelligence, Audio Event Detection, Speech Activity Analysis and Temporal Audio Structure', 10],
+    ['SHAHAB-029', 'Transcript-Aware Editorial Intelligence, Speech-Content Analysis, Edit Decision Planning and Reversible Edit Policy', 10],
+    ['SHAHAB-030', 'Non-Destructive Audio Editing Engine, Sample-Accurate Edit Execution, Render Graph and Precision Export', 10],
   ];
   const map = {} as Record<ShahabMissionId, ShahabMissionRecord>;
   for (const [missionId, title, totalTaskCount] of defs) {

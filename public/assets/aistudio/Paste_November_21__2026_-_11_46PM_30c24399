@@ -1,0 +1,3581 @@
+# **بسته مهندسی بعدی شهاب — مأموریت‌های ۲۵، ۲۶ و ۲۷**
+
+در این بسته وارد سه قابلیت مهم می‌شویم که شهاب را از یک موتور تبدیل گفتار به متن، به یک موتور تحلیل و آماده‌سازی حرفه‌ای محتوای صوتی تبدیل می‌کنند:
+
+1. **تعیین زمان دقیق کلمات و عبارات در صوت (Forced Alignment):** هر کلمه واقعاً در چه نقطه‌ای از فایل گفته شده است؟
+2. **تشخیص نوبت گویندگان (Speaker Diarization):** چه کسی، در چه بازه‌ای صحبت کرده است؟
+3. **تولید زیرنویس و کپشن حرفه‌ای:** چگونه متن، زمان‌بندی، گوینده و ساختار گفتار به خروجی قابل‌استفاده در تدوین تبدیل شوند؟
+
+این سه قابلیت به هم وابسته‌اند، اما نباید در یک موتور مبهم ادغام شوند. تشخیص گفتار، هم‌ترازی متن با صوت، تشخیص گوینده و تولید زیرنویس چهار وظیفه متفاوت‌اند. هرکدام باید ورودی، خروجی، معیار کیفیت، خطا و شواهد مستقل داشته باشند.
+
+**نقشه اجرای این بسته**
+
+1. **SHAHAB-025 — Acoustic Forced Alignment & Word-Level Timing**
+
+   تعیین محدوده زمانی واقعی کلمات و عبارات با حفظ منشأ و دقت اندازه‌گیری.
+2. **SHAHAB-026 — Speaker Diarization & Multi-Speaker Attribution**
+
+   تشخیص تغییر گوینده، مدیریت هم‌پوشانی صداها و اتصال گوینده به بخش‌های متن.
+3. **SHAHAB-027 — Professional Subtitle & Caption Engineering**
+
+   تولید زیرنویس فارسی زمان‌بندی‌شده، خوانا، قابل‌ویرایش و سازگار با گردش‌کار تدوین.
+
+**قاعده سخت‌گیرانه این بسته:** اگر مدل یا ابزار فعلی زمان دقیق کلمات یا هویت گوینده را در اختیار نمی‌گذارد، ایجنت حق ندارد این اطلاعات را از روی حدس تولید کند. باید قابلیت لازم را به شکل مستقل بررسی کند، ابزار مناسب را انتخاب کند و محدودیت را آشکارا ثبت کند.
+
+## **مأموریت ۲۵ — هم‌ترازی آکوستیکی متن و صوت و زمان‌بندی کلمه‌به‌کلمه**
+
+
+
+ابتدا اجرا شود
+
+&#x20;Forced Alignment / Acoustic Grounding / Word-Level Timing
+
+
+
+# SHAHAB-025 — ACOUSTIC FORCED ALIGNMENT, WORD-LEVEL TIMING, PHONETIC BOUNDARY ANALYSIS & TIMESTAMP INTEGRITY
+
+## 0. MISSION OBJECTIVE
+
+Engineer a reliable acoustic forced-alignment subsystem for SHAHAB.
+
+The primary objective is to establish the actual temporal relationship between a supplied transcript and its corresponding source audio.
+
+The system must determine, to the granularity genuinely supported by its alignment method:
+
+- Where a transcript segment begins.
+- Where it ends.
+- Where each word begins and ends, when word-level alignment is supported.
+- Which audio interval corresponds to a token or phonetic unit, where the selected method can provide that granularity.
+- Which transcript regions cannot be aligned reliably.
+- Which parts of the audio contain speech not represented in the supplied transcript.
+- Which transcript content cannot be located in the audio.
+- Which boundaries are uncertain or ambiguous.
+
+This mission introduces an alignment capability, not another speech-recognition engine.
+
+The alignment subsystem must not silently rewrite the supplied transcript.
+
+The alignment subsystem must not pretend that text is acoustically confirmed merely because it can assign timestamps to the text.
+
+The alignment subsystem must not fabricate evenly distributed word timestamps.
+
+The alignment subsystem must not convert a weak alignment score into a confident correctness claim.
+
+The alignment subsystem must preserve the exact relationship between:
+
+- The audio source.
+- The audio sample timeline.
+- The supplied transcript revision.
+- The tokenizer or phonetic representation.
+- The alignment algorithm.
+- The resulting word and segment boundaries.
+
+The intended result is an independently testable SHAHAB service that can align recognized or user-provided Persian text to its corresponding audio while preserving uncertainty and provenance.
+
+## 1. STRICT ENTRY GATE
+
+Inspect the actual implementation and evidence from:
+
+- SHAHAB-005: frozen recognition core.
+- SHAHAB-006: baseline evaluation.
+- SHAHAB-007: acoustic state and decoding behavior.
+- SHAHAB-008: Persian contextual memory.
+- SHAHAB-015: crash recovery and processing integrity.
+- SHAHAB-016: performance measurement.
+- SHAHAB-017: streaming semantics.
+- SHAHAB-018: runtime compatibility.
+- SHAHAB-019: Persian fidelity.
+- SHAHAB-021: integrated system qualification.
+- SHAHAB-022: SDK/API contract.
+- SHAHAB-023: Avapardaz integration.
+
+Do not assume these subsystems are implemented merely because their mission reports exist.
+
+Inspect the actual repository and identify:
+
+- Current transcript representation.
+- Current timestamp representation.
+- Existing segment model.
+- Existing sample-index representation.
+- Existing audio timeline mapping.
+- Current model architecture.
+- Available model outputs.
+- Tokenizer behavior.
+- Feature-extraction requirements.
+- Existing alignment code.
+- Existing CTC or Transducer interfaces, if any.
+- Existing runtime alignment support.
+- Existing export timing semantics.
+- Existing timeline-mapping tests.
+
+Create an implementation capability report before modifying code.
+
+Use the following status values:
+
+- `NATIVE_ALIGNMENT_SUPPORTED_AND_VERIFIED`
+- `ALIGNMENT_AVAILABLE_BUT_UNVERIFIED`
+- `ALIGNMENT_PARTIALLY_SUPPORTED`
+- `SEPARATE_ALIGNER_REQUIRED`
+- `ALIGNMENT_NOT_SUPPORTED`
+- `TIMESTAMP_INFORMATION_INSUFFICIENT`
+- `BLOCKED`
+
+If the current ASR model cannot expose the information needed for alignment, do not force the model into an unsupported alignment mode.
+
+Investigate an independent compatible alignment model or algorithm under the same licensing and artifact-governance rules established for SHAHAB.
+
+## 2. DISTINGUISH RECOGNITION FROM ALIGNMENT
+
+The implementation must keep these two operations separate.
+
+### 2.1 Automatic speech recognition
+
+ASR estimates transcript content from audio.
+
+Its input is audio.
+
+Its output is a text hypothesis and any other genuinely supported recognition metadata.
+
+### 2.2 Forced alignment
+
+Forced alignment receives:
+
+- A known audio source.
+- A supplied transcript.
+- A compatible acoustic or alignment model.
+
+It estimates the time intervals in the audio that correspond to the supplied text.
+
+A successful alignment does not prove that the supplied transcript is correct.
+
+An incorrect transcript may still produce a plausible-looking alignment result.
+
+Therefore, the alignment subsystem must distinguish:
+
+- Transcript content supplied to the aligner.
+- Acoustic intervals produced by the aligner.
+- Alignment validity.
+- Transcript-to-audio coverage.
+- Unmatched audio.
+- Unmatched transcript content.
+- Ambiguous phonetic boundaries.
+
+### 2.3 Alignment is not correction
+
+The aligner must not replace:
+
+- The original ASR transcript.
+- The user's edited transcript.
+- The authorized final transcript.
+
+It may create a timing representation linked to a specific transcript revision.
+
+If the transcript changes, the old alignment must remain associated with the old revision and must not silently be presented as current.
+
+## 3. ALIGNMENT ARCHITECTURE
+
+Implement the alignment capability as an independently versioned subsystem.
+
+The logical pipeline should be:
+
+`Audio Source -> Audio Validation -> Timeline Normalization -> Transcript Validation -> Token/Phoneme Representation -> Acoustic Alignment -> Boundary Analysis -> Alignment Quality Evaluation -> Timestamp Result`
+
+The exact architecture must be derived from the selected method.
+
+Do not force all alignment algorithms into an identical internal processing path when their technical requirements differ.
+
+### 3.1 Service responsibilities
+
+The alignment service must own:
+
+- Alignment request validation.
+- Audio/transcript compatibility checks.
+- Alignment model identity.
+- Tokenizer or phonetic representation.
+- Alignment execution.
+- Boundary generation.
+- Alignment failure detection.
+- Unmatched-region reporting.
+- Alignment provenance.
+- Alignment quality metadata.
+- Result serialization.
+
+The service must not own transcript editorial approval.
+
+### 3.2 Engine separation
+
+Do not embed forced-alignment logic directly inside the existing ASR decoder unless the selected architecture requires such integration and it is independently justified.
+
+Prefer a separately addressable alignment capability so that:
+
+- ASR can work without alignment.
+- Alignment can operate on an externally supplied transcript.
+- Different alignment implementations can be benchmarked.
+- Alignment can be upgraded without changing the ASR contract.
+- A missing aligner does not break basic transcription.
+
+### 3.3 SDK contract
+
+Extend the SHAHAB SDK with a versioned alignment interface.
+
+The operation must support conceptual behavior equivalent to:
+
+- `inspectAlignmentCapabilities`
+- `createAlignmentRequest`
+- `submitAlignment`
+- `getAlignmentStatus`
+- `getAlignmentResult`
+- `cancelAlignment`
+- `disposeAlignmentRequest`
+
+Use actual project conventions.
+
+Do not add a method that simply returns fabricated timestamps.
+
+## 4. ALIGNMENT INPUT CONTRACT
+
+Create a typed alignment request.
+
+It must include:
+
+- Unique request ID.
+- Audio source identity.
+- Audio revision or immutable content identity.
+- Audio sample rate.
+- Channel configuration.
+- Sample format.
+- Audio sample count where known.
+- Audio start offset.
+- Audio timeline identity.
+- Transcript ID.
+- Transcript revision.
+- Transcript layer.
+- Transcript text or approved segment representation.
+- Language declaration.
+- Alignment profile.
+- Alignment model identity.
+- Tokenizer identity.
+- Requested timing granularity.
+- Requested execution mode.
+- Privacy/authorization context.
+- Processing configuration identity.
+
+### 4.1 Transcript source layers
+
+The caller must explicitly identify which transcript layer is being aligned.
+
+Possible source layers include:
+
+- Raw acoustic recognition.
+- Context-assisted transcript.
+- Verbatim transcript.
+- Normalized transcript.
+- User-edited transcript.
+- Authorized final transcript.
+
+Do not silently choose a transcript layer.
+
+The same audio may produce different alignment behavior for different transcript revisions.
+
+The resulting alignment must identify the exact layer and revision used.
+
+### 4.2 Input immutability
+
+An alignment operation must not mutate the supplied transcript.
+
+It must not overwrite audio content.
+
+Any preprocessing must produce a clearly identified derived representation.
+
+Preserve the original source identity and transformation lineage.
+
+### 4.3 Range alignment
+
+Support full-recording and subrange alignment where the selected algorithm allows it.
+
+A range request must define its source sample boundaries.
+
+Do not assume that an alignment-relative timestamp begins at source time zero.
+
+Preserve the original audio offset.
+
+## 5. PERSIAN TEXT PREPARATION FOR ALIGNMENT
+
+Persian alignment requires special care because written forms and acoustic realizations are not always one-to-one.
+
+Inspect the actual tokenizer or phonetic frontend required by the selected alignment model.
+
+Do not use a generic Persian normalizer without evaluating its effect on acoustic correspondence.
+
+### 5.1 Orthographic normalization
+
+Preserve:
+
+- Persian Yeh and Arabic Yeh distinctions.
+- Persian Kaf and Arabic Kaf.
+- ZWNJ.
+- Word boundaries.
+- Compound expressions.
+- Colloquial spelling.
+- Informal verb forms.
+- Punctuation.
+- Numerals.
+- Mixed Persian/Latin tokens.
+- Foreign words.
+- Proper nouns.
+
+If alignment preparation requires normalization, store:
+
+- Original transcript.
+- Alignment-prepared transcript.
+- Transformation revision.
+- Reversible mapping between representations.
+
+Never overwrite the source text with alignment-normalized text.
+
+### 5.2 Token-to-word mapping
+
+A tokenizer may split one written Persian word into multiple subword tokens.
+
+The alignment system must maintain a mapping between:
+
+- Original orthographic word.
+- Normalized alignment word.
+- Subword tokens.
+- Phonetic units, where available.
+- Source sample interval.
+
+Do not assume one token equals one word.
+
+Do not combine subword timings by naïvely averaging them.
+
+Define a boundary aggregation method that is compatible with the actual model.
+
+### 5.3 Spoken versus written forms
+
+A spoken contraction may differ from its written representation.
+
+The aligner must not silently convert the spoken form into a formal equivalent and then present that equivalence as exact alignment.
+
+Where a phonetic equivalence or alternative pronunciation is required, document the mapping and preserve the original transcript form.
+
+### 5.4 Numbers and symbols
+
+A written number may correspond to multiple spoken words, or a spoken phrase may be normalized into a numeric form.
+
+Preserve the relationship between:
+
+- Spoken lexical sequence.
+- Written transcript form.
+- Normalized numeric representation.
+
+If the alignment model cannot map a normalized numeric token to the underlying spoken sequence, mark that region unresolved rather than inventing word boundaries.
+
+### 5.5 Punctuation
+
+Punctuation is not an acoustic token in the same sense as spoken words.
+
+Do not assign a fabricated acoustic interval to punctuation.
+
+Where punctuation is retained in the transcript, associate it with a neighboring word or sentence boundary using a documented non-acoustic representation.
+
+## 6. ALIGNMENT METHOD RESEARCH AND SELECTION
+
+Inspect suitable alignment approaches based on the actual model and available runtime.
+
+Potential approaches may include:
+
+- CTC-based forced alignment.
+- Transducer-compatible alignment, where a valid method and compatible implementation exist.
+- Model-specific attention alignment, only where reliable semantics are documented.
+- Dedicated acoustic forced-alignment models.
+- Phoneme-based alignment.
+- Other validated alignment methods.
+
+Do not assume that any ASR architecture exposes a valid forced-alignment path.
+
+### 6.1 CTC alignment
+
+If the selected model exposes a valid CTC representation, inspect:
+
+- Blank-token semantics.
+- Token sequence mapping.
+- Frame stride.
+- Receptive field.
+- Alignment path construction.
+- Repeated token behavior.
+- Token boundary interpretation.
+- Runtime availability.
+
+Do not treat CTC frame indices as exact phoneme boundaries without accounting for frontend frame shifts and model timing behavior.
+
+### 6.2 Transducer alignment
+
+If the active ASR model is Transducer-based, inspect what alignment information the actual runtime exposes.
+
+Determine whether:
+
+- Token emission timestamps are available.
+- Frame-level encoder timing is available.
+- Decoder token paths can be inspected.
+- Alignment can be reconstructed using a valid algorithm.
+- The runtime exposes adequate information.
+
+Do not assume Transducer token emission positions equal actual word start/end boundaries.
+
+Do not fabricate alignment by distributing token times over the audio range.
+
+### 6.3 Dedicated alignment model
+
+If a separate aligner is required:
+
+- Inspect its architecture.
+- Inspect its Persian support.
+- Inspect its tokenizer or phonetic inventory.
+- Inspect its training-data provenance.
+- Inspect its artifact format.
+- Inspect its license.
+- Inspect its runtime requirements.
+- Inspect its language limitations.
+- Inspect available evaluation evidence.
+
+Do not download large artifacts until metadata, licensing, compatibility, and evaluation eligibility have been reviewed.
+
+### 6.4 Selection decision
+
+Choose the most technically justified method.
+
+Record rejected approaches and reasons.
+
+The decision must account for:
+
+- Persian language compatibility.
+- Word-boundary quality.
+- Runtime compatibility.
+- Memory.
+- Latency.
+- Offline operation.
+- Package size.
+- Licensing.
+- Maintenance.
+- Availability of reliable references.
+
+A method with excellent English results but unverified Persian performance must not be represented as a verified Persian aligner.
+
+## 7. TIMEBASE AND SAMPLE-ACCURATE BOUNDARIES
+
+Create a strict time representation contract.
+
+### 7.1 Primary representation
+
+Where available, use integer sample indices as the primary internal representation.
+
+Each aligned item must preserve:
+
+- Start sample index.
+- End sample index.
+- Sample rate.
+- Source audio identity.
+- Timeline origin.
+- Time conversion rule.
+
+Define whether intervals are half-open or closed.
+
+Choose one convention and enforce it across the system.
+
+Adjacent words must not accidentally overlap or leave gaps because of inconsistent boundary conventions.
+
+### 7.2 Derived timestamps
+
+Convert sample positions to seconds only through a documented conversion.
+
+Avoid repeated rounding and converting back and forth between floating-point times and sample indices.
+
+Where decimal timestamps are needed for export, retain the original sample indices as canonical evidence whenever possible.
+
+### 7.3 Source offset mapping
+
+Support audio obtained from:
+
+- Full source files.
+- Selected ranges.
+- Extracted audio.
+- Resampled audio.
+- Timeline clips.
+- Concatenated selected clips, where supported.
+
+Every transformation must have a mapping back to the original source.
+
+If the mapping is not exact, declare its precision and uncertainty.
+
+Do not call a mapping sample-accurate unless the full transformation path preserves exact sample correspondence.
+
+### 7.4 Resampling
+
+If alignment input is resampled:
+
+- Record source rate.
+- Record target rate.
+- Record input sample count.
+- Record output sample count.
+- Record resampling implementation.
+- Record transformation identity.
+- Validate duration preservation.
+- Validate sample mapping.
+
+Do not assume a nominal rate ratio is sufficient to reconstruct all source timing behavior.
+
+## 8. ALIGNMENT OUTPUT CONTRACT
+
+Create a versioned alignment result.
+
+Each aligned unit must contain:
+
+- Alignment result ID.
+- Transcript ID.
+- Transcript revision.
+- Segment ID where applicable.
+- Word/token identity.
+- Original transcript text.
+- Alignment-prepared text where required.
+- Start sample.
+- End sample.
+- Start time.
+- End time.
+- Source audio identity.
+- Alignment model identity.
+- Alignment algorithm/version.
+- Runtime/provider.
+- Alignment status.
+- Timing granularity.
+- Evidence/provenance.
+- Quality indicators, only when genuinely supported.
+
+Use statuses such as:
+
+- `ALIGNED`
+- `PARTIALLY_ALIGNED`
+- `UNALIGNED`
+- `AMBIGUOUS`
+- `OUT_OF_AUDIO_RANGE`
+- `TRANSCRIPT_MISMATCH_SUSPECTED`
+- `ALIGNMENT_FAILED`
+- `TIMING_UNAVAILABLE`
+
+Do not convert `AMBIGUOUS` into `ALIGNED` merely to produce a complete timeline.
+
+### 8.1 Boundary quality
+
+Where the alignment method provides meaningful scores or uncertainty estimates, retain their exact semantics.
+
+Do not relabel arbitrary model scores as probability.
+
+Do not convert a heuristic score into a percentage of correctness.
+
+### 8.2 Alignment gaps
+
+Represent:
+
+- Audio intervals not matched to transcript.
+- Transcript words not matched to audio.
+- Long unexplained gaps.
+- Duplicate alignments.
+- Out-of-order boundaries.
+- Overlapping intervals where not expected.
+
+Do not hide gaps by stretching adjacent words.
+
+### 8.3 Transcript mismatch detection
+
+An aligner may be forced to match incorrect text to the audio.
+
+Build mismatch indicators using available evidence.
+
+Potential indicators include:
+
+- Very weak alignment evidence.
+- Excessive unmatched regions.
+- Invalid token paths.
+- Impossible boundary order.
+- Unusual duration patterns.
+- Repeated pathological alignments.
+- Mismatch between audio segmentation and transcript structure.
+
+These indicators are warnings, not automatic proof that a particular word is wrong.
+
+The subsystem must allow unresolved regions.
+
+## 9. WORD-LEVEL AND PHRASE-LEVEL TIMING
+
+Define supported granularity explicitly.
+
+Possible levels:
+
+- Recording-level.
+- Segment-level.
+- Phrase-level.
+- Word-level.
+- Token-level.
+- Phoneme-level.
+
+The selected aligner may support only some levels reliably.
+
+### 9.1 Word-level aggregation
+
+When the model aligns subword or phonetic units, define how they map to orthographic words.
+
+For a Persian word composed of multiple tokens:
+
+- Preserve all constituent token positions.
+- Resolve word start/end using a documented aggregation rule.
+- Handle punctuation separately.
+- Handle whitespace and ZWNJ correctly.
+- Detect tokens that cannot be assigned unambiguously.
+
+Do not use arithmetic averaging of token timestamps as a substitute for a boundary model.
+
+### 9.2 Phrase boundaries
+
+If word-level timing is unreliable but phrase-level timing is supported:
+
+- Preserve phrase timing.
+- Report word-level timing as unavailable.
+- Do not divide phrase duration evenly among its words.
+
+### 9.3 Punctuation and sentence boundaries
+
+Punctuation must not create artificial acoustic durations.
+
+Sentence boundaries should be mapped to actual pauses or other appropriate evidence only when available.
+
+A punctuation symbol must not be assigned a fake word interval.
+
+## 10. STREAMING AND INCREMENTAL ALIGNMENT
+
+Investigate whether alignment can be performed incrementally.
+
+Do not assume offline forced alignment automatically supports streaming.
+
+A streaming alignment mode must define:
+
+- Pending transcript range.
+- Pending audio range.
+- Stable aligned prefix.
+- Provisional boundaries.
+- Boundary revision behavior.
+- Finalization.
+- State recovery.
+
+### 10.1 Provisional alignment
+
+Where the selected method supports incremental updates:
+
+- Mark provisional boundaries.
+- Track alignment revision.
+- Allow corrections.
+- Avoid marking them final prematurely.
+
+### 10.2 Final alignment
+
+Only mark a range finalized after its required audio and transcript context is available and the alignment stage has completed.
+
+A stable ASR word is not automatically a final aligned word.
+
+### 10.3 Replay behavior
+
+On session recovery:
+
+- Verify audio identity.
+- Verify transcript revision.
+- Verify alignment model.
+- Verify processed sample range.
+- Verify alignment-state identity.
+
+Do not reuse alignment state across different transcript revisions without a validated compatibility rule.
+
+## 11. ALIGNMENT QUALITY EVALUATION
+
+Create a genuine alignment benchmark.
+
+A transcript with correct text is not enough to evaluate timestamp accuracy.
+
+### 11.1 Reference annotations
+
+Use recordings with manually verified boundary annotations.
+
+Where feasible, references should include:
+
+- Word start.
+- Word end.
+- Relevant phonetic or phrase boundaries if needed.
+- Uncertain boundary markers.
+- Annotator identity or controlled pseudonymous identity.
+- Annotation method.
+- Review status.
+
+Do not claim exact boundary accuracy when references are only phrase-level.
+
+### 11.2 Evaluation metrics
+
+Measure where appropriate:
+
+- Boundary absolute error.
+- Start-boundary error.
+- End-boundary error.
+- Median absolute error.
+- P90 absolute error.
+- P95 absolute error where sample count supports it.
+- Alignment coverage.
+- Unaligned-word rate.
+- Invalid-boundary rate.
+- Overlap rate.
+- Out-of-order rate.
+- Transcript mismatch detection performance.
+
+Define units and thresholds.
+
+Do not create numerical success thresholds without an approved product or research policy.
+
+### 11.3 Boundary tolerance
+
+Define tolerance-based metrics only when their rationale is documented.
+
+For example, report the fraction of boundaries within a stated millisecond tolerance, but do not invent a tolerance and call it a universal definition of accuracy.
+
+Use reviewer-verified references and record their resolution.
+
+### 11.4 Persian category evaluation
+
+Evaluate separately:
+
+- Short common words.
+- Long compounds.
+- Colloquial expressions.
+- Attached suffixes.
+- Prefix constructions.
+- ZWNJ-sensitive forms.
+- Foreign words.
+- Proper nouns.
+- Numbers.
+- Repeated words.
+- Disfluencies.
+- Sentence-final particles.
+- Speech with long pauses.
+
+A model may align formal Persian accurately while failing on colloquial speech.
+
+Do not hide category-level failures behind an overall average.
+
+## 12. PERFORMANCE AND RESOURCE ENGINEERING
+
+Use the SHAHAB-016 measurement infrastructure.
+
+Measure:
+
+- Alignment initialization.
+- Token preparation.
+- Audio preparation.
+- Alignment execution.
+- Boundary aggregation.
+- Result serialization.
+- Persistence.
+- Peak memory.
+- Runtime provider.
+- CPU/GPU use where reliably measurable.
+
+Compare:
+
+- Full-recording alignment.
+- Selected-range alignment.
+- Long-recording alignment.
+- Multiple independent segments.
+- Repeated alignment of the same transcript revision.
+
+Do not rerun identical alignment work unnecessarily when a valid cached result can be reused.
+
+Cache identity must include:
+
+- Audio content identity.
+- Audio revision.
+- Transcript revision.
+- Transcript layer.
+- Alignment model.
+- Tokenizer/phonetic configuration.
+- Algorithm version.
+- Preprocessing configuration.
+- Runtime compatibility where it changes results.
+
+Invalidation must occur whenever a relevant identity changes.
+
+## 13. INTEGRATION WITH AVAPARDAZ AND SDK
+
+Expose alignment through the SHAHAB SDK.
+
+Preserve host neutrality.
+
+Avapardaz must not import alignment-model internals.
+
+### 13.1 Result mapping
+
+Integrate alignment results with the existing transcript model.
+
+Preserve:
+
+- Transcript ID.
+- Transcript revision.
+- Segment identity.
+- Source audio identity.
+- Sample ranges.
+- Source-relative timing.
+- Timeline mapping.
+- Alignment status.
+- Alignment provenance.
+
+### 13.2 Timeline integration
+
+When Avapardaz has a verified mapping between source media and timeline:
+
+- Map aligned sample ranges into the appropriate timeline domain.
+- Preserve the transformation.
+- Preserve timing precision.
+- Handle non-zero offsets.
+- Handle selected ranges.
+- Handle multiple clips where supported.
+
+If a timeline mapping cannot be derived, preserve source-relative sample timing and mark timeline mapping unavailable.
+
+### 13.3 Editing integration
+
+Provide a mechanism to inspect aligned words and navigate to their source ranges.
+
+Do not create a second transcript editor.
+
+Do not allow an alignment result to overwrite user-authored content.
+
+If the transcript revision changes, mark the alignment as stale or incompatible until it is recalculated.
+
+### 13.4 Alignment invalidation
+
+An alignment must become stale when:
+
+- Source audio changes.
+- Selected audio range changes.
+- Transcript revision changes.
+- Transcript layer changes.
+- Alignment model changes.
+- Tokenizer or alignment configuration changes.
+- Required preprocessing changes.
+- Timeline mapping changes materially.
+
+Persist the reason for invalidation.
+
+Do not display stale timestamps as current alignment.
+
+## 14. SECURITY AND PRIVACY
+
+Alignment often requires the original source audio and an associated transcript.
+
+Apply existing privacy controls.
+
+Ensure:
+
+- Local-only alignment does not transmit audio.
+- Cloud alignment requires explicit authorization.
+- Temporary audio files follow retention rules.
+- Transcript strings do not leak into generic diagnostics.
+- Alignment results remain project-scoped.
+- Cached alignment does not cross user/project boundaries.
+- Deletion follows existing lifecycle and retention rules.
+
+Do not retain voice or transcript data beyond the authorized processing purpose.
+
+## 15. SHAHAB LAB INTEGRATION
+
+Add an Alignment Diagnostics section.
+
+Show:
+
+- Alignment capability status.
+- Active aligner identity.
+- Alignment model revision.
+- Input transcript revision.
+- Audio identity.
+- Requested granularity.
+- Actual granularity.
+- Alignment duration.
+- Coverage.
+- Unaligned count.
+- Ambiguous count.
+- Boundary-error metrics where valid references exist.
+- Alignment cache behavior.
+- Stale-result count.
+- Failure events.
+
+Do not show a fabricated percentage of word alignment accuracy.
+
+A coverage percentage is permissible only if its denominator is defined as the number of eligible transcript units and the numerator is based on actual successful alignments.
+
+Do not call coverage accuracy.
+
+Display the distinction between:
+
+- Coverage.
+- Boundary precision.
+- Transcript correctness.
+- Alignment confidence, only if properly defined.
+
+## 16. REQUIRED PERSISTENT RECORDS
+
+Reuse existing canonical stores.
+
+Introduce or extend record types equivalent to:
+
+- `SHAHAB_ALIGNMENT_CAPABILITIES`
+- `SHAHAB_ALIGNMENT_MODEL_REGISTRY`
+- `SHAHAB_ALIGNMENT_REQUESTS`
+- `SHAHAB_ALIGNMENT_RESULTS`
+- `SHAHAB_ALIGNMENT_BOUNDARIES`
+- `SHAHAB_ALIGNMENT_UNMATCHED_REGIONS`
+- `SHAHAB_ALIGNMENT_EVALUATION_RUNS`
+- `SHAHAB_ALIGNMENT_INVALIDATION_HISTORY`
+- `SHAHAB_ALIGNMENT_DECISION_LOG`
+
+Each record must identify:
+
+- Schema version.
+- Audio identity.
+- Transcript revision.
+- Alignment method.
+- Model identity.
+- Runtime identity.
+- Evidence status.
+- Timestamp.
+- Provenance.
+
+Historical alignment results must not be overwritten by newer results.
+
+A re-alignment creates a new result revision linked to the previous one.
+
+## 17. REQUIRED TESTS
+
+### 17.1 Input validation
+
+Test:
+
+- Missing audio.
+- Empty audio.
+- Invalid sample rate.
+- Unsupported format.
+- Missing transcript.
+- Empty transcript.
+- Invalid Unicode.
+- Transcript/audio mismatch.
+- Invalid source range.
+- Incompatible tokenizer.
+
+### 17.2 Persian token mapping
+
+Test:
+
+- ZWNJ.
+- Compound words.
+- Persian Yeh/Kaf variants.
+- Colloquial text.
+- Attached pronouns.
+- Prefixes.
+- Mixed Latin/Persian words.
+- Numerals.
+- Repeated tokens.
+- Punctuation.
+- Long words split into multiple tokens.
+
+### 17.3 Timing integrity
+
+Test:
+
+- Non-zero source offset.
+- Resampled audio.
+- Short word intervals.
+- Adjacent words.
+- Repeated words.
+- Long pauses.
+- Empty alignment regions.
+- Out-of-order boundaries.
+- Overlapping boundaries.
+- Segment-relative versus source-relative timing.
+
+### 17.4 Quality
+
+Test with annotated Persian reference material.
+
+Measure boundary error and alignment coverage.
+
+Include hard cases, not only clean reading speech.
+
+### 17.5 Lifecycle
+
+Test:
+
+- New alignment.
+- Duplicate request.
+- Cached result.
+- Transcript revision change.
+- Audio revision change.
+- Cancellation.
+- Failure.
+- Recovery.
+- Stale-result rejection.
+
+### 17.6 Integration
+
+Test:
+
+- SDK request.
+- SDK response.
+- Result persistence.
+- Avapardaz mapping.
+- Timeline conversion.
+- Editor navigation.
+- Export behavior.
+
+## 18. REQUIRED DOCUMENTATION
+
+Create or update:
+
+1. `SHAHAB_ALIGNMENT_ARCHITECTURE.md`
+2. `SHAHAB_PERSIAN_ALIGNMENT_POLICY.md`
+3. `SHAHAB_ALIGNMENT_METHOD_RESEARCH.md`
+4. `SHAHAB_ALIGNMENT_TIMESTAMP_CONTRACT.md`
+5. `SHAHAB_ALIGNMENT_QUALITY_EVALUATION.md`
+6. `SHAHAB_ALIGNMENT_CACHE_AND_INVALIDATION.md`
+7. `SHAHAB_ALIGNMENT_SDK_CONTRACT.md`
+8. `SHAHAB_ALIGNMENT_TEST_REPORT.md`
+9. `SHAHAB_ALIGNMENT_STATE.json`
+10. Append-only evidence ledger entries.
+11. Mission completion record.
+
+Use actual repository locations and reuse existing schemas.
+
+## 19. EXPLICIT NON-GOALS
+
+Do not:
+
+- Generate timestamps by uniformly splitting text over audio duration.
+- Treat ASR token emission time as exact word onset by default.
+- Treat alignment success as proof of transcript correctness.
+- Rewrite the transcript during alignment.
+- Hide unaligned words.
+- Stretch neighboring words to cover missing audio.
+- Invent phoneme boundaries.
+- Invent word-level timing when only phrase timing exists.
+- Reuse stale alignment after transcript changes.
+- Bypass transcript provenance.
+- Upload local audio without explicit authorization.
+- Train an aligner in this mission.
+- Modify the active SHAHAB ASR model.
+
+## 20. ACCEPTANCE CRITERIA
+
+Mark `VERIFIED` only when:
+
+1. Actual alignment capability has been investigated.
+2. The selected method is technically and legally eligible.
+3. Alignment is independent from transcript correction.
+4. Persian text preparation is reversible and documented.
+5. Audio sample positions are preserved.
+6. Source offsets are mapped correctly.
+7. Alignment status distinguishes successful, partial, ambiguous, and failed regions.
+8. Word-level timing is claimed only when genuinely supported.
+9. Reference-based timing quality is measured.
+10. Persian difficult cases are evaluated.
+11. Transcript and audio revision invalidation works.
+12. SDK integration is functional.
+13. Avapardaz integration preserves source and timeline identity.
+14. Alignment results are persistent and attributable.
+15. Required tests execute successfully.
+16. Limitations are explicitly documented.
+
+If only phrase-level timing can be validated, mark word-level timing unsupported and report the narrower capability accurately.
+
+## 21. FINAL EXECUTION REPORT
+
+Return:
+
+- Entry-gate findings.
+- Actual model/runtime alignment capabilities.
+- Alignment method selected.
+- Alternatives rejected.
+- License and artifact findings.
+- Persian text mapping strategy.
+- Sample/timebase strategy.
+- Actual supported timing granularity.
+- Boundary quality measurements.
+- Alignment coverage.
+- Ambiguous and unmatched cases.
+- Runtime and resource measurements.
+- SDK and Avapardaz integration.
+- Exact files modified.
+- Test results.
+- Known limitations.
+- Evidence references.
+- Final mission status.
+
+Final status:
+
+- `VERIFIED`
+- `PARTIALLY_VERIFIED`
+- `BLOCKED`
+- `FAILED`
+
+**GOVERNING PRINCIPLE: Every timestamp must be traceable to an actual acoustic alignment process and an identifiable source sample range. A plausible timeline is not proof of a correct timeline.**
+
+## **مأموریت ۲۶ — تشخیص گوینده و انتساب بخش‌های گفتار به افراد مختلف**
+
+
+
+بعد از SHAHAB-025
+
+&#x20;Speaker Diarization / Speaker Turns / Overlapping Speech
+
+
+
+# SHAHAB-026 — SPEAKER DIARIZATION, SPEAKER-TURN ATTRIBUTION, OVERLAP DETECTION & PRIVACY-PRESERVING VOICE SEGMENTATION
+
+## 0. MISSION OBJECTIVE
+
+Implement a reliable speaker-diarization subsystem for SHAHAB.
+
+The objective is to determine:
+
+- How many distinguishable speaker turns are present in an audio recording, to the extent supported by the audio.
+- Where one speaker's turn ends and another begins.
+- Which transcript segments are associated with the same anonymous speaker identity within a recording.
+- Where multiple speakers overlap.
+- Where speaker attribution is ambiguous.
+- Which audio intervals contain speech for which the available evidence is insufficient to identify a stable speaker cluster.
+
+Diarization is not speaker identification.
+
+Diarization attempts to group speech segments by apparent speaker identity within a defined recording or authorized session.
+
+It must not infer the real-world identity of a speaker.
+
+It must not identify a person by name from their voice.
+
+It must not infer sensitive personal traits from voice characteristics.
+
+It must not automatically track a speaker across unrelated recordings.
+
+It must not convert a weak speaker embedding or clustering score into an authoritative identity claim.
+
+The required output is a set of anonymous, recording-scoped speaker references and attributable speech intervals with explicit evidence and uncertainty.
+
+The diarization subsystem must remain separate from ASR, forced alignment, and transcript editing authority.
+
+It must consume their results only through versioned contracts.
+
+## 1. ENTRY GATE
+
+Inspect the actual implementation and evidence from:
+
+- SHAHAB-005: recognition core.
+- SHAHAB-006: benchmark.
+- SHAHAB-014: privacy and feedback governance.
+- SHAHAB-015: resilience.
+- SHAHAB-016: performance.
+- SHAHAB-017: streaming.
+- SHAHAB-019: Persian fidelity.
+- SHAHAB-021: integrated qualification.
+- SHAHAB-022: SDK.
+- SHAHAB-023: Avapardaz integration.
+- SHAHAB-025: acoustic alignment.
+
+Verify which audio and transcript metadata are actually available.
+
+Inspect:
+
+- Voice activity detection.
+- Speech segmentation.
+- Current speaker metadata.
+- Existing diarization code.
+- Any available speaker embedding model.
+- Runtime compatibility.
+- Overlap detection.
+- Audio channel metadata.
+- Source sample timeline.
+- Streaming session state.
+- Transcript segment identity.
+- Alignment result identity.
+- Privacy and retention mechanisms.
+
+Do not assume that stereo channels correspond to different speakers.
+
+Do not assume that one uninterrupted audio segment contains only one speaker.
+
+Do not assume that voice activity detection is diarization.
+
+Do not assume that an ASR model's internal state identifies a speaker.
+
+### 1.1 Capability status
+
+Record:
+
+- `DIARIZATION_SUPPORTED_AND_VERIFIED`
+- `DIARIZATION_AVAILABLE_BUT_UNVERIFIED`
+- `PARTIALLY_SUPPORTED`
+- `SEPARATE_DIARIZATION_MODEL_REQUIRED`
+- `OVERLAP_DETECTION_UNAVAILABLE`
+- `DIARIZATION_NOT_SUPPORTED`
+- `BLOCKED`
+
+If a separate diarization model is needed, inspect its license, architecture, Persian-domain suitability, runtime compatibility, resource requirements, and data governance before acquisition.
+
+Do not download a large speaker model before establishing its role and eligibility.
+
+## 2. DISTINGUISH SPEECH TASKS
+
+The architecture must distinguish these tasks:
+
+### 2.1 Voice activity detection
+
+Detects speech-like activity versus non-speech or silence, to the degree supported by the model.
+
+It does not identify the speaker.
+
+### 2.2 Speaker diarization
+
+Groups speech segments by anonymous speaker identity within the permitted scope.
+
+### 2.3 Speaker recognition or identification
+
+Attempts to identify or verify a real-world person.
+
+This mission does not authorize that functionality.
+
+### 2.4 Overlap detection
+
+Determines whether speech from multiple voices occurs simultaneously.
+
+Overlap detection may be separate from diarization.
+
+### 2.5 Speaker separation
+
+Attempts to isolate individual speakers from a mixed signal.
+
+This is a separate signal-processing capability and is not automatically included in diarization.
+
+Do not label one task as another.
+
+The interface and result schema must preserve these distinctions.
+
+## 3. DIARIZATION ARCHITECTURE
+
+Implement a separately versioned diarization service.
+
+The conceptual pipeline is:
+
+`Audio Source -> Audio Validation -> Speech Activity Analysis -> Speech Segmentation -> Speaker Representation -> Clustering/Turn Assignment -> Overlap Analysis -> Transcript Association -> Diarization Result`
+
+Adapt this structure to the actual selected algorithm.
+
+Do not create a second audio-ingestion pipeline where the existing audio source abstraction can be safely reused.
+
+### 3.1 Service responsibilities
+
+The service owns:
+
+- Audio segmentation for diarization.
+- Speaker representation, if used.
+- Clustering.
+- Turn boundary generation.
+- Overlap classification, if supported.
+- Anonymous speaker ID generation.
+- Speaker attribution.
+- Uncertainty.
+- Provenance.
+- Diarization quality reporting.
+
+The service does not own:
+
+- Real-world person identity.
+- User account identity.
+- Transcript editorial approval.
+- Model training, unless separately approved.
+- Cross-recording speaker tracking by default.
+
+### 3.2 Recording-scoped identity
+
+Generate anonymous speaker references scoped to a recording or authorized session.
+
+Examples of logical identifiers:
+
+- `speaker_1`
+- `speaker_2`
+- `speaker_3`
+
+These are local labels, not claims about real identities.
+
+The numbering must be deterministic within a stored diarization revision where practical.
+
+If a new diarization run changes cluster assignments, create a new revision and retain mapping history.
+
+Do not silently renumber speakers in an existing finalized transcript.
+
+### 3.3 Speaker profile separation
+
+A speaker profile must not be treated as an account profile.
+
+It may hold the minimal data required for within-recording grouping, such as:
+
+- Anonymous speaker ID.
+- Recording ID.
+- Speaker-turn references.
+- Optional temporary acoustic representation, if justified.
+- Cluster revision.
+- Provenance.
+- Review state.
+
+Avoid unnecessary long-term storage of voice embeddings.
+
+If embeddings are stored, define their exact purpose, access control, retention, deletion behavior, and sensitivity.
+
+## 4. SPEECH SEGMENTATION
+
+Determine how speech regions are created.
+
+Potential mechanisms may include:
+
+- Existing VAD.
+- Dedicated speech activity detector.
+- Model-native segmentation.
+- Acoustic change detection.
+- Multi-channel analysis where justified.
+
+### 4.1 Segmentation boundaries
+
+Each speech region must identify:
+
+- Source audio identity.
+- Start sample.
+- End sample.
+- Sample rate.
+- Timebase.
+- Speech-activity evidence.
+- Segmentation model or method.
+- Segmentation revision.
+- Status.
+
+Do not assume that a detected speech region is a complete sentence or one speaker's entire turn.
+
+### 4.2 Short speech segments
+
+Short utterances are difficult to diarize reliably.
+
+Test:
+
+- Single-word replies.
+- Backchannel speech.
+- Short acknowledgements.
+- Brief interruptions.
+- Very quiet speech.
+- Low-energy syllables.
+- Speech following long silence.
+
+Do not force every short utterance into a confident speaker cluster.
+
+### 4.3 Non-speech intervals
+
+Distinguish:
+
+- Silence.
+- Breathing.
+- Laughter.
+- Coughing.
+- Environmental sound.
+- Non-verbal vocalization.
+- Uncertain vocal event.
+
+Do not classify a laugh or cough as a new speaker turn without supporting evidence.
+
+If non-speech event classification is not part of the actual supported capability, label the event only as unclassified non-speech or unknown.
+
+## 5. SPEAKER REPRESENTATION AND CLUSTERING
+
+If the selected diarization method uses speaker embeddings or acoustic representations, document their semantics.
+
+Inspect:
+
+- Model architecture.
+- Training domain.
+- Feature extraction.
+- Embedding dimension.
+- Normalization.
+- Distance or similarity method.
+- Clustering method.
+- Threshold behavior.
+- Runtime support.
+- Memory use.
+- Known language/accent limitations.
+
+Do not assume that an embedding trained on one population performs equally across Persian speakers or recording conditions.
+
+### 5.1 Clustering methods
+
+Evaluate candidate approaches based on actual performance.
+
+Possible methods may include:
+
+- Agglomerative clustering.
+- Spectral clustering.
+- Online clustering.
+- Model-native clustering.
+- Other documented approaches.
+
+Do not select a clustering method based solely on popularity or library availability.
+
+### 5.2 Number of speakers
+
+Determine whether the system requires the expected number of speakers.
+
+Support an unknown speaker-count mode where the chosen method permits it.
+
+Do not force a fixed number of speakers when the audio evidence does not support it.
+
+If the number of speakers is supplied by the user, retain it as user-provided configuration rather than model-discovered truth.
+
+### 5.3 Speaker similarity
+
+Similarity values must use the actual algorithm's defined scale.
+
+Do not present raw cosine similarity or arbitrary clustering distance as a calibrated probability of speaker identity.
+
+If calibrated confidence is unavailable, present a non-probabilistic ambiguity or evidence state.
+
+### 5.4 Cluster rejection
+
+Support an explicit unresolved assignment.
+
+If a segment does not adequately match an existing anonymous speaker cluster:
+
+- Assign `UNKNOWN_SPEAKER`.
+- Preserve its audio range.
+- Record its evidence state.
+- Avoid forcing membership into the nearest cluster merely to eliminate unknowns.
+
+### 5.5 Cluster revision
+
+When later audio changes clustering:
+
+- Preserve the previous diarization revision.
+- Record which speaker assignments changed.
+- Record which segments were affected.
+- Preserve user-confirmed names or labels separately from automatic cluster identity.
+- Do not silently rewrite accepted transcript annotations.
+
+## 6. OVERLAPPING SPEECH
+
+Overlapping speech is a major challenge in multi-speaker recordings.
+
+The system must not assume that all speech can be represented as a single non-overlapping sequence.
+
+### 6.1 Overlap detection
+
+If supported, detect intervals where multiple speakers appear to be active at the same time.
+
+Record:
+
+- Overlap start sample.
+- Overlap end sample.
+- Involved anonymous speaker IDs, only where supported.
+- Evidence.
+- Detection method.
+- Uncertainty state.
+
+### 6.2 Overlap representation
+
+Allow multiple speaker turns to occupy overlapping audio intervals.
+
+Do not force all speaker intervals into a sequential, non-overlapping timeline.
+
+### 6.3 ASR interaction
+
+The recognition system may:
+
+- Produce a mixed transcript.
+- Omit one speaker.
+- Merge simultaneous words.
+- Produce uncertain output.
+
+Do not assign every recognized word to one of the speakers without evidence.
+
+Where word-level alignment exists, use it as a timing aid, not proof of speaker identity.
+
+Where overlap makes attribution ambiguous, preserve `UNKNOWN_SPEAKER` or `OVERLAPPING_SPEECH`.
+
+### 6.4 Speaker separation boundary
+
+If actual individual-speaker text is required from strongly overlapping audio, investigate whether a separate source-separation subsystem is needed.
+
+Do not claim that diarization itself separates the audio.
+
+Do not duplicate or manufacture audio channels to simulate separation.
+
+A future separation system requires its own model, quality evaluation, privacy, and artifact lifecycle.
+
+## 7. PERSIAN AND REAL-WORLD RECORDING CHALLENGES
+
+Evaluate the system on real Persian speech conditions.
+
+Potential factors include:
+
+- Different speaking rates.
+- Colloquial speech.
+- Formal speech.
+- Regional pronunciation.
+- Close-microphone versus distant-microphone recording.
+- Different microphone types.
+- Different room acoustics.
+- Background noise.
+- Telephone-like audio.
+- Podcast recording.
+- Interview recording.
+- Meeting recording.
+- Lecture recording.
+- Cross-talk.
+- Two speakers with similar vocal characteristics.
+
+Do not infer demographic or sensitive identity characteristics from these categories.
+
+Use recording conditions and linguistic behavior only as technical evaluation variables where lawful and appropriate.
+
+### 7.1 Channel information
+
+When audio has multiple channels, inspect whether channel separation contains meaningful speaker information.
+
+Do not assume left channel equals speaker one and right channel equals speaker two.
+
+Test actual source-channel provenance.
+
+### 7.2 Mixed acoustic environments
+
+Evaluate how:
+
+- Reverberation.
+- Compression.
+- Background music.
+- Noise.
+- Microphone distance.
+- Level imbalance.
+- Echo.
+- Clipping.
+
+Affect speaker assignment.
+
+Do not claim that a particular condition causes an error without measured evidence.
+
+### 7.3 Short sample limitations
+
+Do not force a confident speaker profile from insufficient audio.
+
+Use an explicit minimum-evidence policy based on evaluation.
+
+Where minimum sample criteria are proposed, document that they are operational thresholds, not universal scientific constants.
+
+## 8. SPEAKER-TO-TRANSCRIPT ASSOCIATION
+
+Integrate diarization with ASR and alignment through explicit mapping.
+
+The diarization service must not rewrite transcript text.
+
+### 8.1 Segment association
+
+For each eligible transcript segment, record:
+
+- Transcript segment ID.
+- Transcript revision.
+- Source sample range.
+- Alignment result ID where available.
+- Diarization revision.
+- Assigned anonymous speaker ID.
+- Attribution state.
+- Attribution method.
+- Evidence reference.
+
+### 8.2 Attribution granularity
+
+Distinguish:
+
+- Recording-level speaker presence.
+- Turn-level speaker attribution.
+- Segment-level speaker attribution.
+- Word-level speaker attribution.
+
+Do not claim word-level attribution if only an entire sentence or turn has been assigned to a speaker.
+
+### 8.3 Word-level speaker mapping
+
+Where word-level timing and diarization intervals both exist:
+
+- Compare word intervals with speaker intervals.
+- Define overlap and boundary rules.
+- Preserve ambiguous words.
+- Handle words spanning a speaker transition.
+- Do not assign a speaker merely because one occupies the majority of a word's duration unless that is a validated and declared policy.
+
+### 8.4 Timing quality dependency
+
+If alignment is unavailable or unreliable, diarization-to-word association must reflect the missing timing evidence.
+
+Do not use fabricated word timestamps to assign speakers.
+
+## 9. MANUAL REVIEW AND USER-CORRECTABLE DIARIZATION
+
+Create or reuse a review interaction that allows users to correct speaker grouping.
+
+Users may need to:
+
+- Rename anonymous speakers for the current recording.
+- Merge two clusters.
+- Split one cluster.
+- Reassign a speaker turn.
+- Mark a turn unknown.
+- Mark overlapping speech.
+- Correct speaker boundaries where supported.
+
+These are user-authorized annotations.
+
+They must not be confused with verified real-world identity.
+
+### 9.1 Label semantics
+
+Allow local labels such as:
+
+- Interviewer.
+- Guest.
+- Host.
+- Speaker A.
+- Speaker B.
+
+These labels are user descriptions within the project.
+
+Do not infer real names from voice.
+
+### 9.2 Merge operation
+
+When two clusters are merged:
+
+- Preserve old identities.
+- Record the merge event.
+- Create a new diarization revision.
+- Update affected segments.
+- Preserve the user's ability to undo the merge.
+
+### 9.3 Split operation
+
+When one cluster is divided:
+
+- Record the source cluster.
+- Record the target cluster identities.
+- Record affected intervals.
+- Preserve the previous result.
+- Recalculate applicable mappings.
+
+### 9.4 User edit versus model result
+
+A user-confirmed speaker assignment must be preserved against automatic re-diarization.
+
+If a new diarization revision disagrees with a protected user assignment:
+
+- Preserve both pieces of evidence.
+- Record the conflict.
+- Do not overwrite the user decision silently.
+- Request an explicit resolution where necessary.
+
+## 10. STREAMING DIARIZATION
+
+Investigate whether diarization can operate incrementally.
+
+Do not claim real-time diarization based solely on frequent partial responses.
+
+### 10.1 Streaming states
+
+Distinguish:
+
+- Provisional speaker cluster.
+- Stable provisional cluster.
+- Finalized speaker turn.
+- Revised speaker assignment.
+- Unknown speaker.
+- Overlap detected.
+- Session finalization.
+
+A streaming system may initially assign a segment to an anonymous speaker and later revise the clustering.
+
+Every revision must carry explicit identity and version.
+
+### 10.2 Speaker label stability
+
+Avoid changing `speaker_1` and `speaker_2` unnecessarily during streaming.
+
+Define how the system maintains stable recording-scoped labels.
+
+If clusters are merged or split, preserve revision ancestry.
+
+### 10.3 Future context
+
+Some diarization methods require future audio context.
+
+If the system delays speaker attribution to gain accuracy, measure and disclose the additional latency.
+
+Do not publish a provisional label as final merely to reduce UI delay.
+
+## 11. PRIVACY AND BIOMETRIC-DATA GOVERNANCE
+
+Treat speaker representations and embeddings as sensitive audio-derived data.
+
+This mission does not authorize biometric identity recognition.
+
+### 11.1 Recording-scoped processing
+
+Default speaker identifiers must be local to a recording or authorized project scope.
+
+Do not link the same anonymous speaker across unrelated recordings by default.
+
+Do not create a global voiceprint registry.
+
+### 11.2 Embedding retention
+
+Determine whether embeddings must be retained after diarization.
+
+Prefer minimal retention when the clustering result can be stored without retaining the underlying voice representation.
+
+If embeddings are temporarily needed:
+
+- Define their storage location.
+- Define encryption or access controls where available.
+- Define lifetime.
+- Define deletion behavior.
+- Define whether they are exported.
+- Define whether they are used for later recordings.
+
+Cross-recording reuse requires separate explicit product and privacy approval.
+
+### 11.3 Consent
+
+Respect recording-source authorization.
+
+Do not upload voice embeddings or audio by default.
+
+Do not treat user consent for transcript processing as automatic consent for long-term voice representation storage or unrelated identity matching.
+
+### 11.4 Diagnostics
+
+Ordinary operational events must not contain:
+
+- Audio samples.
+- Raw embeddings.
+- Full voice representations.
+- Real-world speaker names inferred by the system.
+- Unnecessary personal metadata.
+
+Use scoped IDs and technical status data.
+
+## 12. QUALITY EVALUATION
+
+Build an independent diarization benchmark.
+
+### 12.1 Reference annotation
+
+Use eligible, human-reviewed speaker-turn annotations.
+
+Record:
+
+- Audio identity.
+- Sample range.
+- Anonymous reference speaker ID.
+- Overlap status.
+- Ambiguous intervals.
+- Annotator/reviewer identity or protected pseudonym.
+- Annotation revision.
+- Adjudication state.
+
+Do not use unverified transcript speaker labels as ground truth.
+
+### 12.2 Metrics
+
+Measure appropriate metrics supported by the evaluation design, such as:
+
+- Diarization Error Rate (DER).
+- Jaccard Error Rate (JER), where applicable.
+- False alarm time.
+- Missed speech time.
+- Speaker confusion time.
+- Speaker-turn boundary error.
+- Overlap detection precision and recall.
+- Unknown-speaker rate.
+- Speaker cluster count error.
+- Attribution coverage.
+
+Document collar and overlap scoring policies for metrics that depend on them.
+
+Do not compare scores from incompatible collar, overlap, or speech-region settings.
+
+### 12.3 Persian category evaluation
+
+Evaluate:
+
+- Two-speaker conversations.
+- Multi-speaker conversations.
+- Similar voices.
+- Short replies.
+- Rapid turn-taking.
+- Interruptions.
+- Overlapping speech.
+- Interview formats.
+- Podcast formats.
+- Noisy recordings.
+- Different channel arrangements.
+
+Report category-level results.
+
+### 12.4 Error analysis
+
+Classify:
+
+- False speaker split.
+- False speaker merge.
+- Missed speaker turn.
+- Incorrect turn boundary.
+- Overlap missed.
+- Overlap falsely detected.
+- Short-segment assignment error.
+- Unknown assignment.
+- Cluster identity instability.
+
+Do not label every error as an acoustic-embedding failure without evidence.
+
+## 13. PERFORMANCE AND RESOURCE CONTROL
+
+Use SHAHAB-016 measurement infrastructure.
+
+Measure:
+
+- Diarization initialization.
+- Speech segmentation.
+- Embedding extraction, if used.
+- Clustering duration.
+- Speaker assignment duration.
+- Memory use.
+- Peak memory.
+- CPU use where measurable.
+- GPU use where measurable.
+- Processing throughput.
+- Streaming attribution latency.
+- Recovery behavior.
+
+Test longer recordings and increasing speaker counts.
+
+Avoid unbounded accumulation of speaker features.
+
+Define session-level memory limits and cleanup.
+
+Do not retain all raw audio-derived intermediate data indefinitely.
+
+## 14. SDK AND AVAPARDAZ INTEGRATION
+
+Expose diarization through a versioned SHAHAB SDK contract.
+
+Potential operations:
+
+- `inspectDiarizationCapabilities`
+- `createDiarizationRequest`
+- `submitDiarization`
+- `getDiarizationStatus`
+- `getDiarizationResult`
+- `cancelDiarization`
+- `reviseSpeakerAssignment`
+- `disposeDiarizationResult`
+
+Use the existing SDK structure.
+
+Do not create a separate audio-source contract.
+
+### 14.1 Combined workflow
+
+Support an orchestration path equivalent to:
+
+`Audio -> ASR -> Optional Alignment -> Diarization -> Transcript Association -> User Review`
+
+The order may differ based on actual dependencies.
+
+Do not force alignment to wait unnecessarily if the diarization model can operate independently.
+
+Do not force diarization to consume transcript text if it only requires audio.
+
+### 14.2 Avapardaz integration
+
+Integrate with the existing transcript editor.
+
+Provide speaker labels and segment associations where supported.
+
+Do not create a second transcript representation solely for speaker metadata.
+
+Preserve:
+
+- Speaker assignment provenance.
+- User corrections.
+- Alignment references.
+- Transcript revisions.
+- Source sample ranges.
+
+### 14.3 Speaker UI
+
+Display anonymous speaker labels in a clear, editable manner.
+
+Provide:
+
+- Speaker list for the current recording.
+- Turn ranges.
+- Unknown-speaker regions.
+- Overlapping-speech regions.
+- Review state.
+- User-defined label.
+
+Do not visually imply a real identity.
+
+Do not show false confidence percentages.
+
+## 15. PERSISTENT RECORDS
+
+Reuse the canonical event and transcript stores.
+
+Add or extend records equivalent to:
+
+- `SHAHAB_DIARIZATION_CAPABILITIES`
+- `SHAHAB_DIARIZATION_REQUESTS`
+- `SHAHAB_DIARIZATION_RESULTS`
+- `SHAHAB_SPEAKER_CLUSTERS`
+- `SHAHAB_SPEAKER_TURNS`
+- `SHAHAB_SPEAKER_ASSIGNMENTS`
+- `SHAHAB_OVERLAP_EVENTS`
+- `SHAHAB_SPEAKER_REVIEW_HISTORY`
+- `SHAHAB_DIARIZATION_EVALUATION_RUNS`
+- `SHAHAB_DIARIZATION_PRIVACY_RECORDS`
+
+Every record must identify:
+
+- Recording scope.
+- Audio revision.
+- Model/method identity.
+- Runtime.
+- Result revision.
+- Provenance.
+- Authorization.
+- Timestamp.
+
+If embeddings are stored, their record must include the additional retention and access-control metadata.
+
+## 16. TEST MATRIX
+
+### 16.1 Segmentation
+
+Test:
+
+- Silence.
+- Speech.
+- Very short speech.
+- Long speech.
+- Quiet speech.
+- Laughter.
+- Coughing.
+- Background noise.
+- Long pause.
+- Abrupt interruption.
+
+### 16.2 Speaker clustering
+
+Test:
+
+- One speaker.
+- Two speakers.
+- Multiple speakers.
+- Similar voice characteristics.
+- Short replies.
+- Repeated turns.
+- A speaker returning after a long absence.
+- Unknown speaker.
+- Overlapping speech.
+
+### 16.3 Identity scope
+
+Test:
+
+- Separate recordings.
+- Separate projects.
+- Concurrent sessions.
+- Repeated file processing.
+- New diarization revision.
+- Cluster merge.
+- Cluster split.
+
+Ensure that cross-recording identity is not silently created.
+
+### 16.4 Transcript mapping
+
+Test:
+
+- Segment-level attribution.
+- Word-level mapping where valid alignment exists.
+- Missing alignment.
+- Ambiguous timing.
+- Words spanning speaker transitions.
+- Overlap.
+- User-corrected speaker assignment.
+
+### 16.5 Privacy
+
+Test:
+
+- Embedding storage policy.
+- Temporary embedding deletion.
+- Cross-project isolation.
+- Unauthorized retrieval.
+- Consent denial.
+- Consent revocation.
+- Diagnostic-data exclusion.
+
+### 16.6 Performance and resilience
+
+Test:
+
+- Long recordings.
+- Many speaker turns.
+- Memory pressure.
+- Cancellation.
+- Crash recovery.
+- Duplicate requests.
+- Re-diarization.
+- Concurrent sessions.
+
+## 17. SHAHAB LAB INTEGRATION
+
+Add a Speaker Intelligence section.
+
+Display:
+
+- Diarization capability state.
+- Active method/model.
+- Recording ID.
+- Result revision.
+- Speaker cluster count.
+- Attributed duration.
+- Unknown-speaker duration.
+- Overlap duration.
+- Turn count.
+- Evaluation DER/JER where valid.
+- Boundary error.
+- Processing latency.
+- Memory use.
+- User review state.
+- Privacy status.
+
+Do not convert speaker count into a confidence score.
+
+Do not use attributed duration as a measure of speaker correctness.
+
+Distinguish attribution coverage from diarization accuracy.
+
+## 18. REQUIRED DOCUMENTATION
+
+Create or update:
+
+1. `SHAHAB_DIARIZATION_ARCHITECTURE.md`
+2. `SHAHAB_SPEAKER_IDENTITY_POLICY.md`
+3. `SHAHAB_OVERLAP_DETECTION_SPEC.md`
+4. `SHAHAB_PERSIAN_DIARIZATION_EVALUATION.md`
+5. `SHAHAB_SPEAKER_TRANSCRIPT_MAPPING.md`
+6. `SHAHAB_DIARIZATION_PRIVACY_POLICY.md`
+7. `SHAHAB_DIARIZATION_STREAMING_SPEC.md`
+8. `SHAHAB_DIARIZATION_SDK_CONTRACT.md`
+9. `SHAHAB_DIARIZATION_TEST_REPORT.md`
+10. `SHAHAB_DIARIZATION_STATE.json`
+11. Append-only evidence ledger entries.
+12. Mission completion record.
+
+Use the existing canonical documentation paths and schemas.
+
+## 19. EXPLICIT NON-GOALS
+
+Do not:
+
+- Identify real people by voice.
+- Infer sensitive personal characteristics.
+- Build a global voiceprint database.
+- Automatically connect speakers across unrelated recordings.
+- Treat VAD as diarization.
+- Treat diarization as source separation.
+- Treat speaker similarity as a calibrated identity probability.
+- Force every segment into a known speaker.
+- Assume stereo channels correspond to speakers.
+- Assign words to speakers using fabricated timing.
+- Modify transcript content during diarization.
+- Overwrite user-approved speaker assignments.
+- Upload audio or embeddings without authorization.
+- Store embeddings indefinitely without a valid purpose and approved retention rule.
+- Claim overlapping speech has been separated when it has only been detected.
+
+## 20. ACCEPTANCE CRITERIA
+
+`VERIFIED` requires:
+
+1. Actual diarization capabilities have been inspected.
+2. A valid method/model has been selected or an unsupported capability has been accurately documented.
+3. Speaker identity is recording-scoped by default.
+4. Speech segmentation and diarization are separate.
+5. Unknown-speaker assignments are supported.
+6. Overlap is represented correctly where supported.
+7. Transcript association preserves timing provenance.
+8. User correction and revision history work.
+9. Privacy and embedding-retention controls are enforced.
+10. Reference-based diarization metrics have been measured.
+11. Persian recording categories are evaluated.
+12. Streaming behavior is accurately labeled.
+13. SDK and Avapardaz integration are functional.
+14. Resource use is measured.
+15. Required tests are executed.
+16. No real-world identity inference is introduced.
+
+If only two-speaker, non-overlapping diarization has been validated, the product must expose that limitation instead of advertising general multi-speaker diarization.
+
+## 21. FINAL EXECUTION REPORT
+
+Return:
+
+- Entry-gate evidence.
+- Actual diarization capability.
+- Model/method identity.
+- Architecture.
+- Speaker representation and clustering.
+- Recording-scoped identity policy.
+- Overlap behavior.
+- Unknown-speaker behavior.
+- Persian evaluation results.
+- DER/JER methodology.
+- Timing and transcript mapping.
+- Streaming capability.
+- SDK integration.
+- Privacy and embedding retention.
+- Resource measurements.
+- Tests executed.
+- Exact files modified.
+- Known limitations.
+- Evidence-ledger references.
+- Final mission status.
+
+Final status:
+
+- `VERIFIED`
+- `PARTIALLY_VERIFIED`
+- `BLOCKED`
+- `FAILED`
+
+**GOVERNING PRINCIPLE: SHAHAB may describe anonymous speaker structure within an authorized recording. It must not turn voice similarity into an unsupported claim about who a person is.**
+
+## **مأموریت ۲۷ — موتور حرفه‌ای تولید زیرنویس و کپشن**
+
+
+
+بعد از SHAHAB-025 و SHAHAB-026
+
+&#x20;Subtitle Engineering / Caption Generation / Temporal Synchronization
+
+
+
+# SHAHAB-027 — PROFESSIONAL SUBTITLE AND CAPTION ENGINEERING, PERSIAN RTL LAYOUT, TEMPORAL SYNCHRONIZATION & EDITORIAL QUALITY CONTROL
+
+## 0. MISSION OBJECTIVE
+
+Build a professional subtitle and caption generation subsystem on top of the verified SHAHAB transcript, alignment, and optional diarization capabilities.
+
+The objective is to convert transcript and timing evidence into readable, synchronized, editable subtitle/caption outputs suitable for professional audio and video editing workflows.
+
+This is not simply a text-to-SRT serializer.
+
+A professional subtitle system must solve several distinct problems:
+
+- Text segmentation.
+- Reading-speed management.
+- Display-duration selection.
+- Line breaking.
+- Persian right-to-left rendering.
+- Mixed-script handling.
+- Speaker labeling.
+- Punctuation placement.
+- Subtitle overlap control.
+- Synchronization with source media.
+- Timing precision.
+- Transcript revision tracking.
+- Export compatibility.
+- Re-import validation.
+- Human review.
+- Editorial style profiles.
+
+The system must preserve source meaning and must not rewrite the speaker's words merely to make subtitles shorter.
+
+The system must distinguish verbatim subtitles, cleaned subtitles, and accessibility-oriented captions.
+
+The engine must not invent word boundaries or speaker labels.
+
+It must not silently compress text to fit an arbitrary display window.
+
+It must not sacrifice linguistic fidelity to meet a visual line-length target.
+
+The final result must be traceable to a particular transcript revision, alignment revision, source audio revision, and optional diarization revision.
+
+## 1. ENTRY GATE
+
+Inspect and verify:
+
+- SHAHAB-019: Persian fidelity.
+- SHAHAB-021: integrated qualification.
+- SHAHAB-022: SDK/API.
+- SHAHAB-023: Avapardaz integration.
+- SHAHAB-024: Adobe integration decision.
+- SHAHAB-025: acoustic alignment.
+- SHAHAB-026: speaker diarization.
+
+Do not assume all prerequisite capabilities are fully implemented.
+
+### 1.1 Timing capability gate
+
+Determine which timing granularities are genuinely available:
+
+- Recording-level.
+- Segment-level.
+- Phrase-level.
+- Word-level.
+- Token-level.
+
+A subtitle engine must use the actual available granularity.
+
+If only phrase-level timing is verified, do not fabricate word boundaries.
+
+If no reliable timing exists, the system may support a non-synchronized text transcript, but it must not label the result a precisely synchronized subtitle track.
+
+### 1.2 Speaker capability gate
+
+Determine whether verified diarization is available.
+
+If not:
+
+- Generate speaker-neutral subtitles.
+- Do not invent speaker labels.
+- Do not infer speaker changes from punctuation or sentence boundaries alone.
+- Keep speaker-aware subtitle generation disabled or explicitly limited.
+
+If diarization is available but partial:
+
+- Use only verified speaker assignments.
+- Preserve unresolved sections as speaker-unknown.
+- Do not force a speaker label onto every caption.
+
+### 1.3 Host-format gate
+
+Inspect the actual requirements of each target output format and host application.
+
+Do not assume every application supports every subtitle or caption feature.
+
+Use verified format specifications and actual import/export tests.
+
+## 2. SUBTITLE AND CAPTION TASK DEFINITIONS
+
+Distinguish three products.
+
+### 2.1 Verbatim subtitles
+
+Represent what the speaker actually said.
+
+Preserve:
+
+- Repetitions.
+- Fillers.
+- False starts.
+- Colloquial speech.
+- Incomplete phrases.
+- Self-corrections.
+- Meaningful hesitations.
+- Speaker interruptions.
+
+Only apply formatting and segmentation that do not alter the spoken content.
+
+### 2.2 Cleaned subtitles
+
+Provide an explicitly authorized, editorially cleaned presentation.
+
+Possible operations may include:
+
+- Removing approved non-semantic fillers.
+- Adjusting punctuation.
+- Combining fragments.
+- Applying approved orthographic normalization.
+- Reducing redundant wording where the product explicitly allows it.
+
+Every cleanup operation must be attributable and reversible.
+
+The cleaned version must never overwrite the verbatim transcript.
+
+### 2.3 Accessibility-oriented captions
+
+May include verified non-speech and sound-event descriptions where supported by a separate capability or human annotation.
+
+Potential elements include:
+
+- Speaker turn labels.
+- Verified non-speech events.
+- Relevant sound descriptions.
+- Overlapping speech indicators.
+- Meaningful environmental audio.
+
+Do not invent sound descriptions from transcript context.
+
+Do not infer emotional or psychological states from voice.
+
+Do not claim that captions are fully accessible merely because they contain text and timing.
+
+Document the accessibility scope and unresolved limitations.
+
+## 3. SUBTITLE PIPELINE ARCHITECTURE
+
+Create a separately versioned subtitle-generation subsystem.
+
+The conceptual pipeline is:
+
+`Transcript Revision -> Timing Verification -> Speaker Attribution -> Text Segmentation -> Line Layout -> Display Timing -> Readability Validation -> Format Serialization -> Export Validation`
+
+Use only stages that are supported by actual evidence.
+
+### 3.1 Service responsibilities
+
+The subtitle service owns:
+
+- Subtitle profile management.
+- Transcript-to-caption mapping.
+- Text segmentation.
+- Line breaking.
+- Display-duration calculation.
+- Reading-speed evaluation.
+- RTL-aware layout metadata.
+- Speaker-label formatting.
+- Overlap handling.
+- Export serialization.
+- Format validation.
+- Subtitle quality reporting.
+
+The subtitle service does not own:
+
+- Speech recognition.
+- Forced alignment.
+- Speaker diarization.
+- Transcript correction authorization.
+- Video rendering unless an existing verified rendering subsystem owns that responsibility.
+
+### 3.2 Input identity
+
+Every subtitle-generation request must identify:
+
+- Source media.
+- Source media revision.
+- Transcript ID.
+- Transcript revision.
+- Transcript layer.
+- Alignment result ID.
+- Diarization result ID, if used.
+- Target format.
+- Subtitle profile.
+- Language.
+- Timing granularity.
+- Source timeline mapping.
+- Export target.
+- User authorization context.
+
+A subtitle document must not silently combine results from different transcript revisions.
+
+### 3.3 Immutable generation
+
+Treat every generated subtitle document as a revisioned derived artifact.
+
+If the source transcript, alignment, speaker mapping, profile, or serialization configuration changes, create a new subtitle revision.
+
+Do not silently overwrite an earlier exported artifact.
+
+## 4. TEXT SEGMENTATION ENGINE
+
+Build a segmentation engine that transforms transcript content into caption units without changing the underlying spoken words unless the selected editorial profile explicitly permits transformation.
+
+### 4.1 Segmentation objectives
+
+Balance:
+
+- Linguistic completeness.
+- Natural phrase boundaries.
+- Reading speed.
+- On-screen duration.
+- Line count.
+- Line length.
+- Speaker changes.
+- Pause structure.
+- Subtitle synchronization.
+
+Do not optimize line length in isolation.
+
+A short line that splits a Persian grammatical unit may be harder to read than a longer coherent line.
+
+### 4.2 Persian linguistic boundaries
+
+Use Persian-aware segmentation rules.
+
+Inspect:
+
+- Sentence boundaries.
+- Phrase boundaries.
+- Conjunctions.
+- Prepositional phrases.
+- Attached pronouns.
+- ZWNJ constructions.
+- Compound expressions.
+- Verb groups.
+- Names.
+- Numeric expressions.
+- Quoted phrases.
+- Incomplete sentences.
+- Colloquial constructions.
+
+Do not split a word across lines unless the target format and approved typography explicitly allow a suitable behavior.
+
+Do not split a tightly connected expression merely to meet a simplistic character limit.
+
+### 4.3 Punctuation
+
+Punctuation must remain associated with its intended text segment.
+
+Do not leave Persian sentence punctuation at the wrong visual edge.
+
+Do not invent punctuation that changes sentence meaning.
+
+Do not use punctuation as a substitute for audio timing.
+
+### 4.4 Natural phrase units
+
+Prefer segmentation at supported phrase or clause boundaries.
+
+Use actual transcript punctuation, syntax, timing, and pause information where available.
+
+If punctuation is not acoustically grounded or the transcript is incomplete, do not fabricate precise prosodic boundaries.
+
+### 4.5 Segmentation provenance
+
+Every subtitle unit must reference its source transcript segment or word range.
+
+Record:
+
+- Source segment IDs.
+- Source word IDs when available.
+- Text transformation.
+- Segmentation rule.
+- Profile revision.
+- Manual override status.
+
+The user must be able to trace a caption back to the source transcript.
+
+## 5. READING-SPEED AND DURATION MANAGEMENT
+
+Implement a configurable reading-speed evaluation system.
+
+Do not hardcode one universal rate for every language, audience, content type, or delivery platform.
+
+### 5.1 Reading-speed metric
+
+Where character-based reading speed is used, define the exact convention.
+
+For example, distinguish:
+
+- Unicode code points.
+- Grapheme clusters.
+- Visible characters.
+- Spaces.
+- Punctuation.
+- Numerals.
+- Latin runs.
+
+Do not mix character-count definitions across reports.
+
+Where a word-per-minute metric is used, define what constitutes a word for Persian text.
+
+Because Persian orthography and whitespace do not always correspond directly to spoken-word segmentation, the metric must use a documented tokenizer or word-counting convention.
+
+### 5.2 Profile-specific limits
+
+Support configurable profiles.
+
+Potential profile dimensions include:
+
+- Educational content.
+- Interview.
+- Podcast.
+- Documentary.
+- Fast social video.
+- Long-form lecture.
+- Accessibility-first captions.
+- Verbatim archival transcript.
+
+These are profile categories, not assumptions about universal reading-speed thresholds.
+
+Each approved profile must define:
+
+- Maximum lines.
+- Preferred line length.
+- Maximum line length.
+- Minimum display duration.
+- Maximum display duration.
+- Reading-speed target.
+- Reading-speed warning threshold.
+- Preferred segmentation.
+- Speaker-label policy.
+- Overlap policy.
+- Punctuation policy.
+- Timing tolerance.
+
+Do not create an official product default without an approved design and evaluation process.
+
+### 5.3 Insufficient display duration
+
+If a caption contains too much text for its available acoustic interval:
+
+1. Attempt to split at a valid boundary.
+2. Check whether an adjacent subtitle can be retimed without violating synchronization.
+3. Check whether the source transcript contains an authorized cleaned layer.
+4. Evaluate whether the profile permits a different segmentation.
+5. Report the remaining constraint.
+
+Do not shorten the caption by deleting important spoken words without explicit authorization.
+
+Do not extend a subtitle into a region where another unrelated speaker is speaking without a declared overlap policy.
+
+### 5.4 Long silence and gaps
+
+Do not automatically stretch a caption across long silence.
+
+Use timing rules that preserve actual speech intervals and provide adequate display duration without falsely implying continuous speech.
+
+A subtitle may remain visible briefly after speech ends if the approved profile allows it, but that display hold must be distinguished from the underlying acoustic interval.
+
+Preserve both:
+
+- Acoustic start/end.
+- Display start/end.
+
+These are not the same concept.
+
+## 6. PERSIAN RTL AND MIXED-SCRIPT LAYOUT
+
+This is a central requirement.
+
+The system must correctly represent Persian text in right-to-left contexts while preserving Latin, numeric, and mixed-script content.
+
+### 6.1 Directionality
+
+Determine whether the target format supports explicit text direction or whether the host renderer controls direction.
+
+Use Unicode bidirectional behavior correctly.
+
+Do not insert arbitrary bidirectional control characters without an explicit policy.
+
+If directional marks are used:
+
+- Define where they are introduced.
+- Ensure they are reversible.
+- Prevent duplicate marks.
+- Avoid polluting the underlying transcript text.
+- Verify copy/paste behavior.
+- Verify exported-file behavior.
+
+### 6.2 Mixed Persian and Latin
+
+Test lines containing:
+
+- Persian text plus English names.
+- Persian text plus technical abbreviations.
+- Persian text plus URLs, only where appropriate.
+- Persian text plus numeric identifiers.
+- Persian text plus Latin model names.
+- Persian text plus parentheses.
+- Persian text plus punctuation.
+- Multiple direction changes in one line.
+
+Ensure that visual order does not alter the logical underlying string.
+
+### 6.3 Numerals
+
+Handle:
+
+- Persian numerals.
+- Arabic numerals.
+- Western numerals.
+- Time codes.
+- Dates.
+- Decimal numbers.
+- Percentages.
+- Currency values.
+- Technical identifiers.
+
+Do not silently convert number styles unless the selected transcript/subtitle profile authorizes that transformation.
+
+### 6.4 ZWNJ and grapheme integrity
+
+Ensure that line breaking does not separate characters in ways that damage Persian word rendering.
+
+Do not split:
+
+- Combining marks.
+- Grapheme clusters.
+- ZWNJ-dependent written forms.
+- Connected characters in invalid positions.
+
+Use actual text-layout and Unicode segmentation logic, not arbitrary string indices.
+
+### 6.5 Font and renderer compatibility
+
+If preview rendering is part of the product, test actual target rendering environments.
+
+Do not claim that correct stored Unicode guarantees identical visual appearance in every host.
+
+Document dependencies on fonts, shaping engines, browser rendering, and the target application's subtitle renderer where relevant.
+
+Do not package or redistribute font assets without license verification.
+
+## 7. SPEAKER-AWARE CAPTION GENERATION
+
+Use SHAHAB-026 diarization only where verified.
+
+### 7.1 Speaker labels
+
+Support configurable speaker-label output.
+
+Possible labels:
+
+- `speaker_1`
+- `speaker_2`
+- User-confirmed role labels.
+- User-entered names, where explicitly provided.
+
+Do not invent names or roles.
+
+Do not automatically infer labels such as interviewer or guest from conversation order unless the user confirms them or an approved, evidence-backed rule establishes that mapping.
+
+### 7.2 Speaker changes
+
+Consider speaker-turn boundaries when creating subtitle units.
+
+A caption that contains two speakers must preserve their attribution through a verified display method.
+
+Do not merge different speaker turns into one ambiguous caption merely to reduce cue count.
+
+### 7.3 Overlapping speech
+
+Define how overlapping speaker turns appear in the target output format.
+
+Possible strategies include:
+
+- Separate simultaneous caption cues where supported.
+- Explicit speaker labels.
+- A controlled combined representation.
+- Marking a region as overlapping and unresolved.
+
+Do not force overlapping speech into a single invented sequence.
+
+If the target format cannot represent simultaneous cues reliably, document the information loss and provide an appropriate export limitation.
+
+### 7.4 Unknown speaker
+
+If diarization assigns `UNKNOWN_SPEAKER`, do not replace it with a guessed name.
+
+A speaker label may be omitted or marked unresolved according to the approved profile.
+
+## 8. NON-SPEECH CAPTIONS
+
+Only create sound-event captions from supported evidence.
+
+Potential events include:
+
+- Music.
+- Laughter.
+- Applause.
+- Coughing.
+- Alarm.
+- Environmental noise.
+- Instrumental sound.
+- Other annotated sound.
+
+The source must be an actual audio-event detection system or human annotation.
+
+Do not infer events from transcript semantics.
+
+For example, a speaker saying "همه خندیدند" does not prove that laughter is audible in the recording.
+
+### 8.1 Event provenance
+
+Every non-speech caption must identify:
+
+- Event type.
+- Source audio range.
+- Detection or annotation method.
+- Reviewer state.
+- Event identity.
+- Uncertainty.
+
+If no validated event detection exists, keep the feature disabled or accept human-entered annotations through a clearly labeled manual path.
+
+### 8.2 Accessibility policy
+
+Do not equate descriptive sound captions with complete accessibility compliance.
+
+Document what is covered and what remains outside the current implementation.
+
+## 9. TIMING MODEL
+
+The subtitle engine must maintain distinct timing fields.
+
+### 9.1 Acoustic timing
+
+Represents the actual audio interval associated with source speech.
+
+Derived from verified alignment and sample mapping.
+
+### 9.2 Display timing
+
+Represents when a caption is displayed to the viewer.
+
+It may differ from acoustic timing under an approved caption policy.
+
+### 9.3 Source timing
+
+Represents the location in the original media file.
+
+### 9.4 Timeline timing
+
+Represents the location in the editing project timeline.
+
+### 9.5 Export timing
+
+Represents the serialized timing after format-specific conversion and rounding.
+
+Never overwrite one domain with another.
+
+### 9.6 Rounding and frame rates
+
+Inspect the target application's timebase and supported export formats.
+
+Where a format uses frame-based timestamps:
+
+- Identify the actual frame rate.
+- Identify whether timecode is drop-frame or non-drop-frame where relevant.
+- Define conversion precision.
+- Prevent cumulative rounding drift.
+- Preserve canonical sample-based timing internally.
+
+Where the target format uses millisecond timestamps, retain the higher-precision source representation internally.
+
+Do not claim frame accuracy if the source timing or timebase is insufficient.
+
+### 9.7 Variable frame rate
+
+If the video source uses a variable-frame-rate timeline, use the actual media timebase or a verified presentation-timestamp mapping.
+
+Do not use a constant nominal frame-rate calculation unless it is valid for the actual source.
+
+If a reliable mapping is unavailable, report the limitation.
+
+## 10. SUBTITLE DOCUMENT AND OUTPUT SCHEMA
+
+Define a canonical internal subtitle document independent of export format.
+
+It should contain:
+
+- Subtitle document ID.
+- Subtitle document revision.
+- Source media identity.
+- Source media revision.
+- Transcript ID and revision.
+- Transcript layer.
+- Alignment result identity.
+- Diarization result identity, if used.
+- Profile ID and revision.
+- Language.
+- Directionality metadata.
+- Subtitle cues.
+- Cue identities.
+- Source word/segment references.
+- Acoustic time ranges.
+- Display time ranges.
+- Source time ranges.
+- Timeline time ranges where verified.
+- Speaker references.
+- Non-speech annotation references.
+- Provenance.
+- Export metadata.
+- Validation results.
+
+Each cue must have:
+
+- Stable ID.
+- Display order.
+- Text.
+- Start time.
+- End time.
+- Start/end sample reference where available.
+- Speaker reference where applicable.
+- Source transcript references.
+- Split/merge history.
+- Validation state.
+- Editorial override state.
+
+Do not store every cue only as plain text plus floating-point seconds.
+
+Preserve enough structure for editing, re-export, and traceability.
+
+## 11. EXPORT FORMAT SUPPORT
+
+Inspect target host and platform requirements before enabling export formats.
+
+Potential formats to evaluate include:
+
+- SRT.
+- WebVTT.
+- TTML.
+- Plain text with timing metadata.
+- Structured JSON sidecar.
+- Host-specific marker or cue interchange.
+- Project-native subtitle structure where officially supported.
+
+Do not implement all formats indiscriminately.
+
+Prioritize actual user workflows and supported host capabilities.
+
+### 11.1 Format capability matrix
+
+For each format, verify:
+
+- Text encoding.
+- Unicode behavior.
+- RTL handling.
+- Cue timing precision.
+- Speaker-label support.
+- Simultaneous cue behavior.
+- Styling support.
+- Positioning support.
+- Metadata preservation.
+- Import compatibility.
+- Export compatibility.
+- Known limitations.
+
+A format's existence does not prove that the target editor supports its full feature set.
+
+### 11.2 SRT-specific validation
+
+Where SRT export is implemented, test:
+
+- Sequence numbering.
+- Timestamp syntax.
+- Start/end ordering.
+- Millisecond rounding.
+- Empty cues.
+- Overlaps.
+- Persian Unicode.
+- ZWNJ.
+- Mixed-script text.
+- Long lines.
+- Cue duration.
+- File encoding.
+
+Do not assume that every SRT player renders Persian identically.
+
+### 11.3 WebVTT-specific validation
+
+Where WebVTT export is implemented, validate:
+
+- Header.
+- Cue identifiers.
+- Timing format.
+- Cue settings.
+- Text handling.
+- Supported positioning.
+- Speaker labels.
+- Overlap semantics.
+- Browser playback.
+
+Do not write unsupported extension syntax.
+
+### 11.4 Loss accounting
+
+Each serializer must report information that the target format cannot preserve.
+
+Examples:
+
+- Source sample indices.
+- Model provenance.
+- Transcript revision history.
+- Alignment uncertainty.
+- Detailed speaker-cluster metadata.
+- User-edit history.
+- Editorial transformation metadata.
+
+Do not silently discard this information.
+
+Preserve it in an optional sidecar where appropriate.
+
+The user must be able to identify the limitations of a lossy export.
+
+## 12. SUBTITLE QUALITY CONTROL ENGINE
+
+Build an automated QA layer.
+
+### 12.1 Structural validation
+
+Check:
+
+- Valid cue identity.
+- Valid start/end.
+- Positive duration.
+- Chronological ordering where required.
+- Duplicate IDs.
+- Empty cues.
+- Invalid text encoding.
+- Invalid Unicode.
+- Missing source references.
+- Broken alignment references.
+- Stale transcript revision.
+- Stale diarization revision.
+
+### 12.2 Timing validation
+
+Check:
+
+- Start before end.
+- Negative or invalid time.
+- Out-of-source-range cue.
+- Unexpected large gap.
+- Excessive overlap.
+- Display duration below approved limits.
+- Display duration above approved limits.
+- Acoustic/display timing mismatch.
+- Cue crossing a source boundary.
+- Cumulative rounding drift.
+
+An overlap is not necessarily an error. It may represent genuine overlapping speech or a format-supported simultaneous cue.
+
+Classify overlap according to its source.
+
+### 12.3 Readability validation
+
+Check:
+
+- Reading speed.
+- Line length.
+- Line count.
+- Phrase fragmentation.
+- Linguistic boundary quality.
+- Excessive punctuation.
+- Speaker-label consistency.
+- Mixed-direction rendering risks.
+- Long unbroken Latin sequences.
+- Very short display windows.
+
+Use explicit validation rules.
+
+Do not create a universal readability score without an approved measurement model.
+
+### 12.4 Persian-specific QA
+
+Check:
+
+- ZWNJ.
+- Character shaping.
+- Persian/Arabic Yeh and Kaf representation.
+- Numeral consistency.
+- RTL direction.
+- Parentheses and brackets.
+- Punctuation.
+- Mixed-language runs.
+- Word boundaries.
+- Proper nouns.
+- Colloquial text preservation.
+
+Do not automatically rewrite text to make it pass a readability check.
+
+A QA failure may require an editor warning, a different segmentation, or user review.
+
+It must not silently alter transcript meaning.
+
+## 13. AUTOMATIC SEGMENTATION AND OPTIMIZATION
+
+Implement an explainable cue-generation algorithm.
+
+The algorithm should consider:
+
+- Acoustic phrase boundaries.
+- Verified word timing.
+- Existing sentence punctuation.
+- Transcript structure.
+- Speaker changes.
+- Profile limits.
+- Reading-speed metrics.
+- Display timing.
+- Format constraints.
+
+### 13.1 Candidate generation
+
+Generate alternative cue segmentations where appropriate.
+
+Each candidate should have:
+
+- Source text coverage.
+- Source word/segment references.
+- Display duration.
+- Reading-speed measurement.
+- Line count.
+- Boundary quality.
+- Speaker consistency.
+- Validation warnings.
+
+Do not discard source words during candidate generation.
+
+### 13.2 Segmentation objective
+
+If an optimization function is used, document its terms.
+
+Possible factors include:
+
+- Linguistic boundary preference.
+- Reading-speed deviation.
+- Line imbalance.
+- Excessively short cues.
+- Excessively long cues.
+- Speaker change penalties.
+- Timing mismatch.
+- Cue overlap constraints.
+
+Do not hide linguistic priorities inside an opaque score.
+
+Keep hard constraints separate from soft preferences.
+
+### 13.3 Deterministic output
+
+Given the same:
+
+- Transcript revision.
+- Alignment revision.
+- Diarization revision.
+- Profile revision.
+- Engine version.
+- Configuration.
+
+The generator should produce deterministic results unless the implementation intentionally uses a non-deterministic process.
+
+If nondeterminism is unavoidable, record relevant parameters and preserve the generated revision.
+
+## 14. HUMAN EDITING AND OVERRIDES
+
+Users must be able to inspect and adjust generated captions.
+
+Support editing operations appropriate to the actual application:
+
+- Edit text.
+- Split cue.
+- Merge cues.
+- Adjust display timing.
+- Correct timing mapping.
+- Assign a speaker label.
+- Remove an optional sound caption.
+- Change subtitle profile.
+- Regenerate a selected range.
+- Restore a previous generated revision.
+
+### 14.1 Override provenance
+
+Every manual change must be attributable.
+
+Record:
+
+- Original generated cue.
+- Modified cue.
+- Operation.
+- User action identity or protected actor reference.
+- Timestamp.
+- Reason where the product requests one.
+- Revision ancestry.
+
+Do not overwrite the original generated output.
+
+### 14.2 Regeneration conflicts
+
+If a user manually edits cues and later requests regeneration:
+
+- Preserve the manually edited revision.
+- Identify affected regions.
+- Detect conflicts.
+- Regenerate only permitted unprotected regions where supported.
+- Require explicit handling for conflicting edits.
+
+Never assume that a new generated subtitle document should replace all previous user work.
+
+### 14.3 Undo/redo
+
+Integrate with the existing editor undo/redo system.
+
+Do not implement a second incompatible undo stack.
+
+Distinguish machine-generated segmentation refreshes from user-authorized edits.
+
+## 15. AVAPARDAZ INTEGRATION
+
+Integrate with the existing Avapardaz transcript and editing architecture.
+
+Use SHAHAB-022 SDK contracts.
+
+Reuse:
+
+- Project identity.
+- Media identity.
+- Transcript editor.
+- Timeline mapping.
+- Authorization.
+- Persistence.
+- Revision history.
+- Export infrastructure.
+
+Do not introduce a second project or media model.
+
+### 15.1 Editor preview
+
+Where the product supports subtitle preview:
+
+- Render cues with actual display times.
+- Preserve Persian RTL.
+- Handle speaker labels.
+- Show timing warnings.
+- Show unresolved alignment.
+- Distinguish acoustic time from display time.
+
+Do not claim final video-render output if the product only provides a preview.
+
+### 15.2 Subtitle-to-audio navigation
+
+When valid sample ranges exist, allow navigation to the relevant source audio region.
+
+When only coarse timing exists, navigate at the actual supported granularity.
+
+Do not simulate exact word navigation with arbitrary timestamps.
+
+### 15.3 Re-generation
+
+Allow controlled regeneration based on:
+
+- Full transcript.
+- Selected transcript range.
+- Changed profile.
+- Changed alignment.
+- Changed diarization.
+- Changed source media.
+
+Every regeneration must record its inputs and produce a new revision.
+
+## 16. ADOBE AND OTHER HOST ADAPTERS
+
+Use the verified SHAHAB-024 integration decision.
+
+Do not assume that Adobe Audition accepts all output formats.
+
+Inspect the actual supported import/export capabilities for the verified host version.
+
+For each host adapter, document:
+
+- Accepted formats.
+- Timing granularity.
+- RTL behavior.
+- Speaker handling.
+- Cue overlap support.
+- Styling support.
+- Information loss.
+- Tested versions.
+
+A companion workflow, sidecar import, or manual export must be labeled accurately.
+
+Do not claim native subtitle-track integration when a user must import a file manually.
+
+Do not manipulate host-internal project files through undocumented formats.
+
+The host adapter must remain independent from the subtitle-generation core.
+
+## 17. LOCAL/CLOUD AND PRIVACY
+
+Subtitle generation should normally operate on existing transcript and timing records where possible.
+
+Do not re-upload source audio merely to generate subtitles if the required approved transcript/alignment data is already locally available.
+
+If remote processing is required for a specific feature, follow explicit authorization.
+
+Do not upload the complete transcript to external telemetry.
+
+Protect:
+
+- Project transcripts.
+- Speaker labels.
+- Source media references.
+- User edits.
+- Export files.
+- Temporary subtitle packages.
+
+A user-provided speaker name is project content, not generic telemetry metadata.
+
+## 18. PERFORMANCE AND LARGE-PROJECT HANDLING
+
+Measure:
+
+- Transcript parsing.
+- Word-reference mapping.
+- Cue segmentation.
+- RTL metadata preparation.
+- Reading-speed calculation.
+- Layout QA.
+- Serialization.
+- Export.
+- Preview rendering.
+
+Test:
+
+- Very long recordings.
+- Large transcripts.
+- Large numbers of cues.
+- Multiple speakers.
+- High-frequency speaker turns.
+- Long mixed-script lines.
+- Multiple transcript revisions.
+- Repeated regeneration.
+- Concurrent project usage where supported.
+
+Avoid quadratic operations over large transcript documents where a bounded or indexed approach is available.
+
+Do not retain duplicate copies of every generated subtitle document in active memory.
+
+Persist revisions according to the application's established lifecycle.
+
+## 19. SUBTITLE BENCHMARK AND HUMAN EVALUATION
+
+Build an evaluation set with human-reviewed subtitle references.
+
+The evaluation should examine:
+
+- Text preservation.
+- Phrase boundary quality.
+- Reading speed.
+- Cue duration.
+- Line balance.
+- Persian RTL quality.
+- Speaker attribution.
+- Timing.
+- Overlap handling.
+- Export/import fidelity.
+
+### 19.1 Quantitative measurements
+
+Measure, where the evaluation supports them:
+
+- Word coverage.
+- Text omission count.
+- Text duplication count.
+- Reading-speed violations.
+- Cue-duration violations.
+- Line-length violations.
+- Boundary displacement.
+- Timeline mapping error.
+- Invalid cue rate.
+- Export round-trip differences.
+- Overlap-handling errors.
+
+Do not use a single aggregate readability score as a substitute for detailed QA.
+
+### 19.2 Human review
+
+Have reviewers evaluate:
+
+- Natural line breaking.
+- Persian readability.
+- Text fidelity.
+- Speaker attribution.
+- Timing.
+- Visual clutter.
+- Excessive cue changes.
+- Accessibility-oriented sound labels.
+
+Record review method and sample count.
+
+Do not claim human-quality approval based on automated schema validation.
+
+## 20. TEST MATRIX
+
+### 20.1 Text
+
+Test:
+
+- Persian-only.
+- Mixed Persian/English.
+- Numerals.
+- ZWNJ.
+- Punctuation.
+- Proper names.
+- Colloquial text.
+- Repetitions.
+- Disfluencies.
+- Long compounds.
+- Empty segments.
+
+### 20.2 Timing
+
+Test:
+
+- Accurate word boundaries.
+- Phrase-level only timing.
+- Non-zero source offset.
+- Resampling.
+- Long-duration drift.
+- Very short captions.
+- Long captions.
+- Silence gaps.
+- Overlapping speakers.
+- Variable frame rate where supported.
+
+### 20.3 Segmentation
+
+Test:
+
+- Sentence boundaries.
+- Clause boundaries.
+- Very short utterances.
+- Long continuous speech.
+- Speaker transitions.
+- Disfluencies.
+- Incomplete phrases.
+- Repeated words.
+- Mixed-language units.
+
+### 20.4 Formats
+
+For each implemented format test:
+
+- Valid serialization.
+- Invalid cue order.
+- Unicode.
+- RTL.
+- Time precision.
+- Speaker label.
+- Overlap.
+- Import into supported host.
+- Re-export.
+- Round-trip loss.
+
+### 20.5 User editing
+
+Test:
+
+- Manual cue edit.
+- Split.
+- Merge.
+- Timing adjustment.
+- Speaker relabel.
+- Regeneration.
+- Conflict resolution.
+- Undo/redo.
+- Source revision change.
+
+### 20.6 Recovery
+
+Test:
+
+- Export interruption.
+- Application restart.
+- Partial generation.
+- Corrupted output.
+- Stale alignment.
+- Stale diarization.
+- Transcript revision mismatch.
+- Failed host import.
+
+## 21. SHAHAB LAB INTEGRATION
+
+Add a Subtitle Quality and Export section.
+
+Show:
+
+- Subtitle engine revision.
+- Transcript revision.
+- Alignment revision.
+- Diarization revision.
+- Output profile.
+- Output format.
+- Cue count.
+- Text coverage.
+- Unaligned text count.
+- Reading-speed violations.
+- Cue-duration violations.
+- Line-length warnings.
+- RTL validation status.
+- Overlap status.
+- Export status.
+- Round-trip validation state.
+- Human review status.
+
+Clearly distinguish:
+
+- Structural validity.
+- Readability validation.
+- Timing validation.
+- Linguistic quality.
+- Host compatibility.
+
+A valid SRT file is not necessarily readable, correctly synchronized, or linguistically faithful.
+
+## 22. PERSISTENT RECORDS
+
+Extend existing canonical records.
+
+Use logical record types equivalent to:
+
+- `SHAHAB_SUBTITLE_DOCUMENTS`
+- `SHAHAB_SUBTITLE_REVISIONS`
+- `SHAHAB_SUBTITLE_PROFILES`
+- `SHAHAB_SUBTITLE_CUES`
+- `SHAHAB_SUBTITLE_SOURCE_MAPPINGS`
+- `SHAHAB_SUBTITLE_VALIDATION_RESULTS`
+- `SHAHAB_SUBTITLE_EXPORT_HISTORY`
+- `SHAHAB_SUBTITLE_IMPORT_TESTS`
+- `SHAHAB_SUBTITLE_MANUAL_OVERRIDES`
+- `SHAHAB_SUBTITLE_EVALUATION_RUNS`
+
+Each document must reference its source transcript, alignment, diarization, source media, and profile revisions.
+
+Do not allow a subtitle artifact to remain marked current after a dependency changes.
+
+## 23. REQUIRED DOCUMENTATION
+
+Create or update:
+
+1. `SHAHAB_SUBTITLE_ARCHITECTURE.md`
+2. `SHAHAB_PERSIAN_SUBTITLE_STYLE_GUIDE.md`
+3. `SHAHAB_SUBTITLE_SEGMENTATION_POLICY.md`
+4. `SHAHAB_SUBTITLE_TIMING_CONTRACT.md`
+5. `SHAHAB_RTL_AND_MIXED_SCRIPT_LAYOUT.md`
+6. `SHAHAB_SPEAKER_CAPTION_POLICY.md`
+7. `SHAHAB_SUBTITLE_FORMAT_COMPATIBILITY.md`
+8. `SHAHAB_SUBTITLE_QA_POLICY.md`
+9. `SHAHAB_SUBTITLE_HUMAN_EVALUATION.md`
+10. `SHAHAB_SUBTITLE_TEST_REPORT.md`
+11. `SHAHAB_SUBTITLE_STATE.json`
+12. Append-only evidence ledger entries.
+13. Mission completion record.
+
+Use actual canonical documentation and state paths.
+
+Do not duplicate existing project-level transcript schemas.
+
+## 24. EXPLICIT NON-GOALS
+
+Do not:
+
+- Treat subtitle generation as ASR.
+- Treat text segmentation as forced alignment.
+- Fabricate word timestamps.
+- Invent speaker identities.
+- Delete words to meet a line-length target without authorization.
+- Change verbatim text silently.
+- Treat a structurally valid subtitle file as proof of readability.
+- Claim all players render Persian identically.
+- Claim accessibility compliance without a defined evaluation.
+- Claim native host subtitle integration without testing the actual host.
+- Overwrite user-edited subtitle revisions.
+- Hide information lost by export conversion.
+- Upload transcripts or audio without authorization.
+
+## 25. ACCEPTANCE CRITERIA
+
+Mark `VERIFIED` only when:
+
+1. SHAHAB-025 timing capability is verified or limitations are explicitly respected.
+2. SHAHAB-026 speaker capability is verified or speaker labels are disabled.
+3. A canonical subtitle document schema exists.
+4. Persian-aware segmentation is implemented.
+5. Acoustic and display timing remain separate.
+6. Reading-speed calculation is documented and tested.
+7. RTL and mixed-script behavior is tested.
+8. ZWNJ and Unicode integrity are preserved.
+9. Speaker-aware captions work where supported.
+10. Overlapping speech is represented honestly.
+11. Export formats are validated.
+12. Information loss is documented.
+13. Manual editing is revisioned and reversible.
+14. Stale transcript/alignment/diarization results are rejected.
+15. Avapardaz integration works with the existing editor and persistence system.
+16. Target-host compatibility is established by real tests or explicitly limited.
+17. Automated QA is implemented.
+18. Human evaluation is performed where required.
+19. Performance is measured on large inputs.
+20. Privacy and source identity remain intact.
+
+A `VERIFIED` result may cover a restricted set of export formats or host applications, but the supported scope must be explicit.
+
+## 26. FINAL EXECUTION REPORT
+
+Return:
+
+- Entry-gate decision.
+- Actual supported timing granularity.
+- Actual speaker-attribution capability.
+- Subtitle architecture.
+- Persian segmentation policy.
+- Reading-speed methodology.
+- Acoustic/display timing model.
+- RTL/mixed-script behavior.
+- Supported formats.
+- Host compatibility.
+- Export/import tests.
+- Human evaluation results.
+- Performance measurements.
+- Exact files created or changed.
+- Known limitations.
+- Evidence-ledger references.
+- Final mission status.
+
+Final status:
+
+- `VERIFIED`
+- `PARTIALLY_VERIFIED`
+- `BLOCKED`
+- `FAILED`
+
+**GOVERNING PRINCIPLE: A professional subtitle is not merely recognized text with timestamps. It is a linguistically faithful, temporally grounded, readable, reversible, and correctly exported representation of the original audio.**
+
+## **ترتیب اجرا و معیار عبور**
+
+| مأموریت              | وابستگی اصلی                              | نتیجه مورد انتظار                           |
+| -------------------- | ----------------------------------------- | ------------------------------------------- |
+| **۲۵ — Alignment**   | صوت واقعی و متن مشخص                      | زمان‌بندی معتبر و قابل‌ردیابی               |
+| **۲۶ — Diarization** | صوت و مرجع زمانی معتبر                    | گویندگان ناشناس و نوبت‌های گفتار            |
+| **۲۷ — Subtitles**   | متن، Alignment و در صورت وجود Diarization | زیرنویس خوانا و خروجی قابل‌استفاده در تدوین |
+
+چند خط قرمز برای ارزیابی گزارش ایجنت:
+
+- اگر زمان‌بندی فقط در سطح جمله است، نباید ادعای زمان‌بندی کلمه‌به‌کلمه کند.
+- اگر دو گوینده هم‌زمان صحبت می‌کنند، نباید متن را به یک ترتیب خطی ساختگی تبدیل کند.
+- اگر فایل خروجی زیرنویس از نظر ساختاری معتبر است ولی فارسی را نادرست نمایش می‌دهد، مأموریت ۲۷ موفق نیست.
+- اگر کاربر متن را اصلاح کرده، اجرای مجدد Alignment یا Diarization نباید اصلاحات او را از بین ببرد.
+
+**نکته معماری:** خروجی این سه مأموریت باید به یکدیگر متصل باشد، اما هر سرویس باید مستقل، نسخه‌پذیر و قابل‌آزمایش باقی بماند. این جداسازی بعداً امکان تعویض مدل هم‌ترازی یا تشخیص گوینده را بدون بازنویسی موتور اصلی شهاب فراهم می‌کند.

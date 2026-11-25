@@ -1,0 +1,772 @@
+# SHAHAB — STAGE 1 FORENSIC ENGINEERING AUDIT
+## Native Persian ASR Core | Compute-Efficient Model Architecture | Shared-Engine Readiness
+### STRICT READ-ONLY | ZERO EXECUTION | ZERO MODIFICATION
+
+---
+
+# 0. MISSION AND AUDIT AUTHORITY
+
+Act as a principal speech-recognition systems architect, neural-network architecture researcher, audio DSP engineer, CPU inference specialist, and forensic software auditor.
+
+Your assignment is to conduct a rigorous, narrowly scoped forensic audit of the existing SHAHAB speech-recognition engine within the AVAPARDAZ application.
+
+This is the application's FIRST functional development stage:
+
+**Audio Input → Audio Processing → SHAHAB Inference → Persian Speech-to-Text Output.**
+
+SHAHAB is intended to become a project-owned, locally operating Persian ASR engine. It must eventually serve two independent application hosts:
+
+1. The AVAPARDAZ application.
+2. A future Adobe Audition integration.
+
+The same authoritative recognition core must serve both environments. Independent, duplicated ASR implementations are not the intended architecture.
+
+The audit has four primary objectives:
+
+A. Establish what SHAHAB actually is today.
+
+B. Identify material implementation defects, architectural weaknesses, and computational inefficiencies in its existing speech-to-text execution path.
+
+C. Determine whether its current architecture can realistically evolve into the intended compact, high-accuracy, CPU-efficient recognition engine.
+
+D. Assess whether its recognition core can be separated from application-specific dependencies and reused by a future Adobe Audition host.
+
+**This is an audit, NOT a development task, implementation task, optimization task, or architecture-rewriting task.**
+
+Your authority is limited to inspecting existing evidence and producing technically justified recommendations.
+
+Do not change the application.
+
+---
+
+# 1. ABSOLUTE SCOPE BOUNDARY
+
+The audit MUST remain within the existing SHAHAB speech-to-text subsystem and the minimum dependencies required to understand its real execution path.
+
+The primary audit boundary is:
+
+Audio Input
+→ Decoding
+→ Audio Frontend / Preprocessing
+→ Feature Extraction
+→ Model Initialization
+→ Neural Inference
+→ Recognition Decoding
+→ Text and Metadata Generation
+→ Output Handoff.
+
+Inspect only:
+
+- SHAHAB entry points and actual inference implementation.
+- Directly invoked audio-processing dependencies.
+- Model definitions, architecture metadata, manifests, and available model assets.
+- Tokenizer, vocabulary, and decoder components.
+- Inference runtime and resource management.
+- Contracts between the recognition core and its immediate caller.
+- Directly relevant tests and existing benchmark artifacts.
+- Security controls directly protecting this execution path.
+
+A component may be inspected only when its actual relationship to the SHAHAB execution path is established or must be verified.
+
+## Explicit exclusions
+
+DO NOT audit:
+
+- ENGINE 01 as an independent subsystem.
+- Audio editing, mixing, rendering, or timeline functionality.
+- Unrelated application workflows.
+- Other ASR engines or experimental engines.
+- Unrelated APIs.
+- General UI or frontend quality.
+- Administrative systems or unrelated authentication architecture.
+- CI/CD or deployment architecture unrelated to SHAHAB.
+- The complete Adobe Audition plugin implementation.
+- Unrelated repository components.
+
+A downstream dependency may be included only when it directly affects SHAHAB input, recognition execution, output correctness, or core isolation.
+
+Every scope expansion requires an explicit technical justification.
+
+Do not inspect a component merely because it appears interesting, sophisticated, or potentially useful in the future.
+
+---
+
+# 2. DEFINE THE ACTUAL ENGINE BEFORE EVALUATING IT
+
+First establish the real implementation.
+
+Determine:
+
+1. What code actually constitutes SHAHAB's recognition core?
+2. What implementation performs neural inference?
+3. Which model architecture is genuinely used?
+4. Which model assets are actually available?
+5. Which preprocessing and feature-extraction implementations are actually executed?
+6. Which decoder generates recognition output?
+7. Which runtime and execution provider are actually used?
+8. Which components are actively called, disconnected, mocked, experimental, or merely documented?
+
+Distinguish:
+
+- Implemented and statically established.
+- Supported by existing runtime evidence.
+- Verified only through historical artifacts.
+- Mocked or simulated.
+- Disconnected from the active execution path.
+- Missing or inaccessible.
+- Unknown.
+
+Imports, filenames, interfaces, manifests, and documentation do not independently establish runtime execution.
+
+Do not assume that a declared architecture, capability, or performance characteristic accurately represents the actual implementation.
+
+## Terminology clarification
+
+In this audit, "native SHAHAB engine" means the intended project-owned, locally operating recognition engine.
+
+It does NOT automatically mean a C++ implementation, a particular native library, a particular plugin format, or a particular operating-system API.
+
+Evaluate those implementation choices only when relevant to the actual shared-core architecture.
+
+---
+
+# 3. FORENSIC EXECUTION-PATH TRACING
+
+Before evaluating individual modules, reconstruct the shortest demonstrable execution path from incoming audio to the final transcript.
+
+Produce a focused dependency and call graph containing:
+
+- Entry point.
+- Actual caller.
+- Actual callee.
+- Relevant interface or data contract.
+- Function of each component.
+- Evidence classification.
+- Known execution limitations.
+
+Follow the actual data rather than merely following import statements.
+
+Determine where:
+
+- Audio is decoded.
+- Audio is resampled.
+- Channels are mixed or transformed.
+- Features are extracted.
+- Audio is divided into frames or chunks.
+- Tensors are allocated.
+- Model inference occurs.
+- Recognition decoding occurs.
+- Tokens become text.
+- Timestamps and confidence values are generated.
+- Results are returned to the application.
+
+Identify duplicated operations, unnecessary conversions, redundant data copies, repeated initialization, and avoidable memory retention where evidence establishes their existence.
+
+Do not map the entire repository.
+
+STOP tracing a dependency when its contribution to the in-scope execution path has been sufficiently established.
+
+---
+
+# 4. CORE MODEL ARCHITECTURE AUDIT
+
+This is a central and mandatory audit dimension.
+
+Investigate the actual neural architecture used by SHAHAB, not merely its model name or declared specification.
+
+Establish, where evidence exists:
+
+- Model family and recognition paradigm.
+- Encoder architecture.
+- Decoder architecture.
+- Prediction network and joiner, if applicable.
+- Layer structure and dimensionality.
+- Hidden dimensions.
+- Attention or convolution mechanisms.
+- Recurrent or sequence-modeling components.
+- Temporal subsampling.
+- Feature dimensionality and frame stride.
+- Vocabulary and tokenization.
+- Parameter count.
+- Model footprint.
+- Computational complexity.
+- Intermediate activation and memory requirements.
+- Streaming characteristics.
+- Decoder search complexity.
+
+If model weights, model configuration, training specifications, or architecture definitions are missing, identify precisely which properties cannot be established.
+
+Never infer hidden architecture details from a marketing name or an incomplete manifest.
+
+## 4.1 Fundamental architecture objective
+
+SHAHAB is intended to achieve:
+
+- Strong Persian speech-recognition accuracy.
+- Low CPU demand.
+- Low inference memory consumption.
+- A naturally compact model footprint.
+- Efficient initialization and inference.
+- Competitive processing speed on practical CPU hardware.
+
+The desired compactness must primarily originate from architecture and engineering choices made at model design and development time.
+
+**Do not treat shrinking an inefficient, oversized model as an acceptable substitute for designing an efficient model from the outset.**
+
+The primary architectural investigation must focus on:
+
+- Efficient model topology.
+- Parameter utilization.
+- Computational complexity.
+- Efficient sequence modeling.
+- Appropriate temporal downsampling.
+- Efficient feature representation.
+- Encoder and decoder design.
+- Avoidance of redundant computations.
+- CPU-friendly mathematical operations.
+- Efficient inference data flow.
+
+Post-training weight compression, quantization, pruning, and compression-based model reduction must not be presented as the primary solution to the user's core requirement.
+
+They may be discussed separately when relevant, but their use does not establish that the underlying architecture is inherently efficient.
+
+Do not confuse:
+
+- Small model file size.
+- Low parameter count.
+- Low RAM consumption.
+- Low peak memory.
+- Low CPU utilization.
+- Low computational complexity.
+- Fast inference.
+
+These are related but distinct properties.
+
+## 4.2 Computational efficiency analysis
+
+Identify where the actual computational cost originates.
+
+Separate:
+
+A. Audio frontend computation.
+
+B. Neural model computation.
+
+C. Recognition decoder computation.
+
+D. Runtime and tensor-management overhead.
+
+E. Audio-data movement and memory overhead.
+
+F. Initialization and model-loading cost.
+
+Do not assume neural inference is the dominant bottleneck without evidence.
+
+Where model configurations permit defensible calculations, estimate parameter counts and computational complexity.
+
+Disclose the exact calculation assumptions and conventions.
+
+Do not fabricate FLOPs, MACs, parameter counts, or CPU utilization when the required information is unavailable.
+
+Distinguish theoretical complexity from measured runtime performance.
+
+## 4.3 Architectural alternatives
+
+If the current architecture has material deficiencies, compare no more than THREE genuinely relevant alternatives.
+
+Do not generate a catalogue of neural-network architectures.
+
+For each alternative, evaluate:
+
+- Recognition architecture.
+- Computational mechanism.
+- Expected computational cost.
+- Model-size implications.
+- Memory requirements.
+- Decoder complexity.
+- Streaming characteristics.
+- Persian-language suitability.
+- Engineering and training requirements.
+- Principal trade-offs.
+
+Select one preferred direction only when the evidence supports that conclusion.
+
+Otherwise, explain what must be established before a defensible selection is possible.
+
+Do not recommend replacing the existing architecture merely because a different architecture is newer or more fashionable.
+
+---
+
+# 5. AUDIO FRONTEND AND SIGNAL-INTEGRITY AUDIT
+
+Evaluate only the audio-processing components directly used by SHAHAB.
+
+Inspect:
+
+- Supported audio formats.
+- Decoder behavior.
+- Sample-rate conversion.
+- Anti-aliasing.
+- Channel handling.
+- Mono conversion.
+- Audio normalization.
+- Frame generation.
+- Windowing.
+- Feature extraction.
+- Numerical stability.
+- Invalid, truncated, silent, and corrupted input handling.
+- Sample integrity.
+- Chunk-boundary handling.
+
+Determine whether the selected audio frontend is computationally appropriate for the model architecture.
+
+Identify unnecessary decoding, repeated resampling, redundant feature extraction, avoidable data copies, and unnecessary intermediate buffers.
+
+Evaluate whether the frontend preserves information required for reliable Persian speech recognition.
+
+Do not confuse successful audio ingestion with verified recognition quality.
+
+Every material criticism must include a preferred technical solution.
+
+---
+
+# 6. INFERENCE RUNTIME AND RESOURCE-LIFECYCLE AUDIT
+
+Inspect only the actual runtime used by SHAHAB.
+
+Evaluate:
+
+- Model loading and initialization.
+- Runtime execution provider.
+- CPU execution configuration.
+- Threading and parallelism.
+- Session initialization.
+- Tensor allocation and disposal.
+- Intermediate activation lifetime.
+- Memory reuse.
+- Decoder execution.
+- Chunk scheduling.
+- Cancellation.
+- Error handling.
+- Repeated inference.
+- Model caching.
+- Resource cleanup.
+
+Establish whether the runtime wastes CPU or RAM because of avoidable software architecture rather than inherent model requirements.
+
+Separate:
+
+- Model limitations.
+- Runtime limitations.
+- Audio-frontend limitations.
+- Decoder limitations.
+- Integration overhead.
+
+Never recommend increasing CPU threads, using a different execution provider, or adding a new dependency without establishing the specific problem it solves and its likely trade-offs.
+
+---
+
+# 7. PERSIAN RECOGNITION AND OUTPUT CORRECTNESS
+
+Evaluate the existing Persian-language recognition pipeline.
+
+Inspect:
+
+- Tokenizer and vocabulary consistency.
+- Persian character handling.
+- Arabic/Persian character normalization.
+- ZWNJ and whitespace behavior.
+- Number normalization where implemented.
+- Decoder behavior.
+- Transcript construction.
+- Chunk reconciliation.
+- Timestamp generation.
+- Confidence semantics.
+- Source-audio identity and hash propagation.
+
+Determine whether confidence and timestamps represent real measurements, model emissions, heuristic estimates, or synthetic defaults.
+
+Identify misleading metadata and incorrect claims of alignment accuracy.
+
+## Recognition-quality evidence
+
+Use only existing genuine audio, corresponding ground-truth transcripts, benchmark artifacts, and documented measurement procedures.
+
+Do not execute new inference.
+
+Do not invent WER, CER, Sentence Error Rate, recognition accuracy, or generalization claims.
+
+A single recording or multiple derivatives of one recording cannot establish general Persian recognition quality.
+
+If a valid multi-speaker evaluation dataset is unavailable, report recognition quality as NOT ESTABLISHED.
+
+Separate:
+
+- Architectural capability.
+- Actual recognition implementation.
+- Historically reported recognition quality.
+- Independently verified recognition quality.
+
+Do not allow successful runtime initialization or mocked inference to establish recognition accuracy.
+
+---
+
+# 8. SHARED CORE READINESS — AVAPARDAZ AND FUTURE ADOBE AUDITION
+
+This is an architectural boundary assessment only.
+
+Do not audit or design the full Adobe Audition plugin.
+
+Determine whether the current SHAHAB engine can become an independent recognition core reusable by both hosts.
+
+Inspect whether the recognition implementation depends on:
+
+- React or browser APIs.
+- Application-specific state.
+- Express or HTTP server assumptions.
+- Host-specific audio buffers.
+- Application-specific filesystem paths.
+- Global mutable state.
+- Host-specific lifecycle behavior.
+- Environment-specific configuration.
+
+Evaluate whether the core can expose a stable, host-independent interface for:
+
+- Audio input and metadata.
+- Streaming or buffered audio.
+- Sample rate and channel configuration.
+- Recognition configuration.
+- Progress reporting.
+- Cancellation.
+- Structured transcript results.
+- Timestamp and confidence semantics.
+- Structured errors.
+- Versioned contracts.
+
+Distinguish:
+
+1. What is already host-independent.
+2. What remains coupled to AVAPARDAZ.
+3. What must be isolated.
+4. What cannot be established without selecting the future plugin integration model.
+
+The shared-core requirement means one authoritative recognition implementation, processing contract, and model lineage.
+
+It does not necessarily require both hosts to share one running process or one physical model installation.
+
+Avoid duplicated recognition logic, duplicated audio preprocessing, unnecessary data serialization, and redundant model initialization.
+
+Present the minimum architectural boundary needed to support future reuse.
+
+Do not assume a particular Adobe SDK, plugin format, operating system, or deployment mechanism.
+
+---
+
+# 9. SECURITY — STRICTLY LIMITED TO SHAHAB
+
+Inspect only security problems that directly affect the SHAHAB recognition path.
+
+Consider:
+
+- Audio-input validation.
+- Recognition API authentication and authorization, where applicable.
+- Ownership and isolation of recognition jobs.
+- Model-asset integrity.
+- Temporary audio handling.
+- Sensitive transcript exposure.
+- Unsafe file paths.
+- Input-driven resource exhaustion.
+- Error and log data exposure.
+- Direct boundaries between SHAHAB and its host.
+
+Do not perform a general application security audit.
+
+A missing control in one source file is not automatically a confirmed vulnerability.
+
+For every suspected vulnerability, establish its actual entry point, reachable path, affected asset, existing controls, and technically plausible impact.
+
+Classify confirmed defects separately from static weaknesses and unverified risks.
+
+Do not perform probing, exploit attempts, or security testing.
+
+---
+
+# 10. STRICT EVIDENCE AND ANTI-HALLUCINATION PROTOCOL
+
+Every substantive claim must be traceable to existing evidence.
+
+Use these evidence classifications:
+
+- SOURCE_CONFIRMED: Directly established by inspected source.
+- EXISTING_RUNTIME_EVIDENCE: Supported by an already-existing runtime record.
+- HISTORICAL_EVIDENCE: Reported in a historical artifact but not independently reproducible in this audit.
+- STATIC_INFERENCE: Technically reasoned from source structure but not runtime-verified.
+- UNVERIFIED: Evidence insufficient to establish the claim.
+- BLOCKED_EXTERNAL: Required assets, configuration, hardware, dataset, or other evidence unavailable.
+
+A test definition is not a test result.
+
+A previous audit statement is not automatically a current fact.
+
+A mocked execution is not real model inference.
+
+An implemented interface is not proof of runtime integration.
+
+A declared capability is not proof that the capability works.
+
+For every finding, identify which evidence classification applies.
+
+If the root cause is not proven, label it as a hypothesis rather than presenting it as fact.
+
+If a claim cannot be substantiated, omit it or explicitly identify the missing evidence.
+
+Do not invent source locations, symbols, line numbers, execution outcomes, benchmark results, or hardware specifications.
+
+---
+
+# 11. MANDATORY TECHNICAL RECOMMENDATION FOR EVERY MATERIAL FINDING
+
+A defect report without a high-quality technical recommendation is incomplete.
+
+For EVERY material finding, provide:
+
+1. Unique finding ID.
+2. Classification and severity.
+3. Exact file path and relevant symbols or line ranges.
+4. Affected execution path.
+5. Evidence and verification status.
+6. Precise technical problem.
+7. Established root cause, if proven.
+8. Actual or technically justified impact.
+9. Preferred target-state solution.
+10. The underlying engineering mechanism.
+11. Why this solution is superior to a superficial patch.
+12. Relevant alternatives and their disadvantages.
+13. Compatibility and architectural dependencies.
+14. A future verification procedure.
+15. Measurable acceptance criteria, only where technically defensible.
+
+## Recommendation quality
+
+Recommendations must be specific to the discovered problem.
+
+Unacceptable recommendations include:
+
+- Optimize the code.
+- Improve performance.
+- Reduce memory usage.
+- Use a better model.
+- Add more tests.
+- Refactor the architecture.
+- Use a faster library.
+
+Instead, explain the exact mechanism, architectural change, algorithmic improvement, or runtime correction that addresses the established problem.
+
+For each material criticism, recommend the most appropriate sustainable solution.
+
+Do not overengineer.
+
+Do not recommend adding multiple new technologies or dependencies when a simpler, technically superior solution exists.
+
+If the optimal solution cannot be selected without additional evidence, explain the competing options, missing evidence, and exact decision criterion.
+
+Distinguish measured improvements from expected improvements.
+
+Do not invent quantitative performance gains.
+
+---
+
+# 12. READ-ONLY EXECUTION BOUNDARY
+
+This section is absolute and overrides any other instruction that might imply execution.
+
+## Permitted actions
+
+- Open and read existing source files.
+- Search within the existing source tree.
+- Inspect existing documentation.
+- Inspect model configuration and metadata.
+- Inspect existing tests without executing them.
+- Inspect existing benchmark and evaluation artifacts.
+- Trace existing call relationships.
+- Analyze existing interfaces and contracts.
+- Read existing historical reports.
+
+## Absolutely prohibited actions
+
+DO NOT:
+
+- Execute terminal or shell commands.
+- Run Node.js, Python, npm, npx, TypeScript, or other programs.
+- Launch the application.
+- Execute tests.
+- Run builds.
+- Run benchmarks.
+- Profile CPU or RAM.
+- Execute FFmpeg or other media tools.
+- Install or update packages.
+- Download models or datasets.
+- Make network requests or contact external services.
+- Modify source code.
+- Modify tests.
+- Modify model assets or manifests.
+- Modify configuration.
+- Change Git state.
+- Deploy or restart anything.
+- Create or delete repository files.
+- Generate files inside the repository.
+
+Reading a test is permitted. Running it is forbidden.
+
+Reading historical benchmark results is permitted. Reproducing them is forbidden.
+
+If a tool would execute code or modify repository state, do not use it.
+
+Do not confuse permission to inspect a file with permission to execute its contents.
+
+All findings must be based on the existing repository snapshot and available artifacts.
+
+---
+
+# 13. FINDING CLASSIFICATION AND PRIORITY
+
+Use only classifications justified by evidence:
+
+- CONFIRMED_FUNCTIONAL_DEFECT.
+- CONFIRMED_ARCHITECTURAL_DEFECT.
+- CONFIRMED_SECURITY_DEFECT.
+- DATA_INTEGRITY_DEFECT.
+- RESOURCE_MANAGEMENT_DEFECT.
+- PERFORMANCE_BOTTLENECK.
+- ARCHITECTURAL_LIMITATION.
+- UNVERIFIED_RISK.
+- STRATEGIC_OPTIMIZATION_OPPORTUNITY.
+
+Use these priorities:
+
+**P0 — Critical:** An established problem that prevents trustworthy primary operation or creates serious exposure of data or system integrity.
+
+**P1 — High:** A material defect affecting recognition correctness, model execution, signal integrity, architectural viability, or core reuse.
+
+**P2 — Medium:** A demonstrated performance, resource, or maintainability problem with meaningful consequences for the intended engine.
+
+Strategic opportunities are not automatically defects or P0/P1/P2 bugs.
+
+Do not manufacture findings to populate every category.
+
+Do not assign numerical quality scores, weighted scores, arbitrary maturity levels, or GO/NO-GO release decisions in this stage.
+
+This is a focused engineering diagnosis, not a product certification exercise.
+
+---
+
+# 14. REQUIRED FINAL REPORT
+
+Produce one technically rigorous and focused report directly in the conversation.
+
+Use this exact structure:
+
+## A. Executive Verdict
+
+State what SHAHAB actually is today, its principal strengths, most important defects, and whether its current architecture is aligned with the intended engine.
+
+## B. Verified Execution Architecture
+
+Show the actual audio-to-transcript execution path with evidence classifications.
+
+## C. Model Architecture Assessment
+
+Explain the real model architecture, its computational characteristics, and its engineering limitations.
+
+## D. Audio Frontend and Inference Assessment
+
+Identify the most important signal-processing, decoding, inference, and memory issues.
+
+## E. CPU Efficiency and Model Compactness Assessment
+
+Distinguish architectural efficiency from runtime efficiency and model footprint.
+
+State which claims are established and which are unverified.
+
+## F. Persian Recognition and Output Integrity
+
+Explain what is actually known about Persian recognition quality, tokenizer correctness, timestamps, and confidence.
+
+## G. Shared-Core Readiness
+
+Determine whether the current recognition engine can serve as a reusable core for AVAPARDAZ and future Adobe Audition integration.
+
+## H. Prioritized Findings and Preferred Solutions
+
+List every material, evidence-supported finding.
+
+Every finding must include its technically justified preferred recommendation according to Section 11.
+
+Order findings by actual impact, not by file order.
+
+## I. Recommended Target-State SHAHAB Architecture
+
+Present ONE preferred architecture based on the available evidence.
+
+Where a decision cannot yet be justified, explicitly state the alternatives and the evidence required to choose.
+
+Clearly distinguish current implementation from proposed architecture.
+
+## J. Dependency-Aware Remediation Roadmap
+
+Organize future work by technical dependency and priority.
+
+Do not implement any item.
+
+## K. Evidence Gaps and Scope Exclusions
+
+Identify:
+
+- Missing model assets.
+- Missing architecture or training specifications.
+- Missing evaluation datasets.
+- Missing hardware specifications.
+- Missing runtime evidence.
+- Unknown Adobe integration constraints.
+- Components deliberately excluded from this audit.
+
+Do not investigate excluded components.
+
+## L. Audit Completion Status
+
+Choose one:
+
+- COMPLETED_WITH_CONFIRMED_FINDINGS.
+- COMPLETED_WITH_NO_CONFIRMED_FINDINGS.
+- PARTIALLY_COMPLETED.
+- BLOCKED_BY_MISSING_EVIDENCE.
+
+Explain the reason briefly.
+
+---
+
+# 15. STOP CONDITION AND FINAL DIRECTIVE
+
+The audit is complete when:
+
+- The actual in-scope SHAHAB execution path has been reconstructed.
+- Its directly relevant dependencies have been understood.
+- Its actual model and inference architecture have been assessed to the extent permitted by available evidence.
+- Material implementation and architectural weaknesses have been identified or explicitly ruled out within the inspected scope.
+- Every material finding has a technically justified preferred solution.
+- The shared-core boundary has been assessed.
+- Missing evidence and unresolved decisions have been explicitly documented.
+
+Do not expand the audit to unrelated modules.
+
+Do not continue inspecting files merely to increase the number of findings.
+
+Do not turn future product ambitions into current software defects.
+
+Do not mistake a theoretical architectural opportunity for an established implementation failure.
+
+Do not conceal uncertainty.
+
+**FINAL AUTHORITY: A narrow, deep, evidence-based forensic audit of the existing SHAHAB speech-to-text engine, with technically superior recommendations for every material finding.**
+
+**READ-ONLY. NO EXECUTION. NO TESTING. NO MODIFICATION. NO IMPLEMENTATION.**

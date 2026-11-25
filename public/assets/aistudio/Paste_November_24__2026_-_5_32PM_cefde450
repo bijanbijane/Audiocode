@@ -1,0 +1,1090 @@
+۱-AVAPARDAZ — FORENSIC ENGINEERING AUDIT
+SHAHAB ASR ENGINE + ENGINE 01 AUDIO CORE
+Version 6 — Evidence-Driven | Architecture-Aware | Strict Read-Only
+Repository: https://github.com/bijanbijane/Audiocode
+Target branch: main
+Audit scope:
+1. SHAHAB — the speech-recognition engine.
+2. ENGINE 01 — the first audio-processing core of Avapardaz.
+3. The integration contract and end-to-end data flow between these two systems.
+Your role: Independent senior software architect, ASR engineer, audio-processing engineer, reliability auditor, and quality-assurance reviewer.
+Mission type: Forensic engineering audit, defect discovery, architecture verification, evidence assessment, and remediation planning.
+Execution mode: READ-ONLY. No implementation. No repository modifications.
+
+1. MISSION OBJECTIVE
+Conduct a rigorous, independent, evidence-based audit of SHAHAB and ENGINE 01 as they actually exist in the repository.
+Do not assume that the architecture described in documentation is necessarily the architecture implemented in code.
+Do not assume that a class, interface, adapter, API, model file, test, or documented feature is actually used in the production execution path.
+Determine what the system genuinely implements, what it actually executes, what has been independently verified, what remains incomplete, and what cannot currently be proven.
+The audit must answer the following questions:
+1. What are the actual responsibilities and boundaries of SHAHAB?
+2. What is the actual responsibility and boundary of ENGINE 01?
+3. How does audio travel from initial input to ASR processing and downstream delivery?
+4. Are the two engines genuinely connected?
+5. Are their data contracts compatible?
+6. Does SHAHAB perform real Persian speech recognition, and what evidence establishes its quality?
+7. Are timestamps, audio positions, and transcript outputs reliable?
+8. Are memory management, concurrency, cancellation, and long-running operations safe?
+9. Does ENGINE 01 preserve audio integrity and project isolation?
+10. Which defects are demonstrably present?
+11. Which risks remain unverified?
+12. Which capabilities exist only in documentation, tests, mocks, or simulations?
+13. What specific engineering changes would resolve each confirmed problem?
+14. Which existing components are healthy and should be protected from unnecessary modification?
+The final report must be actionable by an engineering team without requiring them to guess what you discovered or what needs to be fixed.
+Do not attempt to make the project look better or worse than its actual condition. Report the evidence.
+
+2. NON-NEGOTIABLE RULE: STRICT READ-ONLY OPERATION
+This is an audit, not an implementation task.
+2.1. Permitted activities
+You may:
+* Read repository files and documentation.
+* Inspect Git history and repository metadata.
+* Inspect source code, dependencies, imports, exports, and call sites.
+* Trace execution paths and data flow.
+* Inspect test files and test configurations.
+* Inspect benchmark results and available datasets.
+* Inspect CI workflows and accessible execution logs.
+* Analyze model manifests, ONNX metadata, vocabulary files, and integrity checks.
+* Run existing tests only when their safety and side effects have been assessed.
+* Perform independent analysis in an isolated temporary environment outside the repository, when feasible.
+2.2. Prohibited activities
+You must not:
+* Create, edit, delete, rename, or move repository files.
+* Refactor or rewrite source code.
+* Modify tests, assertions, fixtures, or test configuration.
+* Install or update dependencies.
+* Modify model files, model weights, vocabulary, manifests, or datasets.
+* Download new models or datasets.
+* Modify environment configuration.
+* Execute database migrations.
+* Deploy or publish anything.
+* Modify external services or production infrastructure.
+* Commit, push, merge, rebase, reset, checkout, or switch branches.
+* Modify Git history, remote configuration, or repository settings.
+* Weaken tests to make them pass.
+* Modify code to make the audit easier.
+* Save the audit report inside the repository.
+Do not execute any operation that may change repository state merely to obtain additional evidence.
+If a command's side effects cannot be established, do not run it.
+Repository integrity takes priority over audit coverage.
+2.3. Test execution safety
+Before executing any test or diagnostic command:
+1. Inspect the relevant package script or command.
+2. Inspect the underlying test configuration.
+3. Review setup hooks, teardown hooks, fixtures, and output directories.
+4. Identify file-writing behavior, cache generation, database access, network access, and external service dependencies.
+5. Determine whether the test can safely run without changing repository files, original data, configuration, or external systems.
+Prefer an isolated temporary environment outside the repository when it is technically feasible.
+Do not install dependencies to make a test executable.
+If a test may modify the repository or external resources and cannot be safely isolated, classify it as:
+NOT RUN — SAFETY RESTRICTION
+Do not report an unexecuted test as passed or failed.
+Do not clean up accidental modifications by resetting or deleting files. Stop and disclose the event.
+2.4. Initial and final repository integrity checks
+At the beginning and end of the audit, record:
+* Repository identity.
+* Active branch.
+* Full commit SHA.
+* Working-tree status.
+* Modified files.
+* Untracked files.
+* Available remote repository information.
+At the end, compare the repository state with the initial state.
+Never use a command that changes Git state merely to synchronize or inspect the remote repository.
+If the latest remote main commit cannot be independently verified through an available read-only interface, explicitly state that limitation.
+
+3. SOURCE-OF-TRUTH AND EVIDENCE HIERARCHY
+When sources disagree, do not silently choose whichever description looks most convincing.
+Use this hierarchy:
+1. Actual source code and its reachable execution paths.
+2. Reproducible runtime behavior and executable test results.
+3. Directly inspected model metadata, data, and configuration.
+4. Test definitions and test fixtures.
+5. Current project documentation.
+6. Historical reports and previous audit claims.
+This hierarchy does not mean that source code alone proves correct behavior. A code path may exist but may never execute, may receive invalid inputs, or may produce incorrect results.
+Maintain the following distinctions:
+Implemented: A real implementation exists.
+Reachable: A real application path can invoke it.
+Executed: The behavior has actually been executed in the inspected environment.
+Verified: Evidence appropriate to the claimed behavior demonstrates that it works correctly.
+Never use these terms interchangeably.
+A successful model initialization is not proof of accurate transcription.
+A successful test compilation is not proof of runtime correctness.
+A successful audio ingestion test is not proof of end-to-end integration.
+
+4. ESTABLISH THE ACTUAL AUDIT BOUNDARIES
+Do not assume that the folder structure perfectly represents the system architecture.
+4.1. SHAHAB boundary
+Identify SHAHAB's actual responsibilities through:
+* Its entry points.
+* Runtime implementation.
+* Model execution.
+* Audio input handling.
+* Decoding.
+* Transcript generation.
+* Timestamp generation.
+* Public interfaces.
+* Actual callers and consumers.
+* Associated tests and model assets.
+4.2. ENGINE 01 boundary
+First determine whether ENGINE 01 is explicitly defined in current architecture documentation and source code.
+If it has a formally documented boundary, use that boundary and verify it against the implementation.
+If its boundary is ambiguous, incomplete, or inconsistently named:
+1. Report the ambiguity.
+2. Identify the relevant architectural evidence.
+3. Propose a provisional audit boundary.
+4. Clearly distinguish confirmed ownership from provisional classification.
+5. Do not silently assign unrelated modules to ENGINE 01.
+Determine its real responsibilities in audio ingestion, preparation, session and job management, ASR integration, audio integrity, and downstream data delivery.
+4.3. Shared components
+Identify modules that serve both engines.
+Classify them as:
+SHARED_COMPONENT
+Do not assign exclusive ownership to one engine without evidence.
+4.4. Suggested starting locations
+Begin investigation in relevant areas such as:
+* src/shahab/
+* src/asr-core/
+* src/ai-engine/asr/
+* server.ts
+* Relevant HTTP routers.
+* Runtime adapters.
+* Audio ingestion modules.
+* Model assets and manifests.
+* Tests and documentation associated with these components.
+These are starting points, not an exhaustive or authoritative list.
+Expand the investigation when actual call relationships or data dependencies demonstrate that an external module belongs to the audit scope.
+Inspect ENGINE 02 and ENGINE 03 only as far as necessary to verify ENGINE 01's output contracts and integration boundaries. Do not expand into their internal implementation without a direct reason.
+
+5. EXECUTION PLAN
+Perform the audit in seven controlled phases.
+Do not skip a phase simply because the repository is large.
+Do not claim completion merely because all phases have been listed.
+PHASE 0 — Environment and repository verification
+Establish:
+* Repository identity.
+* Branch.
+* Full commit SHA.
+* Local versus remote version visibility.
+* Runtime environment.
+* Available dependencies.
+* Availability of model assets.
+* Availability of audio samples.
+* Access to tests.
+* Access to CI logs.
+* Safety constraints.
+Deliverable: An environment and repository identity report.
+PHASE 1 — Architecture inventory
+Identify all in-scope files and modules.
+For each module record:
+Field	Required information
+Module ID	Unique identifier
+File path	Actual repository path
+Ownership	SHAHAB / ENGINE 01 / SHARED
+Responsibility	Actual technical role
+Entry point	Relevant function or class
+Callers	Known callers
+Dependencies	Important dependencies
+Consumers	Known consumers
+Related tests	Test paths
+Review status	Actual inspection status
+Use these review statuses:
+* REVIEWED
+* PARTIALLY_REVIEWED
+* IDENTIFIED_NOT_REVIEWED
+* NOT_ACCESSIBLE
+* OUT_OF_SCOPE
+A file is not REVIEWED merely because its name was discovered.
+A file is not REVIEWED merely because its contents were opened. Its relevant responsibilities and relationships must also have been assessed.
+Produce an Architecture Coverage Matrix.
+Audit area	Identified files	Reviewed files	Partially reviewed	Not reviewed
+Explain how the coverage figures were calculated.
+Do not represent file-count coverage as proof of complete behavioral coverage.
+PHASE 2 — Execution-path and data-flow reconstruction
+Trace the actual audio-processing path from initial input to final output.
+At minimum investigate:
+1. File or stream entry.
+2. Input validation.
+3. Initial decoding.
+4. Canonical audio ingestion.
+5. Format conversion.
+6. Sample-rate conversion.
+7. Channel conversion.
+8. Audio sample representation.
+9. Feature extraction.
+10. Runtime invocation.
+11. Encoder execution.
+12. Decoder execution.
+13. Joiner execution.
+14. Token decoding.
+15. Transcript construction.
+16. Timestamp generation.
+17. Text normalization.
+18. Delivery to ENGINE 01 consumers.
+19. Downstream handoff.
+For every stage identify:
+* Actual entry point.
+* Relevant function or class.
+* Input structure.
+* Output structure.
+* Calling component.
+* Consuming component.
+* Error behavior.
+* Related test.
+* Evidence status.
+Produce a Data Flow Diagram using Mermaid or an equivalent readable representation.
+Clearly distinguish:
+* STATICALLY_TRACED: Source-code relationships are established.
+* RUNTIME_VERIFIED: The actual path was executed and verified.
+* PARTIALLY_TRACED: Only part of the path is established.
+* UNKNOWN: Insufficient evidence.
+Never invent a missing connection to make the architecture diagram complete.
+PHASE 3 — SHAHAB deep audit
+Perform the full SHAHAB audit described in Section 6.
+PHASE 4 — ENGINE 01 deep audit
+Perform the full ENGINE 01 audit described in Section 7.
+PHASE 5 — Integration and contract audit
+Independently examine the actual producer and consumer contracts as described in Section 8.
+PHASE 6 — Tests, benchmarks, CI, findings, and remediation planning
+Evaluate the strength of existing evidence, consolidate unique findings, identify release blockers, and produce a prioritized remediation roadmap.
+
+6. SHAHAB — DETAILED TECHNICAL AUDIT
+6.1. Model provenance and architecture
+Inspect the actual model assets and execution implementation.
+Determine:
+* Model origin.
+* Model version.
+* Actual model architecture.
+* Encoder implementation.
+* Decoder implementation.
+* Joiner implementation.
+* ONNX graph files.
+* ONNX graph metadata.
+* Runtime compatibility.
+* Execution provider.
+* Vocabulary and tokenization.
+* Token inventory.
+* Manifest consistency.
+* Weight integrity checks.
+* Hash algorithm and expected hashes.
+* Quantization details.
+* Session initialization.
+* Model loading and unloading.
+* Differences between original and optimized execution paths.
+* Differences between documented and actual architecture.
+Identify exactly which model files are loaded by the real execution path.
+Do not treat the presence of an ONNX file as proof that it is used.
+Do not treat a model manifest as proof that the files match its claims.
+6.2. Audio input and preprocessing
+Trace each supported audio format from the external input boundary to the actual model input.
+Investigate:
+* WAV
+* MP3
+* FLAC
+* OGG
+* WebM
+* MP4
+* AAC
+* AIFF
+For every format, report:
+Validation stage	Result
+Router accepts format	
+File validation succeeds	
+Actual decoder supports it	
+Ingestion supports it	
+Data reaches Runtime	
+Model processes it	
+Relevant real test exists	
+Final support status	
+Also inspect:
+* Actual model input sample rate.
+* Channel count.
+* Mono conversion.
+* Resampling.
+* Downmixing.
+* Sample representation.
+* Sample indexing.
+* Clipping.
+* Silence.
+* Noise.
+* Low-gain audio.
+* Corrupted or truncated files.
+* Maximum upload size.
+* Maximum processing duration.
+* Long audio handling.
+Distinguish declared support, implementation-level support, and experimentally verified support.
+Do not infer format support merely from an allowlist or MIME-type declaration.
+6.3. Feature extraction and model execution
+Inspect the real implementation of:
+* Feature extraction.
+* Window size.
+* Frame shift.
+* Feature dimensions.
+* Tensor shapes.
+* Tensor data types.
+* Encoder inputs and outputs.
+* Decoder inputs and outputs.
+* Joiner inputs and outputs.
+* Beam search.
+* Blank-token handling.
+* Token selection.
+* Special-token handling.
+* Empty-output handling.
+* ONNX error handling.
+* Compatibility with downstream transcript structures.
+Record actual parameter values when available.
+Do not invent missing configuration values.
+Any claimed algorithmic defect must be supported by actual code evidence or a reproducible comparison.
+6.4. Persian speech recognition quality
+This is a primary evaluation area.
+Investigate the available evidence for:
+* Standard Persian.
+* Colloquial Persian.
+* Dialect variation.
+* Fast speech.
+* Pauses.
+* Incomplete words.
+* Similar-sounding words.
+* Similar Persian characters.
+* Personal names.
+* Geographic names.
+* Domain-specific vocabulary.
+* Numbers and dates.
+* Punctuation.
+* Word boundaries.
+* ZWNJ and half-space behavior.
+* Text normalization.
+* Deletions.
+* Insertions.
+* Substitutions.
+Keep raw model output separate from normalized transcript output.
+Where genuine reference transcripts and corresponding audio are available, show representative examples:
+* Reference transcript.
+* Raw model output.
+* Normalized output.
+* Error category.
+* Relevant audio condition.
+Do not claim general Persian accuracy based on a few selected examples.
+If valid audio and ground-truth evidence are insufficient, report:
+PERSIAN_ASR_ACCURACY_NOT_ESTABLISHED
+Do not invent a benchmark score.
+6.5. Streaming, chunking, and timestamps
+Inspect:
+* Chunking strategy.
+* Chunk overlap.
+* Chunk boundary handling.
+* Duplicate words.
+* Missing words.
+* Backpressure.
+* Cancellation.
+* Timeout behavior.
+* Concurrent inference.
+* Result ordering.
+* Initial latency.
+* Final latency.
+* Segment timestamps.
+* Token timestamps.
+* Sample-position correspondence.
+* Temporal monotonicity.
+* Timestamp bounds.
+For every timestamp implementation, identify its actual derivation:
+* MODEL_DERIVED
+* SIGNAL_DERIVED
+* ALIGNMENT_DERIVED
+* ESTIMATED
+* UNKNOWN
+Do not call estimated timestamps forced alignment.
+Do not claim word-level alignment accuracy merely because word-level timestamps are present.
+Investigate whether chunk-level timing errors can propagate into downstream editing positions.
+6.6. Memory, resource lifecycle, and reliability
+Inspect:
+* Tensor allocation.
+* Tensor ownership.
+* Input disposal.
+* Output disposal.
+* ONNX session lifecycle.
+* WASM memory behavior.
+* RAM consumption.
+* Memory growth.
+* Queue management.
+* Concurrency limits.
+* Unload behavior.
+* Dispose behavior.
+* Repeated inference.
+* Long-running jobs.
+* Error paths.
+* Cancellation paths.
+For each potential resource leak, trace:
+1. Allocation.
+2. Ownership.
+3. References.
+4. Release behavior.
+5. Normal exit.
+6. Error exit.
+7. Cancellation exit.
+8. Repeated execution behavior.
+The absence of an obvious dispose() call in one function is not sufficient proof of a memory leak. Ownership may be handled elsewhere.
+Classify findings as either:
+* CONFIRMED_RESOURCE_LEAK
+* RESOURCE_LIFECYCLE_DEFECT
+* POTENTIAL_RESOURCE_LEAK
+* NOT_REPRODUCED
+A confirmed runtime leak requires repeatable measurements or other convincing execution evidence.
+If execution is unavailable, report a resource-lifecycle risk rather than claiming a proven leak.
+6.7. Security, local execution, and offline behavior
+Treat local execution and CPU-capable speech recognition as important architecture requirements of Avapardaz.
+Verify the actual implementation rather than assuming that these requirements have already been met.
+Inspect:
+* Local inference capability.
+* CPU execution.
+* Network dependencies.
+* Runtime model downloads.
+* External API calls.
+* Audio or transcript transmission.
+* Authentication.
+* Authorization.
+* Input validation.
+* File access.
+* Upload limits.
+* Rate limiting.
+* Replay protection.
+* Cancellation and timeout.
+* Sensitive information exposure.
+* Error information leakage.
+Distinguish:
+1. Offline during inference.
+2. Offline during application startup.
+3. Offline after installation and model acquisition.
+4. Offline without external services.
+5. Operation that still requires network access.
+Report what is actually established.
+Do not assume that a WASM execution path proves that the entire application is offline-capable.
+
+7. ENGINE 01 — DETAILED TECHNICAL AUDIT
+Audit ENGINE 01 independently.
+Its exact boundary must be based on current project architecture and implementation evidence.
+Inspect the actual audio-processing lifecycle:
+1. File input.
+2. Stream input.
+3. Input validation.
+4. Canonical audio ingestion.
+5. Initial decoding.
+6. Format conversion.
+7. Sample-rate conversion.
+8. Channel conversion.
+9. Preservation of original audio.
+10. Sample-position management.
+11. Session management.
+12. Job management.
+13. SHAHAB invocation.
+14. Transcript receipt.
+15. Timestamp receipt.
+16. Raw-text preservation.
+17. Text normalization.
+18. Retry behavior.
+19. Error propagation.
+20. Cancellation.
+21. Timeout.
+22. Long-audio processing.
+23. Recovery after failure.
+24. Project isolation.
+25. Data integrity.
+26. Downstream delivery to ENGINE 02.
+For each responsibility establish:
+* File location.
+* Entry point.
+* Call path.
+* Input structure.
+* Output structure.
+* Data ownership.
+* Dependencies.
+* Consumers.
+* Related tests.
+* Runtime evidence.
+* Known limitations.
+* Confirmed defects.
+* Unverified risks.
+Distinguish real execution from:
+* Interfaces.
+* Abstract contracts.
+* Adapters that are not actually invoked.
+* Mocks.
+* Stubs.
+* Simulations.
+* Documentation-only features.
+* Unreachable code.
+Audio integrity requirement
+Investigate whether the original audio remains preserved throughout the processing pipeline.
+Determine whether:
+* Original audio is immutable.
+* Processing occurs on a derived representation.
+* Sample indices remain consistent.
+* Time mappings remain correct after transformations.
+* Failures can corrupt or overwrite original assets.
+* Temporary audio is distinguished from authoritative source audio.
+Do not declare non-destructive processing verified without appropriate evidence.
+Project and session isolation
+Inspect whether:
+* Jobs are associated with the correct project.
+* Sessions cannot leak state across projects.
+* Concurrent jobs remain correctly isolated.
+* Cancellation affects only the intended operation.
+* Failures cannot corrupt another project's state.
+* Identifiers remain consistent throughout processing.
+Report the actual guarantees, not merely the intended design.
+
+8. SHAHAB ↔ ENGINE 01 INTEGRATION AUDIT
+Inspect the producer and consumer independently.
+Do not assume that matching TypeScript interfaces guarantee correct runtime behavior.
+Produce a contract table:
+Contract field	SHAHAB producer	ENGINE 01 consumer	Compatibility
+Audio input			
+Sample rate			
+Channel count			
+Audio duration			
+Sample position			
+Transcript			
+Normalized transcript			
+Timestamp			
+Job ID			
+Session ID			
+Project ID			
+Error structure			
+Cancellation			
+Processing state			
+Inspect:
+* Field names.
+* Field types.
+* Required versus optional fields.
+* Nullability.
+* Units.
+* Time origin.
+* Sample-index semantics.
+* Empty-result behavior.
+* Error propagation.
+* Timeout compatibility.
+* Cancellation propagation.
+* Retry semantics.
+* Duplicate processing.
+* Session isolation.
+* Job ownership.
+* Data ownership.
+* API version compatibility.
+* Downstream output compatibility.
+For each confirmed integration defect, provide evidence from both sides of the contract.
+If a contract cannot be traced to an actual runtime consumer, report it as an unverified integration path.
+
+9. BENCHMARK AND DATASET VALIDITY
+Inspect all existing ASR benchmarks, evaluation reports, and datasets relevant to SHAHAB.
+For each dataset record:
+* Total file count.
+* Number of independent original recordings.
+* Number of independent speakers.
+* Number of derived audio samples.
+* Speaker diversity.
+* Dialect diversity.
+* Recording conditions.
+* Noise conditions.
+* Ground-truth availability.
+* Transcript provenance.
+* Normalization rules.
+* Per-file results.
+* Aggregate results.
+* Evaluation repeatability.
+* Train/evaluation leakage risks.
+* Speaker leakage risks.
+Do not count noisy, clipped, gain-adjusted, or otherwise transformed versions of one recording as independent recordings.
+Metric verification
+For WER, verify:
+WER = (S + D + I) / N
+Where:
+* S = substitutions.
+* D = deletions.
+* I = insertions.
+* N = number of reference words.
+For CER, identify the exact character-level calculation and normalization procedure.
+Determine whether reported aggregation uses:
+* Micro-averaging.
+* Macro-averaging.
+* Another method.
+Inspect whether the scoring procedure handles:
+* Whitespace.
+* Punctuation.
+* Persian normalization.
+* Arabic versus Persian character variants.
+* ZWNJ and half-spaces.
+* Numbers.
+* Diacritics.
+* Empty references.
+* Empty hypotheses.
+Do not compare WER scores obtained under materially different normalization rules as though they were directly equivalent.
+Do not claim independent reproduction when the source audio or ground truth is unavailable.
+Do not claim statistical generalization from a small or dependent dataset.
+If the evidence is insufficient to establish actual Persian recognition quality, report:
+PERSIAN_ASR_ACCURACY_NOT_ESTABLISHED
+Do not invent acceptance thresholds as existing project requirements. Any proposed threshold must be labeled:
+PROPOSED_ACCEPTANCE_CRITERION
+
+10. TEST AND CI AUDIT
+Classify relevant tests as:
+* Unit.
+* Integration.
+* End-to-End.
+* Security.
+* Performance.
+* Reliability.
+* ASR Accuracy.
+* Regression.
+For each relevant test, report:
+Test attribute	Required finding
+Test name	
+File path	
+Target capability	
+Test category	
+Mock or real implementation	
+Actual model execution	
+Ground-truth reference	
+Execution status	
+Actual outcome	
+Coverage limitations	
+Defects it cannot detect	
+Use only these execution states:
+* PASSED
+* FAILED
+* NOT RUN
+* BLOCKED
+* NOT APPLICABLE
+Never assign PASSED or FAILED to an unexecuted test.
+Distinguish:
+* Static checks.
+* Type checks.
+* Build checks.
+* Model initialization checks.
+* Inference smoke tests.
+* Transcript correctness tests.
+* Performance measurements.
+* End-to-end product tests.
+A passing inference smoke test does not establish transcript accuracy.
+A passing build does not establish runtime reliability.
+A passing unit test does not establish end-to-end integration.
+GitHub Actions
+Inspect the latest accessible CI runs associated with the audited commit and target branch.
+For each relevant run, record:
+* Workflow name.
+* Run ID.
+* Commit SHA.
+* Branch.
+* Execution time.
+* Job names.
+* Failed jobs.
+* Failed steps.
+* Available logs.
+* Exact error messages.
+* Evidence-based root cause, if established.
+If only the final workflow status is visible and logs cannot be accessed, report:
+FAILURE_CAUSE_UNKNOWN
+Do not infer the cause of a CI failure.
+Do not attribute a workflow failure to SHAHAB or ENGINE 01 without evidence linking the failed step to that component.
+
+11. PREVIOUS AUDIT FINDINGS — REVALIDATION ONLY
+The following items are historical investigation leads, not established facts about the current commit.
+Independently revalidate them:
+1. A previously reported WER value of approximately 0.5192 in docs/shahab/SHAHAB_RELEASE_BENCHMARK.json.
+2. Previously reported limitations in independent recordings in docs/shahab/SHAHAB_FIELD_DATASET_MANIFEST.json.
+3. Potential model-readiness and integrity-validation weaknesses in src/shahab/ShahabZipformerAsrRuntime.ts.
+4. Potential differences between runtime processing duration limits and HTTP request timeouts.
+5. Potential Tensor lifecycle issues in src/shahab/ShahabZipformerEngine.ts.
+6. Potential discrepancies between declared capabilities and actual runtime architecture.
+7. Previously observed CI failures on main.
+For each lead, assign one of:
+* STILL_PRESENT
+* FIXED_AND_VERIFIED
+* PARTIALLY_FIXED
+* NOT_REPRODUCED
+* NOT_ACCESSIBLE
+* PREVIOUS_CLAIM_UNVERIFIED
+Record the current commit, exact evidence, and relevant file paths.
+Do not repeat previous conclusions without rechecking them.
+If a previous defect has been fixed, identify the actual fix and the evidence establishing that the fix works.
+
+12. EVIDENCE AND FINDING CLASSIFICATION
+Every finding must have a unique evidence reference.
+Use:
+* EVID-S-001 for SHAHAB evidence.
+* EVID-E-001 for ENGINE 01 evidence.
+* EVID-I-001 for integration evidence.
+* EVID-T-001 for test evidence.
+* EVID-B-001 for benchmark evidence.
+* EVID-C-001 for CI evidence.
+Evidence levels
+E1 — Direct source-code evidence
+Actual code, exact file path, relevant symbol, and line range.
+E2 — Execution evidence
+Reproducible test, runtime observation, benchmark, or diagnostic result.
+E3 — Documentation evidence
+Documentation or historical report that has not been independently verified against current behavior.
+E4 — Hypothesis or risk
+A technically plausible concern that has not been proven.
+Finding types
+Use the most appropriate classification:
+* CONFIRMED_CODE_DEFECT
+* CONFIRMED_RUNTIME_DEFECT
+* ARCHITECTURAL_GAP
+* INTEGRATION_DEFECT
+* QUALITY_GAP
+* SECURITY_DEFECT
+* PERFORMANCE_DEFECT
+* RESOURCE_LIFECYCLE_RISK
+* TEST_COVERAGE_GAP
+* DOCUMENTATION_DRIFT
+* UNVERIFIED_RISK
+A static code inconsistency is not automatically a confirmed runtime failure.
+For example, a declared timeout mismatch is a confirmed configuration inconsistency if directly established, but its actual impact on a particular execution must be separately verified.
+Every finding must reference:
+* Audited commit.
+* File path.
+* Symbol.
+* Exact line range, when accessible.
+* Evidence IDs.
+* Observed behavior.
+* Expected behavior.
+Never invent line numbers, test outputs, execution results, commit identifiers, or benchmark values.
+If line numbers cannot be retrieved, state that explicitly and identify the file and symbol.
+
+13. CAPABILITY STATUS CLASSIFICATION
+Assign one status to every reviewed capability:
+* IMPLEMENTED_AND_VERIFIED
+* IMPLEMENTED_BUT_UNVERIFIED
+* PARTIALLY_IMPLEMENTED
+* DOCUMENTED_ONLY
+* MOCKED_OR_SIMULATED
+* NOT_IMPLEMENTED
+* FAILED
+* NOT_ACCESSIBLE
+Use IMPLEMENTED_AND_VERIFIED only when:
+1. A real implementation exists.
+2. Its actual execution path is traceable.
+3. Relevant behavior has been tested or otherwise independently demonstrated.
+4. Evidence is appropriate to the specific capability being claimed.
+5. Significant limitations are disclosed.
+Do not treat verification of one simple execution path as verification of all supported inputs and operating conditions.
+For complex capabilities, report sub-capabilities separately when their behavior differs.
+
+14. DEFECT REPORTING FORMAT
+Assign each unique finding a permanent identifier:
+* SHAHAB-001
+* ENGINE01-001
+* INTEGRATION-001
+* ACCURACY-001
+* SECURITY-001
+* TEST-001
+Every finding must contain:
+1. Finding ID.
+2. Title.
+3. Affected component.
+4. Finding type.
+5. Capability status.
+6. Evidence level.
+7. Severity.
+8. Audited commit SHA.
+9. File path.
+10. Relevant symbol.
+11. Exact line range, if available.
+12. Actual behavior.
+13. Expected behavior.
+14. Direct evidence.
+15. Reproduction procedure.
+16. Root cause, if established.
+17. Unresolved hypotheses.
+18. User impact.
+19. Architectural impact.
+20. Recommended technical fix.
+21. Likely files affected by remediation.
+22. Required acceptance test.
+23. Measurable acceptance criterion.
+24. Regression risks.
+25. Dependencies on other fixes.
+If the root cause is not proven, use:
+ROOT_CAUSE_UNCONFIRMED
+Do not report the same underlying defect as several independent findings.
+If multiple files contribute to one defect, maintain one primary finding ID and list all related locations.
+
+15. SEVERITY AND REMEDIATION PRIORITY
+Keep severity and remediation priority separate.
+Severity
+* CRITICAL: Serious security exposure, data corruption, data loss, or fundamental failure of a core capability.
+* HIGH: Serious disruption of a primary product function, correctness, or reliability.
+* MEDIUM: Important defect with limited impact or a viable workaround.
+* LOW: Minor defect or non-critical improvement.
+Remediation priority
+* P0: Must be resolved before the relevant product use or release can be considered safe and reliable.
+* P1: Required in the first remediation package.
+* P2: Required in a subsequent engineering package.
+* P3: Optional or incremental improvement.
+Severity describes impact.
+Priority describes remediation urgency.
+Do not automatically assign a high priority merely because an issue is technically complicated.
+Explain every severity and priority decision.
+
+16. INDEPENDENT SCORING
+Score SHAHAB and ENGINE 01 separately.
+Scores are engineering assessment summaries, not proof of release readiness.
+SHAHAB scoring
+Category	Weight
+Actual Persian ASR accuracy	25
+Model and architecture correctness	15
+Timestamp and streaming correctness	15
+Reliability and resource management	15
+Security and local execution	10
+Test quality and evidence	15
+Release readiness	5
+Total	100
+ENGINE 01 scoring
+Category	Weight
+Audio ingestion and preparation	20
+SHAHAB integration and contract correctness	20
+Data integrity and time mapping	20
+Reliability and operation management	15
+Security and project isolation	10
+Test quality and evidence	10
+Release readiness	5
+Total	100
+Score each assessable category from 0 to 10.
+Weighted contribution:
+Category score × category weight ÷ 10
+For categories that cannot be assessed:
+* Mark NOT ASSESSABLE.
+* Disclose the missing weight.
+* Do not silently assign a perfect or zero score.
+Provide both:
+1. The weighted score across assessable categories.
+2. Evidence coverage as a percentage of the total category weight.
+Use this coverage formula:
+Evidence coverage = assessable category weight ÷ total category weight × 100
+Do not present a high adjusted score with low coverage as proof of product quality.
+Do not score Persian accuracy as established when reliable reference evidence is unavailable.
+For each category, provide the score, rationale, limitations, and evidence IDs.
+
+17. RELEASE READINESS — INDEPENDENT GATE ASSESSMENT
+A weighted average score must never conceal a critical release blocker.
+Assess release readiness separately from the numerical score.
+For each relevant gate, assign:
+* PASS
+* FAIL
+* UNKNOWN
+* NOT APPLICABLE
+Evaluate at least these gates:
+1. Core model can be loaded and executed.
+2. Real audio can reach the actual model.
+3. The end-to-end transcript path works.
+4. Audio integrity is preserved.
+5. Time and sample-position mapping is sufficiently correct for the product's intended use.
+6. Cancellation and error handling are reliable.
+7. No unresolved critical security issue is established.
+8. Resource behavior is acceptable for the tested workload.
+9. Persian ASR quality has sufficient valid evidence against the project's actual acceptance requirements.
+10. CI and required regression tests meet the available release requirements.
+11. External dependencies and offline behavior match the product requirements.
+Do not invent formal release thresholds.
+If the project does not define a threshold, report:
+ACCEPTANCE_THRESHOLD_NOT_SPECIFIED
+You may recommend a future threshold, but label it as a proposal rather than an existing requirement.
+A critical unresolved defect must not be neutralized by a high average score.
+A gate with insufficient evidence must be UNKNOWN, not PASS.
+Conclude with one of:
+* GO
+* NO_GO
+* CONDITIONAL_GO
+* NOT_ASSESSABLE
+Explain the decision and list every blocking or unknown gate.
+
+18. REMEDIATION ROADMAP
+For every confirmed defect, provide an actionable remediation proposal.
+Each proposed fix must identify:
+* Finding IDs addressed.
+* Actual problem.
+* Established root cause.
+* Intended behavior after correction.
+* Relevant architectural layer.
+* Likely files affected.
+* Dependencies.
+* Impact on other components.
+* Healthy components that must remain unchanged.
+* Required tests.
+* Measurable acceptance criteria.
+* Regression risks.
+* Rollback or containment considerations, when appropriate.
+Avoid vague recommendations such as:
+* Optimize performance.
+* Improve memory management.
+* Refactor architecture.
+* Improve ASR accuracy.
+* Improve reliability.
+Translate every recommendation into specific engineering actions and measurable outcomes.
+Group related fixes into small, independently verifiable remediation packages.
+Order packages according to technical dependencies.
+Do not recommend replacing the entire engine, model, or architecture unless evidence demonstrates that a more limited fix is insufficient.
+Do not implement any proposed fix during this audit.
+
+19. HEALTHY COMPONENTS AND PROTECTED AREAS
+Identify components that have sufficient evidence of correct behavior and should be protected from unnecessary changes.
+For each component report:
+* File path.
+* Responsibility.
+* Evidence of correct behavior.
+* Relevant tests.
+* Dependencies.
+* Verified operating conditions.
+* Known limitations.
+* Reason it should remain unchanged during remediation.
+Distinguish:
+* VERIFIED_HEALTHY
+* PARTIALLY_VERIFIED
+* UNVERIFIED
+* KNOWN_DEFECT
+Do not label untested code healthy merely because no defect was found.
+Do not recommend changes to a healthy component without explaining the specific dependency that requires them.
+
+20. AUDIT LEDGER AND CONTINUATION CONTROL
+Maintain an audit ledger throughout the task.
+Keep it in the response or working conversation context. Do not create a ledger file inside the repository.
+The ledger must contain:
+Item	Current status
+Audited commit SHA	
+Current phase	
+Completed phases	
+Files reviewed	
+Partially reviewed files	
+Files not reviewed	
+Tests executed	
+Tests not executed	
+Confirmed findings	
+Unverified risks	
+Blocked items	
+Next action	
+Update this ledger after completing each major phase.
+Do not repeatedly audit the same completed material unless new evidence or a changed commit requires revalidation.
+If the execution reaches context, time, or tool limitations:
+1. Report PARTIALLY_COMPLETED.
+2. Preserve the exact audited commit SHA.
+3. Record the last completed phase.
+4. List reviewed and unreviewed files.
+5. Preserve all confirmed findings and evidence references.
+6. Identify blocked work and the reason.
+7. Provide an exact continuation point.
+8. Do not claim that unfinished areas are complete.
+If the commit changes between execution sessions, identify the change and determine which previous findings need revalidation.
+Continue independent audit work without requesting unnecessary user confirmation.
+
+21. REQUIRED FINAL REPORT STRUCTURE
+Deliver the final report in the following order:
+1. Executive summary.
+2. Repository identity, branch, and audited commit.
+3. Environment and access limitations.
+4. Actual SHAHAB boundary.
+5. Actual ENGINE 01 boundary.
+6. Architecture inventory.
+7. Architecture coverage matrix.
+8. Dependency map.
+9. End-to-end audio data-flow diagram.
+10. Detailed SHAHAB audit.
+11. Detailed ENGINE 01 audit.
+12. SHAHAB-to-ENGINE 01 integration audit.
+13. Producer/consumer contract comparison.
+14. Persian ASR quality assessment.
+15. Benchmark and dataset validity.
+16. Test coverage and test execution results.
+17. CI results.
+18. Unique confirmed findings.
+19. Unverified technical risks.
+20. Documented but unverified capabilities.
+21. Revalidation of previous audit leads.
+22. Independent SHAHAB score.
+23. Independent ENGINE 01 score.
+24. Release gate assessment.
+25. Verified healthy and protected components.
+26. Prioritized remediation roadmap.
+27. Remaining limitations and blocked items.
+28. Final repository integrity verification.
+Final summary table
+Metric	SHAHAB	ENGINE 01
+Capabilities identified		
+Capabilities reviewed		
+Capabilities verified		
+Capabilities unverified		
+Partially implemented capabilities		
+Critical findings		
+High findings		
+Medium findings		
+Low findings		
+Unverified risks		
+File review coverage		
+Evidence coverage		
+Assessable weighted score		
+Release gate result		
+Report integration findings separately.
+Do not double-count the same underlying defect across SHAHAB, ENGINE 01, integration, security, or testing summaries.
+
+22. FINAL SELF-AUDIT OF YOUR OWN REPORT
+Before presenting the report, critically review your own work.
+Confirm:
+* The audited commit is identified.
+* The actual engine boundaries are evidence-based.
+* The architecture diagram represents actual code relationships.
+* The audio path has been traced rather than inferred.
+* Reviewed and unreviewed files are distinguished.
+* Every confirmed defect has supporting evidence.
+* Static inconsistencies are distinguished from runtime failures.
+* Hypotheses are not presented as facts.
+* Tests are reported with their actual execution status.
+* Benchmark calculations and normalization rules are disclosed.
+* Derived audio samples are not counted as independent recordings.
+* Persian accuracy is not inferred from successful inference alone.
+* Scores are reproducible from their stated weights.
+* Release gates are independent of average scores.
+* Recommendations have measurable acceptance criteria.
+* Healthy components are explicitly protected.
+* Tool and access limitations are disclosed.
+* No repository modification has occurred.
+If any condition is not satisfied, correct the report or disclose the limitation.
+
+23. COMPLETION CRITERIA
+The audit may be marked:
+COMPLETED
+only when:
+1. The audited repository version is established.
+2. Actual SHAHAB and ENGINE 01 boundaries are documented.
+3. Relevant files and modules have been inventoried.
+4. Review coverage is disclosed.
+5. The actual audio-processing path is traced.
+6. Integration contracts are examined.
+7. Persian ASR evidence is evaluated.
+8. Benchmark validity is assessed.
+9. Tests and CI are reported accurately.
+10. Confirmed defects are separated from risks.
+11. Every confirmed defect has a technical remediation proposal.
+12. Healthy components are identified.
+13. Release gates have been assessed.
+14. Limitations are disclosed.
+15. Repository integrity has been checked.
+Otherwise, use:
+PARTIALLY_COMPLETED
+and explicitly identify the unfinished work.
+Never manufacture missing evidence to satisfy a completion criterion.
+
+FINAL DIRECTIVE
+Act as an independent forensic engineering auditor, not as a developer trying to make the repository pass tests.
+Do not defend existing code without evidence.
+Do not invent defects to make the report look comprehensive.
+Do not approve undocumented or unverified capabilities.
+Do not hide confirmed problems.
+Do not turn hypotheses into facts.
+Do not fabricate test results, benchmark values, line numbers, commit IDs, or runtime observations.
+Do not modify source code, tests, model assets, configuration, data, Git state, or external services.
+Do not rewrite healthy components.
+Do not implement proposed fixes.
+The final deliverable must provide an accurate, traceable, technically defensible picture of what SHAHAB and ENGINE 01 actually implement, how they operate, how reliably they perform, what has been proven, what remains uncertain, which defects are confirmed, and exactly what engineering work is required to reach a dependable product state.
+This mission ends with the audit report and remediation plan only.
+Implementation and remediation are explicitly out of scope and must be handled in a separate, subsequent mission.

@@ -73,6 +73,7 @@ export interface ShahabLeakageCheckReport {
   readonly duplicateAcousticFingerprints: readonly string[];
   readonly crossPartitionSpeakerLeaks: readonly string[];
   readonly crossPartitionSessionLeaks: readonly string[];
+  readonly crossPartitionLineageLeaks?: readonly string[];
   readonly notes: readonly string[];
 }
 
@@ -137,6 +138,21 @@ export class SHAHABFieldDatasetManifest {
    */
   public checkLeakage(): ShahabLeakageCheckReport {
     const all = this.listSamples();
+    const sampleById = new Map<string, ShahabFieldSampleRecord>(all.map((s) => [s.sampleId, s]));
+    const resolveRootSampleId = (sampleId: string): string => {
+      let currentId = sampleId;
+      const visited = new Set<string>([currentId]);
+      while (true) {
+        const record = sampleById.get(currentId);
+        const parentId = record?.derivedFromSampleId?.trim();
+        if (!parentId || visited.has(parentId)) {
+          return currentId;
+        }
+        visited.add(parentId);
+        currentId = parentId;
+      }
+    };
+
     const seenHashes = new Map<string, string>();
     const dupHashes: string[] = [];
     const seenFp = new Map<string, string>();
@@ -146,6 +162,8 @@ export class SHAHABFieldDatasetManifest {
     const testSpeakers = new Set<string>();
     const devSessions = new Set<string>();
     const testSessions = new Set<string>();
+    const devLineageRoots = new Set<string>();
+    const testLineageRoots = new Set<string>();
 
     for (const s of all) {
       if (seenHashes.has(s.audioSha256)) {
@@ -160,18 +178,26 @@ export class SHAHABFieldDatasetManifest {
         seenFp.set(s.acousticFingerprint, s.sampleId);
       }
 
+      const rootId = resolveRootSampleId(s.sampleId);
       if (s.partition === 'DEV_DIAGNOSTIC') {
         if (s.speakerGroupId) devSpeakers.add(s.speakerGroupId);
         devSessions.add(s.sessionGroupId);
+        devLineageRoots.add(rootId);
       } else if (s.partition === 'FROZEN_TEST') {
         if (s.speakerGroupId) testSpeakers.add(s.speakerGroupId);
         testSessions.add(s.sessionGroupId);
+        testLineageRoots.add(rootId);
       }
     }
 
     const speakerLeaks = [...devSpeakers].filter((sp) => testSpeakers.has(sp));
     const sessionLeaks = [...devSessions].filter((se) => testSessions.has(se));
-    const passed = dupHashes.length === 0 && speakerLeaks.length === 0 && sessionLeaks.length === 0;
+    const lineageLeaks = [...devLineageRoots].filter((root) => testLineageRoots.has(root));
+    const passed =
+      dupHashes.length === 0 &&
+      speakerLeaks.length === 0 &&
+      sessionLeaks.length === 0 &&
+      lineageLeaks.length === 0;
 
     return {
       passed,
@@ -179,10 +205,16 @@ export class SHAHABFieldDatasetManifest {
       duplicateAcousticFingerprints: dupFp,
       crossPartitionSpeakerLeaks: speakerLeaks,
       crossPartitionSessionLeaks: sessionLeaks,
+      crossPartitionLineageLeaks: lineageLeaks,
       notes: [
         `Total samples registered: ${all.length}`,
         `Eligible for ground-truth scoring: ${this.listEligibleForScoring().length}`,
-        speakerLeaks.length === 0 ? 'No speaker overlap across DEV/FROZEN_TEST.' : `Speaker leakage detected: ${speakerLeaks.join(', ')}`,
+        speakerLeaks.length === 0
+          ? 'No speaker overlap across DEV/FROZEN_TEST.'
+          : `Speaker leakage detected: ${speakerLeaks.join(', ')}`,
+        lineageLeaks.length === 0
+          ? 'No derived-sample lineage overlap across DEV/FROZEN_TEST.'
+          : `Derived-sample lineage leakage detected across DEV/FROZEN_TEST (root recordings: ${lineageLeaks.join(', ')}).`,
       ],
     };
   }
@@ -209,7 +241,12 @@ export class SHAHABFieldDatasetManifest {
 
     for (const cat of categories) {
       const items = this.listEligibleForScoring().filter((s) => s.category === cat);
-      const uniqueRecordings = new Set(items.map((i) => i.derivedFromSampleId ?? i.sampleId)).size;
+      // Only non-derived source recordings count as independent recordings for a category.
+      // Derived acoustic stress variants of another recording must never inflate independentRecordingCount.
+      const independentItems = items.filter(
+        (i) => !i.isDerivedAcousticConditionVariant && !i.derivedFromSampleId,
+      );
+      const uniqueRecordings = new Set(independentItems.map((i) => i.sampleId)).size;
       const totalDur = Number(items.reduce((acc, i) => acc + i.durationSec, 0).toFixed(2));
       const status =
         items.length === 0

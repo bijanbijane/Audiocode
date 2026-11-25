@@ -264,7 +264,9 @@ export interface PersianWordToken {
   displayText: string;
   range: FlickRange;
   confidence: number;
-  alignmentSource: 'ASR' | 'ForcedAlignment' | 'AcousticSnap';
+  /** False when the upstream ASR model did not emit a real per-word confidence score */
+  confidenceAvailable?: boolean;
+  alignmentSource: 'ASR' | 'ForcedAlignment' | 'AcousticSnap' | 'Estimated';
   hasTrailingEzafeRisk?: boolean;
   isDisfluency?: boolean;
   isStretchedVowel?: boolean;

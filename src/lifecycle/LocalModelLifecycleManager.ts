@@ -13,6 +13,7 @@ import {
   isQuotaExceededError,
   MAX_MODEL_CHUNK_BYTES,
   MODEL_CHUNK_SIZE_BYTES,
+  ModelArchitecture,
   ModelRepositoryError,
   PersistedModelRegistryPointer,
   StoredModelArtifactManifest,
@@ -47,7 +48,7 @@ export interface InstalledModelDescriptor {
   readonly version: string;
   readonly generationId: string;
   readonly storageDirectory: string;
-  readonly architecture: 'FASTCONFORMER_CTC' | 'WHISPER_SEQ2SEQ';
+  readonly architecture: ModelArchitecture;
   readonly supportedRuntime: 'onnxruntime-web/wasm' | 'onnxruntime-web/webgpu';
   readonly supportedExecutionProviders: readonly ('webgpu' | 'wasm')[];
   readonly fileName: string;

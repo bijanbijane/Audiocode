@@ -271,6 +271,7 @@ export class SmartAudioEditJobManager {
         job: entry.job,
         session: entry.session,
         audio: entry.audio,
+        ownerId: entry.ownerId,
         languageHint: options?.languageHint ?? 'fa',
         signal: controller.signal,
         onJobUpdate: (updated) => {
@@ -288,6 +289,7 @@ export class SmartAudioEditJobManager {
         job: entry.job,
         session: entry.session,
         audio: entry.audio,
+        signal: controller.signal,
         onJobUpdate: (updated) => {
           entry.job = updated;
         },
@@ -499,7 +501,7 @@ export class SmartAudioEditJobManager {
     return this.toSnapshot(entry);
   }
 
-  public listJobs(ownerId?: string): readonly AudioEditJob[] {
+  public listJobs(ownerId?: string, projectId?: string): readonly AudioEditJob[] {
     this.sweepExpiredJobs();
     if (this.limits.requireExplicitOwnerId && (!ownerId || ownerId.trim().length === 0)) {
       throw new SmartAudioEditError('JOB_ACCESS_DENIED', 'فهرست Jobها بدون هویت مالک مجاز نیست.');
@@ -507,6 +509,7 @@ export class SmartAudioEditJobManager {
     const list: AudioEditJob[] = [];
     for (const entry of this.jobs.values()) {
       if (ownerId !== undefined && entry.ownerId !== ownerId) continue;
+      if (projectId !== undefined && entry.session.projectId !== projectId) continue;
       list.push(entry.job);
     }
     return list;

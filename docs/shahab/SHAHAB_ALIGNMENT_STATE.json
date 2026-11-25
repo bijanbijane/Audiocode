@@ -1,0 +1,190 @@
+{
+  "missionId": "SHAHAB-025",
+  "generatedAtUtc": "2026-11-21T20:53:23.309Z",
+  "contractVersion": "1.0.0",
+  "capabilities": {
+    "contractVersion": "1.0.0",
+    "inspectedAtUtc": "2026-11-21T20:53:23.310Z",
+    "activeAsrModelId": "ramin-mahmoodi/persian-zipformer-asr",
+    "activeAsrModelRevision": "0408facbcf3f670121def48e0802c395c225d150",
+    "activeAsrArchitecture": "zipformer2 pruned_transducer_stateless7 (RNN-T, 1024 BPE)",
+    "activeAsrFrameStrideMs": 40,
+    "activeModelTokensPresentOnDisk": true,
+    "activeModelOnnxWeightsPresentOnDisk": false,
+    "dedicatedCtcAlignerWeightsPresentOnDisk": false,
+    "capabilityStatus": "ALIGNMENT_PARTIALLY_SUPPORTED",
+    "supportedGranularities": [
+      "SEGMENT_LEVEL",
+      "TOKEN_LEVEL",
+      "TIMING_UNAVAILABLE"
+    ],
+    "verifiedWordLevelPhonemeAlignment": false,
+    "proportionalTimestampFabricationBlocked": true,
+    "supportedBackends": [
+      "CTC_VITERBI_LOGPROBS",
+      "TRANSDUCER_TOKEN_EMISSION_LATTICE",
+      "ACOUSTIC_VAD_ANCHORED_SEGMENT",
+      "TIMING_UNAVAILABLE_NO_ACOUSTIC_EVIDENCE"
+    ],
+    "methodEvaluationMatrix": [
+      {
+        "methodId": "ctc-viterbi-forced-alignment",
+        "name": "CTC Frame-Posterior Viterbi Forced Alignment (Log-Domain)",
+        "architecture": "Wav2Vec2-CTC / Conformer-CTC / MMS-FA + Log-Domain Viterbi Trellis",
+        "supportedGranularity": "WORD_LEVEL",
+        "pros": [
+          "True acoustic frame-to-character Viterbi alignment with mathematically verifiable monotonicity",
+          "No emission-delay bias typical of causal RNN-T transducers",
+          "Reuses pure TypeScript log-domain aligner already implemented in SHAHAB workspace"
+        ],
+        "cons": [
+          "Requires a verified Persian CTC acoustic model checkpoint (.onnx) not yet bundled on disk",
+          "Sensitive to unexpanded numeric literals unless spoken-form normalization is provided"
+        ],
+        "persianReadiness": "VERIFIED_IF_CHECKPOINT_PRESENT",
+        "diskAssetAvailable": false,
+        "selectionStatus": "RECOMMENDED_NEXT_ACQUISITION"
+      },
+      {
+        "methodId": "rnnt-transducer-token-lattice",
+        "name": "Active Zipformer-Transducer Emission Frame Mapping",
+        "architecture": "pruned_transducer_stateless7 (40ms frame stride, 1024 BPE)",
+        "supportedGranularity": "TOKEN_LEVEL",
+        "pros": [
+          "Uses active SHAHAB ASR model family directly without a second runtime",
+          "Provides monotonic BPE emission frame indices at 40ms granularity"
+        ],
+        "cons": [
+          "RNN-T emission frames reflect decoder emission time (lookahead delay), NOT exact phoneme onset/offset",
+          "40ms frame stride limits sub-frame precision; ONNX weights currently absent from container snapshot"
+        ],
+        "persianReadiness": "PARTIAL_EMISSION_DELAY",
+        "diskAssetAvailable": false,
+        "selectionStatus": "ACTIVE_PRIMARY_WHEN_LOGPROBS_PROVIDED"
+      },
+      {
+        "methodId": "acoustic-vad-segment-anchoring",
+        "name": "Acoustic Signal VAD Speech-Region Anchoring (Honest Segment-Level)",
+        "architecture": "Deterministic 20ms RMS + Spectral-Flatness Speech Activity Anchoring",
+        "supportedGranularity": "SEGMENT_LEVEL",
+        "pros": [
+          "Zero external weight dependency; operates on real PCM signal energy/spectrum",
+          "Detects silent/mismatched audio and anchors real speech spans honestly at segment granularity",
+          "Refuses to fabricate word-level timestamps when acoustic word evidence is absent"
+        ],
+        "cons": [
+          "Cannot resolve word-level acoustic boundaries inside continuous speech",
+          "Words inside anchored segments remain explicitly TIMING_UNAVAILABLE"
+        ],
+        "persianReadiness": "PARTIAL_EMISSION_DELAY",
+        "diskAssetAvailable": true,
+        "selectionStatus": "ACTIVE_FALLBACK_HONEST_SEGMENT"
+      },
+      {
+        "methodId": "phoneme-mfa-persian",
+        "name": "Phoneme-Level Forced Alignment (Persian G2P + MFA / Kaldi)",
+        "architecture": "Persian Grapheme-to-Phoneme + Acoustic Triphone/HMM-DNN Forced Aligner",
+        "supportedGranularity": "WORD_LEVEL",
+        "pros": [
+          "Highest theoretical phoneme/word onset accuracy when backed by a Persian lexicon + G2P"
+        ],
+        "cons": [
+          "Requires native Kaldi/MFA toolchain + verified Persian pronunciation dictionary (heavy footprint)",
+          "Out-of-vocabulary colloquial Persian forms require robust G2P rules"
+        ],
+        "persianReadiness": "REQUIRES_EXTERNAL_PHONEME_MODEL",
+        "diskAssetAvailable": false,
+        "selectionStatus": "RECOMMENDED_NEXT_ACQUISITION"
+      },
+      {
+        "methodId": "uniform-proportional-split",
+        "name": "Evenly Distributed / Character-Proportional Word Timing",
+        "architecture": "Heuristic text-length division over segment duration",
+        "supportedGranularity": "TIMING_UNAVAILABLE",
+        "pros": [
+          "Trivial computation"
+        ],
+        "cons": [
+          "Fabricates fake acoustic timing — strictly PROHIBITED by SHAHAB-025 §18",
+          "Breaks on pauses, elongated vowels, fast/slow speech rate changes, and silent padding"
+        ],
+        "persianReadiness": "REJECTED_FABRICATION",
+        "diskAssetAvailable": false,
+        "selectionStatus": "REJECTED"
+      }
+    ],
+    "limitations": [
+      "Active SHAHAB ASR model is an RNN-T transducer (40ms frame stride); emission frames are decoder emission times, not exact acoustic phoneme boundaries.",
+      "No standalone Persian CTC/phoneme forced-alignment ONNX checkpoint is bundled in models/persian-ctc-aligner/; SEPARATE_ALIGNER_REQUIRED for production phoneme-exact word timing.",
+      "No human-annotated Persian word-boundary ground-truth dataset is bundled in the workspace; real-world Persian word-boundary MAE remains NOT_MEASURED until gold annotations are ingested.",
+      "When only PCM audio + transcript are supplied without CTC log-probs or transducer emission frames, SHAHAB-025 anchors real speech segments via acoustic VAD and leaves internal words honestly TIMING_UNAVAILABLE (never fabricating proportional splits)."
+    ],
+    "recommendedNextStep": "Acquire a permissively licensed Persian/multilingual CTC acoustic model (e.g. Wav2Vec2-CTC / MMS-FA ONNX) and evaluate boundary MAE/P95 against a human-annotated Persian forced-alignment corpus."
+  },
+  "sampleRuns": {
+    "honestSegmentAnchoredRun": {
+      "requestId": "align_1795294403334_65b30423",
+      "backendMode": "ACOUSTIC_VAD_ANCHORED_SEGMENT",
+      "effectiveGranularity": "SEGMENT_LEVEL",
+      "overallStatus": "PARTIALLY_ALIGNED",
+      "alignedSegments": 4,
+      "alignedWords": 0,
+      "unalignedWords": 45,
+      "cacheHitOnRepeat": true,
+      "invariantsPassed": true,
+      "latencyMs": 19.625
+    },
+    "controlledCtcViterbiRun": {
+      "requestId": "align_1795294403364_83a733e1",
+      "backendMode": "CTC_VITERBI_LOGPROBS",
+      "effectiveGranularity": "WORD_LEVEL",
+      "overallStatus": "PARTIALLY_ALIGNED",
+      "alignedWords": 9,
+      "unalignedWords": 2,
+      "evaluationMetrics": {
+        "datasetLabel": "controlled-persian-ctc-synthetic-fixture",
+        "evaluationSource": "SYNTHETIC_CONTROLLED_CTC_FIXTURE",
+        "evaluatedWordCount": 11,
+        "alignedWordCount": 9,
+        "unalignedWordCount": 2,
+        "coverageRatio": 0.8182,
+        "onsetMaeMs": 0,
+        "offsetMaeMs": 0,
+        "boundaryMaeMs": 0,
+        "boundaryMedianAbsErrorMs": 0,
+        "boundaryP90AbsErrorMs": 0,
+        "boundaryP95AbsErrorMs": 0,
+        "overlapCount": 0,
+        "outOfOrderCount": 0,
+        "coverageVsAccuracyWarning": "Coverage reports the fraction of words with assigned timing; it is NOT timing accuracy. Boundary accuracy requires onset/offset MAE and P95 against verified ground truth."
+      },
+      "invariantsPassed": true,
+      "latencyMs": 9.209
+    }
+  },
+  "persianEvaluationCategories": [
+    "CLEAN_STUDIO",
+    "COLLOQUIAL_CONVERSATIONAL",
+    "FAST_SPEECH",
+    "SLOW_DELIBERATE",
+    "NOISY_REVERBERANT",
+    "LONG_RECORDING",
+    "HEAVY_PUNCTUATION",
+    "PERSIAN_COMPOUNDS_ZWNJ",
+    "MIXED_PERSIAN_ENGLISH",
+    "NUMBERS_DATES",
+    "USER_EDITED_TRANSCRIPT",
+    "PARTIAL_MISMATCH_AUDIO",
+    "SILENCE_AND_NON_SPEECH"
+  ],
+  "humanAnnotatedPersianGoldMetricsStatus": "NOT_MEASURED_NO_GOLD_CORPUS_ON_DISK",
+  "cacheInvalidationEventsCount": 1,
+  "finalStatus": "PARTIALLY_VERIFIED",
+  "knownLimitations": [
+    "Active SHAHAB ASR model is an RNN-T transducer (40ms frame stride); emission frames are decoder emission times, not exact acoustic phoneme boundaries.",
+    "No standalone Persian CTC/phoneme forced-alignment ONNX checkpoint is bundled in models/persian-ctc-aligner/; SEPARATE_ALIGNER_REQUIRED for production phoneme-exact word timing.",
+    "No human-annotated Persian word-boundary ground-truth dataset is bundled in the workspace; real-world Persian word-boundary MAE remains NOT_MEASURED until gold annotations are ingested.",
+    "When only PCM audio + transcript are supplied without CTC log-probs or transducer emission frames, SHAHAB-025 anchors real speech segments via acoustic VAD and leaves internal words honestly TIMING_UNAVAILABLE (never fabricating proportional splits).",
+    "Real-world human-annotated Persian word-boundary MAE/P95 is NOT_MEASURED until a dedicated Persian CTC/phoneme checkpoint and verified gold corpus are acquired."
+  ]
+}

@@ -25,8 +25,9 @@ import { SmartAudioEditJobManager } from './SmartAudioEditJobManager';
 import type { ShahabAsrEngine, SmartEditPreviewMode } from './SmartAudioEditContracts';
 
 const DEFAULT_MAX_SMART_EDIT_UPLOAD_BYTES = 64 * 1024 * 1024; // 64 MiB
-const DEFAULT_OPERATION_TIMEOUT_MS = 180_000; // 3 minutes
+const DEFAULT_OPERATION_TIMEOUT_MS = 300_000; // 5 minutes — aligned with SHAHAB HTTP timeout & CPU Zipformer runtime
 const SAFE_JOB_ID_RE = /^[a-zA-Z0-9_-]{4,80}$/;
+const SAFE_PROJECT_ID_RE = /^[a-zA-Z0-9_-]{2,64}$/;
 const ALLOWED_UPLOAD_CONTENT_TYPE_RE =
   /^(audio\/(wav|wave|x-wav|mpeg|mp3|flac|ogg|webm|mp4|aac|aiff|x-aiff)|application\/octet-stream|application\/json)(;.*)?$/i;
 
@@ -230,9 +231,16 @@ export function createSmartAudioEditHttpRouter(options?: {
             offlineOnlyEnforced: true,
             missingFiles: zt.missingFiles,
             integrityError: zt.integrityError ? sanitizeDiagnosticString(zt.integrityError) : null,
+            integrityVerified: zt.integrityVerified ?? (zt.available && zt.integrityError === null),
+            maxSingleRequestDurationSec: zt.maxSingleRequestDurationSec,
             activeJobCount: zt.activeJobCount,
             queuedJobCount: zt.queuedJobCount,
             lastMetrics: zt.lastMetrics,
+          },
+          limits: {
+            maxUploadBytes,
+            operationTimeoutMs,
+            maxSingleRequestDurationSec: zt.maxSingleRequestDurationSec ?? null,
           },
           bundledSample: bundledSample
             ? { available: true, filename: bundledSample.filename, modelId: bundledSample.modelId }
@@ -382,10 +390,24 @@ export function createSmartAudioEditHttpRouter(options?: {
               decodedName = cleaned;
             }
           }
+          const rawProjectHeader = req.headers['x-project-id'];
+          let validatedHeaderProjectId: string | undefined;
+          if (rawProjectHeader !== undefined) {
+            if (typeof rawProjectHeader !== 'string' || !SAFE_PROJECT_ID_RE.test(rawProjectHeader.trim())) {
+              res.status(400).json({
+                error: 'INVALID_PROJECT_ID',
+                code: 'INVALID_PROJECT_ID',
+                message: 'شناسه پروژه (X-Project-Id) معتبر نیست.',
+              });
+              return;
+            }
+            validatedHeaderProjectId = rawProjectHeader.trim();
+          }
           const snapshot = jobManager.createJobFromAudio({
             ownerId,
             audioBytes: req.body,
             filename: decodedName,
+            projectId: validatedHeaderProjectId,
           });
           res.status(201).json(snapshot);
           return;
@@ -408,7 +430,19 @@ export function createSmartAudioEditHttpRouter(options?: {
           });
           return;
         }
-        const body = rawBody as { useBundledSample?: boolean };
+        const body = rawBody as { useBundledSample?: boolean; projectId?: unknown };
+        let validatedBodyProjectId: string | undefined;
+        if (body.projectId !== undefined) {
+          if (typeof body.projectId !== 'string' || !SAFE_PROJECT_ID_RE.test(body.projectId.trim())) {
+            res.status(400).json({
+              error: 'INVALID_PROJECT_ID',
+              code: 'INVALID_PROJECT_ID',
+              message: 'شناسه پروژه (projectId) معتبر نیست.',
+            });
+            return;
+          }
+          validatedBodyProjectId = body.projectId.trim();
+        }
         if (body.useBundledSample) {
           const sample = resolveBundledSample();
           if (!sample || !fs.existsSync(sample.filePath)) {
@@ -423,6 +457,7 @@ export function createSmartAudioEditHttpRouter(options?: {
             ownerId,
             audioFilePath: sample.filePath,
             filename: sample.filename,
+            projectId: validatedBodyProjectId,
           });
           res.status(201).json(snapshot);
           return;
@@ -476,10 +511,23 @@ export function createSmartAudioEditHttpRouter(options?: {
     next();
   });
 
-  router.get('/jobs', (_req, res) => {
+  router.get('/jobs', (req, res) => {
     const ownerId = getOwnerId(res);
+    const rawQueryProjectId = req.query.projectId;
+    let projectIdFilter: string | undefined;
+    if (rawQueryProjectId !== undefined) {
+      if (typeof rawQueryProjectId !== 'string' || !SAFE_PROJECT_ID_RE.test(rawQueryProjectId.trim())) {
+        res.status(400).json({
+          error: 'INVALID_PROJECT_ID',
+          code: 'INVALID_PROJECT_ID',
+          message: 'فیلتر شناسه پروژه (projectId) معتبر نیست.',
+        });
+        return;
+      }
+      projectIdFilter = rawQueryProjectId.trim();
+    }
     res.json({
-      jobs: jobManager.listJobs(ownerId),
+      jobs: jobManager.listJobs(ownerId, projectIdFilter),
       resources:
         securityGuard.config.mode === 'hosted'
           ? jobManager.getResourceStatus(ownerId)

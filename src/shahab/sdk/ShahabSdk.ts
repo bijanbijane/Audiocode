@@ -20,6 +20,8 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { normalizePersianTextDeterministic } from '../ShahabContracts.ts';
+import { conditionPcmTo16kMono } from '../core/ShahabCoreAudioConditioner.ts';
+import { hashFileSha256BoundedSync } from '../ShahabModelStore.ts';
 import { SHAHAB_NEURAL_CORE_IDENTITY } from '../ShahabEngineUnified.ts';
 import { ShahabEvidenceStore } from '../ShahabEvidenceStore.ts';
 import {
@@ -42,6 +44,55 @@ import {
   auditPersianOrthographyTransformation,
 } from '../ShahabPersianFidelity.ts';
 import { SHAHABJobStateMachine } from '../ShahabResilienceEngine.ts';
+import {
+  ShahabAlignmentEngine,
+  SHAHAB_ALIGNMENT_CONTRACT_VERSION,
+  type AlignmentCapabilityReport,
+  type AlignmentRequestInput,
+  type AlignmentResult,
+} from '../ShahabAlignmentEngine.ts';
+import {
+  ShahabDiarizationEngine,
+  SHAHAB_DIARIZATION_CONTRACT_VERSION,
+  attributeTranscriptWithDiarization,
+  type AttributionGranularity,
+  type DiarizationCapabilityReport,
+  type DiarizationRequestInput,
+  type DiarizationResult,
+  type SpeakerRevisionOperation,
+  type TranscriptSpeakerAttributionResult,
+} from '../ShahabDiarizationEngine.ts';
+import {
+  ShahabSubtitleEngine,
+  SHAHAB_SUBTITLE_CONTRACT_VERSION,
+  exportSubtitleDocument,
+  type ShahabSubtitleDocument,
+  type SubtitleEditorialProfile,
+  type SubtitleExportArtifact,
+  type SubtitleExportFormat,
+  type SubtitleGenerationInput,
+} from '../ShahabSubtitleEngine.ts';
+import {
+  ShahabAudioIntelligenceEngine,
+  SHAHAB_AUDIO_INTELLIGENCE_CONTRACT_VERSION,
+  type AudioIntelCapabilityReport,
+  type AudioSceneAnalysisInput,
+  type AudioSceneAnalysisResult,
+} from '../ShahabAudioIntelligenceEngine.ts';
+import {
+  ShahabEditorialPlannerEngine,
+  SHAHAB_EDITORIAL_PLANNER_CONTRACT_VERSION,
+  type EditDecisionPlan,
+  type EditPlanGenerationInput,
+  type EditorialProfileDefinition,
+} from '../ShahabEditorialPlannerEngine.ts';
+import {
+  ShahabRenderEngine,
+  SHAHAB_RENDER_ENGINE_CONTRACT_VERSION,
+  type RenderCapabilitiesReport,
+  type RenderExecutionRequest,
+  type RenderExecutionResult,
+} from '../ShahabRenderEngine.ts';
 
 // ── Semantic Version Constants (Distinct Identities per SHAHAB-022 §9) ──────
 export const SHAHAB_SDK_API_VERSION = '1.0.0';
@@ -458,6 +509,12 @@ export class ShahabSdkEngine {
   private readonly idempotencyIndex = new Map<string, string>(); // key -> jobId
   private readonly streamingSessions = new Map<string, InternalStreamingRecord>();
   private readonly diagnosticTrail: Array<Record<string, unknown>> = [];
+  private readonly alignmentEngine: ShahabAlignmentEngine;
+  private readonly diarizationEngine: ShahabDiarizationEngine;
+  private readonly subtitleEngine: ShahabSubtitleEngine;
+  private readonly audioIntelligenceEngine: ShahabAudioIntelligenceEngine;
+  private readonly editorialPlannerEngine: ShahabEditorialPlannerEngine;
+  private readonly renderEngine: ShahabRenderEngine;
 
   constructor(options: ShahabSdkEngineOptions) {
     this.modelDir = path.resolve(options.modelDir);
@@ -468,6 +525,12 @@ export class ShahabSdkEngine {
     this.maxPayloadBytes = options.maxPayloadBytes ?? 64 * 1024 * 1024;
     this.qualificationDecision =
       options.qualificationDecisionOverride ?? this.readQualificationDecisionFromDisk();
+    this.alignmentEngine = new ShahabAlignmentEngine(this.authorizedWorkspaceRoot);
+    this.diarizationEngine = new ShahabDiarizationEngine(this.authorizedWorkspaceRoot);
+    this.subtitleEngine = new ShahabSubtitleEngine();
+    this.audioIntelligenceEngine = new ShahabAudioIntelligenceEngine(this.authorizedWorkspaceRoot);
+    this.editorialPlannerEngine = new ShahabEditorialPlannerEngine();
+    this.renderEngine = new ShahabRenderEngine(path.join(this.docsDir, 'renders'));
   }
 
   private readQualificationDecisionFromDisk(): string {
@@ -525,7 +588,7 @@ export class ShahabSdkEngine {
           evidenceRef: null,
         });
       }
-      hashes[fileName] = sha256Hex(fs.readFileSync(fullPath));
+      hashes[fileName] = hashFileSha256BoundedSync(fullPath);
     }
 
     const audit = auditZipformerStreamingCapability(path.join(this.modelDir, 'encoder.int8.onnx'));
@@ -1021,35 +1084,30 @@ export class ShahabSdkEngine {
           evidenceRef: null,
         });
       }
-      // Downmix interleaved channels -> mono, then resample to 16 kHz deterministically
-      const frameCount = Math.floor(source.pcmFloat32.length / source.channels);
-      const mono = new Float32Array(frameCount);
-      if (source.channels === 1) {
-        mono.set(source.pcmFloat32.subarray(0, frameCount));
-      } else {
-        for (let i = 0; i < frameCount; i++) {
-          let sum = 0;
-          for (let ch = 0; ch < source.channels; ch++) {
-            sum += source.pcmFloat32[i * source.channels + ch];
-          }
-          mono[i] = sum / source.channels;
-        }
-      }
-      if (source.sampleRateHz === 16000) {
-        pcm16k = mono;
-      } else {
-        const outLen = Math.max(1, Math.round((mono.length * 16000) / source.sampleRateHz));
-        const resampled = new Float32Array(outLen);
-        const ratio = source.sampleRateHz / 16000;
-        for (let i = 0; i < outLen; i++) {
-          const srcPos = i * ratio;
-          const idx = Math.floor(srcPos);
-          const frac = srcPos - idx;
-          const s0 = mono[Math.min(idx, mono.length - 1)];
-          const s1 = mono[Math.min(idx + 1, mono.length - 1)];
-          resampled[i] = s0 + (s1 - s0) * frac;
-        }
-        pcm16k = resampled;
+      // Single authoritative phase-safe downmix + anti-aliased Kaiser-sinc resampling to 16 kHz mono
+      try {
+        const conditioned = conditionPcmTo16kMono({
+          pcm: source.pcmFloat32,
+          sampleRateHz: source.sampleRateHz,
+          channels: source.channels,
+          layout: 'interleaved',
+        }).pcm16k;
+        pcm16k = conditioned === source.pcmFloat32 ? new Float32Array(conditioned) : conditioned;
+      } catch (err) {
+        throw new ShahabSdkError({
+          code: 'AUDIO_DECODE_FAILURE',
+          category: 'AUDIO',
+          failureStage: 'AUDIO_CONDITIONING',
+          recoverable: false,
+          retryEligible: false,
+          userSafeMessageKey: 'shahab.sdk.invalid_pcm_buffer',
+          userSafeMessage: err instanceof Error ? err.message : String(err),
+          jobId: null,
+          sessionId: null,
+          modelId: null,
+          runtimeId: SHAHAB_RUNTIME_ADAPTER_VERSION,
+          evidenceRef: null,
+        });
       }
     }
 
@@ -1684,6 +1742,276 @@ export class ShahabSdkEngine {
     }
   }
 
+  // ── SHAHAB-025 Acoustic Forced Alignment SDK Contract (§12) ──────────────
+  public inspectAlignmentCapabilities(): AlignmentCapabilityReport {
+    this.assertNotDisposed();
+    return this.alignmentEngine.inspectAlignmentCapabilities();
+  }
+
+  public createAlignmentRequest(input: AlignmentRequestInput) {
+    this.assertNotDisposed();
+    return this.alignmentEngine.createAlignmentRequest(input);
+  }
+
+  public submitAlignment(requestIdOrInput: string | AlignmentRequestInput): AlignmentResult {
+    this.assertNotDisposed();
+    const res = this.alignmentEngine.submitAlignment(requestIdOrInput);
+    this.recordDiagnostic('SDK_ALIGNMENT_COMPLETED', {
+      contractVersion: SHAHAB_ALIGNMENT_CONTRACT_VERSION,
+      requestId: res.requestId,
+      backendMode: res.backendMode,
+      effectiveGranularity: res.effectiveGranularity,
+      overallStatus: res.overallStatus,
+      cacheHit: res.cacheHit,
+      latencyMs: res.latencyMs,
+    });
+    return res;
+  }
+
+  public getAlignmentStatus(requestId: string) {
+    this.assertNotDisposed();
+    return this.alignmentEngine.getAlignmentStatus(requestId);
+  }
+
+  public getAlignmentResult(requestId: string): AlignmentResult {
+    this.assertNotDisposed();
+    return this.alignmentEngine.getAlignmentResult(requestId);
+  }
+
+  public cancelAlignment(requestId: string) {
+    this.assertNotDisposed();
+    return this.alignmentEngine.cancelAlignment(requestId);
+  }
+
+  public disposeAlignmentRequest(requestId: string) {
+    this.assertNotDisposed();
+    return this.alignmentEngine.disposeAlignmentRequest(requestId);
+  }
+
+  // ── SHAHAB-026 Speaker Diarization SDK Contract (§14) ─────────────────────
+  public inspectDiarizationCapabilities(): DiarizationCapabilityReport {
+    this.assertNotDisposed();
+    return this.diarizationEngine.inspectDiarizationCapabilities();
+  }
+
+  public createDiarizationRequest(input: DiarizationRequestInput) {
+    this.assertNotDisposed();
+    return this.diarizationEngine.createDiarizationRequest(input);
+  }
+
+  public submitDiarization(requestIdOrInput: string | DiarizationRequestInput): DiarizationResult {
+    this.assertNotDisposed();
+    const res = this.diarizationEngine.submitDiarization(requestIdOrInput);
+    this.recordDiagnostic('SDK_DIARIZATION_COMPLETED', {
+      contractVersion: SHAHAB_DIARIZATION_CONTRACT_VERSION,
+      requestId: res.requestId,
+      backendMode: res.backendMode,
+      detectedSpeakerCount: res.detectedSpeakerCount,
+      overlapDurationMs: res.overlapDurationMs,
+      embeddingsRetained: res.privacyAudit.embeddingsRetained,
+      latencyMs: res.latencyMs,
+    });
+    return res;
+  }
+
+  public getDiarizationStatus(requestId: string) {
+    this.assertNotDisposed();
+    return this.diarizationEngine.getDiarizationStatus(requestId);
+  }
+
+  public getDiarizationResult(requestId: string): DiarizationResult {
+    this.assertNotDisposed();
+    return this.diarizationEngine.getDiarizationResult(requestId);
+  }
+
+  public cancelDiarization(requestId: string) {
+    this.assertNotDisposed();
+    return this.diarizationEngine.cancelDiarization(requestId);
+  }
+
+  public reviseSpeakerAssignment(
+    requestId: string,
+    operation: SpeakerRevisionOperation,
+  ): DiarizationResult {
+    this.assertNotDisposed();
+    return this.diarizationEngine.reviseSpeakerAssignment(requestId, operation);
+  }
+
+  public undoLastSpeakerRevision(requestId: string): DiarizationResult {
+    this.assertNotDisposed();
+    return this.diarizationEngine.undoLastSpeakerRevision(requestId);
+  }
+
+  public disposeDiarizationResult(requestId: string) {
+    this.assertNotDisposed();
+    return this.diarizationEngine.disposeDiarizationResult(requestId);
+  }
+
+  public attributeTranscriptWithDiarization(
+    alignment: AlignmentResult,
+    diarization: DiarizationResult,
+    requestedGranularity: AttributionGranularity,
+  ): TranscriptSpeakerAttributionResult {
+    this.assertNotDisposed();
+    return attributeTranscriptWithDiarization(alignment, diarization, requestedGranularity);
+  }
+
+  // ── SHAHAB-027 Subtitle & Caption Engineering SDK Contract (§15) ──────────
+  public getSubtitleProfiles(): readonly SubtitleEditorialProfile[] {
+    this.assertNotDisposed();
+    return this.subtitleEngine.getProfiles();
+  }
+
+  public generateSubtitles(input: SubtitleGenerationInput): ShahabSubtitleDocument {
+    this.assertNotDisposed();
+    const doc = this.subtitleEngine.generateSubtitles(input);
+    this.recordDiagnostic('SDK_SUBTITLES_GENERATED', {
+      contractVersion: SHAHAB_SUBTITLE_CONTRACT_VERSION,
+      documentId: doc.documentId,
+      profileId: doc.profile.profileId,
+      mode: doc.mode,
+      cueCount: doc.cues.length,
+      qaErrorCount: doc.qaReport.errorCount,
+      qaWarningCount: doc.qaReport.warningCount,
+    });
+    return doc;
+  }
+
+  public applyManualSubtitleEdit(
+    documentId: string,
+    edit: {
+      readonly cueId: string;
+      readonly newLines?: readonly string[];
+      readonly newDisplayStartMs?: number;
+      readonly newDisplayEndMs?: number;
+      readonly newSpeakerDisplayLabel?: string | null;
+    },
+  ): ShahabSubtitleDocument {
+    this.assertNotDisposed();
+    return this.subtitleEngine.applyManualCueEdit(documentId, edit);
+  }
+
+  public exportSubtitles(
+    document: ShahabSubtitleDocument,
+    format: SubtitleExportFormat,
+  ): SubtitleExportArtifact {
+    this.assertNotDisposed();
+    return exportSubtitleDocument(document, format);
+  }
+
+  public validateSubtitleDependencyFreshness(
+    doc: ShahabSubtitleDocument,
+    currentUpstream: {
+      readonly audioSha256: string;
+      readonly transcriptRevisionId: string;
+      readonly alignmentRequestId?: string;
+      readonly diarizationRevisionId?: string | null;
+    },
+  ) {
+    this.assertNotDisposed();
+    return this.subtitleEngine.validateDependencyFreshness(doc, currentUpstream);
+  }
+
+  // ── SHAHAB-028 Acoustic Scene Intelligence SDK Contract ───────────────────
+  public getAudioIntelligenceCapabilities(): AudioIntelCapabilityReport {
+    this.assertNotDisposed();
+    return this.audioIntelligenceEngine.getCapabilities();
+  }
+
+  public analyzeAudioScene(input: AudioSceneAnalysisInput): AudioSceneAnalysisResult {
+    this.assertNotDisposed();
+    const res = this.audioIntelligenceEngine.analyzeAudioScene(input);
+    this.recordDiagnostic('SDK_AUDIO_SCENE_ANALYZED', {
+      contractVersion: SHAHAB_AUDIO_INTELLIGENCE_CONTRACT_VERSION,
+      analysisId: res.analysisId,
+      audioId: res.audioId,
+      eventCount: res.events.length,
+      overlappingEventPairsCount: res.overlappingEventPairsCount,
+      coverageStatus: res.coverageCrossCheck.status,
+    });
+    return res;
+  }
+
+  // ── SHAHAB-029 Editorial Decision Planner SDK Contract ────────────────────
+  public listEditorialProfiles(): readonly EditorialProfileDefinition[] {
+    this.assertNotDisposed();
+    return this.editorialPlannerEngine.listProfiles();
+  }
+
+  public generateEditDecisionPlan(input: EditPlanGenerationInput): EditDecisionPlan {
+    this.assertNotDisposed();
+    const plan = this.editorialPlannerEngine.generateEditPlan(input);
+    this.recordDiagnostic('SDK_EDIT_PLAN_GENERATED', {
+      contractVersion: SHAHAB_EDITORIAL_PLANNER_CONTRACT_VERSION,
+      planId: plan.planId,
+      profileId: plan.profile.profileId,
+      candidateCount: plan.operations.length,
+      conflictCount: plan.conflicts.length,
+      consistencyStatus: plan.consistencyReport.status,
+    });
+    return plan;
+  }
+
+  public approveEditOperation(planId: string, operationId: string, actor?: string): EditDecisionPlan {
+    this.assertNotDisposed();
+    return this.editorialPlannerEngine.approveEditOperation(planId, operationId, actor);
+  }
+
+  public rejectEditOperation(planId: string, operationId: string, reason?: string, actor?: string): EditDecisionPlan {
+    this.assertNotDisposed();
+    return this.editorialPlannerEngine.rejectEditOperation(planId, operationId, reason, actor);
+  }
+
+  public protectEditSourceRange(
+    planId: string,
+    range: { readonly startSample: number; readonly endSample: number; readonly reason: string; readonly actor?: string },
+  ): EditDecisionPlan {
+    this.assertNotDisposed();
+    return this.editorialPlannerEngine.protectSourceRange(planId, range);
+  }
+
+  public invalidateEditPlansForAudio(audioId: string, reason: string): readonly EditDecisionPlan[] {
+    this.assertNotDisposed();
+    return this.editorialPlannerEngine.invalidatePlansOnDependencyChange(audioId, reason);
+  }
+
+  // ── SHAHAB-030 Non-Destructive Audio Render Engine SDK Contract ───────────
+  public getRenderCapabilities(): RenderCapabilitiesReport {
+    this.assertNotDisposed();
+    return this.renderEngine.getCapabilities();
+  }
+
+  public previewNonDestructiveRender(
+    req: Omit<RenderExecutionRequest, 'renderMode' | 'outputFilePath'>,
+  ): RenderExecutionResult {
+    this.assertNotDisposed();
+    const out = this.renderEngine.previewRender(req);
+    this.recordDiagnostic('SDK_RENDER_PREVIEW_COMPLETED', {
+      contractVersion: SHAHAB_RENDER_ENGINE_CONTRACT_VERSION,
+      renderId: out.renderId,
+      planId: out.planId,
+      validationStatus: out.validation.status,
+      outputTotalFrames: out.outputTotalFrames,
+    });
+    return out;
+  }
+
+  public submitFinalNonDestructiveRender(
+    req: Omit<RenderExecutionRequest, 'renderMode'>,
+  ): RenderExecutionResult {
+    this.assertNotDisposed();
+    const out = this.renderEngine.submitFinalRender(req);
+    this.recordDiagnostic('SDK_RENDER_FINAL_COMPLETED', {
+      contractVersion: SHAHAB_RENDER_ENGINE_CONTRACT_VERSION,
+      renderId: out.renderId,
+      planId: out.planId,
+      exportFormat: out.exportFormat,
+      validationStatus: out.validation.status,
+      outputFileSha256: out.validation.outputFileSha256,
+    });
+    return out;
+  }
+
   /** Sanitized diagnostic export (§15) — zero raw audio, transcripts, or private file paths. */
   public exportSanitizedDiagnostics() {
     return {
@@ -1724,6 +2052,9 @@ export class ShahabSdkEngine {
       await this.adapter.dispose();
       this.adapter = null;
     }
+    this.audioIntelligenceEngine.dispose();
+    this.editorialPlannerEngine.dispose();
+    this.renderEngine.dispose();
     this.initialized = false;
   }
 }

@@ -11,7 +11,7 @@ export const MODEL_CHUNK_SIZE_BYTES = 1024 * 1024;
 export const MAX_MODEL_CHUNK_BYTES = 1024 * 1024;
 export const MAX_SAFE_MODEL_FILE_BYTES = 2 * 1024 * 1024 * 1024; // 2 GiB
 
-export type ModelArchitecture = 'FASTCONFORMER_CTC' | 'WHISPER_SEQ2SEQ';
+export type ModelArchitecture = 'FASTCONFORMER_CTC' | 'WHISPER_SEQ2SEQ' | 'ZIPFORMER_TRANSDUCER';
 
 export interface StoredModelChunkEntry {
   readonly index: number;

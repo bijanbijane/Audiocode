@@ -290,6 +290,18 @@ export class BrowserOnnxAsrRuntimeAdapter implements LocalAsrRuntimeAdapter {
       });
     }
 
+    if (
+      descriptor.architecture !== 'FASTCONFORMER_CTC' &&
+      descriptor.architecture !== 'WHISPER_SEQ2SEQ'
+    ) {
+      this.lastErrorCode = 'MODEL_INCOMPATIBLE';
+      throw new AsrRuntimeError({
+        code: 'MODEL_INCOMPATIBLE',
+        message: `BrowserOnnxAsrRuntimeAdapter only supports FASTCONFORMER_CTC and WHISPER_SEQ2SEQ; received ${descriptor.architecture}.`,
+        runtimeTarget: this.runtimeTarget,
+      });
+    }
+
     const providers: ('webgpu' | 'wasm')[] = (descriptor.executionProviders ?? ['wasm'])
       .filter((p): p is 'webgpu' | 'wasm' => p === 'webgpu' || p === 'wasm');
     const initPayload: StudioAsrInitializePayload = {
@@ -442,11 +454,16 @@ export class BrowserOnnxAsrRuntimeAdapter implements LocalAsrRuntimeAdapter {
 
       const peakBefore = this.budget.getSnapshot().highWaterMarkBytes;
       this.workerClient.setActiveJobId(request.jobId);
+      const chunkedArch =
+        this.activeDescriptor.architecture === 'FASTCONFORMER_CTC' ||
+        this.activeDescriptor.architecture === 'WHISPER_SEQ2SEQ'
+          ? this.activeDescriptor.architecture
+          : undefined;
       const chunkedEngine = new PersianChunkedAsrEngine(
         {
           modelId: this.activeDescriptor.modelId,
           modelVersion: this.activeDescriptor.modelVersion,
-          architecture: this.activeDescriptor.architecture,
+          architecture: chunkedArch,
           modelSha256: this.activeModelSha256,
           detectVoiceActivity: (pcm16k) => this.workerClient.detectVoiceActivity(pcm16k),
           transcribeWindow: (pcm16k) => this.workerClient.transcribeWindow(pcm16k),

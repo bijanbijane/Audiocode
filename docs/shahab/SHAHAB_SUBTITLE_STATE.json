@@ -1,0 +1,587 @@
+{
+  "missionId": "SHAHAB-027",
+  "generatedAtUtc": "2026-11-21T20:53:23.309Z",
+  "contractVersion": "1.0.0",
+  "availableProfiles": [
+    {
+      "profileId": "EDUCATIONAL",
+      "displayName": "Educational / Course",
+      "displayNameFa": "آموزشی و درسی",
+      "defaultMode": "CLEANED",
+      "maxLines": 2,
+      "maxCharsPerLine": 42,
+      "maxCps": 18
+    },
+    {
+      "profileId": "INTERVIEW",
+      "displayName": "Interview / Dialogue",
+      "displayNameFa": "مصاحبه و گفت‌وگو",
+      "defaultMode": "VERBATIM",
+      "maxLines": 2,
+      "maxCharsPerLine": 40,
+      "maxCps": 20
+    },
+    {
+      "profileId": "PODCAST",
+      "displayName": "Podcast / Long-Form",
+      "displayNameFa": "پادکست",
+      "defaultMode": "CLEANED",
+      "maxLines": 2,
+      "maxCharsPerLine": 42,
+      "maxCps": 20
+    },
+    {
+      "profileId": "DOCUMENTARY",
+      "displayName": "Documentary / Broadcast",
+      "displayNameFa": "مستند و پخش حرفه‌ای",
+      "defaultMode": "CLEANED",
+      "maxLines": 2,
+      "maxCharsPerLine": 38,
+      "maxCps": 17
+    },
+    {
+      "profileId": "FAST_SOCIAL",
+      "displayName": "Fast Social / Vertical Video",
+      "displayNameFa": "شبکه‌های اجتماعی (سریع)",
+      "defaultMode": "CLEANED",
+      "maxLines": 2,
+      "maxCharsPerLine": 28,
+      "maxCps": 23
+    },
+    {
+      "profileId": "LECTURE",
+      "displayName": "Academic Lecture",
+      "displayNameFa": "سخنرانی و کلاس دانشگاهی",
+      "defaultMode": "VERBATIM",
+      "maxLines": 2,
+      "maxCharsPerLine": 44,
+      "maxCps": 20
+    },
+    {
+      "profileId": "ACCESSIBILITY_FIRST",
+      "displayName": "Accessibility-First Captions (SDH)",
+      "displayNameFa": "زیرنویس دسترس‌پذیری (SDH)",
+      "defaultMode": "ACCESSIBILITY",
+      "maxLines": 2,
+      "maxCharsPerLine": 40,
+      "maxCps": 16
+    },
+    {
+      "profileId": "VERBATIM_ARCHIVAL",
+      "displayName": "Verbatim Archival",
+      "displayNameFa": "آرشیوی عین‌به‌عین",
+      "defaultMode": "VERBATIM",
+      "maxLines": 2,
+      "maxCharsPerLine": 45,
+      "maxCps": 24
+    }
+  ],
+  "sampleDocument": {
+    "contractVersion": "1.0.0",
+    "documentId": "subdoc_1795294403475_ccb7c6",
+    "revisionId": "subrev_1_96c0a1",
+    "mode": "CLEANED",
+    "profile": {
+      "profileId": "PODCAST",
+      "displayName": "Podcast / Long-Form",
+      "displayNameFa": "پادکست",
+      "defaultMode": "CLEANED",
+      "maxLines": 2,
+      "maxCharsPerLine": 42,
+      "minDurationMs": 1000,
+      "maxDurationMs": 6500,
+      "minGapMs": 80,
+      "targetCps": 16,
+      "maxCps": 20,
+      "bidiPolicy": "RLM_ANCHORED",
+      "numeralPolicy": "PRESERVE_ORIGINAL",
+      "includeSpeakerLabels": true,
+      "readingSpeedMetricDefinition": "Visual grapheme clusters (excluding invisible ZWNJ/bidi controls) per second + Persian word WPM."
+    },
+    "timingConfig": {
+      "fps": 25,
+      "dropFrame": false,
+      "vfrDetected": false,
+      "timelineOffsetMs": 1000
+    },
+    "dependencyLineage": {
+      "audioId": "shahab-025-podcast-fixture",
+      "audioSha256": "f195a3a40b87e2c96f2e1215ca3e58fec4ce169583e1d748e4e551f1aae615af",
+      "transcriptRevisionId": "tr_rev_1",
+      "alignmentRequestId": "align_1795294403334_65b30423",
+      "alignmentGranularity": "SEGMENT_LEVEL",
+      "alignmentContractVersion": "1.0.0",
+      "diarizationRequestId": "diar_1795294403374_2981b264",
+      "diarizationRevisionId": "diar_rev_1_cf461c",
+      "diarizationContractVersion": "1.0.0"
+    },
+    "cues": [
+      {
+        "cueId": "cue_0001",
+        "index": 1,
+        "mode": "CLEANED",
+        "rawSourceText": "سلام و وقت بخیر، امروز در استودیو آواپرداز می‌خواهیم موتور SHAHAB را بررسی کنیم.",
+        "lines": [
+          "‏گوینده 1: سلام و وقت بخیر، امروز در",
+          "‏استودیو آواپرداز می‌خواهیم موتور SHAHAB را بررسی کنیم."
+        ],
+        "renderedText": "‏گوینده 1: سلام و وقت بخیر، امروز در\n‏استودیو آواپرداز می‌خواهیم موتور SHAHAB را بررسی کنیم.",
+        "speakerId": "speaker_1",
+        "speakerDisplayLabel": "گوینده 1",
+        "activeSpeakerIds": [
+          "speaker_1"
+        ],
+        "overlapFlag": false,
+        "isNonSpeechAccessibilityCue": false,
+        "nonSpeechSource": null,
+        "timingProvenance": "SEGMENT_ACOUSTIC_ALIGNED",
+        "acousticRange": {
+          "startSample": 6400,
+          "endSample": 44800,
+          "sampleRateHz": 16000,
+          "startSec": 0.4,
+          "endSec": 2.8,
+          "durationMs": 2400,
+          "startFlicks": 282240000,
+          "endFlicks": 1975680000
+        },
+        "displayRange": {
+          "startMs": 400,
+          "endMs": 2800,
+          "durationMs": 2400
+        },
+        "sourceRange": {
+          "startSample": 67200,
+          "endSample": 182400,
+          "sampleRateHz": 48000,
+          "startSec": 1.4,
+          "endSec": 3.8,
+          "durationMs": 2400,
+          "startFlicks": 987840000,
+          "endFlicks": 2681280000
+        },
+        "timelineRange": {
+          "startMs": 1400,
+          "endMs": 3800,
+          "startFlicks": 987840000,
+          "endFlicks": 2681280000
+        },
+        "exportRange": {
+          "startMs": 400,
+          "endMs": 2800,
+          "durationMs": 2400
+        },
+        "readingMetrics": {
+          "visibleGraphemeCountIncludingSpaces": 89,
+          "visibleGraphemeCountExcludingSpaces": 74,
+          "persianWordCount": 16,
+          "cpsIncludingSpaces": 37.08,
+          "cpsExcludingSpaces": 30.83,
+          "wpm": 400,
+          "lineGraphemeCounts": [
+            35,
+            53
+          ],
+          "maxLineGraphemeCount": 53
+        },
+        "rtlLayout": {
+          "bidiPolicy": "RLM_ANCHORED",
+          "containsPersianRtl": true,
+          "containsLatinLtr": true,
+          "containsNumerals": true,
+          "mixedScriptDetected": true,
+          "zwnjCount": 1,
+          "directionalMarksInsertedCount": 2,
+          "reversibleCleanTextVerified": true,
+          "layoutWarnings": []
+        },
+        "manualOverride": false,
+        "lastEditedAtUtc": null,
+        "notes": "Cue anchored directly to verified acoustic alignment span."
+      },
+      {
+        "cueId": "cue_0002",
+        "index": 2,
+        "mode": "CLEANED",
+        "rawSourceText": "بله، دقیقاً هم‌زمان درباره کیفیت زیرنویس فارسی و استانداردهای SDK صحبت می‌کنیم.",
+        "lines": [
+          "‏گوینده 2: بله، دقیقاً هم‌زمان درباره کیفیت",
+          "‏زیرنویس فارسی و استانداردهای SDK صحبت می‌کنیم."
+        ],
+        "renderedText": "‏گوینده 2: بله، دقیقاً هم‌زمان درباره کیفیت\n‏زیرنویس فارسی و استانداردهای SDK صحبت می‌کنیم.",
+        "speakerId": "speaker_2",
+        "speakerDisplayLabel": "گوینده 2",
+        "activeSpeakerIds": [
+          "speaker_2"
+        ],
+        "overlapFlag": false,
+        "isNonSpeechAccessibilityCue": false,
+        "nonSpeechSource": null,
+        "timingProvenance": "SEGMENT_ACOUSTIC_ALIGNED",
+        "acousticRange": {
+          "startSample": 52800,
+          "endSample": 91200,
+          "sampleRateHz": 16000,
+          "startSec": 3.3,
+          "endSec": 5.7,
+          "durationMs": 2400,
+          "startFlicks": 2328480000,
+          "endFlicks": 4021920000
+        },
+        "displayRange": {
+          "startMs": 3300,
+          "endMs": 5700,
+          "durationMs": 2400
+        },
+        "sourceRange": {
+          "startSample": 206400,
+          "endSample": 321600,
+          "sampleRateHz": 48000,
+          "startSec": 4.3,
+          "endSec": 6.7,
+          "durationMs": 2400,
+          "startFlicks": 3034080000,
+          "endFlicks": 4727520000
+        },
+        "timelineRange": {
+          "startMs": 4300,
+          "endMs": 6700,
+          "startFlicks": 3034080000,
+          "endFlicks": 4727520000
+        },
+        "exportRange": {
+          "startMs": 3320,
+          "endMs": 5720,
+          "durationMs": 2400
+        },
+        "readingMetrics": {
+          "visibleGraphemeCountIncludingSpaces": 86,
+          "visibleGraphemeCountExcludingSpaces": 73,
+          "persianWordCount": 14,
+          "cpsIncludingSpaces": 35.83,
+          "cpsExcludingSpaces": 30.42,
+          "wpm": 350,
+          "lineGraphemeCounts": [
+            40,
+            45
+          ],
+          "maxLineGraphemeCount": 45
+        },
+        "rtlLayout": {
+          "bidiPolicy": "RLM_ANCHORED",
+          "containsPersianRtl": true,
+          "containsLatinLtr": true,
+          "containsNumerals": true,
+          "mixedScriptDetected": true,
+          "zwnjCount": 2,
+          "directionalMarksInsertedCount": 2,
+          "reversibleCleanTextVerified": true,
+          "layoutWarnings": []
+        },
+        "manualOverride": false,
+        "lastEditedAtUtc": null,
+        "notes": "Cue anchored directly to verified acoustic alignment span."
+      },
+      {
+        "cueId": "cue_0003",
+        "index": 3,
+        "mode": "CLEANED",
+        "rawSourceText": "متشکرم، بیایید از زمان‌بندی دقیق و نیم‌فاصله‌ها شروع کنیم.",
+        "lines": [
+          "‏- گوینده 1: متشکرم، بیایید از زمان‌بندی",
+          "‏- گوینده 2: دقیق و نیم‌فاصله‌ها شروع کنیم."
+        ],
+        "renderedText": "‏- گوینده 1: متشکرم، بیایید از زمان‌بندی\n‏- گوینده 2: دقیق و نیم‌فاصله‌ها شروع کنیم.",
+        "speakerId": "speaker_1",
+        "speakerDisplayLabel": "گوینده 1",
+        "activeSpeakerIds": [
+          "speaker_1",
+          "speaker_2"
+        ],
+        "overlapFlag": true,
+        "isNonSpeechAccessibilityCue": false,
+        "nonSpeechSource": null,
+        "timingProvenance": "SEGMENT_ACOUSTIC_ALIGNED",
+        "acousticRange": {
+          "startSample": 97600,
+          "endSample": 116800,
+          "sampleRateHz": 16000,
+          "startSec": 6.1,
+          "endSec": 7.3,
+          "durationMs": 1200,
+          "startFlicks": 4304160000,
+          "endFlicks": 5150880000
+        },
+        "displayRange": {
+          "startMs": 6100,
+          "endMs": 7300,
+          "durationMs": 1200
+        },
+        "sourceRange": {
+          "startSample": 340800,
+          "endSample": 398400,
+          "sampleRateHz": 48000,
+          "startSec": 7.1,
+          "endSec": 8.3,
+          "durationMs": 1200,
+          "startFlicks": 5009760000,
+          "endFlicks": 5856480000
+        },
+        "timelineRange": {
+          "startMs": 7100,
+          "endMs": 8300,
+          "startFlicks": 5009760000,
+          "endFlicks": 5856480000
+        },
+        "exportRange": {
+          "startMs": 6120,
+          "endMs": 7320,
+          "durationMs": 1200
+        },
+        "readingMetrics": {
+          "visibleGraphemeCountIncludingSpaces": 79,
+          "visibleGraphemeCountExcludingSpaces": 65,
+          "persianWordCount": 13,
+          "cpsIncludingSpaces": 65.83,
+          "cpsExcludingSpaces": 54.17,
+          "wpm": 650,
+          "lineGraphemeCounts": [
+            38,
+            40
+          ],
+          "maxLineGraphemeCount": 40
+        },
+        "rtlLayout": {
+          "bidiPolicy": "RLM_ANCHORED",
+          "containsPersianRtl": true,
+          "containsLatinLtr": false,
+          "containsNumerals": true,
+          "mixedScriptDetected": false,
+          "zwnjCount": 3,
+          "directionalMarksInsertedCount": 2,
+          "reversibleCleanTextVerified": true,
+          "layoutWarnings": []
+        },
+        "manualOverride": false,
+        "lastEditedAtUtc": null,
+        "notes": "Cue anchored directly to verified acoustic alignment span."
+      },
+      {
+        "cueId": "cue_0004",
+        "index": 4,
+        "mode": "CLEANED",
+        "rawSourceText": "در پایان خروجی‌های SRT و WebVTT را ارزیابی خواهیم کرد.",
+        "lines": [
+          "‏گوینده 1: در پایان خروجی‌های SRT",
+          "‏و WebVTT را ارزیابی خواهیم کرد."
+        ],
+        "renderedText": "‏گوینده 1: در پایان خروجی‌های SRT\n‏و WebVTT را ارزیابی خواهیم کرد.",
+        "speakerId": "speaker_1",
+        "speakerDisplayLabel": "گوینده 1",
+        "activeSpeakerIds": [
+          "speaker_1"
+        ],
+        "overlapFlag": false,
+        "isNonSpeechAccessibilityCue": false,
+        "nonSpeechSource": null,
+        "timingProvenance": "SEGMENT_ACOUSTIC_ALIGNED",
+        "acousticRange": {
+          "startSample": 123200,
+          "endSample": 152000,
+          "sampleRateHz": 16000,
+          "startSec": 7.7,
+          "endSec": 9.5,
+          "durationMs": 1800,
+          "startFlicks": 5433120000,
+          "endFlicks": 6703200000
+        },
+        "displayRange": {
+          "startMs": 7700,
+          "endMs": 9500,
+          "durationMs": 1800
+        },
+        "sourceRange": {
+          "startSample": 417600,
+          "endSample": 504000,
+          "sampleRateHz": 48000,
+          "startSec": 8.7,
+          "endSec": 10.5,
+          "durationMs": 1800,
+          "startFlicks": 6138720000,
+          "endFlicks": 7408800000
+        },
+        "timelineRange": {
+          "startMs": 8700,
+          "endMs": 10500,
+          "startFlicks": 6138720000,
+          "endFlicks": 7408800000
+        },
+        "exportRange": {
+          "startMs": 7720,
+          "endMs": 9520,
+          "durationMs": 1800
+        },
+        "readingMetrics": {
+          "visibleGraphemeCountIncludingSpaces": 63,
+          "visibleGraphemeCountExcludingSpaces": 52,
+          "persianWordCount": 12,
+          "cpsIncludingSpaces": 35,
+          "cpsExcludingSpaces": 28.89,
+          "wpm": 400,
+          "lineGraphemeCounts": [
+            31,
+            31
+          ],
+          "maxLineGraphemeCount": 31
+        },
+        "rtlLayout": {
+          "bidiPolicy": "RLM_ANCHORED",
+          "containsPersianRtl": true,
+          "containsLatinLtr": true,
+          "containsNumerals": true,
+          "mixedScriptDetected": true,
+          "zwnjCount": 1,
+          "directionalMarksInsertedCount": 2,
+          "reversibleCleanTextVerified": true,
+          "layoutWarnings": []
+        },
+        "manualOverride": false,
+        "lastEditedAtUtc": null,
+        "notes": "Cue anchored directly to verified acoustic alignment span."
+      }
+    ],
+    "transformations": [],
+    "qaReport": {
+      "auditedAtUtc": "2026-11-21T20:53:23.475Z",
+      "passedWithoutErrors": true,
+      "errorCount": 0,
+      "warningCount": 6,
+      "infoCount": 0,
+      "issues": [
+        {
+          "issueId": "qa_linelen_cue_0001",
+          "cueId": "cue_0001",
+          "category": "STRUCTURAL",
+          "severity": "WARNING",
+          "code": "EXCEEDS_MAX_CHARS_PER_LINE",
+          "message": "Cue 1 line width is 53 graphemes (profile max 42)."
+        },
+        {
+          "issueId": "qa_cps_cue_0001",
+          "cueId": "cue_0001",
+          "category": "READABILITY",
+          "severity": "WARNING",
+          "code": "EXCESSIVE_READING_SPEED_CPS",
+          "message": "Cue 1 reading speed is 37.08 CPS (profile ceiling 20 CPS)."
+        },
+        {
+          "issueId": "qa_linelen_cue_0002",
+          "cueId": "cue_0002",
+          "category": "STRUCTURAL",
+          "severity": "WARNING",
+          "code": "EXCEEDS_MAX_CHARS_PER_LINE",
+          "message": "Cue 2 line width is 45 graphemes (profile max 42)."
+        },
+        {
+          "issueId": "qa_cps_cue_0002",
+          "cueId": "cue_0002",
+          "category": "READABILITY",
+          "severity": "WARNING",
+          "code": "EXCESSIVE_READING_SPEED_CPS",
+          "message": "Cue 2 reading speed is 35.83 CPS (profile ceiling 20 CPS)."
+        },
+        {
+          "issueId": "qa_cps_cue_0003",
+          "cueId": "cue_0003",
+          "category": "READABILITY",
+          "severity": "WARNING",
+          "code": "EXCESSIVE_READING_SPEED_CPS",
+          "message": "Cue 3 reading speed is 65.83 CPS (profile ceiling 20 CPS)."
+        },
+        {
+          "issueId": "qa_cps_cue_0004",
+          "cueId": "cue_0004",
+          "category": "READABILITY",
+          "severity": "WARNING",
+          "code": "EXCESSIVE_READING_SPEED_CPS",
+          "message": "Cue 4 reading speed is 35 CPS (profile ceiling 20 CPS)."
+        }
+      ],
+      "summaryMetrics": {
+        "totalCues": 4,
+        "maxCpsObserved": 65.83,
+        "meanCpsObserved": 43.44,
+        "minDurationObservedMs": 1200,
+        "maxDurationObservedMs": 2400,
+        "maxLineLengthObserved": 53
+      }
+    },
+    "revisions": [
+      {
+        "revisionId": "subrev_1_96c0a1",
+        "parentRevisionId": null,
+        "timestampUtc": "2026-11-21T20:53:23.475Z",
+        "action": "INITIAL_GENERATION",
+        "detail": "Generated 4 cues under profile PODCAST (CLEANED)."
+      }
+    ],
+    "limitations": [
+      "SHAHAB-025 alignment granularity is SEGMENT_LEVEL; cue timing reflects verified segment-level bounds and does NOT claim phoneme-exact word alignment."
+    ],
+    "createdAtUtc": "2026-11-21T20:53:23.475Z",
+    "updatedAtUtc": "2026-11-21T20:53:23.475Z"
+  },
+  "exports": {
+    "srt": {
+      "cueCount": 4,
+      "sha256": "046db93fd4840cf1345c1e6029b474ec73ec487a5765b2b053432a9d2c7d8bf8",
+      "roundTripPassed": true,
+      "zwnjPreserved": true,
+      "declaredInformationLosses": [
+        "SRT has no native metadata for structured speaker IDs, acoustic vs. display timing separation, revision history, or dependency lineage.",
+        "SRT has no native RTL/styling directive; relies on Unicode logical order + RLM/FSI marks.",
+        "Sub-millisecond sample indices and flicks are quantized to millisecond precision."
+      ],
+      "preview": "1\n00:00:00,400 --> 00:00:02,800\n‏گوینده 1: سلام و وقت بخیر، امروز در\n‏استودیو آواپرداز می‌خواهیم موتور SHAHAB را بررسی کنیم.\n\n2\n00:00:03,320 --> 00:00:05,720\n‏گوینده 2: بله، دقیقاً هم‌زمان درباره کیفیت\n‏زیرنویس فارسی و استانداردهای SDK صحبت می‌کنیم.\n\n3\n00:00:06,120 --> 00:00:07,320\n‏- گوینده 1: متشکرم، بیایید از زمان‌بندی\n‏- گوینده 2: دقیق و نیم‌فاصله‌ها شروع کنیم.\n\n4\n00:00:07,720 --> 00:00:09,520\n‏گوینده 1: در پایان خروجی‌های SRT\n‏و WebVTT را ارزیابی خواهیم کرد.\n"
+    },
+    "webvtt": {
+      "cueCount": 4,
+      "sha256": "0d82032728865c0870fc46543331c10fe0540b1fd20d7391100f835e9c82959e",
+      "roundTripPassed": true,
+      "zwnjPreserved": true,
+      "declaredInformationLosses": [
+        "WebVTT drops full sample-index/flick timing domains, transformation provenance logs, and revision ancestry.",
+        "Browser/player support for WebVTT <v> voice tags varies across hosts."
+      ],
+      "preview": "WEBVTT\nKind: captions\nLanguage: fa\nNOTE SHAHAB-027 v1.0.0 | doc=subdoc_1795294403475_ccb7c6 | rev=subrev_1_96c0a1\n\ncue_0001\n00:00:00.400 --> 00:00:02.800 align:middle\n<v گوینده 1>‏گوینده 1: سلام و وقت بخیر، امروز در\n‏استودیو آواپرداز می‌خواهیم موتور SHAHAB را بررسی کنیم.\n\ncue_0002\n00:00:03.320 --> 00:00:05.720 align:middle\n<v گوینده 2>‏گوینده 2: بله، دقیقاً هم‌زمان درباره کیفیت\n‏زیرنویس فارسی و استانداردهای SDK صحبت می‌کنیم.\n\ncue_0003\n00:00:06.120 --> 00:00:07.320 align:middle\n‏- گوینده 1: متشکرم، بیایید از زمان‌بندی\n‏- گوینده 2: دقیق و نیم‌فاصله‌ها شروع کنیم.\n\ncue_0004\n00:00:07.720 --> 00:00:09.520 align:middle\n<v گوینده 1>‏گوینده 1: در پایان خروجی‌های SRT\n‏و WebVTT را ارزیابی خواهیم کرد.\n"
+    },
+    "ttml": {
+      "cueCount": 4,
+      "sha256": "a9996516eb95ba32f0f3bfd9718933ffd74fab14900b32ba095729783ac40881",
+      "roundTripPassed": true,
+      "zwnjPreserved": true,
+      "declaredInformationLosses": [
+        "TTML preserves xml:lang=\"fa\", tts:direction=\"rtl\", and ttm:agent speaker references, but omits full SHAHAB sample/flick lineage and revision history."
+      ]
+    },
+    "jsonSidecar": {
+      "cueCount": 4,
+      "sha256": "38ab201600732697ab1b5773f9e7f0ab24d103ae3534f83cf9d68915f51da0bc",
+      "roundTripPassed": true,
+      "zwnjPreserved": true
+    },
+    "adobeAuditionPackage": {
+      "liveAuditionHostImportTested": false,
+      "markerCsvLines": 5
+    }
+  },
+  "manualOverrideConflictProtectionVerified": true,
+  "staleDependencyRejectionVerified": true,
+  "humanEditorialReviewStatus": "NOT_TESTED_NO_HUMAN_REVIEW_PANEL_RUN",
+  "finalStatus": "PARTIALLY_VERIFIED",
+  "knownLimitations": [
+    "Word-level cue sub-splitting inherits SHAHAB-025 granularity limit: when only segment-level acoustic timing is available, visual display splits are tagged SEGMENT_DERIVED_DISPLAY_SPLIT_NOT_WORD_ACOUSTIC and never fabricate word acoustic timestamps.",
+    "Live human Persian editorial panel review has not been executed in this automated run (humanEditorialReviewStatus=NOT_TESTED_NO_HUMAN_REVIEW_PANEL_RUN).",
+    "Live Adobe Audition desktop GUI import test is NOT_TESTED in this headless Linux environment."
+  ]
+}

@@ -86,8 +86,29 @@ export function classifyError(
   } else if (lower.includes('model_not_installed') || lower.includes('no local model')) {
     code = 'MODEL_NOT_INSTALLED';
     subsystem = 'ASR_MODEL';
-  } else if (lower.includes('onnx') || lower.includes('wasm runtime')) {
-    code = lower.includes('load') ? 'MODEL_LOAD_FAILED' : 'ASR_RUNTIME_UNAVAILABLE';
+  } else if (
+    lower.includes('wasm runtime') ||
+    lower.includes('runtime_unavailable') ||
+    lower.includes('runtime unavailable') ||
+    lower.includes('webassembly runtime is unavailable') ||
+    lower.includes('no available adapters') ||
+    lower.includes('cannot find module')
+  ) {
+    code = 'ASR_RUNTIME_UNAVAILABLE';
+    subsystem = 'ASR_RUNTIME';
+  } else if (lower.includes('onnx') || lower.includes('wasm')) {
+    if (lower.includes('load') || lower.includes('invalid model') || lower.includes('protobuf')) {
+      code = 'MODEL_LOAD_FAILED';
+    } else if (
+      context.defaultCode === 'ASR_INFERENCE_FAILED' ||
+      lower.includes('invalid data location') ||
+      lower.includes('tensor') ||
+      lower.includes('input')
+    ) {
+      code = 'ASR_INFERENCE_FAILED';
+    } else {
+      code = 'ASR_RUNTIME_UNAVAILABLE';
+    }
     subsystem = 'ASR_RUNTIME';
   } else if (lower.includes('worker') && lower.includes('timeout')) {
     code = 'WORKER_TIMEOUT';

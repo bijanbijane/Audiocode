@@ -28,7 +28,7 @@ export type StreamingExecutionCategory =
   | 'VAD_SEGMENTED_BATCH'
   | 'REPEATED_FULL_CONTEXT_PROCESSING';
 
-export type AudioContainerFormat = 'wav' | 'mp3' | 'flac' | 'ogg' | 'm4a' | 'webm' | 'pcm16' | 'unknown';
+export type AudioContainerFormat = 'wav' | 'mp3' | 'flac' | 'ogg' | 'm4a' | 'webm' | 'aiff' | 'pcm16' | 'unknown';
 
 export type AsrBackendKind =
   | 'LOCAL_CPU_ACOUSTIC_CTC_ADAPTER'

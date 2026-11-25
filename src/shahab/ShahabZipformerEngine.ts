@@ -33,554 +33,39 @@ import {
   AvapardazTranscriptResult,
   LocalAsrRuntimeAdapter,
 } from '../asr-core/UnifiedLocalAsrRuntime';
-import { detectTextLanguageTag, normalizeWithProfile } from '../asr-core/CoreNormalizationAndLanguage';
+import { detectTextLanguageTag } from '../asr-core/CoreNormalizationAndLanguage';
 import { PERSIAN_NORMALIZATION_CONTRACT_VERSION } from '../lifecycle/CanonicalModelProvenance';
-import { normalizePersianTextDeterministic } from './ShahabContracts';
+import { conditionPcmTo16kMono } from './core/ShahabCoreAudioConditioner';
+import {
+  SHAHAB_CORE_CONTRACT_VERSION,
+  type ShahabCoreInferenceBackend,
+} from './core/ShahabCoreContract';
+import {
+  decodeBpeTokenIdsCanonical,
+  resolveValidatedFrameStrideSec,
+  runBatchedModifiedBeamSearch,
+  runGreedyTransducerSearch,
+} from './core/ShahabCoreDecoder';
+import { normalizeCanonicalPersianUtterance } from './core/ShahabCorePersianNormalizer';
+import {
+  DEFAULT_SHAHAB_FBANK_CONFIG,
+  SHAHAB_FEATURE_CONFIG_VERSION,
+  extractKaldiFbank80,
+  type ShahabExtractedFeatures,
+  type ShahabKaldiFbankConfig,
+} from './core/ShahabCoreFbank';
+import { decodeWavToMono16k } from './core/ShahabCoreWavDecoder';
+import { hashFileSha256BoundedSync, resolveDefaultShahabModelDir } from './ShahabModelStore';
 
-export const SHAHAB_FEATURE_CONFIG_VERSION = 'KALDI_FBANK_80_16K_POVEY_25MS_10MS_V1';
+export {
+  SHAHAB_FEATURE_CONFIG_VERSION,
+  DEFAULT_SHAHAB_FBANK_CONFIG,
+  extractKaldiFbank80,
+  decodeWavToMono16k,
+  type ShahabKaldiFbankConfig,
+  type ShahabExtractedFeatures,
+};
 export const SHAHAB_DECODER_INTERFACE_VERSION = 'STATELESS7_RNNT_CTX2_V1';
-
-export interface ShahabKaldiFbankConfig {
-  readonly sampleRateHz: 16000;
-  readonly frameLengthMs: 25;
-  readonly frameShiftMs: 10;
-  readonly numMelBins: 80;
-  readonly lowFreqHz: number;
-  readonly highFreqHz: number;
-  readonly preemphasisCoeff: number;
-  readonly removeDcOffset: boolean;
-  readonly windowType: 'povey';
-  readonly tailPadSec: number;
-}
-
-export const DEFAULT_SHAHAB_FBANK_CONFIG: ShahabKaldiFbankConfig = Object.freeze({
-  sampleRateHz: 16000,
-  frameLengthMs: 25,
-  frameShiftMs: 10,
-  numMelBins: 80,
-  lowFreqHz: 20,
-  highFreqHz: 7600,
-  preemphasisCoeff: 0.97,
-  removeDcOffset: true,
-  windowType: 'povey',
-  tailPadSec: 0.6,
-});
-
-// Radix-2 in-place iterative Cooley-Tukey FFT (N=512)
-function fft512(re: Float32Array, im: Float32Array): void {
-  const n = 512;
-  let j = 0;
-  for (let i = 1; i < n; i++) {
-    let bit = n >>> 1;
-    while (j & bit) {
-      j ^= bit;
-      bit >>>= 1;
-    }
-    j ^= bit;
-    if (i < j) {
-      const tr = re[i];
-      re[i] = re[j];
-      re[j] = tr;
-      const ti = im[i];
-      im[i] = im[j];
-      im[j] = ti;
-    }
-  }
-  for (let len = 2; len <= n; len <<= 1) {
-    const ang = (-2 * Math.PI) / len;
-    const wLenRe = Math.cos(ang);
-    const wLenIm = Math.sin(ang);
-    const half = len >>> 1;
-    for (let i = 0; i < n; i += len) {
-      let wRe = 1;
-      let wIm = 0;
-      for (let k = 0; k < half; k++) {
-        const uRe = re[i + k];
-        const uIm = im[i + k];
-        const vRe = re[i + k + half] * wRe - im[i + k + half] * wIm;
-        const vIm = re[i + k + half] * wIm + im[i + k + half] * wRe;
-        re[i + k] = uRe + vRe;
-        im[i + k] = uIm + vIm;
-        re[i + k + half] = uRe - vRe;
-        im[i + k + half] = uIm - vIm;
-        const nextWRe = wRe * wLenRe - wIm * wLenIm;
-        wIm = wRe * wLenIm + wIm * wLenRe;
-        wRe = nextWRe;
-      }
-    }
-  }
-}
-
-function hzToMelKaldi(hz: number): number {
-  return 1127.0 * Math.log(1.0 + hz / 700.0);
-}
-
-let cachedPoveyWindow: Float32Array | null = null;
-let cachedMelBank: { readonly bins: Float32Array[]; readonly lowFreq: number; readonly highFreq: number } | null = null;
-
-function getPoveyWindow400(): Float32Array {
-  if (cachedPoveyWindow) return cachedPoveyWindow;
-  const win = new Float32Array(400);
-  const a = (2 * Math.PI) / (400 - 1);
-  for (let i = 0; i < 400; i++) {
-    win[i] = Math.pow(0.5 - 0.5 * Math.cos(a * i), 0.85);
-  }
-  cachedPoveyWindow = win;
-  return win;
-}
-
-function getKaldiMelFilterbank(lowFreq: number, highFreq: number, numMelBins = 80): Float32Array[] {
-  if (cachedMelBank && cachedMelBank.lowFreq === lowFreq && cachedMelBank.highFreq === highFreq) {
-    return cachedMelBank.bins;
-  }
-  const nFft = 512;
-  const numFftBins = nFft / 2; // 256
-  const fftBinWidth = 16000 / nFft; // 31.25 Hz
-  const melLow = hzToMelKaldi(lowFreq);
-  const melHigh = hzToMelKaldi(highFreq);
-  const melDelta = (melHigh - melLow) / (numMelBins + 1);
-
-  const bins: Float32Array[] = [];
-  for (let m = 0; m < numMelBins; m++) {
-    const leftMel = melLow + m * melDelta;
-    const centerMel = melLow + (m + 1) * melDelta;
-    const rightMel = melLow + (m + 2) * melDelta;
-    const weights = new Float32Array(numFftBins + 1);
-    for (let k = 0; k < numFftBins; k++) {
-      const freq = fftBinWidth * k;
-      const mel = hzToMelKaldi(freq);
-      if (mel > leftMel && mel < rightMel) {
-        if (mel <= centerMel) {
-          weights[k] = (mel - leftMel) / (centerMel - leftMel);
-        } else {
-          weights[k] = (rightMel - mel) / (rightMel - centerMel);
-        }
-      }
-    }
-    bins.push(weights);
-  }
-  cachedMelBank = { bins, lowFreq, highFreq };
-  return bins;
-}
-
-export interface ShahabExtractedFeatures {
-  readonly data: Float32Array; // [numFrames * 80]
-  readonly numFrames: number;
-  readonly featureDim: 80;
-  readonly sampleRateHz: 16000;
-  readonly audioDurationSec: number;
-  readonly configVersion: string;
-}
-
-// Precomputed FFT-512 bit-reversal permutation and twiddle factors for OPT-001 (zero weight changes)
-const FFT512_BIT_REV = (() => {
-  const n = 512;
-  const rev = new Uint16Array(n);
-  for (let i = 0; i < n; i++) {
-    let x = i;
-    let r = 0;
-    for (let b = 0; b < 9; b++) {
-      r = (r << 1) | (x & 1);
-      x >>>= 1;
-    }
-    rev[i] = r;
-  }
-  return rev;
-})();
-
-const FFT512_TWIDDLE_RE = (() => {
-  const tw = new Float32Array(256);
-  for (let k = 0; k < 256; k++) {
-    tw[k] = Math.cos((-2 * Math.PI * k) / 512);
-  }
-  return tw;
-})();
-
-const FFT512_TWIDDLE_IM = (() => {
-  const tw = new Float32Array(256);
-  for (let k = 0; k < 256; k++) {
-    tw[k] = Math.sin((-2 * Math.PI * k) / 512);
-  }
-  return tw;
-})();
-
-function fft512Optimized(re: Float32Array, im: Float32Array): void {
-  const n = 512;
-  for (let i = 0; i < n; i++) {
-    const j = FFT512_BIT_REV[i];
-    if (i < j) {
-      const tr = re[i];
-      re[i] = re[j];
-      re[j] = tr;
-      const ti = im[i];
-      im[i] = im[j];
-      im[j] = ti;
-    }
-  }
-  for (let len = 2; len <= n; len <<= 1) {
-    const half = len >>> 1;
-    const step = n / len;
-    for (let i = 0; i < n; i += len) {
-      for (let k = 0; k < half; k++) {
-        const twIdx = k * step;
-        const wRe = FFT512_TWIDDLE_RE[twIdx];
-        const wIm = FFT512_TWIDDLE_IM[twIdx];
-        const idxA = i + k;
-        const idxB = idxA + half;
-        const uRe = re[idxA];
-        const uIm = im[idxA];
-        const vRe = re[idxB] * wRe - im[idxB] * wIm;
-        const vIm = re[idxB] * wIm + im[idxB] * wRe;
-        re[idxA] = uRe + vRe;
-        im[idxA] = uIm + vIm;
-        re[idxB] = uRe - vRe;
-        im[idxB] = uIm - vIm;
-      }
-    }
-  }
-}
-
-interface CompactMelFilter {
-  readonly startBin: number;
-  readonly endBin: number; // inclusive
-  readonly weights: Float32Array;
-}
-
-let cachedCompactMelBank: {
-  readonly filters: CompactMelFilter[];
-  readonly lowFreq: number;
-  readonly highFreq: number;
-} | null = null;
-
-function getCompactKaldiMelFilterbank(lowFreq: number, highFreq: number, numMelBins = 80): CompactMelFilter[] {
-  if (
-    cachedCompactMelBank &&
-    cachedCompactMelBank.lowFreq === lowFreq &&
-    cachedCompactMelBank.highFreq === highFreq
-  ) {
-    return cachedCompactMelBank.filters;
-  }
-  const full = getKaldiMelFilterbank(lowFreq, highFreq, numMelBins);
-  const filters: CompactMelFilter[] = [];
-  for (let m = 0; m < full.length; m++) {
-    const w = full[m];
-    let startBin = -1;
-    let endBin = -1;
-    for (let k = 0; k < 256; k++) {
-      if (w[k] > 0) {
-        if (startBin === -1) startBin = k;
-        endBin = k;
-      }
-    }
-    if (startBin === -1) {
-      filters.push({ startBin: 0, endBin: -1, weights: new Float32Array(0) });
-    } else {
-      filters.push({
-        startBin,
-        endBin,
-        weights: w.slice(startBin, endBin + 1),
-      });
-    }
-  }
-  cachedCompactMelBank = { filters, lowFreq, highFreq };
-  return filters;
-}
-
-/**
- * Extracts Kaldi-compatible 80-dim Log-Mel FBANK features from 16kHz Mono Float32 PCM
- * (matching sherpa-onnx / kaldi-native-fbank defaults for Zipformer2 stateless7).
- * Supports `optimizationMode: 'BASELINE' | 'OPTIMIZED'` for controlled SHAHAB-016 A/B verification.
- */
-export function extractKaldiFbank80(
-  pcm16k: Float32Array,
-  config: ShahabKaldiFbankConfig = DEFAULT_SHAHAB_FBANK_CONFIG,
-  optimizationMode: 'BASELINE' | 'OPTIMIZED' = 'OPTIMIZED',
-): ShahabExtractedFeatures {
-  const tailSamples = Math.round(config.tailPadSec * config.sampleRateHz);
-  const padded = new Float32Array(pcm16k.length + tailSamples);
-  padded.set(pcm16k, 0);
-
-  const frameLen = 400; // 25ms @ 16kHz
-  const frameShift = 160; // 10ms @ 16kHz
-  const numFrames = padded.length < frameLen ? 1 : 1 + Math.floor((padded.length - frameLen) / frameShift);
-  const out = new Float32Array(numFrames * 80);
-
-  const win = getPoveyWindow400();
-  const re = new Float32Array(512);
-  const im = new Float32Array(512);
-  const power = new Float32Array(257);
-  const eps = 1.1920929e-7; // FLT_EPSILON
-
-  if (optimizationMode === 'OPTIMIZED') {
-    const compactFilters = getCompactKaldiMelFilterbank(config.lowFreqHz, config.highFreqHz, 80);
-    const paddedLen = padded.length;
-    const preemph = config.preemphasisCoeff;
-    const removeDc = config.removeDcOffset;
-
-    for (let f = 0; f < numFrames; f++) {
-      const start = f * frameShift;
-      const avail = Math.min(frameLen, paddedLen - start);
-      let mean = 0;
-      if (removeDc) {
-        let sum = 0;
-        for (let i = 0; i < avail; i++) {
-          sum += padded[start + i];
-        }
-        mean = sum / frameLen;
-      }
-
-      re.fill(0, frameLen);
-      im.fill(0);
-      let prev = (avail > 0 ? padded[start] : 0) - mean;
-      re[0] = (prev - preemph * prev) * win[0];
-      for (let i = 1; i < avail; i++) {
-        const cur = padded[start + i] - mean;
-        re[i] = (cur - preemph * prev) * win[i];
-        prev = cur;
-      }
-      for (let i = avail; i < frameLen; i++) {
-        const cur = -mean;
-        re[i] = (cur - preemph * prev) * win[i];
-        prev = cur;
-      }
-
-      fft512Optimized(re, im);
-
-      for (let k = 0; k <= 256; k++) {
-        const rk = re[k];
-        const ik = im[k];
-        power[k] = rk * rk + ik * ik;
-      }
-
-      const rowOffset = f * 80;
-      for (let m = 0; m < 80; m++) {
-        const cf = compactFilters[m];
-        let melEnergy = 0;
-        const w = cf.weights;
-        const startBin = cf.startBin;
-        for (let j = 0; j < w.length; j++) {
-          melEnergy += w[j] * power[startBin + j];
-        }
-        out[rowOffset + m] = Math.log(melEnergy > eps ? melEnergy : eps);
-      }
-    }
-  } else {
-    const melBins = getKaldiMelFilterbank(config.lowFreqHz, config.highFreqHz, 80);
-    for (let f = 0; f < numFrames; f++) {
-      const start = f * frameShift;
-      let sum = 0;
-      for (let i = 0; i < frameLen; i++) {
-        sum += start + i < padded.length ? padded[start + i] : 0;
-      }
-      const mean = config.removeDcOffset ? sum / frameLen : 0;
-
-      re.fill(0);
-      im.fill(0);
-      let prev = (start < padded.length ? padded[start] : 0) - mean;
-      re[0] = (prev - config.preemphasisCoeff * prev) * win[0];
-      for (let i = 1; i < frameLen; i++) {
-        const cur = (start + i < padded.length ? padded[start + i] : 0) - mean;
-        re[i] = (cur - config.preemphasisCoeff * prev) * win[i];
-        prev = cur;
-      }
-
-      fft512(re, im);
-
-      for (let k = 0; k <= 256; k++) {
-        power[k] = re[k] * re[k] + im[k] * im[k];
-      }
-
-      const rowOffset = f * 80;
-      for (let m = 0; m < 80; m++) {
-        const w = melBins[m];
-        let melEnergy = 0;
-        for (let k = 0; k < 256; k++) {
-          if (w[k] > 0) melEnergy += w[k] * power[k];
-        }
-        out[rowOffset + m] = Math.log(Math.max(melEnergy, eps));
-      }
-    }
-  }
-
-  return {
-    data: out,
-    numFrames,
-    featureDim: 80,
-    sampleRateHz: 16000,
-    audioDurationSec: pcm16k.length / 16000,
-    configVersion: SHAHAB_FEATURE_CONFIG_VERSION,
-  };
-}
-
-/**
- * Parses a standard PCM WAV (16-bit or 32-bit float, mono or multichannel) into 16kHz Mono Float32Array.
- */
-export function decodeWavToMono16k(wavBytes: Uint8Array): {
-  readonly pcm16k: Float32Array;
-  readonly originalSampleRate: number;
-  readonly originalChannels: number;
-  readonly durationSec: number;
-} {
-  const view = new DataView(wavBytes.buffer, wavBytes.byteOffset, wavBytes.byteLength);
-  if (
-    wavBytes.byteLength < 44 ||
-    view.getUint32(0, false) !== 0x52494646 || // RIFF
-    view.getUint32(8, false) !== 0x57415645 // WAVE
-  ) {
-    throw new Error('INVALID_WAV_HEADER: Expected RIFF/WAVE header.');
-  }
-
-  let offset = 12;
-  let foundFmt = false;
-  let audioFormat = 0;
-  let channels = 0;
-  let sampleRate = 0;
-  let bitsPerSample = 0;
-  let dataOffset = -1;
-  let dataSize = 0;
-
-  while (offset + 8 <= wavBytes.byteLength) {
-    const chunkId = view.getUint32(offset, false);
-    const chunkSize = view.getUint32(offset + 4, true);
-    const body = offset + 8;
-    if (chunkId === 0x666d7420) {
-      // fmt
-      if (chunkSize < 16 || body + 16 > wavBytes.byteLength) {
-        throw new Error('INVALID_WAV_FMT: Truncated fmt chunk.');
-      }
-      audioFormat = view.getUint16(body, true);
-      channels = view.getUint16(body + 2, true);
-      sampleRate = view.getUint32(body + 4, true);
-      bitsPerSample = view.getUint16(body + 14, true);
-      foundFmt = true;
-    } else if (chunkId === 0x64617461) {
-      // data
-      dataOffset = body;
-      dataSize = Math.min(chunkSize, wavBytes.byteLength - body);
-      break;
-    }
-    const nextOffset = body + chunkSize + (chunkSize % 2);
-    if (!Number.isSafeInteger(nextOffset) || nextOffset <= offset) {
-      break;
-    }
-    offset = nextOffset;
-  }
-
-  if (!foundFmt) {
-    throw new Error('INVALID_WAV_FMT: Missing fmt chunk.');
-  }
-  if (channels < 1 || channels > 8) {
-    throw new Error(`INVALID_WAV_CHANNELS: Unsupported channel count (${channels}).`);
-  }
-  if (!Number.isFinite(sampleRate) || sampleRate < 4000 || sampleRate > 384000) {
-    throw new Error(`INVALID_WAV_SAMPLE_RATE: Unsupported sample rate (${sampleRate}).`);
-  }
-  const isPcm16 = audioFormat === 1 && bitsPerSample === 16;
-  const isPcm24 = audioFormat === 1 && bitsPerSample === 24;
-  const isFloat32 = audioFormat === 3 && bitsPerSample === 32;
-  if (!isPcm16 && !isPcm24 && !isFloat32) {
-    throw new Error(`UNSUPPORTED_WAV_FORMAT: format=${audioFormat}, bits=${bitsPerSample}`);
-  }
-  if (dataOffset < 0 || dataSize <= 0) {
-    throw new Error('INVALID_WAV_DATA: Missing PCM data chunk.');
-  }
-
-  const bytesPerSample = bitsPerSample / 8;
-  const frameBytes = bytesPerSample * channels;
-  const totalFrames = Math.floor(dataSize / frameBytes);
-  if (totalFrames <= 0) {
-    throw new Error('INVALID_WAV_DATA: WAV contains 0 audio frames.');
-  }
-
-  const readSample = (pos: number): number => {
-    if (isFloat32) {
-      const v = view.getFloat32(pos, true);
-      return Number.isFinite(v) ? Math.max(-1, Math.min(1, v)) : 0;
-    }
-    if (isPcm16) {
-      return view.getInt16(pos, true) / 32768;
-    }
-    const b0 = wavBytes[pos];
-    const b1 = wavBytes[pos + 1];
-    const b2 = wavBytes[pos + 2];
-    let v = b0 | (b1 << 8) | (b2 << 16);
-    if (v & 0x800000) v |= ~0xffffff;
-    return v / 8388608;
-  };
-
-  const mono = new Float32Array(totalFrames);
-  if (channels === 1) {
-    for (let i = 0; i < totalFrames; i++) {
-      mono[i] = readSample(dataOffset + i * bytesPerSample);
-    }
-  } else {
-    // Phase-aware & dead-channel-aware stereo/multi-channel downmix:
-    // Prevents out-of-phase stereo (L = -R) from cancelling to 0.0 silence.
-    const ch0 = new Float32Array(totalFrames);
-    const ch1 = new Float32Array(totalFrames);
-    let sumSq0 = 0;
-    let sumSq1 = 0;
-    let dot01 = 0;
-    for (let i = 0; i < totalFrames; i++) {
-      const base = dataOffset + i * frameBytes;
-      const s0 = readSample(base);
-      const s1 = readSample(base + bytesPerSample);
-      ch0[i] = s0;
-      ch1[i] = s1;
-      sumSq0 += s0 * s0;
-      sumSq1 += s1 * s1;
-      dot01 += s0 * s1;
-    }
-    const rms0 = Math.sqrt(sumSq0 / totalFrames);
-    const rms1 = Math.sqrt(sumSq1 / totalFrames);
-    const db0 = rms0 > 1e-6 ? 20 * Math.log10(rms0) : -120;
-    const db1 = rms1 > 1e-6 ? 20 * Math.log10(rms1) : -120;
-    const denom = Math.sqrt(sumSq0 * sumSq1);
-    const corr = denom > 1e-12 ? dot01 / denom : 0;
-
-    const phaseInversionRisk = corr < -0.55;
-    const silentOneChannel = (db0 < -72 && db1 > -50) || (db1 < -72 && db0 > -50);
-
-    if (channels === 2 && (phaseInversionRisk || silentOneChannel)) {
-      const dominant = rms0 >= rms1 ? ch0 : ch1;
-      mono.set(dominant);
-    } else if (channels === 2) {
-      for (let i = 0; i < totalFrames; i++) {
-        mono[i] = (ch0[i] + ch1[i]) * 0.5;
-      }
-    } else {
-      for (let i = 0; i < totalFrames; i++) {
-        const base = dataOffset + i * frameBytes;
-        let acc = ch0[i] + ch1[i];
-        for (let ch = 2; ch < channels; ch++) {
-          acc += readSample(base + ch * bytesPerSample);
-        }
-        mono[i] = acc / channels;
-      }
-    }
-  }
-
-  let pcm16k = mono;
-  if (sampleRate !== 16000) {
-    const targetLen = Math.max(1, Math.round((mono.length * 16000) / sampleRate));
-    pcm16k = new Float32Array(targetLen);
-    const ratio = sampleRate / 16000;
-    for (let i = 0; i < targetLen; i++) {
-      const pos = i * ratio;
-      const lo = Math.min(mono.length - 1, Math.floor(pos));
-      const hi = Math.min(mono.length - 1, lo + 1);
-      const frac = pos - lo;
-      pcm16k[i] = mono[lo] * (1 - frac) + mono[hi] * frac;
-    }
-  }
-
-  return {
-    pcm16k,
-    originalSampleRate: sampleRate,
-    originalChannels: channels,
-    durationSec: mono.length / sampleRate,
-  };
-}
 
 export function loadZipformerTokensTxt(tokensPath: string): readonly string[] {
   const raw = fs.readFileSync(tokensPath, 'utf-8');
@@ -599,12 +84,7 @@ export function loadZipformerTokensTxt(tokensPath: string): readonly string[] {
 }
 
 export function decodeBpeTokenIdsToText(tokenIds: readonly number[], vocab: readonly string[]): string {
-  let text = '';
-  for (const id of tokenIds) {
-    if (id <= 0 || id >= vocab.length) continue;
-    text += vocab[id] ?? '';
-  }
-  return text.replace(/▁/g, ' ').replace(/\s+/g, ' ').trim();
+  return decodeBpeTokenIdsCanonical(tokenIds, vocab);
 }
 
 /**
@@ -614,6 +94,7 @@ export function decodeBpeTokenIdsToText(tokenIds: readonly number[], vocab: read
  */
 
 export interface ShahabCacheIdentityKey {
+  readonly tenantScope?: string;
   readonly audioSha256: string;
   readonly segmentId: string;
   readonly segmentStartSample: number;
@@ -632,6 +113,7 @@ export interface ShahabCacheIdentityKey {
 
 export function serializeCacheIdentity(key: ShahabCacheIdentityKey): string {
   return [
+    key.tenantScope ?? 'default',
     key.audioSha256,
     key.segmentId,
     `${key.segmentStartSample}:${key.segmentEndSample}`,
@@ -653,6 +135,8 @@ export interface ShahabEncoderOutputTensor {
   readonly dtype: 'float32';
   readonly byteLength: number;
   readonly encoderTimeMs: number;
+  readonly frameStrideSec?: number;
+  readonly audioDurationSec?: number;
 }
 
 export interface ShahabStreamingStateEntry {
@@ -1361,8 +845,15 @@ export class SHAHABFrozenModelAdapter implements LocalAsrRuntimeAdapter {
   private loadTimeMs: number | null = null;
   private inferenceVerified = false;
   private activeJobId: string | null = null;
+  private activeAbortController: AbortController | null = null;
   private encoderInvocationCount = 0;
   private decoderInvocationCount = 0;
+  private integrityProbeCache: {
+    readonly signature: string;
+    readonly available: boolean;
+    readonly missingFiles: readonly string[];
+    readonly mismatches: readonly string[];
+  } | null = null;
 
   constructor(options: ShahabFrozenAdapterOptions) {
     this.modelDir = path.resolve(options.modelDir);
@@ -1405,13 +896,11 @@ export class SHAHABFrozenModelAdapter implements LocalAsrRuntimeAdapter {
     readonly hashes: { encoder: string; decoder: string; joiner: string; tokens: string };
     readonly mismatches: readonly string[];
   } {
-    const hashFile = (name: string) =>
-      crypto.createHash('sha256').update(fs.readFileSync(path.join(this.modelDir, name))).digest('hex');
     const actual = {
-      encoder: hashFile('encoder.int8.onnx'),
-      decoder: hashFile('decoder.int8.onnx'),
-      joiner: hashFile('joiner.int8.onnx'),
-      tokens: hashFile('tokens.txt'),
+      encoder: hashFileSha256BoundedSync(path.join(this.modelDir, 'encoder.int8.onnx')),
+      decoder: hashFileSha256BoundedSync(path.join(this.modelDir, 'decoder.int8.onnx')),
+      joiner: hashFileSha256BoundedSync(path.join(this.modelDir, 'joiner.int8.onnx')),
+      tokens: hashFileSha256BoundedSync(path.join(this.modelDir, 'tokens.txt')),
     };
     const mismatches: string[] = [];
     if (actual.encoder !== this.expectedHashes.encoder) mismatches.push('encoder.int8.onnx SHA-256 mismatch');
@@ -1421,12 +910,85 @@ export class SHAHABFrozenModelAdapter implements LocalAsrRuntimeAdapter {
     return { immutable: mismatches.length === 0, hashes: actual, mismatches };
   }
 
+  /**
+   * Checks presence and SHA-256 integrity of required model files, cached by file size+mtime signature
+   * so repeated capability/readiness probes remain fast while immediately catching missing or tampered weights.
+   */
+  public inspectModelIntegrityCached(): {
+    readonly available: boolean;
+    readonly missingFiles: readonly string[];
+    readonly mismatches: readonly string[];
+    readonly signature: string;
+  } {
+    const required = ['encoder.int8.onnx', 'decoder.int8.onnx', 'joiner.int8.onnx', 'tokens.txt'] as const;
+    const missingFiles: string[] = [];
+    const sigParts: string[] = [];
+    for (const name of required) {
+      const fullPath = path.join(this.modelDir, name);
+      try {
+        const st = fs.statSync(fullPath);
+        if (!st.isFile() || st.size <= 0) {
+          missingFiles.push(name);
+          sigParts.push(`${name}:empty`);
+        } else {
+          sigParts.push(`${name}:${st.size}:${Math.trunc(st.mtimeMs)}`);
+        }
+      } catch {
+        missingFiles.push(name);
+        sigParts.push(`${name}:missing`);
+      }
+    }
+    const signature = sigParts.join('|');
+    if (this.integrityProbeCache && this.integrityProbeCache.signature === signature) {
+      return { ...this.integrityProbeCache, signature };
+    }
+    if (missingFiles.length > 0) {
+      const result = { signature, available: false, missingFiles, mismatches: [] as string[] };
+      this.integrityProbeCache = result;
+      return result;
+    }
+    try {
+      const immut = this.verifyWeightImmutability();
+      const result = {
+        signature,
+        available: immut.immutable,
+        missingFiles: [] as string[],
+        mismatches: immut.mismatches,
+      };
+      this.integrityProbeCache = result;
+      return result;
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      const result = {
+        signature,
+        available: false,
+        missingFiles: [] as string[],
+        mismatches: [msg],
+      };
+      this.integrityProbeCache = result;
+      return result;
+    }
+  }
+
   public async probeCapabilities(): Promise<AsrRuntimeCapabilityReport> {
+    const probe = this.inspectModelIntegrityCached();
+    const notes: string[] = [
+      'Executes Zipformer2-Transducer (pruned_transducer_stateless7) via 3 separate ONNX sessions (encoder + decoder + joiner) inside Node.js using onnxruntime-web WASM CPU.',
+      'Offline graph only (no cached_key/cached_conv streaming inputs); encoder_out reuse supported across decoder passes.',
+    ];
+    if (!probe.available) {
+      if (probe.missingFiles.length > 0) {
+        notes.push(`Model assets missing on disk: ${probe.missingFiles.join(', ')}.`);
+      }
+      if (probe.mismatches.length > 0) {
+        notes.push(`Model integrity verification failed: ${probe.mismatches.join('; ')}.`);
+      }
+    }
     return {
       runtimeTarget: this.runtimeTarget,
       runtimeName: this.runtimeName,
       runtimeVersion: 'onnxruntime-web@1.31.1',
-      available: true,
+      available: probe.available,
       offlineCapable: true,
       wasmAvailable: true,
       simdAvailable: true,
@@ -1436,11 +998,8 @@ export class SHAHABFrozenModelAdapter implements LocalAsrRuntimeAdapter {
       maxThreads: 1,
       memoryBudgetBytes: 1024 * 1024 * 1024,
       maxSupportedOnnxOpset: 21,
-      supportedArchitectures: ['FASTCONFORMER_CTC', 'WHISPER_SEQ2SEQ'],
-      notes: [
-        'Executes Zipformer2-Transducer (pruned_transducer_stateless7) via 3 separate ONNX sessions (encoder + decoder + joiner).',
-        'Offline graph only (no cached_key/cached_conv streaming inputs); encoder_out reuse supported across decoder passes.',
-      ],
+      supportedArchitectures: ['ZIPFORMER_TRANSDUCER'],
+      notes,
     };
   }
 
@@ -1463,17 +1022,31 @@ export class SHAHABFrozenModelAdapter implements LocalAsrRuntimeAdapter {
       this.vocab = loadZipformerTokensTxt(path.join(this.modelDir, 'tokens.txt'));
 
       const t0 = performance.now();
-      const encBytes = fs.readFileSync(path.join(this.modelDir, 'encoder.int8.onnx'));
-      const decBytes = fs.readFileSync(path.join(this.modelDir, 'decoder.int8.onnx'));
-      const joinBytes = fs.readFileSync(path.join(this.modelDir, 'joiner.int8.onnx'));
+      const sessionOptions: ort.InferenceSession.SessionOptions = {
+        executionProviders: ['wasm'],
+        graphOptimizationLevel: 'all',
+        enableCpuMemArena: true,
+        enableMemPattern: true,
+      };
 
       let dec: ort.InferenceSession | null = null;
       let join: ort.InferenceSession | null = null;
       let enc: ort.InferenceSession | null = null;
       try {
-        dec = await ort.InferenceSession.create(decBytes, { executionProviders: ['wasm'] });
-        join = await ort.InferenceSession.create(joinBytes, { executionProviders: ['wasm'] });
-        enc = await ort.InferenceSession.create(encBytes, { executionProviders: ['wasm'] });
+        // Sequential ONNX file read + session creation avoids holding all 3 raw buffers
+        // (~115.7 MB) simultaneously in Node heap during cold load.
+        let decBytes: Buffer | null = fs.readFileSync(path.join(this.modelDir, 'decoder.int8.onnx'));
+        dec = await ort.InferenceSession.create(decBytes, sessionOptions);
+        decBytes = null;
+
+        let joinBytes: Buffer | null = fs.readFileSync(path.join(this.modelDir, 'joiner.int8.onnx'));
+        join = await ort.InferenceSession.create(joinBytes, sessionOptions);
+        joinBytes = null;
+
+        let encBytes: Buffer | null = fs.readFileSync(path.join(this.modelDir, 'encoder.int8.onnx'));
+        enc = await ort.InferenceSession.create(encBytes, sessionOptions);
+        encBytes = null;
+
         this.decoderSession = dec;
         this.joinerSession = join;
         this.encoderSession = enc;
@@ -1513,6 +1086,7 @@ export class SHAHABFrozenModelAdapter implements LocalAsrRuntimeAdapter {
   public buildCacheIdentity(params: {
     readonly pcm16k: Float32Array;
     readonly segmentId: string;
+    readonly tenantScope?: string;
     readonly segmentStartSample?: number;
     readonly segmentEndSample?: number;
   }): ShahabCacheIdentityKey {
@@ -1522,6 +1096,7 @@ export class SHAHABFrozenModelAdapter implements LocalAsrRuntimeAdapter {
       .digest('hex');
     const hashes = this.verifiedHashes ?? this.expectedHashes;
     return {
+      tenantScope: params.tenantScope ?? 'default',
       audioSha256,
       segmentId: params.segmentId,
       segmentStartSample: params.segmentStartSample ?? 0,
@@ -1545,6 +1120,7 @@ export class SHAHABFrozenModelAdapter implements LocalAsrRuntimeAdapter {
   public async encodeAudio(params: {
     readonly pcm16k: Float32Array;
     readonly segmentId: string;
+    readonly tenantScope?: string;
     readonly useCache?: boolean;
     readonly signal?: AbortSignal;
     readonly optimizationMode?: 'BASELINE' | 'OPTIMIZED';
@@ -1566,6 +1142,7 @@ export class SHAHABFrozenModelAdapter implements LocalAsrRuntimeAdapter {
     const cacheIdentity = this.buildCacheIdentity({
       pcm16k: params.pcm16k,
       segmentId: params.segmentId,
+      tenantScope: params.tenantScope,
     });
 
     if (params.useCache) {
@@ -1633,6 +1210,8 @@ export class SHAHABFrozenModelAdapter implements LocalAsrRuntimeAdapter {
       dtype: 'float32',
       byteLength: copy.byteLength,
       encoderTimeMs: encMs,
+      frameStrideSec: 0.04,
+      audioDurationSec: params.pcm16k.length / 16000,
     };
 
     if (params.useCache) {
@@ -1656,6 +1235,11 @@ export class SHAHABFrozenModelAdapter implements LocalAsrRuntimeAdapter {
     await this.initializeRuntime();
     const t0 = performance.now();
     const { data, numFrames, dim } = params.encoderOutput;
+    const frameStrideSec = resolveValidatedFrameStrideSec({
+      nominalFrameStrideSec: params.encoderOutput.frameStrideSec ?? 0.04,
+      numFrames,
+      audioDurationSec: params.encoderOutput.audioDurationSec,
+    });
     const decCache = new Map<string, Float32Array>();
     let decJoinCalls = 0;
 
@@ -1664,22 +1248,193 @@ export class SHAHABFrozenModelAdapter implements LocalAsrRuntimeAdapter {
       const hit = decCache.get(key);
       if (hit) return hit;
       const y = new ort.Tensor('int64', BigInt64Array.from([BigInt(t0Id), BigInt(t1Id)]), [1, 2]);
-      const res = await this.decoderSession!.run({ y });
-      this.decoderInvocationCount++;
-      decJoinCalls++;
-      const out = new Float32Array(res.decoder_out.data as Float32Array);
-      decCache.set(key, out);
-      return out;
+      try {
+        const res = await this.decoderSession!.run({ y });
+        this.decoderInvocationCount++;
+        decJoinCalls++;
+        try {
+          const out = new Float32Array(res.decoder_out.data as Float32Array);
+          decCache.set(key, out);
+          return out;
+        } finally {
+          res.decoder_out?.dispose?.();
+        }
+      } finally {
+        y.dispose?.();
+      }
     };
 
     const runJoiner = async (frameIdx: number, decVec: Float32Array): Promise<Float32Array> => {
       const encSlice = data.subarray(frameIdx * dim, (frameIdx + 1) * dim);
-      const res = await this.joinerSession!.run({
-        encoder_out: new ort.Tensor('float32', encSlice, [1, dim]),
-        decoder_out: new ort.Tensor('float32', decVec, [1, dim]),
-      });
-      decJoinCalls++;
-      return res.logit.data as Float32Array;
+      const encoderTensor = new ort.Tensor('float32', encSlice, [1, dim]);
+      const decoderTensor = new ort.Tensor('float32', decVec, [1, dim]);
+      try {
+        const res = await this.joinerSession!.run({
+          encoder_out: encoderTensor,
+          decoder_out: decoderTensor,
+        });
+        decJoinCalls++;
+        try {
+          return new Float32Array(res.logit.data as Float32Array);
+        } finally {
+          res.logit?.dispose?.();
+        }
+      } finally {
+        encoderTensor.dispose?.();
+        decoderTensor.dispose?.();
+      }
+    };
+
+    let decoderBatchSupported = true;
+    let joinerBatchSupported = true;
+
+    const isBatchShapeError = (err: unknown): boolean => {
+      const msg = err instanceof Error ? err.message : String(err);
+      return /shape|dimension|dim|batch|expected.*1/i.test(msg);
+    };
+
+    const runDecoderBatch = async (
+      contexts: readonly (readonly [number, number])[],
+    ): Promise<readonly Float32Array[]> => {
+      const batchSize = contexts.length;
+      if (batchSize === 0) return [];
+      if (batchSize === 1 || !decoderBatchSupported) {
+        const out: Float32Array[] = new Array(batchSize);
+        for (let i = 0; i < batchSize; i++) {
+          out[i] = await runDecoder(contexts[i][0], contexts[i][1]);
+        }
+        return out;
+      }
+      const flat = new BigInt64Array(batchSize * 2);
+      for (let i = 0; i < batchSize; i++) {
+        flat[i * 2] = BigInt(contexts[i][0]);
+        flat[i * 2 + 1] = BigInt(contexts[i][1]);
+      }
+      const y = new ort.Tensor('int64', flat, [batchSize, 2]);
+      let fallbackNeeded = false;
+      try {
+        const res = await this.decoderSession!.run({ y });
+        this.decoderInvocationCount++;
+        decJoinCalls++;
+        try {
+          const raw = res.decoder_out.data as Float32Array;
+          const outDims = res.decoder_out.dims;
+          const batchDimMatches =
+            Array.isArray(outDims) && outDims.length >= 2 && Number(outDims[0]) === batchSize;
+          if (!batchDimMatches || raw.length < batchSize * dim || raw.length % batchSize !== 0) {
+            decoderBatchSupported = false;
+            fallbackNeeded = true;
+          } else {
+            const outDim = raw.length / batchSize;
+            const results: Float32Array[] = new Array(batchSize);
+            for (let i = 0; i < batchSize; i++) {
+              const vec = new Float32Array(outDim);
+              vec.set(raw.subarray(i * outDim, (i + 1) * outDim));
+              results[i] = vec;
+            }
+            return results;
+          }
+        } finally {
+          res.decoder_out?.dispose?.();
+        }
+      } catch (err) {
+        if (isBatchShapeError(err)) {
+          decoderBatchSupported = false;
+          fallbackNeeded = true;
+        } else {
+          throw err;
+        }
+      } finally {
+        y.dispose?.();
+      }
+      if (fallbackNeeded) {
+        const out: Float32Array[] = new Array(batchSize);
+        for (let i = 0; i < batchSize; i++) {
+          out[i] = await runDecoder(contexts[i][0], contexts[i][1]);
+        }
+        return out;
+      }
+      return [];
+    };
+
+    let encBatchScratch = new Float32Array(0);
+    let decBatchScratch = new Float32Array(0);
+
+    const runJoinerBatch = async (
+      frameIdx: number,
+      decoderVectors: readonly Float32Array[],
+    ): Promise<readonly Float32Array[]> => {
+      const batchSize = decoderVectors.length;
+      if (batchSize === 0) return [];
+      if (batchSize === 1 || !joinerBatchSupported) {
+        const out: Float32Array[] = new Array(batchSize);
+        for (let i = 0; i < batchSize; i++) {
+          out[i] = await runJoiner(frameIdx, decoderVectors[i]);
+        }
+        return out;
+      }
+      const encSlice = data.subarray(frameIdx * dim, (frameIdx + 1) * dim);
+      const needed = batchSize * dim;
+      if (encBatchScratch.length < needed) {
+        encBatchScratch = new Float32Array(needed);
+        decBatchScratch = new Float32Array(needed);
+      }
+      const encBatch = encBatchScratch.subarray(0, needed);
+      const decBatch = decBatchScratch.subarray(0, needed);
+      for (let i = 0; i < batchSize; i++) {
+        encBatch.set(encSlice, i * dim);
+        decBatch.set(decoderVectors[i], i * dim);
+      }
+      const encoderTensor = new ort.Tensor('float32', encBatch, [batchSize, dim]);
+      const decoderTensor = new ort.Tensor('float32', decBatch, [batchSize, dim]);
+      let fallbackNeeded = false;
+      try {
+        const res = await this.joinerSession!.run({
+          encoder_out: encoderTensor,
+          decoder_out: decoderTensor,
+        });
+        decJoinCalls++;
+        try {
+          const raw = res.logit.data as Float32Array;
+          const outDims = res.logit.dims;
+          const batchDimMatches =
+            Array.isArray(outDims) && outDims.length >= 2 && Number(outDims[0]) === batchSize;
+          const vocabMin = this.vocab.length > 0 ? this.vocab.length : 2;
+          if (!batchDimMatches || raw.length < batchSize * vocabMin || raw.length % batchSize !== 0) {
+            joinerBatchSupported = false;
+            fallbackNeeded = true;
+          } else {
+            const vocabSize = raw.length / batchSize;
+            const results: Float32Array[] = new Array(batchSize);
+            for (let i = 0; i < batchSize; i++) {
+              const row = new Float32Array(vocabSize);
+              row.set(raw.subarray(i * vocabSize, (i + 1) * vocabSize));
+              results[i] = row;
+            }
+            return results;
+          }
+        } finally {
+          res.logit?.dispose?.();
+        }
+      } catch (err) {
+        if (isBatchShapeError(err)) {
+          joinerBatchSupported = false;
+          fallbackNeeded = true;
+        } else {
+          throw err;
+        }
+      } finally {
+        encoderTensor.dispose?.();
+        decoderTensor.dispose?.();
+      }
+      if (fallbackNeeded) {
+        const out: Float32Array[] = new Array(batchSize);
+        for (let i = 0; i < batchSize; i++) {
+          out[i] = await runJoiner(frameIdx, decoderVectors[i]);
+        }
+        return out;
+      }
+      return [];
     };
 
     const logSoftmax = (logits: Float32Array): Float32Array => {
@@ -1710,49 +1465,31 @@ export class SHAHABFrozenModelAdapter implements LocalAsrRuntimeAdapter {
     const blankPenalty = params.policy.blankPenalty;
 
     if (params.policy.decodingMethod === 'greedy_search') {
-      const emitted: number[] = [];
-      const timestamps: number[] = [];
-      let ctx0 = 0;
-      let ctx1 = 0;
-      let logProbSum = 0;
-      let decVec = await runDecoder(ctx0, ctx1);
-
-      for (let t = 0; t < numFrames; t++) {
-        if (params.signal?.aborted) {
-          throw new AsrRuntimeError({
+      const greedy = await runGreedyTransducerSearch({
+        numFrames,
+        vocab: this.vocab,
+        blankPenalty,
+        frameStrideSec,
+        signal: params.signal,
+        onCancelled: () =>
+          new AsrRuntimeError({
             code: 'JOB_CANCELLED',
             message: 'Greedy decoding cancelled.',
             runtimeTarget: this.runtimeTarget,
-          });
-        }
-        const logits = await runJoiner(t, decVec);
-        const logProbs = logSoftmax(logits);
-        let bestId = 0;
-        let bestScore = logProbs[0] - blankPenalty;
-        for (let v = 1; v < logProbs.length; v++) {
-          const score = logProbs[v];
-          if (score > bestScore) {
-            bestScore = score;
-            bestId = v;
-          }
-        }
-        if (bestId !== 0) {
-          emitted.push(bestId);
-          timestamps.push(Number((t * 0.04).toFixed(3))); // 4x subsampling * 10ms = 40ms
-          logProbSum += bestScore;
-          ctx0 = ctx1;
-          ctx1 = bestId;
-          decVec = await runDecoder(ctx0, ctx1);
-        }
-      }
+          }),
+        callbacks: {
+          runDecoderBatch,
+          runJoinerBatch,
+        },
+      });
 
       this.inferenceVerified = true;
       return {
-        rawText: decodeBpeTokenIdsToText(emitted, this.vocab),
-        tokenIds: emitted,
-        tokenTimestampsSec: timestamps,
-        logProbSum: Number(logProbSum.toFixed(4)),
-        decoderJoinerInvocations: decJoinCalls,
+        rawText: greedy.rawText,
+        tokenIds: greedy.tokenIds,
+        tokenTimestampsSec: greedy.tokenTimestampsSec,
+        logProbSum: greedy.logProbSum,
+        decoderJoinerInvocations: greedy.totalDecoderJoinerInvocations,
         decodeTimeMs: Math.round(performance.now() - t0),
         policyId: params.policy.policyId,
         decodingMethod: 'greedy_search',
@@ -1762,13 +1499,48 @@ export class SHAHABFrozenModelAdapter implements LocalAsrRuntimeAdapter {
       };
     }
 
-    // Modified Beam Search (stateless7: at most 1 non-blank symbol emitted per encoder frame)
-    // OPT-002 (when optimizationMode === 'OPTIMIZED'):
-    // 1. Per-frame Joiner context (c0, c1) deduplication (avoids redundant ONNX Joiner runs when multiple beams share the last 2 tokens).
-    // 2. Reusable scratch buffer for logSoftmax (eliminates per-beam per-frame Float32Array allocations).
-    // 3. O(K) insertion for top-K token selection (eliminates Array.prototype.sort() inside the inner vocab loop).
     const useDecoderOpt = (params.optimizationMode ?? 'OPTIMIZED') === 'OPTIMIZED';
     const beamSize = Math.max(2, Math.min(12, params.policy.maxActivePaths));
+
+    if (useDecoderOpt) {
+      // SHB-F05: Batched [K, dim] joiner + batched [M, 2] decoder + Parent-Pointer Prefix Trie + scratchpad reuse
+      const batched = await runBatchedModifiedBeamSearch({
+        numFrames,
+        vocab: this.vocab,
+        beamSize,
+        blankPenalty,
+        frameStrideSec,
+        biasMap,
+        signal: params.signal,
+        onCancelled: () =>
+          new AsrRuntimeError({
+            code: 'JOB_CANCELLED',
+            message: 'Modified beam search cancelled.',
+            runtimeTarget: this.runtimeTarget,
+          }),
+        callbacks: {
+          runDecoderBatch,
+          runJoinerBatch,
+        },
+      });
+
+      this.inferenceVerified = true;
+      return {
+        rawText: batched.rawText,
+        tokenIds: batched.tokenIds,
+        tokenTimestampsSec: batched.tokenTimestampsSec,
+        logProbSum: batched.logProbSum,
+        decoderJoinerInvocations: batched.totalDecoderJoinerInvocations,
+        decodeTimeMs: Math.round(performance.now() - t0),
+        policyId: params.policy.policyId,
+        decodingMethod: 'modified_beam_search',
+        maxActivePaths: beamSize,
+        blankPenalty,
+        contextTermsApplied: activeTerms,
+      };
+    }
+
+    // Baseline unoptimized reference loop (retained strictly for BASELINE vs OPTIMIZED A/B benchmarks)
     interface BeamHyp {
       tokens: number[];
       timestamps: number[];
@@ -1779,25 +1551,6 @@ export class SHAHABFrozenModelAdapter implements LocalAsrRuntimeAdapter {
     const logAddExp = (a: number, b: number) =>
       a === -Infinity ? b : b === -Infinity ? a : Math.max(a, b) + Math.log1p(Math.exp(-Math.abs(a - b)));
 
-    const logSoftmaxInto = (logits: Float32Array, dst: Float32Array): Float32Array => {
-      let maxVal = -Infinity;
-      for (let i = 0; i < logits.length; i++) {
-        if (logits[i] > maxVal) maxVal = logits[i];
-      }
-      let sumExp = 0;
-      for (let i = 0; i < logits.length; i++) {
-        sumExp += Math.exp(logits[i] - maxVal);
-      }
-      const logSum = maxVal + Math.log(sumExp);
-      for (let i = 0; i < logits.length; i++) {
-        dst[i] = logits[i] - logSum;
-      }
-      return dst;
-    };
-
-    const topIds = new Int32Array(beamSize + 1);
-    const topLps = new Float64Array(beamSize + 1);
-
     for (let t = 0; t < numFrames; t++) {
       if (params.signal?.aborted) {
         throw new AsrRuntimeError({
@@ -1807,102 +1560,38 @@ export class SHAHABFrozenModelAdapter implements LocalAsrRuntimeAdapter {
         });
       }
       const nextMap = new Map<string, BeamHyp>();
-      const frameLogProbsCache = useDecoderOpt ? new Map<string, Float32Array>() : null;
 
       for (const hyp of beams) {
         const c0 = hyp.tokens[hyp.tokens.length - 2];
         const c1 = hyp.tokens[hyp.tokens.length - 1];
-        let logProbs: Float32Array;
+        const decVec = await runDecoder(c0, c1);
+        const logits = await runJoiner(t, decVec);
+        const logProbs = logSoftmax(logits);
 
-        if (frameLogProbsCache) {
-          const ctxKey = `${c0}:${c1}`;
-          const cachedLp = frameLogProbsCache.get(ctxKey);
-          if (cachedLp) {
-            logProbs = cachedLp;
-          } else {
-            const decVec = await runDecoder(c0, c1);
-            const logits = await runJoiner(t, decVec);
-            logProbs = logSoftmaxInto(logits, new Float32Array(logits.length));
-            frameLogProbsCache.set(ctxKey, logProbs);
+        const top: { id: number; lp: number }[] = [{ id: 0, lp: logProbs[0] - blankPenalty }];
+        for (let v = 1; v < logProbs.length; v++) {
+          const bias = biasMap?.get(v) ?? 0;
+          const lp = logProbs[v] + bias;
+          if (top.length < beamSize + 1) {
+            top.push({ id: v, lp });
+            top.sort((a, b) => b.lp - a.lp);
+          } else if (lp > top[top.length - 1].lp) {
+            top[top.length - 1] = { id: v, lp };
+            top.sort((a, b) => b.lp - a.lp);
           }
-        } else {
-          const decVec = await runDecoder(c0, c1);
-          const logits = await runJoiner(t, decVec);
-          logProbs = logSoftmax(logits);
         }
 
-        if (useDecoderOpt) {
-          const maxK = beamSize + 1;
-          topIds[0] = 0;
-          topLps[0] = logProbs[0] - blankPenalty;
-          let count = 1;
-
-          for (let v = 1; v < logProbs.length; v++) {
-            const bias = biasMap?.get(v) ?? 0;
-            const lp = logProbs[v] + bias;
-            if (count < maxK) {
-              let pos = count;
-              while (pos > 0 && lp > topLps[pos - 1]) {
-                topIds[pos] = topIds[pos - 1];
-                topLps[pos] = topLps[pos - 1];
-                pos--;
-              }
-              topIds[pos] = v;
-              topLps[pos] = lp;
-              count++;
-            } else if (lp > topLps[maxK - 1]) {
-              let pos = maxK - 1;
-              while (pos > 0 && lp > topLps[pos - 1]) {
-                topIds[pos] = topIds[pos - 1];
-                topLps[pos] = topLps[pos - 1];
-                pos--;
-              }
-              topIds[pos] = v;
-              topLps[pos] = lp;
-            }
-          }
-
-          const frameTs = Number((t * 0.04).toFixed(3));
-          for (let i = 0; i < count; i++) {
-            const candId = topIds[i];
-            const candLp = topLps[i];
-            const newTokens = candId === 0 ? hyp.tokens : [...hyp.tokens, candId];
-            const newTs = candId === 0 ? hyp.timestamps : [...hyp.timestamps, frameTs];
-            const newScore = hyp.score + candLp;
-            const key = newTokens.join(',');
-            const existing = nextMap.get(key);
-            if (!existing) {
-              nextMap.set(key, { tokens: newTokens, timestamps: newTs, score: newScore });
-            } else {
-              existing.score = logAddExp(existing.score, newScore);
-            }
-          }
-        } else {
-          // Baseline unoptimized top-K with inner Array.sort()
-          const top: { id: number; lp: number }[] = [{ id: 0, lp: logProbs[0] - blankPenalty }];
-          for (let v = 1; v < logProbs.length; v++) {
-            const bias = biasMap?.get(v) ?? 0;
-            const lp = logProbs[v] + bias;
-            if (top.length < beamSize + 1) {
-              top.push({ id: v, lp });
-              top.sort((a, b) => b.lp - a.lp);
-            } else if (lp > top[top.length - 1].lp) {
-              top[top.length - 1] = { id: v, lp };
-              top.sort((a, b) => b.lp - a.lp);
-            }
-          }
-
-          for (const cand of top) {
-            const newTokens = cand.id === 0 ? hyp.tokens : [...hyp.tokens, cand.id];
-            const newTs = cand.id === 0 ? hyp.timestamps : [...hyp.timestamps, Number((t * 0.04).toFixed(3))];
-            const newScore = hyp.score + cand.lp;
-            const key = newTokens.join(',');
-            const existing = nextMap.get(key);
-            if (!existing) {
-              nextMap.set(key, { tokens: newTokens, timestamps: newTs, score: newScore });
-            } else {
-              existing.score = logAddExp(existing.score, newScore);
-            }
+        const frameTs = Number((t * frameStrideSec).toFixed(3));
+        for (const cand of top) {
+          const newTokens = cand.id === 0 ? hyp.tokens : [...hyp.tokens, cand.id];
+          const newTs = cand.id === 0 ? hyp.timestamps : [...hyp.timestamps, frameTs];
+          const newScore = hyp.score + cand.lp;
+          const key = newTokens.join(',');
+          const existing = nextMap.get(key);
+          if (!existing) {
+            nextMap.set(key, { tokens: newTokens, timestamps: newTs, score: newScore });
+          } else {
+            existing.score = logAddExp(existing.score, newScore);
           }
         }
       }
@@ -1954,40 +1643,47 @@ export class SHAHABFrozenModelAdapter implements LocalAsrRuntimeAdapter {
 
     const startedMs = performance.now();
     this.activeJobId = request.jobId;
+    const jobAbortController = new AbortController();
+    this.activeAbortController = jobAbortController;
+    const onExternalAbort = () => jobAbortController.abort();
+    if (request.signal?.aborted) {
+      jobAbortController.abort();
+    } else {
+      request.signal?.addEventListener('abort', onExternalAbort, { once: true });
+    }
     try {
       await this.initializeRuntime();
-      const rawPcm = await request.readSourceRange(0, request.totalSamples);
-      let pcm16k = rawPcm;
-      if (request.sampleRate !== 16000) {
-        const targetLen = Math.max(1, Math.round((rawPcm.length * 16000) / request.sampleRate));
-        pcm16k = new Float32Array(targetLen);
-        const ratio = request.sampleRate / 16000;
-        for (let i = 0; i < targetLen; i++) {
-          const pos = i * ratio;
-          const lo = Math.min(rawPcm.length - 1, Math.floor(pos));
-          const hi = Math.min(rawPcm.length - 1, lo + 1);
-          const frac = pos - lo;
-          pcm16k[i] = rawPcm[lo] * (1 - frac) + rawPcm[hi] * frac;
-        }
+      if (jobAbortController.signal.aborted) {
+        throw new AsrRuntimeError({
+          code: 'JOB_CANCELLED',
+          message: 'SHAHAB transcription cancelled before audio read.',
+          runtimeTarget: this.runtimeTarget,
+          jobId: request.jobId,
+        });
       }
+      const rawPcm = await request.readSourceRange(0, request.totalSamples);
+      const { pcm16k } = conditionPcmTo16kMono({
+        pcm: rawPcm,
+        sampleRateHz: request.sampleRate,
+        channels: 1,
+      });
 
       const { encoderOutput } = await this.encodeAudio({
         pcm16k,
         segmentId: `${request.jobId}_seg0`,
         useCache: true,
-        signal: request.signal,
+        signal: jobAbortController.signal,
       });
       const policy = this.policyManager.getPolicy('BALANCED');
       const decoded = await this.decodeFromEncoderOutput({
         encoderOutput,
         policy,
-        signal: request.signal,
+        signal: jobAbortController.signal,
       });
 
       const durationSec = request.totalSamples / request.sampleRate;
       const processingTimeMs = Math.max(1, Math.round(performance.now() - startedMs));
-      const p009Norm = normalizePersianTextDeterministic(decoded.rawText).normalized;
-      const normalizedText = normalizeWithProfile(p009Norm, 'MIXED-NORM-V1') || p009Norm;
+      const normalizedText = normalizeCanonicalPersianUtterance(decoded.rawText);
       const lang = detectTextLanguageTag(normalizedText || decoded.rawText).language;
 
       return {
@@ -1999,7 +1695,7 @@ export class SHAHABFrozenModelAdapter implements LocalAsrRuntimeAdapter {
         modelId: this.modelId,
         modelVersion: this.modelRevision.slice(0, 12),
         modelSha256Hex: this.verifiedHashes?.encoder ?? this.expectedHashes.encoder,
-        architecture: 'FASTCONFORMER_CTC', // Existing contract enum compatibility; true Zipformer lineage recorded in modelId/metadata
+        architecture: 'ZIPFORMER_TRANSDUCER',
         normalizationVersion: PERSIAN_NORMALIZATION_CONTRACT_VERSION,
         offlineVerified: true,
         sampleRateHz: 16000,
@@ -2021,7 +1717,7 @@ export class SHAHABFrozenModelAdapter implements LocalAsrRuntimeAdapter {
             rawText: decoded.rawText,
             normalizedText,
             language: lang,
-            confidence: 0, // Honest: uncalibrated raw RNN-T scores are never misrepresented as calibrated probability
+            confidence: null, // Honest: uncalibrated raw RNN-T scores are never misrepresented as calibrated probability
             timestampGranularity: 'SEGMENT',
             words: [],
           },
@@ -2029,11 +1725,17 @@ export class SHAHABFrozenModelAdapter implements LocalAsrRuntimeAdapter {
         peakMemoryBytes: this.memoryGovernor.getTelemetry().processRssBytes,
       };
     } finally {
+      request.signal?.removeEventListener('abort', onExternalAbort);
+      if (this.activeAbortController === jobAbortController) {
+        this.activeAbortController = null;
+      }
       this.activeJobId = null;
     }
   }
 
   public async cancel(): Promise<void> {
+    this.activeAbortController?.abort();
+    this.activeAbortController = null;
     this.activeJobId = null;
   }
 
@@ -2075,6 +1777,118 @@ export class SHAHABFrozenModelAdapter implements LocalAsrRuntimeAdapter {
   public async dispose(): Promise<void> {
     await this.unloadModel();
   }
+
+  /**
+   * Exposes this ONNX Runtime Web WASM adapter via the host-independent
+   * `ShahabCoreInferenceBackend` contract (SHB-F06).
+   */
+  public asCoreInferenceBackend(): ShahabCoreInferenceBackend {
+    return {
+      executionProvider: 'wasm_single_thread',
+      modelId: this.modelId,
+      modelVersion: this.modelRevision.slice(0, 12),
+      getCapabilities: () => ({
+        contractVersion: SHAHAB_CORE_CONTRACT_VERSION,
+        executionProvider: 'wasm_single_thread',
+        nativeCppAvailable: false,
+        statefulStreamingSupported: false,
+        maxThreads: 1,
+        offlineCapable: true,
+      }),
+      initialize: () => this.initializeRuntime(),
+      getVocab: () => this.vocab,
+      runEncoder: async (features, numFrames, featureDim = 80) => {
+        await this.initializeRuntime();
+        const xTensor = new ort.Tensor('float32', features, [1, numFrames, featureDim]);
+        const xLensTensor = new ort.Tensor('int64', BigInt64Array.from([BigInt(numFrames)]), [1]);
+        try {
+          const out = await this.encoderSession!.run({ x: xTensor, x_lens: xLensTensor });
+          this.encoderInvocationCount++;
+          try {
+            const encRaw = out.encoder_out.data as Float32Array;
+            const encLens = out.encoder_out_lens.data as BigInt64Array;
+            const validFrames = Number(encLens[0]);
+            const dim = Number(out.encoder_out.dims[2] ?? 384);
+            const copy = new Float32Array(validFrames * dim);
+            copy.set(encRaw.subarray(0, validFrames * dim));
+            return { data: copy, numFrames: validFrames, dim, frameStrideSec: 0.04 };
+          } finally {
+            out.encoder_out.dispose?.();
+            out.encoder_out_lens.dispose?.();
+          }
+        } finally {
+          xTensor.dispose?.();
+          xLensTensor.dispose?.();
+        }
+      },
+      runDecoderBatch: async (contexts) => {
+        await this.initializeRuntime();
+        const batchSize = contexts.length;
+        if (batchSize === 0) return [];
+        const flat = new BigInt64Array(batchSize * 2);
+        for (let i = 0; i < batchSize; i++) {
+          flat[i * 2] = BigInt(contexts[i][0]);
+          flat[i * 2 + 1] = BigInt(contexts[i][1]);
+        }
+        const y = new ort.Tensor('int64', flat, [batchSize, 2]);
+        try {
+          const res = await this.decoderSession!.run({ y });
+          this.decoderInvocationCount++;
+          try {
+            const raw = res.decoder_out.data as Float32Array;
+            const outDim = raw.length / batchSize;
+            const results: Float32Array[] = new Array(batchSize);
+            for (let i = 0; i < batchSize; i++) {
+              const vec = new Float32Array(outDim);
+              vec.set(raw.subarray(i * outDim, (i + 1) * outDim));
+              results[i] = vec;
+            }
+            return results;
+          } finally {
+            res.decoder_out?.dispose?.();
+          }
+        } finally {
+          y.dispose?.();
+        }
+      },
+      runJoinerBatch: async (encoderFrame, decoderVectors, dim) => {
+        await this.initializeRuntime();
+        const batchSize = decoderVectors.length;
+        if (batchSize === 0) return [];
+        const encBatch = new Float32Array(batchSize * dim);
+        const decBatch = new Float32Array(batchSize * dim);
+        for (let i = 0; i < batchSize; i++) {
+          encBatch.set(encoderFrame, i * dim);
+          decBatch.set(decoderVectors[i], i * dim);
+        }
+        const encoderTensor = new ort.Tensor('float32', encBatch, [batchSize, dim]);
+        const decoderTensor = new ort.Tensor('float32', decBatch, [batchSize, dim]);
+        try {
+          const res = await this.joinerSession!.run({
+            encoder_out: encoderTensor,
+            decoder_out: decoderTensor,
+          });
+          try {
+            const raw = res.logit.data as Float32Array;
+            const vocabSize = raw.length / batchSize;
+            const results: Float32Array[] = new Array(batchSize);
+            for (let i = 0; i < batchSize; i++) {
+              const row = new Float32Array(vocabSize);
+              row.set(raw.subarray(i * vocabSize, (i + 1) * vocabSize));
+              results[i] = row;
+            }
+            return results;
+          } finally {
+            res.logit?.dispose?.();
+          }
+        } finally {
+          encoderTensor.dispose?.();
+          decoderTensor.dispose?.();
+        }
+      },
+      dispose: () => this.dispose(),
+    };
+  }
 }
 
 /**
@@ -2097,21 +1911,37 @@ export interface ShahabRuntimeCapabilityProfile {
 }
 
 export class SHAHABRuntimeCapabilityRegistry {
-  public listProfiles(): readonly ShahabRuntimeCapabilityProfile[] {
+  public listProfiles(options?: {
+    readonly modelDir?: string;
+    readonly runtimeVerified?: boolean;
+  }): readonly ShahabRuntimeCapabilityProfile[] {
+    const resolvedDir = path.resolve(options?.modelDir ?? resolveDefaultShahabModelDir());
+    const requiredFiles = ['encoder.int8.onnx', 'decoder.int8.onnx', 'joiner.int8.onnx', 'tokens.txt'];
+    const allWeightsPresent = requiredFiles.every((f) => {
+      try {
+        const st = fs.statSync(path.join(resolvedDir, f));
+        return st.isFile() && st.size > 0;
+      } catch {
+        return false;
+      }
+    });
+    const wasmVerified = options?.runtimeVerified ?? allWeightsPresent;
+
     return [
       {
         runtimeId: 'shahab-browser-wasm-cpu',
         executionLocation: 'LOCAL_BROWSER',
         executionProvider: 'onnxruntime-web@1.31.1 (wasm)',
-        verifiedInCurrentContainer: true,
+        verifiedInCurrentContainer: wasmVerified,
         supportedTensorDtypes: ['FLOAT', 'INT8', 'UINT8', 'INT64', 'INT32', 'BOOL'],
         int4MatMulNBitsSupported: false,
         streamingEncoderSupported: false,
         encoderOutputReuseSupported: true,
         maxRecommendedPackageBytes: 256 * 1024 * 1024,
         localAudioUploadPolicy: 'NEVER_UPLOAD',
-        statusNote:
-          'Verified with real unmocked Persian Zipformer INT8 inference on sample.wav in this container.',
+        statusNote: wasmVerified
+          ? 'Required Persian Zipformer INT8 ONNX model artifacts detected on disk for onnxruntime-web WASM CPU execution.'
+          : 'UNVERIFIED in current environment: required ONNX model weight files are absent on disk.',
       },
       {
         runtimeId: 'shahab-browser-webgpu',
@@ -2143,7 +1973,7 @@ export class SHAHABRuntimeCapabilityRegistry {
         runtimeId: 'shahab-cloud-unified-contract',
         executionLocation: 'CLOUD_AUTHORIZED',
         executionProvider: 'Unified Avapardaz Local/Cloud Contract (explicit opt-in only)',
-        verifiedInCurrentContainer: true,
+        verifiedInCurrentContainer: false,
         supportedTensorDtypes: ['FLOAT', 'FLOAT16', 'INT8'],
         int4MatMulNBitsSupported: 'NOT_VERIFIED',
         streamingEncoderSupported: false,
@@ -2151,7 +1981,7 @@ export class SHAHABRuntimeCapabilityRegistry {
         maxRecommendedPackageBytes: 4 * 1024 * 1024 * 1024,
         localAudioUploadPolicy: 'EXPLICIT_USER_AUTHORIZATION_REQUIRED',
         statusNote:
-          'Contract parity verified; local mode never implicitly uploads audio (AVP-P01-006 / SHAHAB-010 §2).',
+          'Contract-level opt-in policy only; no live cloud inference endpoint verified in this local-first environment (AVP-P01-006 / SHAHAB-010 §2).',
       },
     ];
   }

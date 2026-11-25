@@ -84,7 +84,7 @@ export interface ProjectTranscriptSegmentRecord {
   readonly rawText: string;
   readonly normalizedText: string;
   readonly userCorrectedText: string | null;
-  readonly confidence: number;
+  readonly confidence: number | null;
 }
 
 export interface ProjectTranscriptRecord {
@@ -113,7 +113,7 @@ export interface SpeechEditSuggestion {
   readonly endSample: number;
   readonly durationSec: number;
   readonly reasonFa: string;
-  readonly confidence: number;
+  readonly confidence: number | null;
 }
 
 export interface ProjectEditDecision {

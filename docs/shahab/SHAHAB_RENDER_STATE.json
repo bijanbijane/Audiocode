@@ -1,0 +1,364 @@
+{
+  "missionId": "SHAHAB-030",
+  "contractVersion": "1.0.0",
+  "graphVersion": "1.0.0",
+  "generatedAtUtc": "2026-11-21T21:46:10.006Z",
+  "finalStatus": "PARTIALLY_VERIFIED",
+  "statusRationale": "Non-destructive Render Graph, execution-boundary approval/stale/protected-range guards, sample-accurate mono & stereo reconstruction, linear & equal-power crossfades, WAV PCM16/PCM32F atomic export, and independent WAV reopen exact-sample validation are verified; lossy/FLAC external encoders and human perceptual listening tests remain UNSUPPORTED/NOT_TESTED.",
+  "capabilities": {
+    "contractVersion": "1.0.0",
+    "graphVersion": "1.0.0",
+    "supportedFormats": [
+      {
+        "format": "WAV_PCM_16",
+        "status": "SUPPORTED_VERIFIED",
+        "lossless": true,
+        "note": "Standard 16-bit signed linear PCM RIFF/WAVE with independent reopen validation."
+      },
+      {
+        "format": "WAV_PCM_32F",
+        "status": "SUPPORTED_VERIFIED",
+        "lossless": true,
+        "note": "IEEE 32-bit float RIFF/WAVE preserving exact unmodified Float32 samples bit-for-bit."
+      },
+      {
+        "format": "FLAC",
+        "status": "UNSUPPORTED",
+        "lossless": true,
+        "note": "FLAC encoder binary/WASM not bundled in workspace; explicitly disclosed rather than silently downgraded."
+      },
+      {
+        "format": "MP3",
+        "status": "UNSUPPORTED",
+        "lossless": false,
+        "note": "MP3 lossy encoder not bundled in workspace; explicitly rejected if requested."
+      },
+      {
+        "format": "AAC",
+        "status": "UNSUPPORTED",
+        "lossless": false,
+        "note": "AAC lossy encoder not bundled in workspace; explicitly rejected if requested."
+      }
+    ],
+    "supportedTransitions": [
+      "NONE",
+      "LINEAR",
+      "EQUAL_POWER"
+    ],
+    "nonDestructiveSourceProtection": true,
+    "independentOutputReopenValidation": true,
+    "preservesMultiChannelWithoutSilentDownmix": true
+  },
+  "previewSummary": {
+    "renderId": "rnd_bf79ecf699",
+    "exportFormat": "WAV_PCM_16",
+    "outputTotalFrames": 118008,
+    "totalRemovedMs": 2124.5,
+    "validation": {
+      "status": "RENDER_VALIDATED",
+      "reopenedIndependently": true,
+      "headerValid": true,
+      "expectedChannels": 2,
+      "actualChannels": 2,
+      "expectedSampleRateHz": 16000,
+      "actualSampleRateHz": 16000,
+      "expectedOutputFrames": 118008,
+      "actualOutputFrames": 118008,
+      "durationMismatchMs": 0,
+      "containsNaNOrInf": false,
+      "peakDbfs": 0,
+      "clippedSampleCount": 480,
+      "sourceInheritedClippedSampleCount": 480,
+      "renderIntroducedClippedSampleCount": 0,
+      "unmodifiedRegionExactSampleMaxAbsError": 0.000030518,
+      "unmodifiedRegionBitExactVerified": true,
+      "sourceHashUnchangedVerified": true,
+      "outputFileSha256": "54879780a9e64c9e76b3e2795f5f5e7b2d08c7439863e5045f7f3a5b67e4a0fa",
+      "warnings": [],
+      "sourceInheritedNotes": [
+        "Retained source regions already contained 480 near-full-scale sample(s) (>=0.999), preserved bit-exact without introducing render clipping."
+      ],
+      "errors": []
+    },
+    "wallTimeMs": 54.22
+  },
+  "finalRenderSummary": {
+    "renderId": "rnd_0579e5da2c",
+    "planId": "edp_92fda99fe0",
+    "planRevision": 6,
+    "exportFormat": "WAV_PCM_32F",
+    "channels": 2,
+    "sampleRateHz": 16000,
+    "sourceTotalFrames": 152000,
+    "outputTotalFrames": 118008,
+    "totalRemovedSamples": 33992,
+    "totalRemovedMs": 2124.5,
+    "outputFileRelativePath": "docs/shahab/renders/shahab_030_verified_stereo_pcm32f.wav",
+    "renderGraph": {
+      "graphId": "rgraph_af331c12",
+      "graphVersion": "1.0.0",
+      "deterministicDigestSha256": "af89d86b9733347951e2c937043d1aeaf02191725d6dab384619a4f0e2170548",
+      "nodes": [
+        {
+          "nodeId": "n1_source_acq",
+          "nodeType": "SOURCE_ACQUISITION",
+          "inputs": [],
+          "config": {
+            "audioId": "avapardaz-editorial-fixture-stereo-01",
+            "channels": 2,
+            "sampleRateHz": 16000,
+            "totalFrames": 152000
+          }
+        },
+        {
+          "nodeId": "n2_source_val",
+          "nodeType": "SOURCE_VALIDATION",
+          "inputs": [
+            "n1_source_acq"
+          ],
+          "config": {
+            "expectedSourcePcmSha256": "62f042bdd936b4ae2797aacc35b13d409ad21176eb9ebbac2bcb1b00f934567f",
+            "sourceRevisionId": "src_rev_001"
+          }
+        },
+        {
+          "nodeId": "n3_range_sel",
+          "nodeType": "RANGE_SELECTION",
+          "inputs": [
+            "n2_source_val"
+          ],
+          "config": {
+            "retainedRegionCount": 4,
+            "approvedCutCount": 3
+          }
+        },
+        {
+          "nodeId": "n4_seq",
+          "nodeType": "REGION_SEQUENCING",
+          "inputs": [
+            "n3_range_sel"
+          ],
+          "config": {
+            "intervalSemantics": "HALF_OPEN_[startSample,endSample)"
+          }
+        },
+        {
+          "nodeId": "n5_gain",
+          "nodeType": "GAIN",
+          "inputs": [
+            "n4_seq"
+          ],
+          "config": {
+            "gainLinear": 1
+          }
+        },
+        {
+          "nodeId": "n6_transition",
+          "nodeType": "TRANSITION",
+          "inputs": [
+            "n5_gain"
+          ],
+          "config": {
+            "curveType": "EQUAL_POWER",
+            "defaultCrossfadeMs": 12,
+            "zeroCrossingToleranceSamples": 32
+          }
+        },
+        {
+          "nodeId": "n7_channel_map",
+          "nodeType": "CHANNEL_MAPPING",
+          "inputs": [
+            "n6_transition"
+          ],
+          "config": {
+            "policy": "PRESERVE_ORIGINAL_CHANNELS",
+            "channels": 2
+          }
+        },
+        {
+          "nodeId": "n8_resample",
+          "nodeType": "RESAMPLING",
+          "inputs": [
+            "n7_channel_map"
+          ],
+          "config": {
+            "mode": "IDENTITY_NO_RESAMPLE",
+            "sampleRateHz": 16000
+          }
+        },
+        {
+          "nodeId": "n9_encode",
+          "nodeType": "ENCODING",
+          "inputs": [
+            "n8_resample"
+          ],
+          "config": {
+            "format": "WAV_PCM_32F",
+            "mode": "FINAL_EXPORT_RENDER"
+          }
+        },
+        {
+          "nodeId": "n10_validate",
+          "nodeType": "OUTPUT_VALIDATION",
+          "inputs": [
+            "n9_encode"
+          ],
+          "config": {
+            "independentReopen": true,
+            "verifyUnmodifiedSamplePreservation": true
+          }
+        }
+      ]
+    },
+    "sourceOutputMappings": [
+      {
+        "mappingId": "map_1",
+        "sourceStartSample": 0,
+        "sourceEndSample": 8985,
+        "outputStartSample": 0,
+        "outputEndSample": 8985,
+        "sampleRateHz": 16000,
+        "isTransitionOverlapRegion": false,
+        "exactCopyVerifiedRange": {
+          "sourceStartSample": 0,
+          "sourceEndSample": 8745,
+          "outputStartSample": 0,
+          "outputEndSample": 8745
+        }
+      },
+      {
+        "mappingId": "map_2",
+        "sourceStartSample": 12480,
+        "sourceEndSample": 35840,
+        "outputStartSample": 8745,
+        "outputEndSample": 32105,
+        "sampleRateHz": 16000,
+        "isTransitionOverlapRegion": true,
+        "exactCopyVerifiedRange": {
+          "sourceStartSample": 12720,
+          "sourceEndSample": 35648,
+          "outputStartSample": 8985,
+          "outputEndSample": 31913
+        }
+      },
+      {
+        "mappingId": "map_3",
+        "sourceStartSample": 62480,
+        "sourceEndSample": 66399,
+        "outputStartSample": 31913,
+        "outputEndSample": 35832,
+        "sampleRateHz": 16000,
+        "isTransitionOverlapRegion": true,
+        "exactCopyVerifiedRange": {
+          "sourceStartSample": 62672,
+          "sourceEndSample": 66175,
+          "outputStartSample": 32105,
+          "outputEndSample": 35608
+        }
+      },
+      {
+        "mappingId": "map_4",
+        "sourceStartSample": 69600,
+        "sourceEndSample": 152000,
+        "outputStartSample": 35608,
+        "outputEndSample": 118008,
+        "sampleRateHz": 16000,
+        "isTransitionOverlapRegion": true,
+        "exactCopyVerifiedRange": {
+          "sourceStartSample": 69824,
+          "sourceEndSample": 152000,
+          "outputStartSample": 35832,
+          "outputEndSample": 118008
+        }
+      }
+    ],
+    "removedRanges": [
+      {
+        "operationId": "edop_0002",
+        "operationType": "REMOVE_FILLER_CANDIDATE",
+        "sourceStartSample": 8960,
+        "sourceEndSample": 12480,
+        "durationMs": 220,
+        "approvedBy": "shahab-verification-harness",
+        "approvedAtUtc": "2026-11-21T21:46:10.521Z"
+      },
+      {
+        "operationId": "edop_0001",
+        "operationType": "TRIM_SILENCE_OR_PAUSE",
+        "sourceStartSample": 35840,
+        "sourceEndSample": 62480,
+        "durationMs": 1665,
+        "approvedBy": "shahab-verification-harness",
+        "approvedAtUtc": "2026-11-21T21:46:10.521Z"
+      },
+      {
+        "operationId": "edop_0003",
+        "operationType": "REMOVE_REPETITION_CANDIDATE",
+        "sourceStartSample": 66400,
+        "sourceEndSample": 69600,
+        "durationMs": 200,
+        "approvedBy": "shahab-verification-harness",
+        "approvedAtUtc": "2026-11-21T21:46:10.521Z"
+      }
+    ],
+    "appliedTransitions": [
+      {
+        "spliceIndex": 1,
+        "outputSamplePosition": 8745,
+        "curveType": "EQUAL_POWER",
+        "requestedFadeMs": 15,
+        "actualFadeSamples": 240,
+        "zeroCrossingSnapDeltaSamples": 25,
+        "boundaryJumpBeforeTransition": 0.08522,
+        "boundaryJumpAfterTransition": 0.00401
+      },
+      {
+        "spliceIndex": 2,
+        "outputSamplePosition": 31913,
+        "curveType": "EQUAL_POWER",
+        "requestedFadeMs": 12,
+        "actualFadeSamples": 192,
+        "zeroCrossingSnapDeltaSamples": 0,
+        "boundaryJumpBeforeTransition": 0.00088,
+        "boundaryJumpAfterTransition": 0.00245
+      },
+      {
+        "spliceIndex": 3,
+        "outputSamplePosition": 35608,
+        "curveType": "EQUAL_POWER",
+        "requestedFadeMs": 14,
+        "actualFadeSamples": 224,
+        "zeroCrossingSnapDeltaSamples": -1,
+        "boundaryJumpBeforeTransition": 0.08354,
+        "boundaryJumpAfterTransition": 0.00225
+      }
+    ],
+    "validation": {
+      "status": "RENDER_VALIDATED",
+      "reopenedIndependently": true,
+      "headerValid": true,
+      "expectedChannels": 2,
+      "actualChannels": 2,
+      "expectedSampleRateHz": 16000,
+      "actualSampleRateHz": 16000,
+      "expectedOutputFrames": 118008,
+      "actualOutputFrames": 118008,
+      "durationMismatchMs": 0,
+      "containsNaNOrInf": false,
+      "peakDbfs": 0,
+      "clippedSampleCount": 480,
+      "sourceInheritedClippedSampleCount": 480,
+      "renderIntroducedClippedSampleCount": 0,
+      "unmodifiedRegionExactSampleMaxAbsError": 0,
+      "unmodifiedRegionBitExactVerified": true,
+      "sourceHashUnchangedVerified": true,
+      "outputFileSha256": "0af96c8be2fc6514a323e2cdea654dddda3814b89cbf7186be9da52c739a11d2",
+      "warnings": [],
+      "sourceInheritedNotes": [
+        "Retained source regions already contained 480 near-full-scale sample(s) (>=0.999), preserved bit-exact without introducing render clipping."
+      ],
+      "errors": []
+    },
+    "wallTimeMs": 38.72
+  }
+}

@@ -25,6 +25,7 @@ import {
   type ShahabZipformerRuntimeStatus,
 } from './ShahabZipformerAsrRuntime';
 import type { ShahabDecodePolicyId } from './ShahabZipformerEngine';
+import type { ShahabContextMemoryStore } from './ShahabContextMemoryStore';
 
 export interface ShahabTranscribeBackend {
   getRuntimeStatus(): ShahabZipformerRuntimeStatus;
@@ -37,6 +38,7 @@ export interface ShahabTranscribeBackend {
 export interface ShahabHttpRouterOptions {
   readonly shahabZipformerRuntime: ShahabZipformerAsrRuntime | ShahabTranscribeBackend;
   readonly securityGuard: AudioApiSecurityGuard;
+  readonly contextMemoryStore?: ShahabContextMemoryStore;
   readonly maxUploadBytes?: number;
   readonly requestTimeoutMs?: number;
   readonly maxConcurrentPerOwner?: number;
@@ -46,7 +48,7 @@ export interface ShahabHttpRouterOptions {
 }
 
 const DEFAULT_MAX_UPLOAD_BYTES = 64 * 1024 * 1024; // 64 MiB
-const DEFAULT_REQUEST_TIMEOUT_MS = 120_000; // 2 minutes
+const DEFAULT_REQUEST_TIMEOUT_MS = 300_000; // 5 minutes — aligned with local CPU Zipformer processing of multi-minute audio
 const ALLOWED_AUDIO_CONTENT_TYPE_RE =
   /^(audio\/(wav|wave|x-wav|mpeg|mp3|flac|ogg|webm|mp4|aac|aiff|x-aiff)|application\/octet-stream)(;.*)?$/i;
 
@@ -85,9 +87,18 @@ export function createShahabHttpRouter(options: ShahabHttpRouterOptions): Router
         modelVersion: status.modelVersion,
         upstreamModelId: status.upstreamModelId,
         runtime: status.runtime,
+        executionProvider: status.executionProvider ?? 'wasm_single_thread',
+        nativeCppAvailable: status.nativeCppAvailable ?? false,
         offlineOnlyEnforced: status.offlineOnlyEnforced,
         missingFiles: status.missingFiles,
         integrityError: status.integrityError ? sanitizeDiagnosticString(status.integrityError) : null,
+        integrityVerified: status.integrityVerified ?? (status.available && status.integrityError === null),
+        maxSingleRequestDurationSec: status.maxSingleRequestDurationSec,
+        limits: {
+          maxUploadBytes,
+          requestTimeoutMs,
+          maxSingleRequestDurationSec: status.maxSingleRequestDurationSec ?? null,
+        },
         sampleAudioAvailable: status.sampleAudioAvailable,
         activeJobCount: status.activeJobCount,
         queuedJobCount: status.queuedJobCount,
@@ -214,6 +225,24 @@ export function createShahabHttpRouter(options: ShahabHttpRouterOptions): Router
         return;
       }
 
+      // 4b. Validate optional X-Project-Id header BEFORE acquiring concurrency slot
+      const rawProjectHeader = req.headers['x-project-id'];
+      let validatedProjectId: string | undefined;
+      if (rawProjectHeader !== undefined) {
+        if (
+          typeof rawProjectHeader !== 'string' ||
+          !/^[a-zA-Z0-9._:-]{1,96}$/.test(rawProjectHeader.trim())
+        ) {
+          res.status(400).json({
+            error: 'INVALID_PROJECT_ID',
+            code: 'INVALID_PROJECT_ID',
+            message: 'شناسه پروژه (X-Project-Id) معتبر نیست.',
+          });
+          return;
+        }
+        validatedProjectId = rawProjectHeader.trim();
+      }
+
       // 5. Enforce per-owner and global concurrency limit
       const slot = securityGuard.acquireConcurrencySlot({
         bucket: 'shahab-transcribe',
@@ -263,6 +292,7 @@ export function createShahabHttpRouter(options: ShahabHttpRouterOptions): Router
         'SPEED',
         'BALANCED',
         'PRECISION',
+        'VOCABULARY',
         'VERBATIM',
       ];
       const decodePolicy: ShahabDecodePolicyId = allowedPolicies.includes(
@@ -295,13 +325,23 @@ export function createShahabHttpRouter(options: ShahabHttpRouterOptions): Router
 
       try {
         const sourceAudioHash = crypto.createHash('sha256').update(req.body).digest('hex');
+        const verifiedContextTerms =
+          options.contextMemoryStore && ownerId !== 'unknown'
+            ? options.contextMemoryStore.getVerifiedTermsForBiasing({
+                ownerId,
+                projectId: validatedProjectId,
+              })
+            : undefined;
         const out = await shahabZipformerRuntime.transcribe({
           sourceAudioId: `aud_${sourceAudioHash.slice(0, 16)}`,
           sourceAudioHash,
           audioBytes: req.body,
           filename,
+          ownerId,
+          projectId: validatedProjectId,
           languageHint: 'fa',
           decodePolicy,
+          verifiedContextTerms,
           signal: abortController.signal,
         });
 

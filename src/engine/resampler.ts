@@ -93,10 +93,10 @@ export function resampleTo16kMono(
   const outputLength = Math.floor(inputLength / ratio);
   const output = new Float32Array(outputLength);
 
-  // Cutoff at 0.9 * Nyquist of target rate (7200 Hz for 16kHz)
-  const cutoffHz = targetSampleRate * 0.45;
+  // Cutoff at 0.9 * Nyquist of the lower sample rate (7200 Hz for 48k->16k, 3600 Hz for 8k->16k)
+  const cutoffHz = Math.min(inputSampleRate, targetSampleRate) * 0.45;
   const fc = cutoffHz / inputSampleRate; // normalized to input sample rate
-  const halfWidth = Math.max(12, Math.round(16 * (inputSampleRate / targetSampleRate)));
+  const halfWidth = Math.max(12, Math.round(16 * Math.max(1, inputSampleRate / targetSampleRate)));
   const filterTaps = halfWidth * 2 + 1;
   const beta = 6.5; // Kaiser beta (~65+ dB stopband attenuation)
   const invI0Beta = 1 / besselI0(beta);

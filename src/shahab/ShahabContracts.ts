@@ -59,7 +59,13 @@ export type ShahabMissionId =
   | 'SHAHAB-021'
   | 'SHAHAB-022'
   | 'SHAHAB-023'
-  | 'SHAHAB-024';
+  | 'SHAHAB-024'
+  | 'SHAHAB-025'
+  | 'SHAHAB-026'
+  | 'SHAHAB-027'
+  | 'SHAHAB-028'
+  | 'SHAHAB-029'
+  | 'SHAHAB-030';
 
 export type ShahabTrackKey =
   | 'repository_inspection'
@@ -252,6 +258,8 @@ export interface ShahabOnnxGraphStats {
   readonly uniqueInitializerTensorCount: number;
   readonly duplicateInitializerTensorCount: number;
   readonly parameterElementCount: number;
+  readonly quantizedWeightElementCount?: number;
+  readonly floatWeightElementCount?: number;
   readonly nonParameterConstantElementCount: number;
   readonly totalInitializerElementCount: number;
   readonly parameterStorageBytes: number;

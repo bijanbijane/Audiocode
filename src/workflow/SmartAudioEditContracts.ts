@@ -90,7 +90,12 @@ export interface ShahabTranscribeRequest {
   readonly totalSourceSamples?: number;
   readonly audioBytes?: Buffer;
   readonly audioFilePath?: string;
+  /** Optional pre-canonicalized 16 kHz mono Float32 PCM from ENGINE 01 to avoid redundant decoding/resampling drift */
+  readonly canonicalPcm16kMono?: Float32Array;
   readonly filename?: string;
+  /** Optional authenticated owner/project scope for tenant-isolated encoder cache keys */
+  readonly ownerId?: string;
+  readonly projectId?: string;
   readonly languageHint?: 'fa' | 'en' | 'fa-en' | 'auto';
   readonly maxChunkDurationSec?: number;
   readonly overlapSec?: number;

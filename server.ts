@@ -72,7 +72,11 @@ import { SpeechSecurityService } from './src/security/SpeechSecurityService.ts';
 import { SpeechSecurityGateway } from './src/security/SpeechSecurityGateway.ts';
 import { createSpeechSecurityHttpRouter } from './src/security/SpeechSecurityHttpRouter.ts';
 import { CoreModelRouter } from './src/asr-core/CoreModelRouter.ts';
-import { float32ToPcm16Buffer } from './src/asr-core/CoreAudioIngestion.ts';
+import {
+  cleanupOrphanedCoreIngestionTempFiles,
+  float32ToPcm16Buffer,
+} from './src/asr-core/CoreAudioIngestion.ts';
+import { cleanupOrphanedCanonicalIngestionFiles } from './src/asr-core/StreamingCanonicalAudioIngestion.ts';
 import { CORE_SAMPLE_RATE, synthesizeAcousticSpeechFromText } from './src/asr-core/CoreAcousticCtcEngine.ts';
 import { runCoreBenchmarkAndAdaptationSuite } from './src/asr-core/CoreAsrBenchmarkSuite.ts';
 import type { DetectedLanguageTag, LongFormConfig } from './src/asr-core/CoreAsrContracts.ts';
@@ -87,7 +91,12 @@ import { createSmartAudioEditHttpRouter } from './src/workflow/SmartAudioEditHtt
 import {
   ShahabZipformerAsrRuntime,
 } from './src/shahab/ShahabZipformerAsrRuntime.ts';
+import {
+  auditShahabMetadataIntegrity,
+  resolveDefaultShahabModelDir,
+} from './src/shahab/ShahabModelStore.ts';
 import { createShahabHttpRouter } from './src/shahab/ShahabHttpRouter.ts';
+import { ShahabContextMemoryStore } from './src/shahab/ShahabContextMemoryStore.ts';
 import {
   AudioApiSecurityGuard,
   resolveServerBindHost,
@@ -186,7 +195,10 @@ async function startServer() {
   const coreAsrRouter = new CoreModelRouter();
   coreAsrRouter.warmup();
   const localCompanionService = new LocalCompanionService();
-  const shahabZipformerRuntime = new ShahabZipformerAsrRuntime();
+  const shahabContextMemoryStore = new ShahabContextMemoryStore();
+  const shahabZipformerRuntime = new ShahabZipformerAsrRuntime({
+    idleUnloadMs: 5 * 60 * 1000,
+  });
   const audioApiSecurityGuard = new AudioApiSecurityGuard();
 
   // The legacy Express signer belongs to Local compatibility only.
@@ -372,6 +384,7 @@ async function startServer() {
     createShahabHttpRouter({
       shahabZipformerRuntime,
       securityGuard: audioApiSecurityGuard,
+      contextMemoryStore: shahabContextMemoryStore,
     }),
   );
 
@@ -590,35 +603,55 @@ async function startServer() {
     });
   });
 
-  app.post('/api/v1/asr/transcriptions', (req, res) => {
-    const body = req.body as {
-      sampleId?: string;
-      domainProfile?: 'general' | 'technology' | 'business' | 'real_estate' | 'education' | 'medical' | 'legal';
-      enableNormalization?: boolean;
-      enableDomainAdaptation?: boolean;
-      rawHypothesisOverride?: string;
-    };
-    const result = runIndependentAsrTranscription({
-      sampleId: body?.sampleId,
-      domainProfile: body?.domainProfile ?? 'technology',
-      enableNormalization: body?.enableNormalization ?? true,
-      enableDomainAdaptation: body?.enableDomainAdaptation ?? true,
-      rawHypothesisOverride: body?.rawHypothesisOverride,
-    });
-    res.json(result);
-  });
+  app.post(
+    '/api/v1/asr/transcriptions',
+    audioApiSecurityGuard.middleware({
+      requireAuth: true,
+      requireReplayProtection: true,
+      requiredScope: 'asr-core:write',
+      rateLimitBucket: 'v1-asr-transcribe',
+      rateLimitMax: 20,
+    }),
+    (req, res) => {
+      const body = req.body as {
+        sampleId?: string;
+        domainProfile?: 'general' | 'technology' | 'business' | 'real_estate' | 'education' | 'medical' | 'legal';
+        enableNormalization?: boolean;
+        enableDomainAdaptation?: boolean;
+        rawHypothesisOverride?: string;
+      };
+      const result = runIndependentAsrTranscription({
+        sampleId: body?.sampleId,
+        domainProfile: body?.domainProfile ?? 'technology',
+        enableNormalization: body?.enableNormalization ?? true,
+        enableDomainAdaptation: body?.enableDomainAdaptation ?? true,
+        rawHypothesisOverride: body?.rawHypothesisOverride,
+      });
+      res.json(result);
+    },
+  );
 
-  app.post('/api/v1/asr/checkpoints/rollback', (req, res) => {
-    const body = req.body as { checkpointId?: string };
-    const list = GLOBAL_PHASE4_CHECKPOINT_MANAGER.listCheckpoints();
-    const targetId = body?.checkpointId || list[0]?.checkpointId;
-    if (!targetId) {
-      res.status(400).json({ error: 'CHECKPOINT_NOT_FOUND' });
-      return;
-    }
-    const rolled = GLOBAL_PHASE4_CHECKPOINT_MANAGER.rollbackToCheckpoint(targetId);
-    res.json({ ok: Boolean(rolled), activeCheckpoint: rolled });
-  });
+  app.post(
+    '/api/v1/asr/checkpoints/rollback',
+    audioApiSecurityGuard.middleware({
+      requireAuth: true,
+      requireReplayProtection: true,
+      requiredScope: 'shahab:admin',
+      rateLimitBucket: 'v1-asr-admin',
+      rateLimitMax: 10,
+    }),
+    (req, res) => {
+      const body = req.body as { checkpointId?: string };
+      const list = GLOBAL_PHASE4_CHECKPOINT_MANAGER.listCheckpoints();
+      const targetId = body?.checkpointId || list[0]?.checkpointId;
+      if (!targetId) {
+        res.status(400).json({ error: 'CHECKPOINT_NOT_FOUND' });
+        return;
+      }
+      const rolled = GLOBAL_PHASE4_CHECKPOINT_MANAGER.rollbackToCheckpoint(targetId);
+      res.json({ ok: Boolean(rolled), activeCheckpoint: rolled });
+    },
+  );
 
   // ── Phase 5 API Routes: Streaming Backends & Failure Matrix ─────────────────
   app.get('/api/v1/streaming/backends', (_req, res) => {
@@ -713,45 +746,56 @@ async function startServer() {
     });
   });
 
-  app.post('/api/v1/continuous-learning/feedback', (req, res) => {
-    const body = req.body as {
-      tenantId?: string;
-      userId?: string;
-      requestId?: string;
-      utteranceId?: string;
-      audioSha256?: string;
-      speakerId?: string;
-      cohortName?: string;
-      feedbackType?:
-        | 'USER_CORRECTION'
-        | 'QUALITY_RATING'
-        | 'BAD_SEGMENT_FLAG'
-        | 'CODE_SWITCH_FAILURE';
-      asrHypothesisRaw?: string;
-      userCorrectionText?: string;
-      trainingConsent?: boolean;
-      audioRetentionConsent?: boolean;
-    };
-    if (!body?.utteranceId || !body?.userCorrectionText) {
-      res.status(400).json({ error: 'VALIDATION_ERROR', message: 'utteranceId and userCorrectionText are required' });
-      return;
-    }
-    const result = GLOBAL_CONTINUOUS_LEARNING_HUB.submitFeedback({
-      tenantId: body.tenantId ?? 'tenant-studio-default',
-      userId: body.userId ?? 'editor-user',
-      requestId: body.requestId ?? `req-${Date.now()}`,
-      utteranceId: body.utteranceId,
-      audioSha256: body.audioSha256 ?? 'studio-fa-001',
-      speakerId: body.speakerId ?? 'spk-sara',
-      cohortName: body.cohortName ?? 'persian_conversational',
-      feedbackType: body.feedbackType ?? 'USER_CORRECTION',
-      asrHypothesisRaw: body.asrHypothesisRaw ?? '',
-      userCorrectionText: body.userCorrectionText,
-      trainingConsent: Boolean(body.trainingConsent),
-      audioRetentionConsent: Boolean(body.audioRetentionConsent ?? true),
-    });
-    res.json(result);
-  });
+  app.post(
+    '/api/v1/continuous-learning/feedback',
+    audioApiSecurityGuard.middleware({
+      requireAuth: true,
+      requireReplayProtection: true,
+      requiredScope: 'asr-core:write',
+      rateLimitBucket: 'v1-cl-feedback',
+      rateLimitMax: 30,
+    }),
+    (req, res) => {
+      const body = req.body as {
+        tenantId?: string;
+        userId?: string;
+        requestId?: string;
+        utteranceId?: string;
+        audioSha256?: string;
+        speakerId?: string;
+        cohortName?: string;
+        feedbackType?:
+          | 'USER_CORRECTION'
+          | 'QUALITY_RATING'
+          | 'BAD_SEGMENT_FLAG'
+          | 'CODE_SWITCH_FAILURE';
+        asrHypothesisRaw?: string;
+        userCorrectionText?: string;
+        trainingConsent?: boolean;
+        audioRetentionConsent?: boolean;
+      };
+      if (!body?.utteranceId || !body?.userCorrectionText) {
+        res.status(400).json({ error: 'VALIDATION_ERROR', message: 'utteranceId and userCorrectionText are required' });
+        return;
+      }
+      const authenticatedOwner = res.locals.avapardazAuth?.ownerId ?? 'editor-user';
+      const result = GLOBAL_CONTINUOUS_LEARNING_HUB.submitFeedback({
+        tenantId: body.tenantId ?? 'tenant-studio-default',
+        userId: authenticatedOwner,
+        requestId: body.requestId ?? `req-${Date.now()}`,
+        utteranceId: body.utteranceId,
+        audioSha256: body.audioSha256 ?? 'studio-fa-001',
+        speakerId: body.speakerId ?? 'spk-sara',
+        cohortName: body.cohortName ?? 'persian_conversational',
+        feedbackType: body.feedbackType ?? 'USER_CORRECTION',
+        asrHypothesisRaw: body.asrHypothesisRaw ?? '',
+        userCorrectionText: body.userCorrectionText,
+        trainingConsent: Boolean(body.trainingConsent),
+        audioRetentionConsent: Boolean(body.audioRetentionConsent ?? true),
+      });
+      res.json(result);
+    },
+  );
 
   // ── Phase 10 Public Product API (`/v1/*`) ─────────────────────────────────
   app.get('/v1/models', async (req, res) => {
@@ -1338,39 +1382,49 @@ async function startServer() {
     res.json({ audit: coreAsrRouter.listRecentRoutingAudit() });
   });
 
-  app.post('/api/v1/asr-core/batch', (req, res) => {
-    const body = (req.body ?? {}) as {
-      filename?: string;
-      audioBase64?: string;
-      rawPcm16Hint?: boolean;
-      languageHint?: DetectedLanguageTag | 'auto';
-      longFormConfig?: Partial<LongFormConfig>;
-    };
-    if (typeof body.audioBase64 !== 'string' || body.audioBase64.trim().length === 0) {
-      res.status(400).json({ error: 'VALIDATION_ERROR', message: 'audioBase64 is required' });
-      return;
-    }
-    try {
-      const routing = coreAsrRouter.routeInference({
-        mode: body.longFormConfig ? 'long_form' : 'batch',
-        languageHint: body.languageHint ?? 'auto',
-      });
-      const rawBytes = Buffer.from(body.audioBase64, 'base64');
-      const result = coreAsrRouter.batchEngine.transcribeAudioBytes({
-        filename: body.filename ?? 'upload.wav',
-        rawBytes,
-        rawPcm16Hint: Boolean(body.rawPcm16Hint),
-        languageHint: body.languageHint ?? 'auto',
-        longFormConfig: body.longFormConfig,
-      });
-      res.json({ routing, result });
-    } catch (err) {
-      res.status(422).json({
-        error: 'CORE_ASR_INGEST_OR_DECODE_FAILED',
-        message: sanitizePublicErrorOutput(err instanceof Error ? err.message : String(err)),
-      });
-    }
-  });
+  app.post(
+    '/api/v1/asr-core/batch',
+    audioApiSecurityGuard.middleware({
+      requireAuth: true,
+      requireReplayProtection: true,
+      requiredScope: 'asr-core:write',
+      rateLimitBucket: 'v1-asr-core-batch',
+      rateLimitMax: 20,
+    }),
+    (req, res) => {
+      const body = (req.body ?? {}) as {
+        filename?: string;
+        audioBase64?: string;
+        rawPcm16Hint?: boolean;
+        languageHint?: DetectedLanguageTag | 'auto';
+        longFormConfig?: Partial<LongFormConfig>;
+      };
+      if (typeof body.audioBase64 !== 'string' || body.audioBase64.trim().length === 0) {
+        res.status(400).json({ error: 'VALIDATION_ERROR', message: 'audioBase64 is required' });
+        return;
+      }
+      try {
+        const routing = coreAsrRouter.routeInference({
+          mode: body.longFormConfig ? 'long_form' : 'batch',
+          languageHint: body.languageHint ?? 'auto',
+        });
+        const rawBytes = Buffer.from(body.audioBase64, 'base64');
+        const result = coreAsrRouter.batchEngine.transcribeAudioBytes({
+          filename: body.filename ?? 'upload.wav',
+          rawBytes,
+          rawPcm16Hint: Boolean(body.rawPcm16Hint),
+          languageHint: body.languageHint ?? 'auto',
+          longFormConfig: body.longFormConfig,
+        });
+        res.json({ routing, result });
+      } catch (err) {
+        res.status(422).json({
+          error: 'CORE_ASR_INGEST_OR_DECODE_FAILED',
+          message: sanitizePublicErrorOutput(err instanceof Error ? err.message : String(err)),
+        });
+      }
+    },
+  );
 
   app.post('/api/v1/asr-core/stream-sim', requireSandboxStudioAccess, (req, res) => {
     const body = (req.body ?? {}) as {
@@ -1409,10 +1463,27 @@ async function startServer() {
     });
   });
 
-  app.get('/api/v1/asr-core/benchmark', (req, res) => {
-    const iters = Math.max(500, Math.min(5000, Number(req.query.iterations) || 1000));
-    res.json(runCoreBenchmarkAndAdaptationSuite(iters));
-  });
+  app.get(
+    '/api/v1/asr-core/benchmark',
+    audioApiSecurityGuard.middleware({
+      requireAuth: true,
+      requiredScope: 'shahab:admin',
+      rateLimitBucket: 'v1-asr-core-bench',
+      rateLimitMax: 5,
+    }),
+    (req, res) => {
+      if (audioApiSecurityGuard.config.mode === 'hosted') {
+        res.status(403).json({
+          error: 'BENCHMARK_DISABLED_IN_HOSTED_MODE',
+          code: 'BENCHMARK_DISABLED_IN_HOSTED_MODE',
+          message: 'اجرای بنچمارک CPU در حالت Hosted غیرفعال است.',
+        });
+        return;
+      }
+      const iters = Math.max(100, Math.min(500, Number(req.query.iterations) || 250));
+      res.json(runCoreBenchmarkAndAdaptationSuite(iters));
+    },
+  );
 
   // ── Unified Processing Engine Routes (`/api/v1/processing/*`) ──────────────
   app.get('/api/v1/processing/capabilities', async (_req, res, next) => {
@@ -1424,52 +1495,71 @@ async function startServer() {
     }
   });
 
-  app.get('/api/v1/processing/trace', (req, res) => {
-    const limit = Math.max(1, Math.min(200, Number(req.query.limit) || 50));
-    res.json({ trace: unifiedProcessingOrchestrator.getExecutionTrace(limit) });
-  });
+  app.get(
+    '/api/v1/processing/trace',
+    audioApiSecurityGuard.middleware({
+      requireAuth: true,
+      requiredScope: 'shahab:admin',
+      rateLimitBucket: 'v1-processing-trace',
+      rateLimitMax: 30,
+    }),
+    (req, res) => {
+      const limit = Math.max(1, Math.min(200, Number(req.query.limit) || 50));
+      res.json({ trace: unifiedProcessingOrchestrator.getExecutionTrace(limit) });
+    },
+  );
 
-  app.post('/api/v1/processing/execute', async (req, res) => {
-    const abortCtrl = new AbortController();
-    req.on('close', () => {
-      if (!res.writableEnded) abortCtrl.abort();
-    });
-    try {
-      const payload = req.body as UnifiedProcessingRequest;
-      const result = await unifiedProcessingOrchestrator.execute(payload, abortCtrl.signal);
-      res.json(result);
-    } catch (err) {
-      if (err instanceof UnifiedProcessingError) {
-        const status =
-          err.code === 'INVALID_PROCESSING_REQUEST'
-            ? 400
-            : err.code === 'UNSUPPORTED_AUDIO_FORMAT'
-              ? 415
-              : err.code === 'PROVIDER_AUTHENTICATION_FAILED'
-                ? 401
-                : err.code === 'PROVIDER_RATE_LIMITED'
-                  ? 429
-                  : err.code === 'PROVIDER_TIMEOUT'
-                    ? 504
-                    : err.code === 'PROCESSING_CANCELLED'
-                      ? 499
-                      : err.code === 'PROCESSING_RESOURCE_LIMIT_EXCEEDED'
-                        ? 413
-                        : err.code === 'LOCAL_RUNTIME_UNAVAILABLE' ||
-                            err.code === 'CLOUD_PROVIDER_UNAVAILABLE'
-                          ? 503
-                          : 502;
-        res.status(status).json({ error: err.toPayload() });
-        return;
-      }
-      res.status(500).json({
-        error: {
-          code: 'PROCESSING_FAILED',
-          messageEn: sanitizePublicErrorOutput(err instanceof Error ? err.message : String(err)),
-        },
+  app.post(
+    '/api/v1/processing/execute',
+    audioApiSecurityGuard.middleware({
+      requireAuth: true,
+      requireReplayProtection: true,
+      requiredScope: 'processing:execute',
+      rateLimitBucket: 'v1-processing-execute',
+      rateLimitMax: 20,
+    }),
+    async (req, res) => {
+      const abortCtrl = new AbortController();
+      req.on('close', () => {
+        if (!res.writableEnded) abortCtrl.abort();
       });
-    }
-  });
+      try {
+        const payload = req.body as UnifiedProcessingRequest;
+        const result = await unifiedProcessingOrchestrator.execute(payload, abortCtrl.signal);
+        res.json(result);
+      } catch (err) {
+        if (err instanceof UnifiedProcessingError) {
+          const status =
+            err.code === 'INVALID_PROCESSING_REQUEST'
+              ? 400
+              : err.code === 'UNSUPPORTED_AUDIO_FORMAT'
+                ? 415
+                : err.code === 'PROVIDER_AUTHENTICATION_FAILED'
+                  ? 401
+                  : err.code === 'PROVIDER_RATE_LIMITED'
+                    ? 429
+                    : err.code === 'PROVIDER_TIMEOUT'
+                      ? 504
+                      : err.code === 'PROCESSING_CANCELLED'
+                        ? 499
+                        : err.code === 'PROCESSING_RESOURCE_LIMIT_EXCEEDED'
+                          ? 413
+                          : err.code === 'LOCAL_RUNTIME_UNAVAILABLE' ||
+                              err.code === 'CLOUD_PROVIDER_UNAVAILABLE'
+                            ? 503
+                            : 502;
+          res.status(status).json({ error: err.toPayload() });
+          return;
+        }
+        res.status(500).json({
+          error: {
+            code: 'PROCESSING_FAILED',
+            messageEn: sanitizePublicErrorOutput(err instanceof Error ? err.message : String(err)),
+          },
+        });
+      }
+    },
+  );
 
   // ── SHAHAB Persistent Observatory & Operations API (SHAHAB-002 .. SHAHAB-021) ──
   const SHAHAB_DOCS_ROOT = path.resolve(process.cwd(), 'docs', 'shahab');
@@ -1523,15 +1613,29 @@ async function startServer() {
     fs.appendFileSync(resolved, `${JSON.stringify(entry)}\n`, 'utf8');
   };
 
-  // Phase 1A: Protect Shahab operational & context-memory routes with deployment-mode security guard
-  app.use(
-    ['/api/shahab/state', '/api/shahab/memory', '/api/shahab/operations'],
-    audioApiSecurityGuard.middleware({
-      requireAuth: audioApiSecurityGuard.config.mode === 'hosted',
-      rateLimitBucket: 'shahab-ops',
-      rateLimitMax: 60,
-    }),
-  );
+  // V7.2 SEC-02: Enforce mandatory auth + shahab:admin scope across BOTH local & hosted modes,
+  // plus replay protection on all state-changing (POST/DELETE) operations under /api/shahab/{memory,operations}.
+  const shahabOpsReadGuard = audioApiSecurityGuard.middleware({
+    requireAuth: true,
+    requiredScope: 'shahab:admin',
+    rateLimitBucket: 'shahab-ops',
+    rateLimitMax: 60,
+  });
+  const shahabOpsMutationGuard = audioApiSecurityGuard.middleware({
+    requireAuth: true,
+    requireReplayProtection: true,
+    requiredScope: 'shahab:admin',
+    rateLimitBucket: 'shahab-ops-write',
+    rateLimitMax: 30,
+  });
+  app.use(['/api/shahab/state', '/api/shahab/memory', '/api/shahab/operations'], (req, res, next) => {
+    const method = req.method.toUpperCase();
+    if (method === 'POST' || method === 'PUT' || method === 'PATCH' || method === 'DELETE') {
+      shahabOpsMutationGuard(req, res, next);
+      return;
+    }
+    shahabOpsReadGuard(req, res, next);
+  });
 
   app.get('/api/shahab/state', (_req, res) => {
     const implementationState = readShahabJsonSafe('SHAHAB_IMPLEMENTATION_STATE.json');
@@ -1553,6 +1657,22 @@ async function startServer() {
     const adobeIntegrationState = readShahabJsonSafe('SHAHAB_ADOBE_INTEGRATION_STATE.json');
     const evidenceLedger = readShahabJsonlSafe('SHAHAB_EVIDENCE_LEDGER.jsonl', 150);
     const runtimeEvents = readShahabJsonlSafe('SHAHAB_RUNTIME_EVENTS.jsonl', 150);
+    const parameterLineage = readShahabJsonSafe('SHAHAB_PARAMETER_LINEAGE.json') as {
+      inheritedFrozenParameters?: number;
+      nonTrainableConstantsElements?: number;
+    } | null;
+
+    const modelDir = resolveDefaultShahabModelDir();
+    const manifestPath = path.join(modelDir, 'manifest.json');
+    const metadataIntegrityAudit = auditShahabMetadataIntegrity({
+      parameterLineage,
+      compactModelState: compactModelState as {
+        recommendation?: string;
+        candidates?: Array<{ transportCompressedMiB?: number | null }>;
+      } | null,
+      manifestPath,
+      publicKeyPem: process.env.SHAHAB_MANIFEST_ED25519_PUBLIC_KEY_PEM ?? null,
+    });
 
     res.json({
       available: Boolean(implementationState),
@@ -1575,111 +1695,85 @@ async function startServer() {
       adobeIntegrationState,
       evidenceLedger,
       runtimeEvents,
+      metadataIntegrityAudit,
     });
   });
 
-  app.post('/api/shahab/memory', (req, res) => {
+  app.get('/api/shahab/memory', (req, res) => {
+    const ownerId = res.locals.avapardazAuth?.ownerId;
+    if (!ownerId) {
+      res.status(401).json({ error: 'UNAUTHORIZED', message: 'Authentication required for context memory.' });
+      return;
+    }
+    const rawProjectId = typeof req.query.projectId === 'string' ? req.query.projectId.trim() : undefined;
+    if (rawProjectId && !/^[a-zA-Z0-9._:-]{1,96}$/.test(rawProjectId)) {
+      res.status(400).json({ error: 'INVALID_PROJECT_ID', message: 'Invalid projectId query parameter.' });
+      return;
+    }
+    const entries = shahabContextMemoryStore.listEntries({ ownerId, projectId: rawProjectId });
+    res.setHeader('Cache-Control', 'no-store');
+    res.json({ ownerId, projectId: rawProjectId ?? null, entries, totalEntries: entries.length });
+  });
+
+  app.post('/api/shahab/memory', async (req, res) => {
+    const ownerId = res.locals.avapardazAuth?.ownerId;
+    if (!ownerId) {
+      res.status(401).json({ error: 'UNAUTHORIZED', message: 'Authentication required to add context memory.' });
+      return;
+    }
     const body = req.body as Record<string, unknown> | undefined;
     const rawTerm = typeof body?.term === 'string' ? body.term.trim() : '';
-    const scopeRaw = typeof body?.scope === 'string' ? body.scope : 'PROJECT';
-    const categoryRaw = typeof body?.category === 'string' ? body.category : 'DOMAIN_TERM';
-    const verificationStatusRaw =
-      typeof body?.verificationStatus === 'string' ? body.verificationStatus : 'USER_VERIFIED';
-
-    const allowedScopes = new Set(['SESSION', 'PROJECT', 'WORKSPACE', 'USER']);
-    const allowedCategories = new Set(['PROPER_NOUN', 'TECHNICAL_TERM', 'DOMAIN_TERM', 'BRAND_OR_ACRONYM', 'COLLOQUIAL_FORM']);
-    const allowedStatuses = new Set(['USER_VERIFIED', 'UNVERIFIED_CANDIDATE', 'ADMIN_APPROVED']);
-
-    if (!rawTerm || rawTerm.length > 120) {
-      res.status(400).json({ error: 'INVALID_TERM', message: 'Persian context term must be 1..120 characters.' });
-      return;
-    }
-    if (!allowedScopes.has(scopeRaw) || !allowedCategories.has(categoryRaw) || !allowedStatuses.has(verificationStatusRaw)) {
-      res.status(400).json({ error: 'INVALID_MEMORY_METADATA', message: 'Invalid scope, category, or verificationStatus.' });
+    const projectIdRaw = typeof body?.projectId === 'string' ? body.projectId.trim() : 'default';
+    if (!/^[a-zA-Z0-9._:-]{1,96}$/.test(projectIdRaw)) {
+      res.status(400).json({ error: 'INVALID_PROJECT_ID', message: 'Invalid projectId identifier.' });
       return;
     }
 
-    const state = (readShahabJsonSafe('SHAHAB_IMPLEMENTATION_STATE.json') as Record<string, unknown> | null) ?? {};
-    const existingMem = (state.persianContextMemory as Record<string, unknown> | undefined) ?? { entries: [] };
-    const existingEntries = Array.isArray(existingMem.entries) ? [...existingMem.entries] : [];
-
-    const nowUtc = new Date().toISOString();
-    const entry = {
-      entryId: `mem_${crypto.randomBytes(4).toString('hex')}`,
-      term: rawTerm,
-      canonicalSurface: rawTerm.replace(/\u064A/g, '\u06CC').replace(/\u0643/g, '\u06A9'),
-      scope: scopeRaw,
-      category: categoryRaw,
-      verificationStatus: verificationStatusRaw,
-      boostWeight: typeof body?.boostWeight === 'number' && Number.isFinite(body.boostWeight)
-        ? Math.max(0.1, Math.min(2.0, body.boostWeight))
-        : 1.0,
-      createdAtUtc: nowUtc,
-      updatedAtUtc: nowUtc,
-      source: 'SHAHAB_LAB_UI',
-    };
-
-    const nextEntries = [entry, ...existingEntries];
-    const nextState = {
-      ...state,
-      updatedAtUtc: nowUtc,
-      persianContextMemory: {
-        ...existingMem,
-        entries: nextEntries,
-      },
-    };
-    writeShahabJsonAtomic('SHAHAB_IMPLEMENTATION_STATE.json', nextState);
-    appendShahabJsonl('SHAHAB_EVIDENCE_LEDGER.jsonl', {
-      eventId: `evt_${crypto.randomBytes(6).toString('hex')}`,
-      timestampUtc: nowUtc,
-      missionId: 'SHAHAB-008',
-      eventType: 'PERSIAN_CONTEXT_MEMORY_ADDED',
-      evidenceStatus: 'VERIFIED',
-      summary: `Added Persian context memory term (${scopeRaw}/${verificationStatusRaw}).`,
-      details: { entryId: entry.entryId, scope: scopeRaw, category: categoryRaw, verificationStatus: verificationStatusRaw },
-    });
-
-    res.status(201).json({ entry, totalEntries: nextEntries.length });
+    try {
+      const result = await shahabContextMemoryStore.addEntry({
+        ownerId,
+        projectId: projectIdRaw,
+        term: rawTerm,
+        scope: typeof body?.scope === 'string' ? body.scope : 'PROJECT',
+        category: typeof body?.category === 'string' ? body.category : 'DOMAIN_TERM',
+        verificationStatus:
+          typeof body?.verificationStatus === 'string' ? body.verificationStatus : 'USER_VERIFIED',
+        boostWeight: typeof body?.boostWeight === 'number' ? body.boostWeight : 1.0,
+        source: 'SHAHAB_LAB_UI',
+      });
+      res.status(201).json(result);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (msg === 'INVALID_TERM') {
+        res.status(400).json({ error: 'INVALID_TERM', message: 'Persian context term must be 1..120 characters.' });
+        return;
+      }
+      if (msg === 'INVALID_MEMORY_METADATA') {
+        res.status(400).json({ error: 'INVALID_MEMORY_METADATA', message: 'Invalid scope, category, or verificationStatus.' });
+        return;
+      }
+      res.status(500).json({ error: 'MEMORY_STORE_ERROR', message: 'Failed to persist context memory entry.' });
+    }
   });
 
-  app.delete('/api/shahab/memory/:entryId', (req, res) => {
-    const entryId = String(req.params.entryId || '').trim();
-    if (!/^[a-zA-Z0-9_-]{3,64}$/.test(entryId)) {
-      res.status(400).json({ error: 'INVALID_ENTRY_ID', message: 'Invalid memory entry identifier.' });
+  app.delete('/api/shahab/memory/:entryId', async (req, res) => {
+    const ownerId = res.locals.avapardazAuth?.ownerId;
+    if (!ownerId) {
+      res.status(401).json({ error: 'UNAUTHORIZED', message: 'Authentication required to delete context memory.' });
       return;
     }
-    const state = (readShahabJsonSafe('SHAHAB_IMPLEMENTATION_STATE.json') as Record<string, unknown> | null) ?? {};
-    const existingMem = (state.persianContextMemory as Record<string, unknown> | undefined) ?? { entries: [] };
-    const existingEntries = Array.isArray(existingMem.entries) ? existingMem.entries : [];
-    const filtered = existingEntries.filter(
-      (item: unknown) =>
-        typeof item === 'object' &&
-        item !== null &&
-        (item as Record<string, unknown>).entryId !== entryId &&
-        (item as Record<string, unknown>).id !== entryId,
-    );
-
-    const nowUtc = new Date().toISOString();
-    const nextState = {
-      ...state,
-      updatedAtUtc: nowUtc,
-      persianContextMemory: {
-        ...existingMem,
-        entries: filtered,
-      },
-    };
-    writeShahabJsonAtomic('SHAHAB_IMPLEMENTATION_STATE.json', nextState);
-    appendShahabJsonl('SHAHAB_EVIDENCE_LEDGER.jsonl', {
-      eventId: `evt_${crypto.randomBytes(6).toString('hex')}`,
-      timestampUtc: nowUtc,
-      missionId: 'SHAHAB-008',
-      eventType: 'PERSIAN_CONTEXT_MEMORY_DELETED',
-      evidenceStatus: 'VERIFIED',
-      summary: `Removed Persian context memory entry ${entryId}.`,
-      details: { entryId, remainingCount: filtered.length },
-    });
-
-    res.json({ deleted: existingEntries.length !== filtered.length, remainingCount: filtered.length });
+    const entryId = String(req.params.entryId || '').trim();
+    try {
+      const result = await shahabContextMemoryStore.deleteEntry({ ownerId, entryId });
+      res.json(result);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (msg === 'INVALID_ENTRY_ID') {
+        res.status(400).json({ error: 'INVALID_ENTRY_ID', message: 'Invalid memory entry identifier.' });
+        return;
+      }
+      res.status(500).json({ error: 'MEMORY_STORE_ERROR', message: 'Failed to delete context memory entry.' });
+    }
   });
 
   app.post('/api/shahab/operations/consent', (req, res) => {
@@ -1863,6 +1957,14 @@ async function startServer() {
       res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
       res.sendFile(path.join(distDir, 'index.html'));
     });
+  }
+
+  // Clean up any orphaned temporary audio ingestion files left by previous abrupt process exits
+  try {
+    cleanupOrphanedCoreIngestionTempFiles({ maxAgeMs: 15 * 60 * 1000 });
+    cleanupOrphanedCanonicalIngestionFiles();
+  } catch {
+    // Non-fatal startup housekeeping
   }
 
   const bindHost = resolveServerBindHost(process.env, audioApiSecurityGuard.config);

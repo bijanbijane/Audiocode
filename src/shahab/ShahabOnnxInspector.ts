@@ -193,16 +193,20 @@ function parseTensorProto(bytes: Uint8Array): ParsedTensorInitializer {
     contentHash = crypto.createHash('sha256').update(rawDataSlice).digest('hex');
   }
 
-  // Classify non-parameter graph constants (shape vectors, INT64 indices, scalar quantization scales/zero-points)
+  // Classify non-parameter graph constants (shape vectors, INT64 indices, scalar/per-channel quantization scales & zero-points).
+  // CRITICAL (SHB-F01): Never classify dynamic-INT8 quantized weight matrices (e.g. `*_quantized` in INT8/UINT8/INT4/UINT4
+  // with dims.length >= 2 or elementCount > 4) as non-parameter constants.
   const lowerName = name.toLowerCase();
-  const isQuantParam =
-    lowerName.includes('_scale') ||
-    lowerName.includes('zero_point') ||
-    lowerName.endsWith('_zp') ||
-    lowerName.includes('quantize');
+  const isQuantizedWeightDtype = QUANTIZED_DTYPES.has(dtypeName);
   const isIndexOrShape = dtypeName === 'INT64' || dtypeName === 'INT32' || dtypeName === 'BOOL';
   const isScalarOrTinyConstant = dims.length === 0 || (dims.length === 1 && elementCount <= 4);
-  const isNonParameterConstant = isQuantParam || isIndexOrShape || isScalarOrTinyConstant;
+  const isScaleOrZeroPoint =
+    lowerName.includes('_scale') ||
+    lowerName.endsWith('scale') ||
+    lowerName.includes('zero_point') ||
+    lowerName.endsWith('_zp') ||
+    (lowerName.includes('quantize') && !isQuantizedWeightDtype && isScalarOrTinyConstant);
+  const isNonParameterConstant = isScaleOrZeroPoint || isIndexOrShape || isScalarOrTinyConstant;
 
   return {
     name,
@@ -394,6 +398,8 @@ export function inspectOnnxModelBytes(
   let uniqueInitializerTensorCount = 0;
   let duplicateInitializerTensorCount = 0;
   let parameterElementCount = 0;
+  let quantizedWeightElementCount = 0;
+  let floatWeightElementCount = 0;
   let nonParameterConstantElementCount = 0;
   let totalInitializerElementCount = 0;
   let parameterStorageBytes = 0;
@@ -452,6 +458,11 @@ export function inspectOnnxModelBytes(
           } else {
             parameterElementCount += t.elementCount;
             parameterStorageBytes += t.storageBytes;
+            if (QUANTIZED_DTYPES.has(t.dtypeName)) {
+              quantizedWeightElementCount += t.elementCount;
+            } else {
+              floatWeightElementCount += t.elementCount;
+            }
           }
         }
       } else if (field === 11 && wire === 2) {
@@ -495,6 +506,8 @@ export function inspectOnnxModelBytes(
     uniqueInitializerTensorCount,
     duplicateInitializerTensorCount,
     parameterElementCount,
+    quantizedWeightElementCount,
+    floatWeightElementCount,
     nonParameterConstantElementCount,
     totalInitializerElementCount,
     parameterStorageBytes,
@@ -508,7 +521,7 @@ export function inspectOnnxModelBytes(
     outputs,
     metadataProps,
     countingMethodology:
-      'Direct ONNX Protobuf GraphProto.initializer traversal (excluding INT32/INT64/BOOL shape/index constants, scale/zero_point scalars, and SHA-256 duplicate payloads >=32 B).',
+      'Direct ONNX Protobuf GraphProto.initializer traversal including quantized weight matrices (INT8/UINT8/INT4/UINT4 *_quantized) and float weights, while excluding INT32/INT64/BOOL shape/index constants, *_scale/*_zero_point/*_zp quantization metadata, scalar/tiny (<=4) constants, and SHA-256 duplicate payloads >=32 B.',
     ambiguityNotes,
   };
 }

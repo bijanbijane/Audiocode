@@ -236,4 +236,37 @@ describe('Section 114 & AVP-008: WebWorkerOrtRuntimeProvider & Hardened OPFS Mod
       /MODEL_MEMORY_BUDGET_DENIED|MEMORY_BUDGET/,
     );
   });
+
+  it('creates real onnxruntime-web Tensor objects with dataLocation after dynamic createSession (regression for invalid data location: undefined)', async () => {
+    const path = await import('node:path');
+    const { buildRealFastConformerContractOnnxModelBytes } = await import(
+      '../../asr-core/ModelQualificationPipeline'
+    );
+
+    const wasmDistDir = path.resolve(process.cwd(), 'node_modules/onnxruntime-web/dist') + path.sep;
+    const provider = new WebWorkerOrtRuntimeProvider(wasmDistDir, undefined, false);
+    const onnxBytes = buildRealFastConformerContractOnnxModelBytes({
+      vocabSize: 4,
+      dominantTokenId: 1,
+    });
+
+    const session = await provider.createSession(onnxBytes, ['wasm']);
+    const frames = 20;
+    const audioTensor = provider.createTensor('float32', new Float32Array(80 * frames), [1, 80, frames]);
+    const lengthTensor = provider.createTensor('int64', BigInt64Array.from([BigInt(frames)]), [1]);
+
+    assert.equal(
+      (audioTensor as unknown as { dataLocation?: string }).dataLocation,
+      'cpu',
+      'createTensor must construct a real ort.Tensor with dataLocation=cpu after createSession',
+    );
+    const outputs = await session.run({
+      audio_signal: audioTensor,
+      length: lengthTensor,
+    });
+    const logprobs = outputs['logprobs'];
+    assert.ok(logprobs, 'session.run must return logprobs output tensor');
+    assert.deepEqual([...logprobs.dims], [1, frames, 4]);
+    await session.release?.();
+  });
 });
