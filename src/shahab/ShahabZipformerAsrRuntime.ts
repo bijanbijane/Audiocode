@@ -170,7 +170,22 @@ export function projectBpeEmissionsToTimedWords(params: {
   readonly chunkDurationSec: number;
 }): RawTimedWord[] {
   const { decoded, vocab, chunkOffsetSec, chunkDurationSec } = params;
-  const maxEndSec = chunkOffsetSec + Math.max(0.05, chunkDurationSec);
+  const safeDurationSec = Number.isFinite(chunkDurationSec) ? Math.max(0, chunkDurationSec) : 0;
+  const safeChunkOffsetSec = Number.isFinite(chunkOffsetSec) ? Math.max(0, chunkOffsetSec) : 0;
+  const maxEndSec = safeChunkOffsetSec + safeDurationSec;
+
+  // Never invent word positions from text length or chunk duration. RNNT emission
+  // timestamps must be present, one-for-one, finite, and inside the source chunk.
+  // The caller still preserves decoded.rawText when acoustic timing is unavailable.
+  if (
+    decoded.tokenIds.length === 0 ||
+    decoded.tokenTimestampsSec.length !== decoded.tokenIds.length ||
+    decoded.tokenTimestampsSec.some(
+      (timestamp) => !Number.isFinite(timestamp) || timestamp < 0 || timestamp > safeDurationSec + 0.1,
+    )
+  ) {
+    return [];
+  }
 
   const grouped: Array<{ pieces: string[]; startSec: number; lastEmitSec: number }> = [];
   for (let i = 0; i < decoded.tokenIds.length; i++) {
@@ -178,8 +193,8 @@ export function projectBpeEmissionsToTimedWords(params: {
     if (id === 0) continue;
     const piece = vocab[id] ?? '';
     if (!piece || piece === '<blk>' || piece === '<sos/eos>' || piece === '<unk>') continue;
-    const rawTs = decoded.tokenTimestampsSec[i] ?? 0;
-    const tsSec = Math.min(maxEndSec, chunkOffsetSec + Math.max(0, rawTs));
+    const rawTs = decoded.tokenTimestampsSec[i];
+    const tsSec = Math.min(maxEndSec, safeChunkOffsetSec + rawTs);
 
     const startsNewWord = piece.startsWith('▁') || grouped.length === 0;
     const cleanPiece = piece.replace(/^▁+/, '');
@@ -194,16 +209,7 @@ export function projectBpeEmissionsToTimedWords(params: {
     }
   }
 
-  // Fallback if vocab grouping produced empty words while rawText is non-empty
-  if (grouped.length === 0 && decoded.rawText.trim().length > 0) {
-    const words = decoded.rawText.trim().split(/\s+/).filter(Boolean);
-    const step = Math.max(0.05, chunkDurationSec) / Math.max(1, words.length);
-    return words.map((word, idx) => {
-      const ws = chunkOffsetSec + idx * step;
-      const we = Math.min(maxEndSec, Math.max(ws + 0.04, ws + step));
-      return { rawText: word, startSec: ws, endSec: we };
-    });
-  }
+  if (grouped.length === 0) return [];
 
   const out: RawTimedWord[] = [];
   for (let i = 0; i < grouped.length; i++) {
@@ -934,7 +940,12 @@ export class ShahabZipformerAsrRuntime implements ShahabAsrEngine {
           const rawText =
             chunkRanges.length === 1
               ? (rawChunkTexts[0] ?? '').trim()
-              : tokens.map((t) => t.rawText).join(' ').trim();
+              : tokens.length > 0 &&
+                chunkBuckets.every((bucket, index) =>
+                  rawChunkTexts[index] === undefined || rawChunkTexts[index].trim().length === 0 || bucket.words.length > 0,
+                )
+              ? tokens.map((t) => t.rawText).join(' ').trim()
+              : rawChunkTexts.join(' ').trim();
 
           const normalizedText = normalizeCanonicalPersianUtterance(rawText);
           const lang = detectTextLanguageTag(normalizedText || rawText).language;

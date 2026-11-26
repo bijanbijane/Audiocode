@@ -26,6 +26,7 @@ export default defineConfig(({mode}) => {
   // In separate mode, the browser UI runs on its own Vite origin while API
   // requests are reverse-proxied to the independently running local/API server.
   // Keep this disabled in the legacy embedded-Vite mode to prevent proxy loops.
+  let resolvedBuildOutDir = path.resolve(__dirname, 'dist');
   const apiProxy = mode === 'separate'
     ? {
         '/api': {
@@ -56,11 +57,14 @@ export default defineConfig(({mode}) => {
       {
         name: 'copy-unbundled-src-assets',
         apply: 'build',
+        configResolved(config): void {
+          resolvedBuildOutDir = path.resolve(config.root, config.build.outDir);
+        },
         closeBundle(error?: Error): void {
           if (error) {
             return;
           }
-          const distDir = path.resolve(__dirname, 'dist');
+          const distDir = resolvedBuildOutDir;
           const srcAssets = path.resolve(__dirname, 'src/assets');
           const distAssets = path.resolve(distDir, 'src/assets');
           if (fs.existsSync(distDir) && fs.existsSync(srcAssets)) {
@@ -72,6 +76,9 @@ export default defineConfig(({mode}) => {
       // and copies them into dist/ort/ for production builds.
       {
         name: 'onnxruntime-web-ort-assets',
+        configResolved(config): void {
+          resolvedBuildOutDir = path.resolve(config.root, config.build.outDir);
+        },
         configureServer(server) {
           const ortDistDir = path.resolve(__dirname, 'node_modules/onnxruntime-web/dist');
           server.middlewares.use('/ort', (req, res, next) => {
@@ -97,9 +104,9 @@ export default defineConfig(({mode}) => {
         },
         closeBundle(error?: Error): void {
           if (error) return;
-          const distOrtDir = path.resolve(__dirname, 'dist/ort');
+          const distOrtDir = path.resolve(resolvedBuildOutDir, 'ort');
           const ortDistDir = path.resolve(__dirname, 'node_modules/onnxruntime-web/dist');
-          if (!fs.existsSync(path.resolve(__dirname, 'dist')) || !fs.existsSync(ortDistDir)) {
+          if (!fs.existsSync(resolvedBuildOutDir) || !fs.existsSync(ortDistDir)) {
             return;
           }
           fs.mkdirSync(distOrtDir, {recursive: true});
@@ -114,23 +121,26 @@ export default defineConfig(({mode}) => {
       {
         name: 'avapardaz-release-manifest',
         apply: 'build',
+        configResolved(config): void {
+          resolvedBuildOutDir = path.resolve(config.root, config.build.outDir);
+        },
         closeBundle(error?: Error): void {
           if (error) return;
-          const distDir = path.resolve(__dirname, 'dist');
+          const distDir = resolvedBuildOutDir;
           if (!fs.existsSync(distDir)) return;
           const assets = collectDistAssets(distDir, distDir);
           const releaseManifest = {
             productName: 'Avapardaz',
-            appVersion: '1.3.0',
-            buildId: `build-${new Date().toISOString().replace(/[:.]/g, '-')}`,
+            appVersion: '2.0.0-beta.1',
+            buildId: process.env.AVAPARDAZ_BUILD_ID?.trim() || `avp-${new Date().toISOString().replace(/[-:]/g, '').replace(/\.\d{3}Z$/, 'Z')}-web`,
             builtAtIso: new Date().toISOString(),
             projectSchemaVersion: 2,
             edlSchemaVersion: 2,
             backupSchemaVersion: 1,
             modelManifestSchemaVersion: 1,
             renderCheckpointSchemaVersion: 1,
-            supportedLocalModelRuntimes: ['onnxruntime-web-wasm'],
-            serviceWorkerCacheVersion: 'paudio-shell-v1.3.1',
+            supportedLocalModelRuntimes: ['sherpa-onnx-cpu', 'onnxruntime-web-wasm'],
+            serviceWorkerCacheVersion: `avapardaz-${process.env.AVAPARDAZ_BUILD_ID?.trim() || 'local-web-build'}`,
             assetCount: assets.length,
             totalBytes: assets.reduce((sum, item) => sum + item.bytes, 0),
             assets,

@@ -17,6 +17,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
+import fsSync from 'node:fs';
+import ffmpegStaticPath from 'ffmpeg-static';
 import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -29,6 +31,11 @@ import {
 } from './NodePublicAsrInferenceExecutor';
 import { ingestPublicAudioStream } from './PublicAudioArtifactIngest';
 import { ASRClient } from '../../sdk/typescript/src/index';
+
+// Test-only FFmpeg binary: production deployments must provide a separately licensed system FFmpeg.
+if (ffmpegStaticPath && !process.env.FFMPEG_BINARY_PATH) {
+  process.env.FFMPEG_BINARY_PATH = ffmpegStaticPath;
+}
 
 function buildPcm16WavBuffer(durationSec: number, freqHz = 440, sampleRate = 16000): Buffer {
   const numSamples = Math.round(sampleRate * durationSec);
@@ -62,16 +69,14 @@ function transcodeWavToFormatViaFfmpeg(wavBuf: Buffer, ext: 'ogg' | 'mp3'): Buff
   const mkdirRes = spawnSync('mkdir', ['-p', tmpDir]);
   if (mkdirRes.status !== 0) throw new Error('Failed to create temp dir');
   try {
-    const fsSync = require('node:fs') as typeof import('node:fs');
     fsSync.writeFileSync(inPath, wavBuf);
     const codecArgs = ext === 'ogg' ? ['-c:a', 'libvorbis'] : ['-c:a', 'libmp3lame', '-b:a', '64k'];
-    const res = spawnSync('ffmpeg', ['-nostdin', '-v', 'error', '-i', inPath, ...codecArgs, '-y', outPath]);
+    const res = spawnSync(process.env.FFMPEG_BINARY_PATH ?? 'ffmpeg', ['-nostdin', '-v', 'error', '-i', inPath, ...codecArgs, '-y', outPath]);
     if (res.status !== 0) {
       throw new Error(`ffmpeg encode ${ext} failed: ${res.stderr.toString()}`);
     }
     return fsSync.readFileSync(outPath);
   } finally {
-    const fsSync = require('node:fs') as typeof import('node:fs');
     fsSync.rmSync(tmpDir, { recursive: true, force: true });
   }
 }

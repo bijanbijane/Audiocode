@@ -263,7 +263,7 @@ export class PlatformControlPlaneGateway {
 
     if (!this.isBootstrapEnabled()) {
       return {
-        status: 503,
+        status: 404,
         body: buildPlatformErrorEnvelope({
           code: 'SERVICE_UNAVAILABLE',
           message: 'Platform owner credential bootstrap is disabled.',
@@ -627,6 +627,29 @@ export class PlatformControlPlaneGateway {
         body: buildPlatformErrorEnvelope({
           code: 'RESOURCE_NOT_FOUND',
           message: 'Target project not found.',
+          requestId: auth.context.requestId,
+        }),
+      };
+    }
+
+    // Production credentials require a fresh step-up authentication flow.
+    // API bearer credentials alone cannot mint another production-scoped secret.
+    if (targetProject.environment === 'PRODUCTION') {
+      this.controlPlane.recordAuditLog({
+        organizationId: auth.context.organizationId,
+        actorType: 'USER',
+        actorId: auth.context.principalId,
+        action: 'PLATFORM_ISSUE_API_KEY',
+        resourceType: 'api_credential',
+        resourceId: targetProject.id,
+        outcome: 'DENIED',
+        reason: 'STEP_UP_AUTHENTICATION_REQUIRED_FOR_PRODUCTION_CREDENTIAL',
+      });
+      return {
+        status: 403,
+        body: buildPlatformErrorEnvelope({
+          code: 'STEP_UP_AUTHENTICATION_REQUIRED',
+          message: 'Issuing an API credential for a PRODUCTION project requires fresh step-up authentication.',
           requestId: auth.context.requestId,
         }),
       };

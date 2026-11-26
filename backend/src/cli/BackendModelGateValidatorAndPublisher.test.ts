@@ -17,10 +17,20 @@ describe('Section 115: BackendModelGateValidatorAndPublisher (5-Gate Pre-Release
     const privPem = privateKey.export({ type: 'pkcs8', format: 'pem' }).toString();
 
     const executedSql: string[] = [];
+    const mockClient = {
+      async query(sql: string) {
+        executedSql.push(sql.trim().split(/\s+/)[0]);
+        return { rows: [], rowCount: 1 };
+      },
+      release() {},
+    };
     const mockDb: PgPoolLike = {
       async query(sql) {
         executedSql.push(sql.trim().split(/\s+/)[0]);
         return { rows: [], rowCount: 1 };
+      },
+      async connect() {
+        return mockClient;
       },
     };
 

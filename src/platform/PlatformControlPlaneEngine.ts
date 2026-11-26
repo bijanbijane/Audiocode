@@ -503,10 +503,17 @@ export class PlatformControlPlaneService {
     ]);
 
     if (nodeEnv === 'production') {
+      const normalizedPepper = configuredPepper.toLowerCase();
+      const looksLikePlaceholder =
+        legacyPlaceholders.has(configuredPepper) ||
+        /(replace|placeholder|example|dev[-_ ]?pepper|your[-_ ]?secret|change[-_ ]?me|todo)/i.test(
+          normalizedPepper,
+        );
       if (
         !configuredPepper ||
-        legacyPlaceholders.has(configuredPepper) ||
-        Buffer.byteLength(configuredPepper, 'utf8') < 32
+        looksLikePlaceholder ||
+        Buffer.byteLength(configuredPepper, 'utf8') < 32 ||
+        new Set(configuredPepper).size < 12
       ) {
         throw new Error(
           'PRODUCTION_API_KEY_PEPPER_INVALID: API_KEY_PEPPER must be configured with at least 32 bytes of cryptographically random secret material in production.',

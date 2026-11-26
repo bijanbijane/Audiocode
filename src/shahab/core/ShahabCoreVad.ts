@@ -1,20 +1,17 @@
 /**
  * SHAHAB SHARED CORE — Host-Independent Acoustic VAD & Pause-Aware Chunk Planner (SHB-F06)
  *
- * - Zero external dependencies (no Node.js fs, Express, or UI imports).
- * - Computes frame-level energy (dBFS) and Zero-Crossing Rate with whisper/quiet-speech safety (-55 dBFS floor).
- * - Applies hangover & pre-roll padding so soft Persian consonants and onsets are never clipped.
- * - Plans chunk boundaries aligned with natural acoustic pauses (minimizing mid-word boundary splits).
- * - Short-circuits pure ambient/digital silence so zero compute is wasted on silent segments.
+ * Zero external dependencies. Uses bounded frame-level RMS/ZCR analysis, one pre/post-roll
+ * expansion per speech region, minimum-duration filtering, and pause-preferred long-chunk splits.
  */
 
 export interface ShahabCoreVadConfig {
-  readonly frameMs?: number;            // Default 25ms
-  readonly hopMs?: number;              // Default 10ms
-  readonly silenceDbfsThreshold?: number; // Default -55.0 dBFS (quiet speech safety)
-  readonly minSpeechDurationMs?: number;// Default 150ms
-  readonly hangoverMs?: number;         // Default 300ms pre-roll / post-roll padding
-  readonly maxChunkSec?: number;        // Default 24s
+  readonly frameMs?: number;
+  readonly hopMs?: number;
+  readonly silenceDbfsThreshold?: number;
+  readonly minSpeechDurationMs?: number;
+  readonly hangoverMs?: number;
+  readonly maxChunkSec?: number;
 }
 
 export interface SpeechSegmentRange {
@@ -25,6 +22,106 @@ export interface SpeechSegmentRange {
   readonly isSpeech: boolean;
 }
 
+const SAMPLE_RATE = 16_000;
+
+function requireFiniteRange(name: string, value: number, min: number, max: number): number {
+  if (!Number.isFinite(value) || value < min || value > max) {
+    throw new RangeError(`${name} must be finite and between ${min} and ${max}.`);
+  }
+  return value;
+}
+
+function makeSpeechRange(startSample: number, endSample: number): SpeechSegmentRange {
+  return {
+    startSample,
+    endSample,
+    startSec: Number((startSample / SAMPLE_RATE).toFixed(3)),
+    endSec: Number((endSample / SAMPLE_RATE).toFixed(3)),
+    isSpeech: true,
+  };
+}
+
+/**
+ * Finds the quietest available frame gap near a requested boundary. If the region contains
+ * uninterrupted speech, it returns the requested boundary and the caller supplies overlap.
+ */
+function findPauseBoundarySample(params: {
+  readonly activeFlags: Uint8Array;
+  readonly hopSamples: number;
+  readonly fromFrame: number;
+  readonly toFrame: number;
+  readonly targetSample: number;
+  readonly searchFrames: number;
+}): number {
+  const targetFrame = Math.round(params.targetSample / params.hopSamples);
+  const lo = Math.max(params.fromFrame + 1, targetFrame - params.searchFrames);
+  const hi = Math.min(params.toFrame - 1, targetFrame + params.searchFrames);
+  let bestCenter = -1;
+  let bestDistance = Number.POSITIVE_INFINITY;
+
+  for (let i = lo; i <= hi;) {
+    if (params.activeFlags[i] === 1) {
+      i++;
+      continue;
+    }
+    const gapStart = i;
+    while (i <= hi && params.activeFlags[i] === 0) i++;
+    const center = Math.floor((gapStart + i - 1) / 2);
+    const distance = Math.abs(center * params.hopSamples - params.targetSample);
+    if (distance < bestDistance) {
+      bestDistance = distance;
+      bestCenter = center;
+    }
+  }
+
+  return bestCenter >= 0 ? bestCenter * params.hopSamples : params.targetSample;
+}
+
+function splitLongSpeechRegion(params: {
+  readonly rawStartSample: number;
+  readonly rawEndSample: number;
+  readonly audioLength: number;
+  readonly activeFlags: Uint8Array;
+  readonly hopSamples: number;
+  readonly hangoverSamples: number;
+  readonly maxChunkSamples: number;
+  readonly maxChunkSec: number;
+}): SpeechSegmentRange[] {
+  const firstSample = Math.max(0, params.rawStartSample - params.hangoverSamples);
+  const finalSample = Math.min(params.audioLength, params.rawEndSample + params.hangoverSamples);
+  const overlapSamples = Math.min(params.hangoverSamples, Math.floor(params.maxChunkSamples / 20));
+  const searchFrames = Math.max(1, Math.ceil((Math.min(500, params.maxChunkSec * 50) * SAMPLE_RATE / 1000) / params.hopSamples));
+  const segments: SpeechSegmentRange[] = [];
+  let chunkStart = firstSample;
+  const firstFrame = Math.max(0, Math.floor(params.rawStartSample / params.hopSamples));
+  const lastFrame = Math.min(params.activeFlags.length - 1, Math.ceil(params.rawEndSample / params.hopSamples));
+
+  while (finalSample - chunkStart > params.maxChunkSamples) {
+    const targetBoundary = chunkStart + params.maxChunkSamples - overlapSamples * 2;
+    const boundary = findPauseBoundarySample({
+      activeFlags: params.activeFlags,
+      hopSamples: params.hopSamples,
+      fromFrame: firstFrame,
+      toFrame: lastFrame,
+      targetSample: targetBoundary,
+      searchFrames,
+    });
+    const safeBoundary = Math.max(
+      chunkStart + overlapSamples,
+      Math.min(chunkStart + params.maxChunkSamples - overlapSamples, boundary),
+    );
+    const chunkEnd = Math.min(finalSample, safeBoundary + overlapSamples);
+    if (chunkEnd <= chunkStart) break;
+    segments.push(makeSpeechRange(chunkStart, chunkEnd));
+    chunkStart = Math.max(chunkStart + 1, safeBoundary - overlapSamples);
+  }
+
+  if (finalSample > chunkStart) {
+    segments.push(makeSpeechRange(chunkStart, finalSample));
+  }
+  return segments;
+}
+
 export function detectCoreAcousticSpeechSegments(
   pcm16k: Float32Array,
   config?: ShahabCoreVadConfig,
@@ -33,124 +130,117 @@ export function detectCoreAcousticSpeechSegments(
   readonly speechRatio: number;
   readonly segments: readonly SpeechSegmentRange[];
 } {
-  if (!pcm16k || pcm16k.length === 0) {
+  if (!(pcm16k instanceof Float32Array) || pcm16k.length === 0) {
     return { hasSpeech: false, speechRatio: 0, segments: [] };
   }
 
-  const sampleRate = 16000;
-  const frameSamples = Math.round(sampleRate * ((config?.frameMs ?? 25) / 1000)); // 400 samples
-  const hopSamples = Math.round(sampleRate * ((config?.hopMs ?? 10) / 1000));     // 160 samples
-  const dbfsThreshold = config?.silenceDbfsThreshold ?? -55.0;
-  const hangoverSamples = Math.round(sampleRate * ((config?.hangoverMs ?? 300) / 1000));
+  const frameMs = requireFiniteRange('frameMs', config?.frameMs ?? 25, 5, 100);
+  const hopMs = requireFiniteRange('hopMs', config?.hopMs ?? 10, 1, frameMs);
+  const dbfsThreshold = requireFiniteRange('silenceDbfsThreshold', config?.silenceDbfsThreshold ?? -55, -120, 0);
+  const minSpeechDurationMs = requireFiniteRange('minSpeechDurationMs', config?.minSpeechDurationMs ?? 150, 0, 60_000);
+  const hangoverMs = requireFiniteRange('hangoverMs', config?.hangoverMs ?? 300, 0, 5_000);
+  const maxChunkSec = requireFiniteRange('maxChunkSec', config?.maxChunkSec ?? 24, 1, 600);
 
-  let totalFrames = 0;
+  const frameSamples = Math.max(1, Math.round(SAMPLE_RATE * frameMs / 1000));
+  const hopSamples = Math.max(1, Math.round(SAMPLE_RATE * hopMs / 1000));
+  const hangoverSamples = Math.round(SAMPLE_RATE * hangoverMs / 1000);
+  const minSpeechSamples = Math.round(SAMPLE_RATE * minSpeechDurationMs / 1000);
+  const maxChunkSamples = Math.max(frameSamples, Math.floor(SAMPLE_RATE * maxChunkSec));
+  const frameCount = Math.ceil(pcm16k.length / hopSamples);
+  const activeFlags = new Uint8Array(frameCount);
   let activeFrames = 0;
-  const frameActiveFlags = new Uint8Array(Math.ceil(pcm16k.length / hopSamples));
 
-  for (let start = 0, fIdx = 0; start + frameSamples <= pcm16k.length; start += hopSamples, fIdx++) {
-    totalFrames++;
+  // Include the final partial frame instead of silently ignoring the tail of short recordings.
+  for (let frameIndex = 0; frameIndex < frameCount; frameIndex++) {
+    const start = frameIndex * hopSamples;
+    const sampleCount = Math.min(frameSamples, pcm16k.length - start);
+    if (sampleCount <= 0) continue;
+
     let sumSq = 0;
-    let zcr = 0;
-    let prev = 0;
-    for (let i = 0; i < frameSamples; i++) {
+    let zeroCrossings = 0;
+    let previous = 0;
+    for (let i = 0; i < sampleCount; i++) {
       const raw = pcm16k[start + i];
-      const s = Number.isFinite(raw) ? raw : 0;
-      sumSq += s * s;
-      if (i > 0 && ((prev >= 0 && s < 0) || (prev < 0 && s >= 0))) {
-        zcr++;
+      const sample = Number.isFinite(raw) ? raw : 0;
+      sumSq += sample * sample;
+      if (i > 0 && ((previous >= 0 && sample < 0) || (previous < 0 && sample >= 0))) {
+        zeroCrossings++;
       }
-      prev = s;
+      previous = sample;
     }
-    const rms = Math.sqrt(sumSq / frameSamples);
-    const dbfs = 20 * Math.log10(rms + 1e-12);
-    const zcrRatio = zcr / frameSamples;
 
-    const isActive = dbfs >= dbfsThreshold && zcrRatio > 0.005 && zcrRatio < 0.50;
+    const rms = Math.sqrt(sumSq / sampleCount);
+    const dbfs = 20 * Math.log10(rms + 1e-12);
+    const zcrRatio = sampleCount > 1 ? zeroCrossings / (sampleCount - 1) : 0;
+    const isActive = dbfs >= dbfsThreshold && zcrRatio > 0.002 && zcrRatio < 0.85;
     if (isActive) {
+      activeFlags[frameIndex] = 1;
       activeFrames++;
-      frameActiveFlags[fIdx] = 1;
     }
   }
 
-  const speechRatio = totalFrames > 0 ? activeFrames / totalFrames : 0;
-  if (speechRatio < 0.01 && activeFrames === 0) {
+  const speechRatio = frameCount > 0 ? activeFrames / frameCount : 0;
+  if (activeFrames === 0) {
     return {
       hasSpeech: false,
       speechRatio: 0,
-      segments: [
-        {
-          startSample: 0,
-          endSample: pcm16k.length,
-          startSec: 0,
-          endSec: pcm16k.length / sampleRate,
-          isSpeech: false,
-        },
-      ],
+      segments: [{
+        startSample: 0,
+        endSample: pcm16k.length,
+        startSec: 0,
+        endSec: Number((pcm16k.length / SAMPLE_RATE).toFixed(3)),
+        isSpeech: false,
+      }],
     };
   }
 
-  const paddedFlags = new Uint8Array(frameActiveFlags.length);
-  const hangoverHopCount = Math.ceil(hangoverSamples / hopSamples);
-  for (let i = 0; i < frameActiveFlags.length; i++) {
-    if (frameActiveFlags[i] === 1) {
-      const lo = Math.max(0, i - hangoverHopCount);
-      const hi = Math.min(paddedFlags.length - 1, i + hangoverHopCount);
-      for (let k = lo; k <= hi; k++) {
-        paddedFlags[k] = 1;
-      }
-    }
-  }
-
+  const maxGapFrames = Math.ceil(hangoverSamples / hopSamples);
   const segments: SpeechSegmentRange[] = [];
-  let inSpeech = false;
-  let segStartSample = 0;
+  let regionStartFrame = -1;
+  let lastActiveFrame = -1;
 
-  for (let fIdx = 0; fIdx < paddedFlags.length; fIdx++) {
-    const sampleIdx = fIdx * hopSamples;
-    if (paddedFlags[fIdx] === 1 && !inSpeech) {
-      inSpeech = true;
-      segStartSample = Math.max(0, sampleIdx - hangoverSamples);
-    } else if (paddedFlags[fIdx] === 0 && inSpeech) {
-      inSpeech = false;
-      const segEndSample = Math.min(pcm16k.length, sampleIdx + hangoverSamples);
-      if (segEndSample - segStartSample >= 1600) {
-        segments.push({
-          startSample: segStartSample,
-          endSample: segEndSample,
-          startSec: Number((segStartSample / sampleRate).toFixed(3)),
-          endSec: Number((segEndSample / sampleRate).toFixed(3)),
-          isSpeech: true,
-        });
-      }
+  const flushRegion = () => {
+    if (regionStartFrame < 0 || lastActiveFrame < regionStartFrame) return;
+    const rawStartSample = regionStartFrame * hopSamples;
+    const rawEndSample = Math.min(pcm16k.length, lastActiveFrame * hopSamples + frameSamples);
+    if (rawEndSample - rawStartSample >= minSpeechSamples) {
+      segments.push(...splitLongSpeechRegion({
+        rawStartSample,
+        rawEndSample,
+        audioLength: pcm16k.length,
+        activeFlags,
+        hopSamples,
+        hangoverSamples,
+        maxChunkSamples,
+        maxChunkSec,
+      }));
     }
-  }
+    regionStartFrame = -1;
+    lastActiveFrame = -1;
+  };
 
-  if (inSpeech) {
-    const segEndSample = pcm16k.length;
-    if (segEndSample - segStartSample >= 1600) {
-      segments.push({
-        startSample: segStartSample,
-        endSample: segEndSample,
-        startSec: Number((segStartSample / sampleRate).toFixed(3)),
-        endSec: Number((segEndSample / sampleRate).toFixed(3)),
-        isSpeech: true,
-      });
+  for (let i = 0; i <= frameCount; i++) {
+    if (i < frameCount && activeFlags[i] === 1) {
+      if (regionStartFrame < 0) regionStartFrame = i;
+      lastActiveFrame = i;
+      continue;
+    }
+    if (regionStartFrame >= 0 && (i === frameCount || i - lastActiveFrame - 1 > maxGapFrames)) {
+      flushRegion();
     }
   }
 
   if (segments.length === 0) {
     return {
-      hasSpeech: speechRatio >= 0.02,
+      hasSpeech: false,
       speechRatio: Number(speechRatio.toFixed(3)),
-      segments: [
-        {
-          startSample: 0,
-          endSample: pcm16k.length,
-          startSec: 0,
-          endSec: Number((pcm16k.length / sampleRate).toFixed(3)),
-          isSpeech: speechRatio >= 0.02,
-        },
-      ],
+      segments: [{
+        startSample: 0,
+        endSample: pcm16k.length,
+        startSec: 0,
+        endSec: Number((pcm16k.length / SAMPLE_RATE).toFixed(3)),
+        isSpeech: false,
+      }],
     };
   }
 

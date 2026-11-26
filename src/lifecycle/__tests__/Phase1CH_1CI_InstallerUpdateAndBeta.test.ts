@@ -33,9 +33,13 @@ import {
   runCleanEnvironmentInstalledVerification,
 } from '../ProductionReleaseAndBetaEngine';
 
-const SHERPA_RUNTIME_ROOT = '/root/.avapardaz/runtime';
-const SHERPA_MODEL_DIR = '/root/.avapardaz/models/sherpa-onnx-nemo-ctc-fa-shenava-rizeh-v1.0-non-streaming-int8-2026-06-26';
-const WAV_1 = path.join(SHERPA_MODEL_DIR, 'test_wavs', '1.wav');
+const SHERPA_RUNTIME_ROOT = process.env.AVAPARDAZ_TEST_SHERPA_RUNTIME_DIR?.trim() ||
+  path.join(os.homedir(), '.avapardaz', 'runtime', 'sherpa-venv');
+const KOOCHIK_MODEL_DIR = process.env.AVAPARDAZ_TEST_SHERPA_MODEL_DIR?.trim() ||
+  path.join(os.homedir(), '.avapardaz', 'models', 'shahab-koochik-v1.0-sherpa-onnx');
+const RIZEH_MODEL_DIR = path.join(os.homedir(), '.avapardaz', 'models', 'sherpa-onnx-nemo-ctc-fa-shenava-rizeh-v1.0-non-streaming-int8-2026-06-26');
+const SHERPA_MODEL_DIR = fs.existsSync(path.join(KOOCHIK_MODEL_DIR, 'model.onnx')) ? KOOCHIK_MODEL_DIR : RIZEH_MODEL_DIR;
+const WAV_1 = path.join(process.cwd(), 'e2e', 'fixtures', 'shahab-fleurs-fa-ir-test.wav');
 
 function createTestSourcePaths(tmpDir: string) {
   const companionBundleFile = path.join(tmpDir, 'mock-avapardaz-companion.mjs');
@@ -148,7 +152,13 @@ describe('Phase 1C-H & 1C-I: Installer, First-Run Health, Clean-Env Execution, A
         installRoot: corruptModelTarget,
         sources,
       });
-      const tokensPath = path.join(validInstall.layout.shenavaModelDir, 'tokens.txt');
+      const installedManifest = JSON.parse(
+        fs.readFileSync(path.join(validInstall.layout.configDir, 'installation-manifest.json'), 'utf8'),
+      ) as { modelId?: string };
+      const selectedModelDirectory = installedManifest.modelId === 'Reza2kn/Shenava-Koochik-v1.0-sherpa-onnx'
+        ? validInstall.layout.shahabKoochikModelDir
+        : validInstall.layout.shenavaModelDir;
+      const tokensPath = path.join(selectedModelDirectory, 'tokens.txt');
       fs.writeFileSync(tokensPath, 'CORRUPTED_TOKENS_CONTENT', 'utf8');
       const invalidStatus = evaluateInstalledFirstRunStatus({ layout: validInstall.layout });
       assert.strictEqual(invalidStatus.status, 'MODEL_INVALID');

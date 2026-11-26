@@ -9,7 +9,7 @@
  * - SHA-256 verification before every load (refuses corrupted/tampered artifacts)
  * - Lazy loading + explicit immediate unload with RSS memory telemetry
  * - Strict 100% local CPU execution (zero cloud ASR, zero network calls during inference)
- * - Sample-accurate mapping from ASR token timings to source audio sample coordinates
+ * - Honest timestamp granularity; this Sherpa export currently provides segment-level timing only
  */
 
 import crypto from 'node:crypto';
@@ -29,7 +29,7 @@ import type {
   TranscriptToken,
 } from '../workflow/SmartAudioEditContracts';
 
-export const SHAHAB_MODEL_MAX_SIZE_BYTES = 200 * 1024 * 1024; // 200 MiB hard cap
+export const SHAHAB_MODEL_MAX_SIZE_BYTES = 600 * 1024 * 1024; // 600 MiB hard cap for the verified 438 MiB Koochik FP32 model
 
 export interface ShahabModelArtifactFile {
   readonly filename: string;
@@ -43,14 +43,14 @@ export interface ShahabModelManifest {
   readonly version: string;
   readonly displayName: string;
   readonly architecture: 'FastConformer-CTC';
-  readonly quantization: 'INT8';
+  readonly quantization: 'FP32' | 'INT8';
   readonly runtime: 'sherpa-onnx-cpu';
   readonly language: 'fa';
-  readonly supportsWordTimestamps: true;
+  readonly supportsWordTimestamps: boolean;
   readonly licenseSpdx: 'Apache-2.0';
   readonly provenance: {
     readonly originType: 'OPEN_BASELINE_VERIFIED';
-    readonly upstreamModelId: 'Reza2kn/Shenava-Rizeh';
+    readonly upstreamModelId: 'Reza2kn/Shenava-Koochik-v1.0-sherpa-onnx' | 'Reza2kn/Shenava-Rizeh';
     readonly upstreamVersion: 'v1.0';
     readonly upstreamLicense: 'Apache-2.0';
     readonly fineTunedByAvapardaz: false;
@@ -62,29 +62,29 @@ export interface ShahabModelManifest {
 
 export const SHAHAB_FA_LITE_MANIFEST: ShahabModelManifest = Object.freeze({
   modelId: 'shahab-fa-lite',
-  version: '1.0.0-baseline.shenava-rizeh',
-  displayName: 'Shahab FA Lite (FastConformer-CTC INT8 — Shenava-Rizeh Baseline)',
+  version: '1.0.0-baseline.shenava-koochik-fp32',
+  displayName: 'SHAHAB Persian Quality (Shenava Koochik FastConformer CTC FP32)',
   architecture: 'FastConformer-CTC',
-  quantization: 'INT8',
+  quantization: 'FP32',
   runtime: 'sherpa-onnx-cpu',
   language: 'fa',
-  supportsWordTimestamps: true,
+  supportsWordTimestamps: false,
   licenseSpdx: 'Apache-2.0',
   provenance: Object.freeze({
     originType: 'OPEN_BASELINE_VERIFIED',
-    upstreamModelId: 'Reza2kn/Shenava-Rizeh',
+    upstreamModelId: 'Reza2kn/Shenava-Koochik-v1.0-sherpa-onnx',
     upstreamVersion: 'v1.0',
     upstreamLicense: 'Apache-2.0',
     fineTunedByAvapardaz: false,
     notes:
-      'Official verified Apache-2.0 Persian NeMo FastConformer CTC INT8 baseline. Fine-tuned Shahab checkpoints are only promoted after passing locked FLEURS/CommonVoice/conversational WER & RTF gates.',
+      'Official Apache-2.0 Persian NeMo FastConformer CTC FP32 Koochik baseline. AVAPARDAZ does not fine-tune these weights. Current Sherpa output provides token onsets but not token durations; word-level end timestamps remain unavailable until a separately validated forced aligner is integrated.',
   }),
   maxArtifactBytes: SHAHAB_MODEL_MAX_SIZE_BYTES,
   files: Object.freeze([
     Object.freeze({
-      filename: 'model.int8.onnx',
-      expectedBytes: 38_183_269,
-      sha256Hex: '6bdd4ab80626ddfe0b19338a5c96fcc4f2021ad78899cece20a805a48dc5250d',
+      filename: 'model.onnx',
+      expectedBytes: 458_819_249,
+      sha256Hex: '6a564b5541920ce1c37bbc91d22e4b3a6838648b9b327eb88997e8db1f90950d',
       required: true,
     }),
     Object.freeze({
@@ -130,7 +130,7 @@ function sha256FileHex(filePath: string): string {
 
 /**
  * Verifies every required file in a Shahab model directory against exact byte count,
- * size ceiling (<= 200 MiB), and SHA-256 digest before inference is permitted.
+ * size ceiling (<= 600 MiB), and SHA-256 digest before inference is permitted.
  */
 export function verifyShahabModelArtifacts(
   rootDir: string,

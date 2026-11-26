@@ -32,7 +32,7 @@ import {
   validateCanonicalModelManifest,
 } from '../lifecycle/CanonicalModelProvenance';
 import { detectTextLanguageTag, normalizeWithProfile } from './CoreNormalizationAndLanguage';
-import { CompanionWebClient } from '../host-bridge/companion/CompanionWebClient';
+import type { NativeCompanionTransport } from './NativeCompanionTransport';
 import type {
   LocalNeuralTranscriptionResult,
   LocalSherpaNeuralEngine,
@@ -43,9 +43,8 @@ import {
 } from '../runtime/memory/MemoryBudgetManager';
 
 export interface NativeCompanionAsrRuntimeAdapterOptions {
-  /** Loopback Companion HTTP endpoint (when talking to an external Companion daemon) */
-  readonly companionEndpoint?: string;
-  readonly companionClient?: CompanionWebClient;
+  /** Injected local Companion transport; implemented outside ASR Core. */
+  readonly companionClient?: NativeCompanionTransport;
   /** Optional direct native engine for standalone native execution or cross-runtime parity tests */
   readonly directNativeEngine?: LocalSherpaNeuralEngine;
   readonly memoryBudgetManager?: MemoryBudgetManager;
@@ -55,7 +54,7 @@ export class NativeCompanionAsrRuntimeAdapter implements LocalAsrRuntimeAdapter 
   public readonly runtimeTarget = 'NATIVE_COMPANION_CPU' as const;
   public readonly runtimeName = 'AVAPARDAZ Native Companion Local Runtime (CPU)';
 
-  private readonly client: CompanionWebClient | null;
+  private readonly client: NativeCompanionTransport | null;
   private readonly directEngine: LocalSherpaNeuralEngine | null;
   private readonly budget: MemoryBudgetManager;
 
@@ -69,9 +68,7 @@ export class NativeCompanionAsrRuntimeAdapter implements LocalAsrRuntimeAdapter 
 
   constructor(options: NativeCompanionAsrRuntimeAdapterOptions = {}) {
     this.directEngine = options.directNativeEngine ?? null;
-    this.client =
-      options.companionClient ??
-      (options.directNativeEngine ? null : new CompanionWebClient(options.companionEndpoint));
+    this.client = options.companionClient ?? null;
     this.budget = options.memoryBudgetManager ?? getSharedMemoryBudgetManager();
   }
 
@@ -238,43 +235,58 @@ export class NativeCompanionAsrRuntimeAdapter implements LocalAsrRuntimeAdapter 
 
     try {
       const durationSec = request.totalSamples / request.sampleRate;
-      // Assemble bounded PCM for Companion transfer
-      const pcm = await request.readSourceRange(0, request.totalSamples);
-      if (jobAbort.signal.aborted) {
-        throw new AsrRuntimeError({
-          code: 'JOB_CANCELLED',
-          message: 'Native Companion transcription cancelled.',
-          runtimeTarget: this.runtimeTarget,
-          jobId: request.jobId,
-        });
-      }
-
       let nativeResult: LocalNeuralTranscriptionResult;
       if (this.directEngine) {
-        const wavBytes = encodeFloat32MonoWav(pcm, request.sampleRate);
-        nativeResult = await this.directEngine.transcribe({
-          modelId: request.modelDescriptor?.modelId ?? this.activeModelId ?? undefined,
-          languageHint: request.languageHint ?? 'fa',
-          audioBytes: Buffer.from(wavBytes.buffer, wavBytes.byteOffset, wavBytes.byteLength),
-          filename: request.fileName,
+        // Node-only temporary-file staging is loaded only in the Native host path;
+        // it must not pull node:fs/os/path into the browser runtime bundle.
+        const nodeOnlyStagerModule = './StreamingPcmCanonicalWavStager';
+        const { stagePcmSourceAsCanonicalWav } = await import(/* @vite-ignore */ nodeOnlyStagerModule) as typeof import('./StreamingPcmCanonicalWavStager');
+        const stagedSource = await stagePcmSourceAsCanonicalWav({
+          sampleRate: request.sampleRate,
+          totalSamples: request.totalSamples,
+          readSourceRange: request.readSourceRange,
           signal: jobAbort.signal,
-          onProgress: (prog) => {
+          onProgress: (percent) => {
             request.onProgress?.({
               jobId: request.jobId,
               runtimeTarget: this.runtimeTarget,
-              stage: 'INFERRING',
-              percent: prog.percent,
-              currentChunk: prog.currentChunk,
-              totalChunks: prog.totalChunks,
-              elapsedMs: prog.elapsedMs,
-              messageFa: `استنتاج محلی Native Companion (${prog.percent}٪)...`,
+              stage: 'PREPROCESSING',
+              percent: Math.min(15, Math.round(percent * 0.15)),
+              currentChunk: Math.ceil((request.totalSamples * percent) / 100 / 16_384),
+              totalChunks: Math.ceil(request.totalSamples / 16_384),
+              elapsedMs: Math.round(performance.now() - startedMs),
+              messageFa: `آماده‌سازی جریانی صوت برای شهاب (${percent}٪)...`,
             });
           },
         });
-      } else if (this.client) {
-        const companionRes = await this.client.transcribePcm({
-          pcm,
+        try {
+          nativeResult = await this.directEngine.transcribe({
+            modelId: request.modelDescriptor?.modelId ?? this.activeModelId ?? undefined,
+            languageHint: request.languageHint ?? 'fa',
+            audioFilePath: stagedSource.filePath,
+            filename: request.fileName,
+            signal: jobAbort.signal,
+            onProgress: (prog) => {
+              request.onProgress?.({
+                jobId: request.jobId,
+                runtimeTarget: this.runtimeTarget,
+                stage: 'INFERRING',
+                percent: prog.percent,
+                currentChunk: prog.currentChunk,
+                totalChunks: prog.totalChunks,
+                elapsedMs: prog.elapsedMs,
+                messageFa: `استنتاج محلی Native Companion (${prog.percent}٪)...`,
+              });
+            },
+          });
+        } finally {
+          await stagedSource.cleanup();
+        }
+      } else if (this.client?.transcribeAudioSource) {
+        const companionRes = await this.client.transcribeAudioSource({
           sampleRate: request.sampleRate,
+          totalSamples: request.totalSamples,
+          readSourceRange: request.readSourceRange,
           filename: request.fileName,
           modelId: request.modelDescriptor?.modelId ?? this.activeModelId ?? undefined,
           languageHint: request.languageHint ?? 'fa',
@@ -283,12 +295,12 @@ export class NativeCompanionAsrRuntimeAdapter implements LocalAsrRuntimeAdapter 
             request.onProgress?.({
               jobId: request.jobId,
               runtimeTarget: this.runtimeTarget,
-              stage: 'INFERRING',
+              stage: job.progressPct < 15 ? 'PREPROCESSING' : 'INFERRING',
               percent: job.progressPct,
               currentChunk: job.currentChunk,
               totalChunks: job.totalChunks,
               elapsedMs: job.elapsedMs,
-              messageFa: `استنتاج محلی Native Companion (${job.progressPct}٪)...`,
+              messageFa: `پردازش جریانی محلی شهاب (${job.progressPct}٪)...`,
             });
           },
         });
@@ -338,6 +350,71 @@ export class NativeCompanionAsrRuntimeAdapter implements LocalAsrRuntimeAdapter 
           channelCount: 1,
           audioSha256: request.sourceAssetSha256,
         };
+      } else if (this.client && durationSec <= 30) {
+        // Bounded compatibility path for legacy transports; large recordings are never copied whole.
+        const pcm = await request.readSourceRange(0, request.totalSamples);
+        if (jobAbort.signal.aborted) throw new Error('TRANSCRIPTION_CANCELLED');
+        const companionRes = await this.client.transcribePcm({
+          pcm,
+          sampleRate: request.sampleRate,
+          filename: request.fileName,
+          modelId: request.modelDescriptor?.modelId ?? this.activeModelId ?? undefined,
+          languageHint: request.languageHint ?? 'fa',
+          signal: jobAbort.signal,
+          onProgress: (job) => {
+            request.onProgress?.({
+              jobId: request.jobId,
+              runtimeTarget: this.runtimeTarget,
+              stage: 'INFERRING',
+              percent: job.progressPct,
+              currentChunk: job.currentChunk,
+              totalChunks: job.totalChunks,
+              elapsedMs: job.elapsedMs,
+              messageFa: `استنتاج محلی Native Companion (${job.progressPct}٪)...`,
+            });
+          },
+        });
+        const mappedArchitecture =
+          companionRes.architecture === 'whisper' || companionRes.architecture === 'WHISPER_SEQ2SEQ'
+            ? ('whisper' as const)
+            : companionRes.architecture === 'qwen3-asr'
+              ? ('qwen3-asr' as const)
+              : ('nemo-ctc' as const);
+        const mappedQuantization = companionRes.quantization === 'FP32' ? ('FP32' as const) : ('INT8' as const);
+        nativeResult = {
+          modelId: companionRes.modelId,
+          architecture: mappedArchitecture,
+          quantization: mappedQuantization,
+          offlineVerified: true,
+          durationSec: companionRes.durationSec,
+          processingTimeMs: companionRes.processingTimeMs,
+          realTimeFactor: companionRes.realTimeFactor,
+          dominantLanguage: detectTextLanguageTag(companionRes.rawText).language,
+          rawText: companionRes.rawText,
+          normalizedByProfile: buildNativeNormalizationProfiles(companionRes.rawText),
+          timestampGranularity: companionRes.timestampGranularity,
+          segments: companionRes.segments.map((seg, idx) => ({
+            id: seg.id,
+            index: typeof seg.index === 'number' ? seg.index : idx,
+            startSec: seg.startSec,
+            endSec: seg.endSec,
+            text: seg.text,
+            normalizedByProfile: buildNativeNormalizationProfiles(seg.text),
+            language: detectTextLanguageTag(seg.text).language,
+            timestampGranularity: seg.timestampGranularity ?? companionRes.timestampGranularity,
+            words: seg.words.map((w) => ({ word: w.word, startSec: w.startSec, endSec: w.endSec })),
+          })),
+          sampleRateHz: 16_000,
+          channelCount: 1,
+          audioSha256: request.sourceAssetSha256,
+        };
+      } else if (this.client) {
+        throw new AsrRuntimeError({
+          code: 'RESOURCE_LIMIT_EXCEEDED',
+          message: 'Native Companion transport does not support range-based streaming; refusing to materialize a recording longer than 30 seconds in memory.',
+          runtimeTarget: this.runtimeTarget,
+          jobId: request.jobId,
+        });
       } else {
         throw new AsrRuntimeError({
           code: 'COMPANION_UNAVAILABLE',
@@ -528,6 +605,16 @@ export function normalizeNativeResultToCanonical(params: {
     timestampGranularity: nativeResult.timestampGranularity,
     segments,
     peakMemoryBytes: params.peakMemoryBytes,
+  };
+}
+
+function buildNativeNormalizationProfiles(text: string): Readonly<Record<'RAW_UNMODIFIED' | 'FA-STRICT-V1' | 'FA-RELAXED-V1' | 'EN-NORM-V1' | 'MIXED-NORM-V1', string>> {
+  return {
+    RAW_UNMODIFIED: text,
+    'FA-STRICT-V1': normalizeWithProfile(text, 'FA-STRICT-V1') || text,
+    'FA-RELAXED-V1': normalizeWithProfile(text, 'FA-RELAXED-V1') || text,
+    'EN-NORM-V1': normalizeWithProfile(text, 'EN-NORM-V1') || text,
+    'MIXED-NORM-V1': normalizeWithProfile(text, 'MIXED-NORM-V1') || text,
   };
 }
 

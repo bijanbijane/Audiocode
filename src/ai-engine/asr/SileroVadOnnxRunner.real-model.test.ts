@@ -41,7 +41,10 @@ function createRealWasmOrtProvider(): OrtRuntimeProvider {
   };
 }
 
-test('Silero VAD v5: real ONNX/WASM CPU inference detects speech on the pinned Persian sample', async () => {
+test(
+  'Silero VAD v5: real ONNX/WASM CPU inference detects speech on the pinned Persian sample',
+  { skip: fs.existsSync(MODEL_PATH) && fs.existsSync(SAMPLE_WAV_PATH) ? false : 'Pinned Silero VAD and Persian WAV assets are provisioned only in the model-smoke workflow' },
+  async () => {
   assert.ok(fs.existsSync(MODEL_PATH), 'pinned Silero VAD ONNX asset must be provisioned before the test');
   assert.ok(fs.existsSync(SAMPLE_WAV_PATH), 'pinned Persian sample WAV must be provisioned before the test');
 
@@ -91,4 +94,5 @@ test('Silero VAD v5: real ONNX/WASM CPU inference detects speech on the pinned P
   } finally {
     await runner.unloadModel();
   }
-});
+  },
+);

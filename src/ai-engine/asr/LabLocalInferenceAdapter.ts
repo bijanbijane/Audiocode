@@ -586,9 +586,11 @@ export class LabLocalInferenceAdapter implements AsrProviderAdapter {
   }
 
   private isTimeoutReason(reason: unknown): boolean {
-    if (!reason) return false;
-    const text = reason instanceof Error ? reason.message : String(reason);
-    return /timeout/i.test(text);
+    // The adapter contract has no separate CANCELLED status: AbortSignal cancellation and
+    // elapsed deadlines both map to TIMEOUT so callers can distinguish them from API failures.
+    if (!reason) return true;
+    const text = reason instanceof Error ? `${reason.name} ${reason.message}` : String(reason);
+    return /timeout|abort|cancel/i.test(text);
   }
 
   private async invokeCancelledCleanup(): Promise<void> {

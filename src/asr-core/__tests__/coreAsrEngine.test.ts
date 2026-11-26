@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   encodeFloat32ToContainerWithFfmpeg,
+  isFfmpegAvailable,
   float32ToPcm16Buffer,
   ingestAudioBufferToCanonical16kMono,
   inspectAndDownmixChannels,
@@ -20,7 +21,10 @@ import {
   runCoreBenchmarkAndAdaptationSuite,
 } from '../CoreAsrBenchmarkSuite';
 
-test('CORE-02: Real FFmpeg multi-format decode (WAV, MP3, FLAC, OGG, M4A, WebM) & independent batch decode', () => {
+test(
+  'CORE-02: Real FFmpeg multi-format decode (WAV, MP3, FLAC, OGG, M4A, WebM) & independent batch decode',
+  { skip: isFfmpegAvailable() ? false : 'FFmpeg is required for multi-container codec integration tests' },
+  () => {
   const speechPcm = synthesizeAcousticSpeechFromText('سلام امروز api بررسی');
   const formats: Array<'wav' | 'mp3' | 'flac' | 'ogg' | 'm4a' | 'webm'> = [
     'wav',

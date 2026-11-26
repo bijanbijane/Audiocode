@@ -38,9 +38,10 @@ import {
   StreamingTranscriptAssembler,
 } from '../StreamingTranscriptAssembler';
 
-const MODEL_DIR = '/root/.avapardaz/models/sherpa-onnx-nemo-ctc-fa-shenava-rizeh-v1.0-non-streaming-int8-2026-06-26';
+const MODEL_DIR = process.env.AVAPARDAZ_SHERPA_MODEL_DIR ?? '/root/.avapardaz/models/sherpa-onnx-nemo-ctc-fa-shenava-rizeh-v1.0-non-streaming-int8-2026-06-26';
 const WAV_0 = path.join(MODEL_DIR, 'test_wavs', '0.wav');
 const WAV_1 = path.join(MODEL_DIR, 'test_wavs', '1.wav');
+const HAS_NATIVE_SHERPA_FIXTURES = fs.existsSync(WAV_0) && fs.existsSync(WAV_1);
 
 function writeTempWavFile(options: {
   filePath: string;
@@ -116,7 +117,10 @@ function writeTempWavFile(options: {
   }
 }
 
-describe('Phase 1C-B: NativeSherpaStreamingRecognizer Real End-to-End Verification', () => {
+describe(
+  'Phase 1C-B: NativeSherpaStreamingRecognizer Real End-to-End Verification',
+  { skip: HAS_NATIVE_SHERPA_FIXTURES ? false : 'Native Sherpa model and pinned Persian WAVs are provisioned only in the model-smoke workflow' },
+  () => {
   it('1C-B-01: Recognizes real Persian speech (test_wavs/0.wav & 1.wav) via streaming chunks with PARTIAL and FINAL events and word timestamps', async () => {
     assert.ok(fs.existsSync(WAV_0), 'WAV_0 must exist');
     assert.ok(fs.existsSync(WAV_1), 'WAV_1 must exist');
@@ -230,7 +234,10 @@ describe('Phase 1C-B: NativeSherpaStreamingRecognizer Real End-to-End Verificati
 });
 
 describe('Phase 1C-C: StreamingTranscriptAssembler & Canonical Timeline (TC-01..TC-20)', () => {
-  it('TC-01..TC-10: Integrates live NativeSherpaStreamingRecognizer events into CanonicalTranscriptSnapshot with provisional isolation, final immutability, and zero overlap duplication', async () => {
+  it(
+    'TC-01..TC-10: Integrates live NativeSherpaStreamingRecognizer events into CanonicalTranscriptSnapshot with provisional isolation, final immutability, and zero overlap duplication',
+    { skip: HAS_NATIVE_SHERPA_FIXTURES ? false : 'Native Sherpa model and pinned Persian WAVs are provisioned only in the model-smoke workflow' },
+    async () => {
     const assembler = new StreamingTranscriptAssembler({
       sessionId: 'tc-live-01',
       sourceSampleRateHz: 48000,

@@ -5,9 +5,27 @@ import {
   synthesizeAcousticSpeechFromText,
 } from '../../asr-core/CoreAcousticCtcEngine';
 import {
-  encodeFloat32ToContainerWithFfmpeg,
   float32ToPcm16Buffer,
 } from '../../asr-core/CoreAudioIngestion';
+function encodeDeterministicWav(pcm: Float32Array, sampleRate: number): Buffer {
+  const data = float32ToPcm16Buffer(pcm);
+  const header = Buffer.alloc(44);
+  header.write('RIFF', 0, 'ascii');
+  header.writeUInt32LE(36 + data.byteLength, 4);
+  header.write('WAVE', 8, 'ascii');
+  header.write('fmt ', 12, 'ascii');
+  header.writeUInt32LE(16, 16);
+  header.writeUInt16LE(1, 20);
+  header.writeUInt16LE(1, 22);
+  header.writeUInt32LE(sampleRate, 24);
+  header.writeUInt32LE(sampleRate * 2, 28);
+  header.writeUInt16LE(2, 32);
+  header.writeUInt16LE(16, 34);
+  header.write('data', 36, 'ascii');
+  header.writeUInt32LE(data.byteLength, 40);
+  return Buffer.concat([header, data]);
+}
+
 import { CoreModelRouter } from '../../asr-core/CoreModelRouter';
 import { MemoryBudgetManager } from '../../runtime/memory/MemoryBudgetManager';
 import {
@@ -28,7 +46,7 @@ import {
 
 function buildDeterministicWavRequest(overrides?: Partial<UnifiedProcessingRequest>): UnifiedProcessingRequest {
   const speech = synthesizeAcousticSpeechFromText('سلام امروز api بررسی');
-  const wavBuf = encodeFloat32ToContainerWithFfmpeg(speech, 'wav', CORE_SAMPLE_RATE);
+  const wavBuf = encodeDeterministicWav(speech, CORE_SAMPLE_RATE);
   const audio = uint8ArrayToTransportSafeAudioInput({
     bytes: new Uint8Array(wavBuf.buffer, wavBuf.byteOffset, wavBuf.byteLength),
     encoding: 'BASE64_CONTAINER',
@@ -584,7 +602,7 @@ test('Orchestration: both adapters produce identical canonical schema, switching
 test('Regression: CoreModelRouter batch + long_form workflow remains compatible alongside UnifiedProcessingOrchestrator', async () => {
   const router = new CoreModelRouter();
   const speech = synthesizeAcousticSpeechFromText('سلام امروز api بررسی');
-  const wavBuf = encodeFloat32ToContainerWithFfmpeg(speech, 'wav', CORE_SAMPLE_RATE);
+  const wavBuf = encodeDeterministicWav(speech, CORE_SAMPLE_RATE);
 
   const direct = router.batchEngine.transcribeAudioBytes({
     filename: 'reg_test.wav',

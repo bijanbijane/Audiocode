@@ -27,6 +27,11 @@ const SAMPLE_WAV_PATH = path.resolve(
   '1.0.0',
   'sample.wav',
 );
+const HAS_PINNED_SAMPLE = fs.existsSync(SAMPLE_WAV_PATH);
+const HAS_PINNED_MODEL = ['encoder.int8.onnx', 'decoder.int8.onnx', 'joiner.int8.onnx', 'tokens.txt'].every((name) =>
+  fs.existsSync(path.resolve(process.cwd(), 'models', 'persian-zipformer-transducer', '1.0.0', name)),
+);
+const MODEL_SMOKE_SKIP = 'Pinned Persian sample/model assets are provisioned only in the model-smoke workflow';
 
 function buildPcm16WavBuffer(params: {
   readonly sampleRate: number;
@@ -63,7 +68,10 @@ function buildPcm16WavBuffer(params: {
   return buf;
 }
 
-test('D1: Corrupt model assets fail SHA-256 check, flip available=false with integrityError, and clear on disk change', async () => {
+test(
+  'D1: Corrupt model assets fail SHA-256 check, flip available=false with integrityError, and clear on disk change',
+  { skip: HAS_PINNED_MODEL && HAS_PINNED_SAMPLE ? false : MODEL_SMOKE_SKIP },
+  async () => {
   const tmpModelDir = fs.mkdtempSync(path.join(os.tmpdir(), 'avp-corrupt-shahab-'));
   try {
     // Populate required model files with corrupted bytes
@@ -120,7 +128,10 @@ test('D1: Corrupt model assets fail SHA-256 check, flip available=false with int
   }
 });
 
-test('D2: Malformed WAV, fake text audio, and truncated MP3 reject cleanly with INVALID_AUDIO_INPUT', async () => {
+test(
+  'D2: Malformed WAV, fake text audio, and truncated MP3 reject cleanly with INVALID_AUDIO_INPUT',
+  { skip: HAS_PINNED_SAMPLE ? false : MODEL_SMOKE_SKIP },
+  async () => {
   const rt = new ShahabZipformerAsrRuntime();
 
   // 1. Direct decodeWavToMono16k header bounds checks
@@ -186,7 +197,10 @@ test('D2: Malformed WAV, fake text audio, and truncated MP3 reject cleanly with 
   await shortLimitRt.dispose();
 });
 
-test('D3: Stereo out-of-phase (L = +s, R = -s) WAV preserves Persian speech instead of cancelling to silence', async () => {
+test(
+  'D3: Stereo out-of-phase (L = +s, R = -s) WAV preserves Persian speech instead of cancelling to silence',
+  { skip: HAS_PINNED_SAMPLE ? false : MODEL_SMOKE_SKIP },
+  async () => {
   const sampleBytes = fs.readFileSync(SAMPLE_WAV_PATH);
   const mono = decodeWavToMono16k(sampleBytes);
 
@@ -314,7 +328,10 @@ test('D5: parseShahabJsonResponse classifies transient proxy/queue errors vs ter
   assert.equal(rBroken.kind, 'ERROR');
 });
 
-test('D6: Bounded queue rejects overflow with SHAHAB_QUEUE_FULL and reports accurate activeJobCount + queuedJobCount', async () => {
+test(
+  'D6: Bounded queue rejects overflow with SHAHAB_QUEUE_FULL and reports accurate activeJobCount + queuedJobCount',
+  { skip: HAS_PINNED_SAMPLE ? false : MODEL_SMOKE_SKIP },
+  async () => {
   const rt = new ShahabZipformerAsrRuntime({ maxPendingJobs: 2 });
   const sampleBytes = fs.readFileSync(SAMPLE_WAV_PATH);
   try {

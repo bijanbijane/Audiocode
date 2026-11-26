@@ -908,7 +908,10 @@ test('20. Invalid/malformed input (missing source hash & NaN/negative event boun
   assert.equal(malformedEventEdl.proposals[0].boundary.valid, false);
 });
 
-test('21. Real SHAHAB -> Engine 02 -> Engine 03 unmocked vertical slice on bundled sample.wav', async () => {
+test(
+  '21. Real SHAHAB -> Engine 02 -> Engine 03 unmocked vertical slice on bundled sample.wav',
+  { skip: fs.existsSync(path.resolve(process.cwd(), 'models/persian-zipformer-transducer/1.0.0/sample.wav')) ? false : 'Bundled Persian ASR model and sample WAV are provisioned only in the model-smoke workflow' },
+  async () => {
   const modelDir = path.resolve(process.cwd(), 'models/persian-zipformer-transducer/1.0.0');
   const sampleWavPath = path.join(modelDir, 'sample.wav');
   assert.ok(fs.existsSync(sampleWavPath), 'Expected bundled sample.wav on disk');
@@ -1004,4 +1007,5 @@ test('21. Real SHAHAB -> Engine 02 -> Engine 03 unmocked vertical slice on bundl
   } finally {
     await sdk.dispose();
   }
-});
+  },
+);

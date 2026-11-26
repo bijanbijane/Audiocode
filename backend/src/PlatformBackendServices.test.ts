@@ -332,6 +332,9 @@ test('Section 100: PlatformBackendServices issues Ed25519-signed license leases 
   assert.equal(statusCode, 410);
   assert.equal((sentBody as { error: string }).error, 'MODEL_VERSION_REVOKED');
 
+  // Restore an active catalog state so the next assertion isolates missing-chunk behavior.
+  catalogStatus = 'ACTIVE';
+
   // A path for a chunk not present in PostgreSQL is rejected before filesystem lookup.
   catalogChunkExists = false;
   statusCode = 200;

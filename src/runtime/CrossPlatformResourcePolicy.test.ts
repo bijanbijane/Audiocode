@@ -52,6 +52,7 @@ test('CrossPlatformResourcePolicy probes Windows/macOS/Linux x86_64/ARM64 and Ch
   const linuxFirefox = probeCrossPlatformCapabilities({
     userAgent: 'Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:130.0) Gecko/20100101 Firefox/130.0',
     platform: 'Linux x86_64',
+    architectureHint: 'x86_64',
     hardwareConcurrency: 16,
     deviceMemoryGb: 32,
     crossOriginIsolated: true,

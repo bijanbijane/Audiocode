@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Readable } from 'node:stream';
+import { spawnSync } from 'node:child_process';
 import { NodePublicAsrInferenceExecutor } from '../platform/NodePublicAsrInferenceExecutor';
 import {
   applyBatchRecommendationsAtomically,
@@ -43,6 +44,8 @@ import {
   ingestRecordedPcmTake,
 } from './audioFixtures';
 import { PersianWordToken, SmartRecommendation, Track } from '../contracts/v1_2';
+
+const HAS_FFMPEG = spawnSync(process.env.FFMPEG_BINARY_PATH ?? 'ffmpeg', ['-version'], { stdio: 'ignore' }).status === 0;
 import { flicksToSeconds, secondsToFlicks } from './timebase';
 import {
   sanitizeSecretsFromText,
@@ -1346,7 +1349,10 @@ function createVerifiedTestAsrExecutor(): NodePublicAsrInferenceExecutor {
   ]);
 }
 
-test('Phase 10A: Identity invitations, API key one-time secret, 24h overlap rotation, revocation, cross-project isolation & Data Residency', async () => {
+test(
+  'Phase 10A: Identity invitations, API key one-time secret, 24h overlap rotation, revocation, cross-project isolation & Data Residency',
+  { skip: HAS_FFMPEG ? false : 'FFmpeg is required by the public binary-audio ingestion integration path' },
+  async () => {
   const cp = new PlatformControlPlaneService();
   const gw = new PlatformDataPlaneGateway(cp, createVerifiedTestAsrExecutor());
 
@@ -1460,7 +1466,10 @@ test('Phase 10A: Identity invitations, API key one-time secret, 24h overlap rota
   assert.equal((await gw.listPublicModels(issued.plaintextSecretOnce)).status, 401);
 });
 
-test('Phase 10B: Idempotency-Key deduplication, integer billing ledger reconciliation, immutable invoices, webhook DLQ & TypeScript SDK', async () => {
+test(
+  'Phase 10B: Idempotency-Key deduplication, integer billing ledger reconciliation, immutable invoices, webhook DLQ & TypeScript SDK',
+  { skip: HAS_FFMPEG ? false : 'FFmpeg is required by the public binary-audio ingestion integration path' },
+  async () => {
   const cp = new PlatformControlPlaneService();
   const gw = new PlatformDataPlaneGateway(cp, createVerifiedTestAsrExecutor());
   const key = cp.issueApiKey({

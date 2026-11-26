@@ -37,8 +37,9 @@ after(() => {
   disposeAllSharedNativeSherpaWorkers();
 });
 
-const MODEL_DIR = '/root/.avapardaz/models/sherpa-onnx-nemo-ctc-fa-shenava-rizeh-v1.0-non-streaming-int8-2026-06-26';
+const MODEL_DIR = process.env.AVAPARDAZ_SHERPA_MODEL_DIR ?? '/root/.avapardaz/models/sherpa-onnx-nemo-ctc-fa-shenava-rizeh-v1.0-non-streaming-int8-2026-06-26';
 const WAV_0 = path.join(MODEL_DIR, 'test_wavs', '0.wav');
+const HAS_NATIVE_SHERPA_FIXTURES = fs.existsSync(WAV_0);
 
 function computeSha256(filePath: string): string {
   return crypto.createHash('sha256').update(fs.readFileSync(filePath)).digest('hex');
@@ -228,7 +229,10 @@ describe('Phase 1C-D: Non-Destructive Intelligent Audio Editing Integration (ED-
   });
 });
 
-describe('Phase 1C-E: Full End-to-End Adobe Audition Integration & Reliability (E2E-01..E2E-25)', () => {
+describe(
+  'Phase 1C-E: Full End-to-End Adobe Audition Integration & Reliability (E2E-01..E2E-25)',
+  { skip: HAS_NATIVE_SHERPA_FIXTURES ? false : 'Native Sherpa model and pinned Persian WAV fixtures are provisioned only in the model-smoke workflow' },
+  () => {
   it('E2E-01..E2E-25: Executes full chain from Native Sherpa Streaming ASR -> Canonical Timeline -> NonDestructiveAudioEditingSession -> Preview -> Approval -> Final WAV & Audition SESX v1.9 Export', async () => {
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'avp-1ce-e2e-'));
     try {

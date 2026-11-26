@@ -13,3 +13,8 @@ dist-packages/
 dist-release/
 test-results/
 .playwright-cli/
+
+# Local benchmark downloads and Python bytecode
+.cache/
+__pycache__/
+*.py[cod]

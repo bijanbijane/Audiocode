@@ -2285,7 +2285,7 @@ export default function App() {
       setShahabRuntimeStatus(liveShahab);
     }
 
-    if (liveShahab?.available) {
+    if (liveShahab?.available && import.meta.env.VITE_ENABLE_EXPERIMENTAL_ZIPFORMER_STUDIO === 'true') {
       const speakerLabel = primaryTrack.speakerLabel || primaryTrack.name || 'گوینده ۱';
       setIsTranscribingAsr(true);
       setActiveFailure(null);
@@ -2533,6 +2533,7 @@ export default function App() {
           return pcmData.subarray(safeStart, safeEnd);
         },
         preference: 'AUTO_LOCAL',
+        preferNativeCompanionWhenReady: true,
         requestedCloudMode: false,
         languageHint: 'fa',
         onProgress: (ev) => {

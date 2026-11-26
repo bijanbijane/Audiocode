@@ -465,3 +465,19 @@ export interface AudioSourceHandle {
 | **Phase 1A.1** — Security Closure & Model Supply-Chain Hardening | `2026-11-23` | `VERIFIED_IN_TESTS` | `src/security/Phase1A1SupplyChainAndAuthClosure.test.ts` |
 | **Phase 1B** — Native Companion Streaming & Memory Foundation | `2026-11-23` | `VERIFIED_IN_TESTS` / `HARDWARE_QUALIFICATION_PENDING` | `docs/AVAPARDAZ/PHASE-1B-COMPANION-STREAMING-REPORT.md` |
 
+
+---
+
+## 2026-11-26 Addendum — SHAHAB Engine 01 Koochik / Native Companion Integration
+
+This addendum supersedes only older claims about the current primary Persian model and default Native Companion route; unrelated historical architecture notes remain historical.
+
+- **Primary Persian model:** `Reza2kn/Shenava-Koochik-v1.0-sherpa-onnx` (NeMo FastConformer CTC FP32, Apache-2.0 upstream). The model remains frozen upstream weights, not an AVAPARDAZ fine-tuned checkpoint.
+- **Pinned artifacts:** `model.onnx` 458,819,249 bytes, SHA-256 `6a564b5541920ce1c37bbc91d22e4b3a6838648b9b327eb88997e8db1f90950d`; `tokens.txt` 12,236 bytes, SHA-256 `8e192963f6e666dfa5721e5cbd4710bc1ef592460a45f08cefc94b2db16a6954`.
+- **Full held-out FLEURS evaluation:** all 871 rows of Google FLEURS `fa_ir/test` completed with zero runtime failures or empty transcripts. Under AVAPARDAZ `FA-RELAXED-V1` plus Persian spoken-number display ITN, corpus WER was 9.9232% and CER 3.6439%; 13,321.86 sec of speech completed in 307.49 sec (RTF 0.02308). This is controlled read speech, not evidence of global state-of-the-art or generalization to conversational/noisy/multi-speaker audio.
+- **Default route:** Native Companion/Koochik is the preferred Engine 01 route when available. Browser WASM remains a fallback. The legacy Zipformer route is explicitly experimental and is no longer selected solely because its model assets are present.
+- **Long-audio transport:** browser range reads, streaming Kaiser-sinc resampling, bounded WAV chunks and file-backed Companion transfer are implemented. The Native adapter rejects a legacy transport for recordings longer than 30 seconds rather than materializing the entire recording.
+- **Sherpa process lifecycle:** persistent offline Python worker is available when the matching Sherpa package is installed; otherwise a single-invocation native CLI batch path loads the model once for a group of bounded chunks. Installer includes the minimal tested native CLI and ONNX Runtime library.
+- **Timing limitation:** Koochik's current Sherpa output gives token onset timestamps but no reliable token durations. Therefore the current output is segment-timed. Word-level end-time claims remain blocked pending a real Persian forced aligner and gold boundary data.
+- **Verification still outstanding:** 60–120 minute stress tests with measured peak RSS and cancellation/recovery; conversational/noisy/dialect/overlap corpus evaluation; Windows x64 and actual Adobe Audition GUI acceptance; matched head-to-head benchmark against alternative ASR systems.
+- Detailed evidence, metrics, protocol and acceptance gates: `docs/shahab/SHAHAB_ENGINE01_AUDIT_AND_FLEURS_EVALUATION_2026-11-26.md`.

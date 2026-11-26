@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { execFile } from 'node:child_process';
+import { execFile, spawnSync } from 'node:child_process';
 import { promisify } from 'node:util';
 import fs from 'node:fs/promises';
 import os from 'node:os';
@@ -18,6 +18,7 @@ import {
 } from '../RightsAndAnnotationGovernanceEngine';
 
 const execFileAsync = promisify(execFile);
+const HAS_FFMPEG = spawnSync('ffmpeg', ['-version'], { stdio: 'ignore' }).status === 0;
 
 function makeSineWav(sampleRate: number, durSec: number, freqHz = 220, stereo = false): Buffer {
   const frames = Math.floor(sampleRate * durSec);
@@ -31,7 +32,10 @@ function makeSineWav(sampleRate: number, durSec: number, freqHz = 220, stereo = 
   return encodePcm16WavBuffer(stereo ? [left, right] : [left], sampleRate);
 }
 
-test('Phase 12B: valid WAV & real FFmpeg-encoded MP3 ingestion, container spoof detection & limits', async () => {
+test(
+  'Phase 12B: valid WAV & real FFmpeg-encoded MP3 ingestion, container spoof detection & limits',
+  { skip: HAS_FFMPEG ? false : 'FFmpeg is required for the MP3 encode/decode integration portion of Phase 12B' },
+  async () => {
   const cp = new PlatformControlPlaneService();
   const df = new SpeechDataFactoryService(cp);
   const src = df.createDataSource({

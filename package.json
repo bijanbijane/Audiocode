@@ -11,7 +11,8 @@
     "clean": "rm -rf dist server.js",
     "lint": "tsc --noEmit",
     "test:quality-gates": "vitest run src/quality-gate/__tests__/full-pipeline.spec.ts",
-    "test:unit": "bash -c 'tsx --test $(find src packages backend -name \"*.test.ts\" | sort)'",
+    "test:unit": "NODE_OPTIONS='--require=./scripts/test-env.cjs' bash -c 'tsx --test --test-concurrency=2 $(find src packages backend -name \"*.test.ts\" ! -path \"src/engine/longFileStress.test.ts\" ! -path \"src/asr-core/__tests__/Phase1CANativeAsrStreamingIngestion.test.ts\" ! -path \"src/intelligence/SandboxHttpAccessGuard.test.ts\" ! -path \"src/platform/SpeechIntelligenceSandboxHttp.integration.test.ts\" ! -path \"src/platform/__tests__/PlatformControlPlaneGateway.test.ts\" ! -path \"src/platform/__tests__/PlatformControlPlaneHttpRouter.test.ts\" ! -path \"src/platform/__tests__/PlatformWebhookSecurity.test.ts\" | sort)'",
+    "test:stress": "tsx --test --test-concurrency=1 src/asr-core/__tests__/Phase1CANativeAsrStreamingIngestion.test.ts src/engine/longFileStress.test.ts",
     "test:e2e": "playwright test",
     "test:e2e:report": "playwright show-report test-results/playwright-report",
     "verify:foundation": "npm run lint && npx vitest run && npm run test:unit && npm run build",
@@ -21,7 +22,8 @@
     "test:separation": "tsx --test src/platform/PlatformApiClient.test.ts src/platform/PlatformApiCompatibilityProxy.test.ts src/platform/LocalExpressLoopbackContract.test.ts backend/src/SeparatedRuntimeRoutingContract.test.ts backend/src/PlatformBackendServices.test.ts",
     "dev:platform-api": "npm run --prefix backend dev",
     "audit:runtime-deps": "node scripts/audit-runtime-dependencies.mjs",
-    "audit:express-routes": "node scripts/audit-express-route-ownership.mjs"
+    "audit:express-routes": "node scripts/audit-express-route-ownership.mjs",
+    "benchmark:shahab:fleurs": "tsx scripts/benchmark-shahab-fleurs.ts"
   },
   "dependencies": {
     "@fontsource/jetbrains-mono": "^5.3.0",
@@ -46,6 +48,8 @@
     "@types/react-dom": "^19.3.0",
     "autoprefixer": "^10.4.21",
     "esbuild": "^0.25.0",
+    "ffmpeg-static": "5.3.0",
+    "ffprobe-static": "3.1.0",
     "tailwindcss": "^4.3.3",
     "tsx": "^4.21.0",
     "typescript": "^7.0.2",

@@ -50,8 +50,11 @@ function toHttpError(err: unknown): { status: number; code: string; message: str
   if (code === 'MODEL_NOT_AVAILABLE' || code === 'SHAHAB_MODEL_INTEGRITY_FAILED') {
     return { status: 422, code, message };
   }
-  if (code === 'AUDIO_DURATION_LIMIT_EXCEEDED' || code === 'PAYLOAD_TOO_LARGE') {
+  if (code === 'AUDIO_DURATION_LIMIT_EXCEEDED' || code === 'PAYLOAD_TOO_LARGE' || code === 'JOB_RETAINED_BYTE_BUDGET_EXCEEDED') {
     return { status: 413, code, message };
+  }
+  if (code === 'OWNER_JOB_QUOTA_EXCEEDED' || code === 'JOB_RETAINED_COUNT_EXCEEDED') {
+    return { status: 429, code, message };
   }
   if (
     code === 'SHAHAB_QUEUE_FULL' ||
@@ -117,6 +120,8 @@ function attachRequestAbortSignal(
 export function createSmartAudioEditHttpRouter(options?: {
   readonly neuralEngine?: LocalSherpaNeuralEngine;
   readonly shahabZipformerRuntime?: ShahabZipformerAsrRuntime;
+  /** Explicit opt-in only; Koochik/Sherpa remains the production Engine 01 default. */
+  readonly useExperimentalZipformer?: boolean;
   readonly asrEngine?: ShahabAsrEngine;
   readonly jobManager?: SmartAudioEditJobManager;
   readonly securityGuard?: AudioApiSecurityGuard;
@@ -128,12 +133,12 @@ export function createSmartAudioEditHttpRouter(options?: {
   readonly securityGuard: AudioApiSecurityGuard;
 } {
   const neuralEngine = options?.neuralEngine ?? new LocalSherpaNeuralEngine();
-  const zipformerRuntime = options?.shahabZipformerRuntime ?? new ShahabZipformerAsrRuntime();
-  const sherpaFallbackRuntime = new ShahabLocalAsrRuntime({ neuralEngine });
-  const useZipformerPrimary =
-    Boolean(options?.shahabZipformerRuntime) || zipformerRuntime.getRuntimeStatus().available;
-  const activeAsrEngine: ShahabAsrEngine =
-    options?.asrEngine ?? (useZipformerPrimary ? zipformerRuntime : sherpaFallbackRuntime);
+  const zipformerRuntime = options?.shahabZipformerRuntime ??
+    (options?.useExperimentalZipformer === true ? new ShahabZipformerAsrRuntime() : null);
+  const sherpaPrimaryRuntime = new ShahabLocalAsrRuntime({ neuralEngine });
+  const useZipformerPrimary = options?.useExperimentalZipformer === true && zipformerRuntime !== null;
+  const activeAsrEngine: ShahabAsrEngine = options?.asrEngine ??
+    (useZipformerPrimary && zipformerRuntime ? zipformerRuntime : sherpaPrimaryRuntime);
 
   const pipeline = new SmartAudioEditPipeline({ asrEngine: activeAsrEngine });
   const securityGuard = options?.securityGuard ?? new AudioApiSecurityGuard();
@@ -146,7 +151,8 @@ export function createSmartAudioEditHttpRouter(options?: {
   const router = express.Router();
 
   const resolveBundledSample = () =>
-    zipformerRuntime.getBundledSampleAudioPath() ?? neuralEngine.getBundledSampleAudioPath();
+    (useZipformerPrimary ? zipformerRuntime?.getBundledSampleAudioPath() : null) ??
+    neuralEngine.getBundledSampleAudioPath();
 
   const requireValidJobId = (req: Request, res: Response, next: NextFunction) => {
     const jobId = String(req.params.jobId ?? '');
@@ -253,7 +259,7 @@ export function createSmartAudioEditHttpRouter(options?: {
         return;
       }
 
-      const rt = sherpaFallbackRuntime.getRuntimeStatus();
+      const rt = sherpaPrimaryRuntime.getRuntimeStatus();
       res.json({
         ok: true,
         engine01: {
@@ -263,9 +269,15 @@ export function createSmartAudioEditHttpRouter(options?: {
           available: rt.available,
           shahabLoaded: rt.shahabLoaded,
           binaryAvailable: Boolean(rt.binaryPath),
+          integrityVerified: rt.installedModels.some((model) => model.modelId === SHAHAB_FA_LITE_MANIFEST.modelId && model.integrityVerified),
           offlineOnlyEnforced: true,
           cpuThreads: rt.cpuThreads,
           lastMetrics: rt.lastMetrics,
+        },
+        limits: {
+          maxUploadBytes,
+          operationTimeoutMs,
+          maxSingleRequestDurationSec: 600,
         },
         bundledSample: bundledSample
           ? { available: true, filename: bundledSample.filename, modelId: bundledSample.modelId }
@@ -786,8 +798,17 @@ export function createSmartAudioEditHttpRouter(options?: {
       try {
         const ownerId = getOwnerId(res);
         const snap = jobManager.getJobSnapshot(req.params.jobId, ownerId);
-        const wav = jobManager.getLastOutputWav(req.params.jobId, ownerId);
-        if (!snap || !wav || wav.byteLength === 0) {
+        const outputPath = jobManager.getLastOutputFilePath(req.params.jobId, ownerId);
+        if (!snap || !outputPath) {
+          res.status(404).json({
+            error: 'RENDER_OUTPUT_NOT_READY',
+            code: 'RENDER_OUTPUT_NOT_READY',
+            message: 'فایل خروجی رندرشده هنوز آماده نیست.',
+          });
+          return;
+        }
+        const outputStat = fs.statSync(outputPath);
+        if (!outputStat.isFile() || outputStat.size <= 0) {
           res.status(404).json({
             error: 'RENDER_OUTPUT_NOT_READY',
             code: 'RENDER_OUTPUT_NOT_READY',
@@ -799,11 +820,17 @@ export function createSmartAudioEditHttpRouter(options?: {
           .replace(/\.[^.]+$/, '')
           .replace(/[^a-zA-Z0-9_\-\u0600-\u06FF]/g, '_');
         res.setHeader('Content-Type', 'audio/wav');
+        res.setHeader('Content-Length', String(outputStat.size));
         res.setHeader(
           'Content-Disposition',
           `attachment; filename="avapardaz-edited-${safeBase || 'output'}.wav"`,
         );
-        res.send(Buffer.from(wav.buffer, wav.byteOffset, wav.byteLength));
+        const outputStream = fs.createReadStream(outputPath);
+        outputStream.on('error', (streamError) => {
+          if (!res.headersSent) handleRouteError(req, res, streamError);
+          else res.destroy(streamError);
+        });
+        outputStream.pipe(res);
       } catch (err) {
         handleRouteError(req, res, err);
       }

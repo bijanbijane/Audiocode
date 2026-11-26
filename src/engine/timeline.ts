@@ -719,19 +719,90 @@ export function applyBatchRecommendationsAtomically(params: {
   };
 }
 
+const DEFAULT_TIMELINE_HISTORY_PCM_BUDGET_BYTES = 128 * 1024 * 1024;
+
+function arePcmSourceSnapshotsEquivalent(
+  before: Record<string, Float32Array> | undefined,
+  after: Record<string, Float32Array> | undefined,
+): boolean {
+  if (before === undefined || after === undefined) return before === after;
+  const beforeKeys = Object.keys(before);
+  const afterKeys = Object.keys(after);
+  if (beforeKeys.length !== afterKeys.length) return false;
+  for (const key of beforeKeys) {
+    if (!(key in after) || before[key] !== after[key]) return false;
+  }
+  return true;
+}
+
 /**
  * Transaction History Stack with Gesture Coalescing support (Section 25).
- * Ensures continuous slider drags only emit ONE committed transaction upon release,
- * and atomically snapshots tracks, tokens, and recommendations.
+ * Retains immutable PCM references only while the unique PCM backing-buffer budget permits.
  */
 export class TimelineHistoryManager {
   private undoStack: EditTransaction[] = [];
   private redoStack: EditTransaction[] = [];
   private projectVersion = 1;
   private readonly maxDepth: number;
+  private readonly maxRetainedPcmBytes: number;
+  private lastCommitRetained = true;
 
-  constructor(maxDepth = 100) {
+  constructor(maxDepth = 100, maxRetainedPcmBytes = DEFAULT_TIMELINE_HISTORY_PCM_BUDGET_BYTES) {
+    if (!Number.isSafeInteger(maxRetainedPcmBytes) || maxRetainedPcmBytes < 0) {
+      throw new RangeError('maxRetainedPcmBytes must be a non-negative safe integer.');
+    }
     this.maxDepth = Math.max(10, Math.trunc(maxDepth));
+    this.maxRetainedPcmBytes = maxRetainedPcmBytes;
+  }
+
+  /** Counts unique Float32Array backing stores retained by both Undo and Redo stacks. */
+  getRetainedPcmBytes(): number {
+    const seen = new Set<ArrayBufferLike>();
+    let total = 0;
+    for (const tx of [...this.undoStack, ...this.redoStack]) {
+      for (const sourceMap of [tx.beforePcmSources, tx.afterPcmSources]) {
+        if (!sourceMap) continue;
+        for (const pcm of Object.values(sourceMap)) {
+          if (pcm instanceof Float32Array && !seen.has(pcm.buffer)) {
+            seen.add(pcm.buffer);
+            total += pcm.buffer.byteLength;
+          }
+        }
+      }
+    }
+    return total;
+  }
+
+  getMaxRetainedPcmBytes(): number {
+    return this.maxRetainedPcmBytes;
+  }
+
+  /** False means the most recent edit was committed but its Undo snapshot exceeded the memory budget. */
+  wasLastCommitRetained(): boolean {
+    return this.lastCommitRetained;
+  }
+
+  private trimHistoryToMemoryBudget(preferredKeepOperationId: string): void {
+    while (this.getRetainedPcmBytes() > this.maxRetainedPcmBytes) {
+      const oldestUndo = this.undoStack[0];
+      const oldestRedo = this.redoStack[0];
+      if (!oldestUndo && !oldestRedo) break;
+
+      const removeUndo = Boolean(
+        oldestUndo && (!oldestRedo || oldestUndo.timestamp <= oldestRedo.timestamp),
+      );
+      const oldest = removeUndo ? oldestUndo! : oldestRedo!;
+      if (oldest.operationId === preferredKeepOperationId) {
+        // The newest transaction alone exceeds the budget. Clear stale history rather than
+        // retaining a multi-hundred-MiB PCM snapshot or exposing an incorrect Undo chain.
+        this.undoStack = [];
+        this.redoStack = [];
+        this.lastCommitRetained = false;
+        return;
+      }
+      if (removeUndo) this.undoStack.shift();
+      else this.redoStack.shift();
+    }
   }
 
   commitTransaction(
@@ -753,6 +824,10 @@ export class TimelineHistoryManager {
       }
       if (params.afterDsp) prev.afterDsp = { ...params.afterDsp };
       if (params.afterPcmSources) prev.afterPcmSources = { ...params.afterPcmSources };
+      if (arePcmSourceSnapshotsEquivalent(prev.beforePcmSources, prev.afterPcmSources)) {
+        prev.beforePcmSources = undefined;
+        prev.afterPcmSources = undefined;
+      }
       if (params.afterAssets) prev.afterAssets = { ...params.afterAssets };
       if (params.afterEqResponseCurveDb !== undefined) {
         prev.afterEqResponseCurveDb = params.afterEqResponseCurveDb
@@ -762,6 +837,8 @@ export class TimelineHistoryManager {
       prev.description = params.description;
       prev.timestamp = now;
       this.redoStack = [];
+      this.lastCommitRetained = true;
+      this.trimHistoryToMemoryBudget(prev.operationId);
       return prev;
     }
 
@@ -801,11 +878,17 @@ export class TimelineHistoryManager {
       commitStatus: 'committed',
     };
 
+    if (arePcmSourceSnapshotsEquivalent(tx.beforePcmSources, tx.afterPcmSources)) {
+      tx.beforePcmSources = undefined;
+      tx.afterPcmSources = undefined;
+    }
     this.undoStack.push(tx);
     if (this.undoStack.length > this.maxDepth) {
       this.undoStack.splice(0, this.undoStack.length - this.maxDepth);
     }
     this.redoStack = [];
+    this.lastCommitRetained = true;
+    this.trimHistoryToMemoryBudget(tx.operationId);
     return tx;
   }
 

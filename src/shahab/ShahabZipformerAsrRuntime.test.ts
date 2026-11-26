@@ -6,12 +6,72 @@ import {
   DEFAULT_SHAHAB_ZIPFORMER_MODEL_DIR,
   ShahabZipformerAsrRuntime,
   ShahabZipformerRuntimeError,
+  projectBpeEmissionsToTimedWords,
 } from './ShahabZipformerAsrRuntime';
+import type { ShahabDecodedHypothesis } from './ShahabZipformerEngine';
 import {
   encodeMonoFloat32To16kWavBytes,
   mapShahabResponseToPersianWordTokens,
 } from '../asr-core/ShahabLocalHttpClient';
 import { SmartAudioEditPipeline } from '../workflow/SmartAudioEditPipeline';
+
+function buildDecodedHypothesis(overrides: Partial<ShahabDecodedHypothesis> = {}): ShahabDecodedHypothesis {
+  return {
+    rawText: 'سلام دنیا',
+    tokenIds: [],
+    tokenTimestampsSec: [],
+    logProbSum: 0,
+    decoderJoinerInvocations: 0,
+    decodeTimeMs: 0,
+    policyId: 'SPEED',
+    decodingMethod: 'greedy_search',
+    maxActivePaths: 1,
+    blankPenalty: 0,
+    contextTermsApplied: [],
+    ...overrides,
+  };
+}
+
+test('SHAHAB never fabricates word timings when RNNT emission timestamps are absent', () => {
+  const words = projectBpeEmissionsToTimedWords({
+    decoded: buildDecodedHypothesis(),
+    vocab: ['<blk>', '▁سلام', '▁دنیا'],
+    chunkOffsetSec: 3,
+    chunkDurationSec: 2,
+  });
+  assert.deepEqual(words, []);
+});
+
+test('SHAHAB rejects incomplete or out-of-range RNNT timestamp evidence', () => {
+  const vocab = ['<blk>', '▁سلام', '▁دنیا'];
+  const mismatched = projectBpeEmissionsToTimedWords({
+    decoded: buildDecodedHypothesis({ tokenIds: [1, 2], tokenTimestampsSec: [0.2] }),
+    vocab,
+    chunkOffsetSec: 0,
+    chunkDurationSec: 1,
+  });
+  const outOfRange = projectBpeEmissionsToTimedWords({
+    decoded: buildDecodedHypothesis({ tokenIds: [1, 2], tokenTimestampsSec: [0.2, 2.0] }),
+    vocab,
+    chunkOffsetSec: 0,
+    chunkDurationSec: 1,
+  });
+  assert.deepEqual(mismatched, []);
+  assert.deepEqual(outOfRange, []);
+});
+
+test('SHAHAB maps valid SentencePiece emission timestamps without claiming forced alignment', () => {
+  const words = projectBpeEmissionsToTimedWords({
+    decoded: buildDecodedHypothesis({ tokenIds: [1, 2], tokenTimestampsSec: [0.1, 0.7] }),
+    vocab: ['<blk>', '▁سلام', '▁دنیا'],
+    chunkOffsetSec: 5,
+    chunkDurationSec: 1.2,
+  });
+  assert.equal(words.length, 2);
+  assert.deepEqual(words.map((word) => word.rawText), ['سلام', 'دنیا']);
+  assert.ok(words.every((word) => word.startSec >= 5 && word.endSec <= 6.2));
+  assert.ok(words[0].startSec < words[1].startSec);
+});
 
 test('1. encodeMonoFloat32To16kWavBytes resamples 48kHz to valid 16kHz mono PCM16 RIFF WAV', () => {
   const pcm48k = new Float32Array(48_000); // 1 second
@@ -51,7 +111,10 @@ test('2. Missing model directory reports unavailable and fails with MODEL_NOT_AV
   );
 });
 
-test('3. Real SHAHAB Zipformer runtime transcribes bundled Persian sample.wav with valid monotonic tokens and runs SmartAudioEditPipeline', async () => {
+test(
+  '3. Real SHAHAB Zipformer runtime transcribes bundled Persian sample.wav with valid monotonic tokens and runs SmartAudioEditPipeline',
+  { skip: process.env.SHAHAB_ENABLE_EXPERIMENTAL_ZIPFORMER === '1' && ['encoder.int8.onnx', 'decoder.int8.onnx', 'joiner.int8.onnx', 'tokens.txt', 'sample.wav'].every((name) => fs.existsSync(path.join(DEFAULT_SHAHAB_ZIPFORMER_MODEL_DIR, name))) ? false : 'Experimental custom ONNX Zipformer decoder remains gated: official Sherpa-ONNX reference transcribes this model, but the custom WASM decoder has not achieved parity; production uses the validated Sherpa CTC path.' },
+  async () => {
   const runtime = new ShahabZipformerAsrRuntime({ modelDir: DEFAULT_SHAHAB_ZIPFORMER_MODEL_DIR });
   try {
     const status = runtime.getRuntimeStatus();
@@ -137,4 +200,5 @@ test('3. Real SHAHAB Zipformer runtime transcribes bundled Persian sample.wav wi
   } finally {
     await runtime.dispose();
   }
-});
+  },
+);

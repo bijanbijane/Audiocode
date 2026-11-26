@@ -120,6 +120,8 @@ const TAR_SPACE_RE = new RegExp(
   'g',
 );
 
+const COMMON_COMPOUND_SPACE_RE = /(^|\s)(نرم|سخت)\s+(افزار(?:ی|ها|های)?)(?=$|\s|[،؛؟!.,:;?])/g;
+
 /**
  * Standardizes Arabic-script presentation forms to canonical Persian Unicode
  * while preserving Persian digits (`۰-۹`) and Latin case.
@@ -185,6 +187,11 @@ export function normalizeCanonicalPersianUtterance(rawText: string): string {
   // 3. Plural `ها` / `های*` suffixes (attached after silent-h or space-separated)
   out = out.replace(HA_ATTACHED_RE, `$1${ZWNJ}$2`);
   out = out.replace(HA_SPACE_RE, `$1${ZWNJ}$2`);
+
+  // 3.1. Canonicalize a small, curated set of technical compounds.
+  out = out.replace(COMMON_COMPOUND_SPACE_RE, (_full, lead: string, first: string, second: string) =>
+    `${lead}${first}${ZWNJ}${second}`,
+  );
 
   // 4. Silent-`ه` inflection suffixes (`خانه‌ای`, `نامه‌ام`), protecting `انتهای`/`اشتهای`/`روستای`
   out = out.replace(SILENT_H_SUFFIX_RE, (full, stem: string, suffix: string) => {

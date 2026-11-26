@@ -11,8 +11,9 @@
 
 import crypto from 'node:crypto';
 import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import type { AudioRenderConfig, AudioRenderResult } from '../audio-renderer/AudioRenderTypes';
-import { readRenderArtifactToUint8Array } from '../audio-renderer/RenderOutputArtifact';
 import type { AudioEditJob } from './AudioEditJobStateMachine';
 import { transitionAudioEditJob } from './AudioEditJobStateMachine';
 import type {
@@ -59,7 +60,8 @@ interface ManagedJobEntry {
   activeAbort: AbortController | null;
   lastPreviewWav: Uint8Array | null;
   lastPreviewMode: SmartEditPreviewMode | null;
-  lastOutputWav: Uint8Array | null;
+  lastOutputFilePath: string | null;
+  lastOutputTempDir: string | null;
   lastOutputMeta: AudioRenderResult['output'];
   lastValidationSummary: {
     readonly prePassed: boolean;
@@ -101,7 +103,6 @@ function estimateEntryRetainedBytes(entry: ManagedJobEntry): number {
     total += entry.audio.totalSourceSamples * 4 * (entry.audio.sourceChannels + 1);
   }
   total += entry.lastPreviewWav?.byteLength ?? 0;
-  total += entry.lastOutputWav?.byteLength ?? 0;
   return total;
 }
 
@@ -198,24 +199,12 @@ export class SmartAudioEditJobManager {
     }
     const ownerId = trimmedOwner || 'local-internal';
     this.sweepExpiredJobs();
-    this.evictIdleJobsIfNeeded();
 
-    // Enforce per-owner job quota (evict owner's oldest idle job if possible, otherwise reject)
-    const ownerJobs = Array.from(this.jobs.entries()).filter(([, e]) => e.ownerId === ownerId);
-    if (ownerJobs.length >= this.limits.maxJobsPerOwner) {
-      const oldestIdleOwned = ownerJobs.find(([, e]) => !e.activeAbort);
-      if (oldestIdleOwned) {
-        this.disposeEntryInternal(oldestIdleOwned[0]);
-      } else {
-        throw new SmartAudioEditError(
-          'OWNER_JOB_QUOTA_EXCEEDED',
-          `حداکثر تعداد Job فعال برای این کاربر (${this.limits.maxJobsPerOwner}) تکمیل شده است.`,
-        );
-      }
+    const jobId = params.jobId ?? `job_${crypto.randomBytes(16).toString('hex')}`;
+    if (this.jobs.has(jobId)) {
+      throw new SmartAudioEditError('JOB_ID_CONFLICT', `Job ${jobId} already exists.`);
     }
 
-    // Generate cryptographically unguessable 128-bit Job ID unless explicitly provided internally
-    const jobId = params.jobId ?? `job_${crypto.randomBytes(16).toString('hex')}`;
     const { job, session, audio } = this.pipeline.importAndNormalizeAudio({
       ...params,
       jobId,
@@ -228,14 +217,66 @@ export class SmartAudioEditJobManager {
       activeAbort: null,
       lastPreviewWav: null,
       lastPreviewMode: null,
-      lastOutputWav: null,
+      lastOutputFilePath: null,
+      lastOutputTempDir: null,
       lastOutputMeta: null,
       lastValidationSummary: null,
       tempArtifactPaths: [],
       lastAccessedAtMs: Date.now(),
     };
+
+    const incomingBytes = estimateEntryRetainedBytes(entry);
+    if (!Number.isFinite(incomingBytes) || incomingBytes > this.limits.maxTotalRetainedBytes) {
+      throw new SmartAudioEditError(
+        'JOB_RETAINED_BYTE_BUDGET_EXCEEDED',
+        `Job requires ${incomingBytes} retained bytes; configured limit is ${this.limits.maxTotalRetainedBytes}.`,
+      );
+    }
+
+    // Fail fast when this owner has no evictable slot; do not evict unrelated owners first.
+    const ownerJobsBeforeAdmission = Array.from(this.jobs.entries()).filter(([, existing]) => existing.ownerId === ownerId);
+    if (
+      ownerJobsBeforeAdmission.length >= this.limits.maxJobsPerOwner &&
+      !ownerJobsBeforeAdmission.some(([, existing]) => !existing.activeAbort)
+    ) {
+      throw new SmartAudioEditError(
+        'OWNER_JOB_QUOTA_EXCEEDED',
+        `حداکثر تعداد Job فعال برای این کاربر (${this.limits.maxJobsPerOwner}) تکمیل شده است.`,
+      );
+    }
+
+    // Reserve room for the incoming entry before inserting it. Active jobs are never evicted.
+    this.evictIdleJobsIfNeeded(undefined, incomingBytes, 1);
+    if (this.jobs.size + 1 > this.limits.maxRetainedJobs) {
+      throw new SmartAudioEditError(
+        'JOB_RETAINED_COUNT_EXCEEDED',
+        `No idle job can be evicted to satisfy the ${this.limits.maxRetainedJobs}-job retention limit.`,
+      );
+    }
+    if (this.getTotalRetainedBytes() + incomingBytes > this.limits.maxTotalRetainedBytes) {
+      throw new SmartAudioEditError(
+        'JOB_RETAINED_BYTE_BUDGET_EXCEEDED',
+        'No idle job can be evicted to satisfy the retained-audio byte budget.',
+      );
+    }
+
+    // Enforce the per-owner quota only after global admission succeeds, avoiding needless eviction.
+    const ownerJobs = Array.from(this.jobs.entries()).filter(([, existing]) => existing.ownerId === ownerId);
+    if (ownerJobs.length >= this.limits.maxJobsPerOwner) {
+      const oldestIdleOwned = ownerJobs
+        .filter(([, existing]) => !existing.activeAbort)
+        .sort((a, b) => a[1].lastAccessedAtMs - b[1].lastAccessedAtMs)[0];
+      if (oldestIdleOwned) {
+        this.disposeEntryInternal(oldestIdleOwned[0]);
+      } else {
+        throw new SmartAudioEditError(
+          'OWNER_JOB_QUOTA_EXCEEDED',
+          `حداکثر تعداد Job فعال برای این کاربر (${this.limits.maxJobsPerOwner}) تکمیل شده است.`,
+        );
+      }
+    }
+
     this.jobs.set(job.jobId, entry);
-    this.evictIdleJobsIfNeeded(job.jobId);
     return this.toSnapshot(entry);
   }
 
@@ -377,6 +418,11 @@ export class SmartAudioEditJobManager {
       entry.lastPreviewMode = res.preview.ok ? params.mode : null;
       entry.lastAccessedAtMs = Date.now();
       this.evictIdleJobsIfNeeded(jobId);
+      if (this.getTotalRetainedBytes() > this.limits.maxTotalRetainedBytes) {
+        entry.lastPreviewWav = null;
+        entry.lastPreviewMode = null;
+        this.evictIdleJobsIfNeeded(jobId);
+      }
       return { snapshot: this.toSnapshot(entry), preview: res.preview };
     } finally {
       cleanup();
@@ -397,6 +443,7 @@ export class SmartAudioEditJobManager {
   ): Promise<{
     readonly snapshot: JobSnapshotResponse;
     readonly renderResult: AudioRenderResult;
+    /** @deprecated Export is file-backed; use the authenticated /export route. */
     readonly wavBytes: Uint8Array;
   }> {
     this.sweepExpiredJobs();
@@ -416,8 +463,16 @@ export class SmartAudioEditJobManager {
     entry.activeAbort = controller;
     entry.lastAccessedAtMs = Date.now();
     this.activeRenderCount++;
+    let managedOutputDir: string | null = null;
 
     try {
+      let outputFilePath = params?.outputFilePath;
+      if (!outputFilePath) {
+        managedOutputDir = fs.mkdtempSync(path.join(os.tmpdir(), 'avapardaz-smart-edit-'));
+        fs.chmodSync(managedOutputDir, 0o700);
+        outputFilePath = path.join(managedOutputDir, 'output.wav');
+      }
+
       const res = await this.pipeline.renderAndExport({
         job: entry.job,
         session: entry.session,
@@ -426,13 +481,38 @@ export class SmartAudioEditJobManager {
           chunkSizeSamples: SMART_EDIT_RESOURCE_LIMITS.chunkSizeSamples,
           ...params?.config,
         },
-        outputFilePath: params?.outputFilePath,
+        outputFilePath,
         abortSignal: controller.signal,
         onJobUpdate: (updated) => {
           entry.job = updated;
         },
       });
 
+      try {
+        if (!res.exportedFilePath || !fs.existsSync(res.exportedFilePath)) {
+          throw new SmartAudioEditError('RENDER_OUTPUT_NOT_PERSISTED', 'Final WAV was not persisted to disk.');
+        }
+        const outputStat = fs.statSync(res.exportedFilePath);
+        if (!outputStat.isFile() || outputStat.size <= 0) {
+          throw new SmartAudioEditError('RENDER_OUTPUT_INVALID', 'Persisted final WAV is empty or not a regular file.');
+        }
+        if (res.renderResult.outputArtifact && outputStat.size !== res.renderResult.outputArtifact.sizeBytes) {
+          throw new SmartAudioEditError(
+            'RENDER_OUTPUT_SIZE_MISMATCH',
+            `Persisted WAV size ${outputStat.size} B does not match artifact size ${res.renderResult.outputArtifact.sizeBytes} B.`,
+          );
+        }
+
+      } finally {
+        await res.renderResult.outputArtifact?.dispose();
+      }
+
+      // Publish new job/output metadata only after persistence and artifact disposal succeed.
+      if (entry.lastOutputTempDir) {
+        const previousDir = entry.lastOutputTempDir;
+        entry.tempArtifactPaths = entry.tempArtifactPaths.filter((candidate) => candidate !== previousDir);
+        fs.rmSync(previousDir, { recursive: true, force: true });
+      }
       entry.job = res.job;
       entry.session = res.session;
       entry.lastOutputMeta = res.renderResult.output;
@@ -443,19 +523,11 @@ export class SmartAudioEditJobManager {
         verifiedDurationSec: res.renderResult.postValidation?.verifiedDurationSec ?? null,
         verifiedOutputHash: res.renderResult.postValidation?.verifiedOutputHash ?? null,
       };
-
-      let wavBytes: Uint8Array = new Uint8Array(0);
-      if (res.renderResult.outputArtifact) {
-        try {
-          wavBytes = await readRenderArtifactToUint8Array(res.renderResult.outputArtifact);
-          entry.lastOutputWav = wavBytes;
-        } finally {
-          await res.renderResult.outputArtifact.dispose();
-        }
-      }
-
-      if (params?.outputFilePath) {
-        entry.tempArtifactPaths.push(params.outputFilePath);
+      entry.lastOutputFilePath = res.exportedFilePath;
+      entry.lastOutputTempDir = managedOutputDir;
+      if (managedOutputDir) {
+        entry.tempArtifactPaths.push(managedOutputDir);
+        managedOutputDir = null; // ownership transferred to the job lifecycle
       }
 
       if (params?.releaseSourceAfterRender) {
@@ -464,7 +536,17 @@ export class SmartAudioEditJobManager {
 
       entry.lastAccessedAtMs = Date.now();
       this.evictIdleJobsIfNeeded(jobId);
-      return { snapshot: this.toSnapshot(entry), renderResult: res.renderResult, wavBytes };
+      return {
+        snapshot: this.toSnapshot(entry),
+        renderResult: res.renderResult,
+        // Do not materialize the full rendered WAV in RAM; export is streamed from the private file.
+        wavBytes: new Uint8Array(0),
+      };
+    } catch (err) {
+      if (managedOutputDir) {
+        try { fs.rmSync(managedOutputDir, { recursive: true, force: true }); } catch { /* best-effort cleanup */ }
+      }
+      throw err;
     } finally {
       cleanup();
       this.activeRenderCount = Math.max(0, this.activeRenderCount - 1);
@@ -529,7 +611,7 @@ export class SmartAudioEditJobManager {
     return entry.lastPreviewWav;
   }
 
-  public getLastOutputWav(jobId: string, ownerId?: string): Uint8Array | null {
+  public getLastOutputFilePath(jobId: string, ownerId?: string): string | null {
     this.sweepExpiredJobs();
     if (this.limits.requireExplicitOwnerId && (!ownerId || ownerId.trim().length === 0)) {
       throw new SmartAudioEditError('JOB_ACCESS_DENIED', 'دسترسی بدون هویت مالک مجاز نیست.');
@@ -540,7 +622,21 @@ export class SmartAudioEditJobManager {
       throw new SmartAudioEditError('JOB_ACCESS_DENIED', 'دسترسی به خروجی این Job مجاز نیست.');
     }
     entry.lastAccessedAtMs = Date.now();
-    return entry.lastOutputWav;
+    if (!entry.lastOutputFilePath || !fs.existsSync(entry.lastOutputFilePath)) return null;
+    return entry.lastOutputFilePath;
+  }
+
+  /** Compatibility-only accessor. Large exports remain file-backed and are never loaded into RAM. */
+  public getLastOutputWav(jobId: string, ownerId?: string): Uint8Array | null {
+    const filePath = this.getLastOutputFilePath(jobId, ownerId);
+    if (!filePath) return null;
+    try {
+      const stat = fs.statSync(filePath);
+      if (!stat.isFile() || stat.size <= 0 || stat.size > 8 * 1024 * 1024) return null;
+      return fs.readFileSync(filePath);
+    } catch {
+      return null;
+    }
   }
 
   public disposeJob(jobId: string, ownerId?: string): boolean {
@@ -567,10 +663,11 @@ export class SmartAudioEditJobManager {
     entry.activeAbort?.abort();
     entry.audio = null;
     entry.lastPreviewWav = null;
-    entry.lastOutputWav = null;
+    entry.lastOutputFilePath = null;
+    entry.lastOutputTempDir = null;
     for (const tempPath of entry.tempArtifactPaths) {
       try {
-        fs.rmSync(tempPath, { force: true });
+        fs.rmSync(tempPath, { recursive: true, force: true });
       } catch {
         // ignore cleanup error
       }
@@ -646,16 +743,18 @@ export class SmartAudioEditJobManager {
    * Evicts idle jobs (oldest first) whenever total job count OR retained byte budget exceeds caps.
    * Unlike the previous implementation, active jobs are skipped rather than halting eviction.
    */
-  private evictIdleJobsIfNeeded(protectedJobId?: string): void {
+  private evictIdleJobsIfNeeded(
+    protectedJobId?: string,
+    additionalRetainedBytes = 0,
+    additionalJobs = 0,
+  ): void {
     const candidates = Array.from(this.jobs.entries())
       .filter(([id, entry]) => id !== protectedJobId && !entry.activeAbort)
       .sort((a, b) => a[1].lastAccessedAtMs - b[1].lastAccessedAtMs);
 
     for (const [jobId] of candidates) {
-      const overCount = this.jobs.size >= this.limits.maxRetainedJobs && !protectedJobId
-        ? true
-        : this.jobs.size > this.limits.maxRetainedJobs;
-      const overBytes = this.getTotalRetainedBytes() > this.limits.maxTotalRetainedBytes;
+      const overCount = this.jobs.size + additionalJobs > this.limits.maxRetainedJobs;
+      const overBytes = this.getTotalRetainedBytes() + additionalRetainedBytes > this.limits.maxTotalRetainedBytes;
       if (!overCount && !overBytes) break;
       this.disposeEntryInternal(jobId);
     }
@@ -676,7 +775,7 @@ export class SmartAudioEditJobManager {
       canUndo: entry.session.edlHistoryIndex > 0,
       canRedo: entry.session.edlHistoryIndex < entry.session.edlHistory.length - 1,
       hasPreviewWav: entry.lastPreviewWav !== null,
-      hasOutputWav: entry.lastOutputWav !== null,
+      hasOutputWav: entry.lastOutputFilePath !== null && fs.existsSync(entry.lastOutputFilePath),
       lastOutputMeta: entry.lastOutputMeta,
       lastValidationSummary: entry.lastValidationSummary,
       stageTrace: entry.session.stageTrace,

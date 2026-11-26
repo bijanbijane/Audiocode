@@ -76,8 +76,18 @@ const ROOT = process.cwd();
 const MODEL_DIR = path.join(ROOT, 'models', 'persian-zipformer-transducer', '1.0.0');
 const SAMPLE_WAV = path.join(MODEL_DIR, 'sample.wav');
 const DOCS_DIR = path.join(ROOT, 'docs', 'shahab');
+const MODEL_ARTIFACTS_AVAILABLE = [
+  'encoder.int8.onnx',
+  'decoder.int8.onnx',
+  'joiner.int8.onnx',
+  'tokens.txt',
+  'sample.wav',
+].every((name) => fs.existsSync(path.join(MODEL_DIR, name)));
+const MODEL_SMOKE_SKIP = 'Pinned Zipformer model artifacts and Persian sample are provisioned only in the model-smoke workflow';
 
-test('SHAHAB-002..004: Evidence store, dual byte formatting, Persian normalization & ONNX protobuf audit', () => {
+test(
+  'SHAHAB-002..004: Evidence store, dual byte formatting, Persian normalization & ONNX protobuf audit',
+  { skip: MODEL_ARTIFACTS_AVAILABLE ? false : MODEL_SMOKE_SKIP }, () => {
   const bytes = formatBytesDual(115_768_868);
   assert.equal(bytes.mib, '110.41 MiB');
   assert.equal(bytes.mb, '115.77 MB');
@@ -149,7 +159,9 @@ test('SHAHAB-002..004: Evidence store, dual byte formatting, Persian normalizati
   }
 });
 
-test('SHAHAB-005..007 & SHAHAB-016: Real frozen Zipformer inference, OPT-001/OPT-002 exact parity, and percentile metrics', async () => {
+test(
+  'SHAHAB-005..007 & SHAHAB-016: Real frozen Zipformer inference, OPT-001/OPT-002 exact parity, and percentile metrics',
+  { skip: MODEL_ARTIFACTS_AVAILABLE ? false : MODEL_SMOKE_SKIP }, async () => {
   const adapter = new SHAHABFrozenModelAdapter({ modelDir: MODEL_DIR });
   try {
     const immut = adapter.verifyWeightImmutability();
@@ -196,7 +208,9 @@ test('SHAHAB-005..007 & SHAHAB-016: Real frozen Zipformer inference, OPT-001/OPT
   }
 });
 
-test('SHAHAB-SDK: refuses model files that do not match pinned release hashes', async () => {
+test(
+  'SHAHAB-SDK: refuses model files that do not match pinned release hashes',
+  { skip: MODEL_ARTIFACTS_AVAILABLE ? false : MODEL_SMOKE_SKIP }, async () => {
   const tamperedModelDir = fs.mkdtempSync(path.join(os.tmpdir(), 'shahab-pinned-hash-test-'));
   let sdk: ReturnType<typeof createShahabSdkEngine> | null = null;
   try {
@@ -287,7 +301,9 @@ test('SHAHAB-006 & SHAHAB-008: Dual-track WER/CER, leakage detection, Persian me
   assert.equal(audit.falseInsertionRate, 0);
 });
 
-test('SHAHAB-009 & SHAHAB-020: Lossless ONNX strip & honest sub-100 MiB uncompressed protection', () => {
+test(
+  'SHAHAB-009 & SHAHAB-020: Lossless ONNX strip & honest sub-100 MiB uncompressed protection',
+  { skip: MODEL_ARTIFACTS_AVAILABLE ? false : MODEL_SMOKE_SKIP }, () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'shahab-strip-test-'));
   try {
     const srcJoiner = path.join(MODEL_DIR, 'joiner.int8.onnx');
@@ -486,7 +502,9 @@ test('SHAHAB-015: ResourceGuard concurrent load serialization, JobStateMachine, 
   assert.equal(fi.passedScenarios, fi.totalScenarios, `Expected all fault-injection drills to pass (${fi.passedScenarios}/${fi.totalScenarios})`);
 });
 
-test('SHAHAB-017: Honest streaming capability audit, 16-state machine, repetition preservation («نه نه») & Editor edit protection', () => {
+test(
+  'SHAHAB-017: Honest streaming capability audit, 16-state machine, repetition preservation («نه نه») & Editor edit protection',
+  { skip: MODEL_ARTIFACTS_AVAILABLE ? false : MODEL_SMOKE_SKIP }, () => {
   const audit = auditZipformerStreamingCapability(path.join(MODEL_DIR, 'encoder.int8.onnx'));
   assert.equal(audit.trueStatefulStreamingStatus, 'NOT_SUPPORTED_BY_MODEL');
   assert.equal(audit.selectedStreamingMode, 'INCREMENTAL_WINDOWED_INFERENCE');
@@ -614,7 +632,9 @@ test('SHAHAB-021: Persisted System Qualification artifacts exist and never suppr
   assert.equal(typeof verifier.verifyDirectory, 'function');
 });
 
-test('SHAHAB-022: Stable host-neutral SDK lifecycle, idempotency conflict, privacy boundary & post-dispose guard', async () => {
+test(
+  'SHAHAB-022: Stable host-neutral SDK lifecycle, idempotency conflict, privacy boundary & post-dispose guard',
+  { skip: MODEL_ARTIFACTS_AVAILABLE ? false : MODEL_SMOKE_SKIP }, async () => {
   const sdk = createShahabSdkEngine({
     modelDir: MODEL_DIR,
     docsDir: DOCS_DIR,
@@ -671,7 +691,9 @@ test('SHAHAB-022: Stable host-neutral SDK lifecycle, idempotency conflict, priva
   );
 });
 
-test('SHAHAB-023: Avapardaz native integration via SDK, non-destructive source hashing, flick mapping & revision staleness', async () => {
+test(
+  'SHAHAB-023: Avapardaz native integration via SDK, non-destructive source hashing, flick mapping & revision staleness',
+  { skip: MODEL_ARTIFACTS_AVAILABLE ? false : MODEL_SMOKE_SKIP }, async () => {
   const sdk = createShahabSdkEngine({ modelDir: MODEL_DIR, docsDir: DOCS_DIR });
   await sdk.initialize();
   try {
@@ -719,7 +741,9 @@ test('SHAHAB-023: Avapardaz native integration via SDK, non-destructive source h
   }
 });
 
-test('SHAHAB-024: Adobe Audition Companion Adapter, Official Register, Markers CSV offset & Bridge Security', async () => {
+test(
+  'SHAHAB-024: Adobe Audition Companion Adapter, Official Register, Markers CSV offset & Bridge Security',
+  { skip: MODEL_ARTIFACTS_AVAILABLE ? false : MODEL_SMOKE_SKIP }, async () => {
   assert.ok(ADOBE_AUDITION_OFFICIAL_CAPABILITY_REGISTER.length >= 5);
   assert.equal(formatAuditionDecimalTime(85.5), '01:25.500');
 

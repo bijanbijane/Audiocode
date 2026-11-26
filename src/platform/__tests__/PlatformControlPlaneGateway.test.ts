@@ -255,12 +255,21 @@ describe('AVP-011 PlatformControlPlaneGateway Authorization, Lifecycle & Integri
     ).toBe(404);
 
     // Step-up authentication required (403) for PRODUCTION project key issuance
-    const prodPrj = gw.createProject({
+    const prodProjectAttempt = gw.createProject({
       bearerToken: ownerA.bearer,
       body: { projectName: 'Production ASR', environment: 'PRODUCTION' },
     });
-    expect(prodPrj.status).toBe(201);
-    const prodPrjId = (prodPrj.body as { id: string }).id;
+    expect(prodProjectAttempt.status).toBe(403);
+    expect((prodProjectAttempt.body as { error: { code: string } }).error.code).toBe(
+      'STEP_UP_AUTHENTICATION_REQUIRED',
+    );
+    const prodPrj = cp.createProject({
+      organizationId: orgA,
+      projectName: 'Production ASR',
+      environment: 'PRODUCTION',
+      actorUserId: 'usr_studio_owner_01',
+    });
+    const prodPrjId = prodPrj.id;
 
     const prodIssueNoStepUp = gw.issueApiKey({
       bearerToken: ownerA.bearer,

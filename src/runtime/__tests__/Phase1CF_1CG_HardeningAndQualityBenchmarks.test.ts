@@ -35,10 +35,11 @@ after(() => {
   disposeAllSharedNativeSherpaWorkers();
 });
 
-const MODEL_DIR = '/root/.avapardaz/models/sherpa-onnx-nemo-ctc-fa-shenava-rizeh-v1.0-non-streaming-int8-2026-06-26';
+const MODEL_DIR = process.env.AVAPARDAZ_SHERPA_MODEL_DIR ?? '/root/.avapardaz/models/sherpa-onnx-nemo-ctc-fa-shenava-rizeh-v1.0-non-streaming-int8-2026-06-26';
 const WAV_0 = path.join(MODEL_DIR, 'test_wavs', '0.wav');
 const WAV_1 = path.join(MODEL_DIR, 'test_wavs', '1.wav');
 const SAMPLE_WAV = path.resolve(process.cwd(), 'models/persian-zipformer-transducer/1.0.0/sample.wav');
+const HAS_NATIVE_SHERPA_FIXTURES = fs.existsSync(WAV_0) && fs.existsSync(WAV_1);
 
 function editDistance<T>(a: T[], b: T[]): number {
   const dp = Array.from({ length: a.length + 1 }, () => new Int32Array(b.length + 1));
@@ -74,7 +75,10 @@ function computeWerAndCer(referenceFa: string, hypothesisFa: string): { werPerce
 }
 
 describe('Phase 1C-F: Production Hardening & Long-Session Reliability', () => {
-  it('1C-F-01: Executes 20 sequential streaming ingestion + timeline assembly sessions with bounded RSS and zero memory/resource leaks', async () => {
+  it(
+    '1C-F-01: Executes 20 sequential streaming ingestion + timeline assembly sessions with bounded RSS and zero memory/resource leaks',
+    { skip: fs.existsSync(WAV_1) ? false : 'Pinned Persian WAV fixture is provisioned only in the model-smoke workflow' },
+    async () => {
     const rssCheckpoints: Array<{ session: number; rssMb: number; heapUsedMb: number }> = [];
     const stagingDir = fs.mkdtempSync(path.join(os.tmpdir(), 'avp-1cf-staging-'));
 
@@ -169,7 +173,10 @@ describe('Phase 1C-F: Production Hardening & Long-Session Reliability', () => {
 });
 
 describe('Phase 1C-G: Production Acceptance, Quality Benchmarking & Release Certification', () => {
-  it('1C-G-01: Evaluates Golden Persian Audio Benchmark Dataset (test_wavs/0.wav, 1.wav, sample.wav) and computes WER, CER, RTF, and Timestamp Accuracy', async () => {
+  it(
+    '1C-G-01: Evaluates Golden Persian Audio Benchmark Dataset (test_wavs/0.wav, 1.wav, sample.wav) and computes WER, CER, RTF, and Timestamp Accuracy',
+    { skip: HAS_NATIVE_SHERPA_FIXTURES ? false : 'Native Sherpa model and pinned Persian WAV fixtures are provisioned only in the model-smoke workflow' },
+    async () => {
     // Ground-truth Persian transcriptions for the bundled test_wavs
     const res0 = await streamWavFileWithNativeSherpa({
       wavFilePath: WAV_0,

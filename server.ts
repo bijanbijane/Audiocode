@@ -391,7 +391,6 @@ async function startServer() {
   // AVP-EXECUTION-001 + Phase 1A: Hardened 3-Engine Smart Audio Edit Vertical Slice (/api/v2/smart-edit/*)
   const { router: smartEditRouter } = createSmartAudioEditHttpRouter({
     neuralEngine: localCompanionService.neuralEngine,
-    shahabZipformerRuntime,
     securityGuard: audioApiSecurityGuard,
   });
   app.use('/api/v2/smart-edit', smartEditRouter);

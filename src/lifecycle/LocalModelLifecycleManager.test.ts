@@ -194,7 +194,8 @@ describe('AVP-008: LocalModelLifecycleManager durability, bounded streaming, rol
     assert.equal(hydrated.activeModel?.verifiedSha256Hex, sha);
 
     const offlineOk = await mgr2.verifyInstalledActiveModelOffline();
-    assert.equal(offlineOk, true);
+    assert.equal(offlineOk.ok, true);
+    assert.equal(offlineOk.state, 'MODEL_AVAILABLE');
     assert.equal(mgr2.getSnapshot().state, 'MODEL_AVAILABLE');
   });
 
@@ -283,7 +284,8 @@ describe('AVP-008: LocalModelLifecycleManager durability, bounded streaming, rol
       license: 'Apache-2.0',
       sourceOrigin: 'local-file',
     });
-    assert.equal(failedSnap.snapshot.state, 'INTEGRITY_FAILURE');
+    assert.equal(failedSnap.snapshot.state, 'MODEL_AVAILABLE', 'Previously verified v1 remains available after rejected v2 replacement');
+    assert.equal(failedSnap.snapshot.lastErrorCode, 'MODEL_INTEGRITY_FAILURE');
     assert.equal(failedSnap.snapshot.activeModel?.version, '1.0.0', 'Active model v1 must survive failed v2 install');
 
     // Install valid v2 -> rollback to v1
@@ -331,8 +333,9 @@ describe('AVP-008: LocalModelLifecycleManager durability, bounded streaming, rol
       stream: makeRangeStream(payload),
       license: 'Apache-2.0',
       sourceOrigin: 'local-file',
+      chunkSizeBytes: 4096,
       abortSignal: ac.signal,
-      
+      onProgress: () => ac.abort(), // Abort after the first persisted chunk, before the next range is fetched.
     });
     assert.equal(abortedSnap.snapshot.activeModel, null);
     assert.equal((await storage.listArtifacts()).temporary.length, 0);

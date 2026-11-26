@@ -19,7 +19,9 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
+import { createInterface } from 'node:readline';
+import { fileURLToPath } from 'node:url';
 import {
   ALLOWED_MODEL_DOWNLOAD_HOSTS,
   activateDirectoryAtomically,
@@ -141,25 +143,41 @@ export interface LocalNeuralTranscriptionResult {
   readonly ingestionMemory?: NativeIngestionMemorySnapshot;
 }
 
-interface SherpaJsonOutput {
+export interface SherpaJsonOutput {
   lang?: string;
   text?: string;
   timestamps?: number[];
+  durations?: number[];
   tokens?: string[];
+  ysLogProbs?: number[];
 }
 
+interface PersistentSherpaPythonWorkerSession {
+  transcribe(wavPath: string): Promise<SherpaJsonOutput>;
+  close(): Promise<void>;
+  readonly pid: number | undefined;
+}
+
+const AVAPARDAZ_HOME = process.env.AVAPARDAZ_HOME?.trim() || path.join(os.homedir(), 'AvaPardaz');
 const DEFAULT_MODEL_SEARCH_DIRS = [
   process.env.AVAPARDAZ_MODELS_DIR,
   path.join(os.homedir(), '.avapardaz', 'models'),
+  path.join(AVAPARDAZ_HOME, 'models'),
   path.resolve(process.cwd(), 'models'),
   '/tmp/avp-p02-bench/models/extracted',
 ].filter((d): d is string => Boolean(d && d.trim().length > 0));
 
 const DEFAULT_BINARY_CANDIDATES = [
   process.env.AVAPARDAZ_SHERPA_BIN,
+  // Per-user isolated Python wheel installation (macOS Apple Silicon / Linux / Windows).
+  path.join(os.homedir(), '.avapardaz', 'runtime', 'sherpa-venv', 'bin', 'sherpa-onnx-offline'),
+  path.join(AVAPARDAZ_HOME, 'runtime', 'sherpa-venv', 'bin', 'sherpa-onnx-offline'),
+  path.join(os.homedir(), '.avapardaz', 'runtime', 'sherpa-venv', 'Scripts', 'sherpa-onnx-offline.exe'),
   path.join(os.homedir(), '.avapardaz', 'runtime', 'bin', 'sherpa-onnx-offline'),
-  '/tmp/avp-p02-bench/runtime/sherpa-onnx-v2.0.2-linux-x64-shared-no-tts/bin/sherpa-onnx-offline',
+  path.join(AVAPARDAZ_HOME, 'runtime', 'bin', process.platform === 'win32' ? 'sherpa-onnx-offline.exe' : 'sherpa-onnx-offline'),
+  '/opt/homebrew/bin/sherpa-onnx-offline',
   '/usr/local/bin/sherpa-onnx-offline',
+  '/tmp/avp-p02-bench/runtime/sherpa-onnx-v2.0.2-linux-x64-shared-no-tts/bin/sherpa-onnx-offline',
 ].filter((p): p is string => Boolean(p && p.trim().length > 0));
 
 export const SHENAVA_RIZEH_RUNTIME_RELEASE = {
@@ -277,17 +295,93 @@ export function verifyModelFilesIntegrity(files: readonly string[]): boolean {
   return true;
 }
 
+const SHAHAB_KOOCHIK_V1_MODEL_PROVENANCE = Object.freeze({
+  expectedBytes: 458_819_249,
+  sha256Hex: '6a564b5541920ce1c37bbc91d22e4b3a6838648b9b327eb88997e8db1f90950d',
+});
+
+function verifyPinnedModelArtifact(
+  filePath: string,
+  expectedBytes: number,
+  expectedSha256Hex: string,
+): boolean {
+  let stat: fs.Stats;
+  try {
+    const linkStat = fs.lstatSync(filePath);
+    if (linkStat.isSymbolicLink()) return false;
+    stat = fs.statSync(filePath);
+  } catch {
+    return false;
+  }
+  if (!stat.isFile() || stat.size !== expectedBytes) return false;
+
+  const cacheKey = `${filePath}:${stat.size}:${Math.trunc(stat.mtimeMs)}:${expectedSha256Hex}`;
+  const cached = artifactIntegrityCache.get(cacheKey);
+  if (cached !== undefined) return cached;
+
+  const hash = crypto.createHash('sha256');
+  const fd = fs.openSync(filePath, 'r');
+  try {
+    const chunk = Buffer.allocUnsafe(1024 * 1024);
+    let bytesRead = 0;
+    while ((bytesRead = fs.readSync(fd, chunk, 0, chunk.length, null)) > 0) {
+      hash.update(chunk.subarray(0, bytesRead));
+    }
+  } finally {
+    fs.closeSync(fd);
+  }
+  const verified = hash.digest('hex') === expectedSha256Hex;
+  artifactIntegrityCache.set(cacheKey, verified);
+  return verified;
+}
+
+function verifyShahabKoochikV1Artifacts(modelPath: string, tokensPath: string): boolean {
+  return (
+    verifyPinnedModelArtifact(
+      modelPath,
+      SHAHAB_KOOCHIK_V1_MODEL_PROVENANCE.expectedBytes,
+      SHAHAB_KOOCHIK_V1_MODEL_PROVENANCE.sha256Hex,
+    ) && verifyModelFilesIntegrity([tokensPath])
+  );
+}
+
+/** Verifies the exact Koochik FP32 model and tokenizer pair used by SHAHAB Engine 01. */
+export function verifyShahabKoochikModelFiles(modelDirectory: string): boolean {
+  const resolved = path.resolve(modelDirectory);
+  return verifyShahabKoochikV1Artifacts(
+    path.join(resolved, 'model.onnx'),
+    path.join(resolved, 'tokens.txt'),
+  );
+}
+
 function detectSherpaBinary(): { binaryPath: string | null; libDir: string | null } {
-  const candidates = [
-    process.env.AVAPARDAZ_SHERPA_BIN,
-    ...DEFAULT_BINARY_CANDIDATES,
-  ].filter((p): p is string => Boolean(p && p.trim().length > 0));
+  const executableName = process.platform === 'win32' ? 'sherpa-onnx-offline.exe' : 'sherpa-onnx-offline';
+  const pathCandidates = (process.env.PATH ?? '')
+    .split(path.delimiter)
+    .filter(Boolean)
+    .map((directory) => path.join(directory, executableName));
+  const candidates = [...DEFAULT_BINARY_CANDIDATES, ...pathCandidates].filter(
+    (p): p is string => Boolean(p && p.trim().length > 0),
+  );
   for (const candidate of candidates) {
     try {
       fs.accessSync(candidate, fs.constants.X_OK);
       const binDir = path.dirname(candidate);
       const siblingLib = path.resolve(binDir, '..', 'lib');
-      const libDir = fs.existsSync(siblingLib) ? siblingLib : null;
+      const libraryCandidates = [
+        siblingLib,
+        path.join(siblingLib, 'python3.11', 'site-packages', 'sherpa_onnx', 'lib'),
+        path.join(siblingLib, 'python3.12', 'site-packages', 'sherpa_onnx', 'lib'),
+        path.join(siblingLib, 'python3.13', 'site-packages', 'sherpa_onnx', 'lib'),
+        path.join(binDir, '..', 'lib', 'sherpa-onnx'),
+      ];
+      const libDir = libraryCandidates.find((directory) => {
+        try {
+          return fs.readdirSync(directory).some((name) => /^lib(?:onnxruntime|sherpa-onnx-c-api)\.(?:dylib|so(?:\.|$))/.test(name));
+        } catch {
+          return false;
+        }
+      }) ?? null;
       return { binaryPath: candidate, libDir };
     } catch {
       // continue searching
@@ -312,6 +406,41 @@ function discoverModelsInRoot(rootDir: string): InstalledLocalNeuralModel[] {
   ];
 
   for (const dir of dirsToCheck) {
+    // SHAHAB quality candidate: official, immutable Apache-2.0 Shenava Koochik v1.0 NeMo CTC.
+    // It is considered installed only after the 458,819,249-byte ONNX graph and tokens
+    // pass pinned SHA-256 checks; a folder name or non-empty file is never sufficient.
+    const dirName = path.basename(dir).toLowerCase();
+    const koochikModel = path.join(dir, 'model.onnx');
+    const koochikTokens = path.join(dir, 'tokens.txt');
+    if (
+      dirName.includes('koochik') &&
+      allFilesExistNonEmpty([koochikModel, koochikTokens]) &&
+      verifyShahabKoochikV1Artifacts(koochikModel, koochikTokens)
+    ) {
+      const files = [koochikModel, koochikTokens];
+      discovered.push({
+        modelId: 'Reza2kn/Shenava-Koochik-v1.0-sherpa-onnx',
+        profileId: 'AVP_MODEL_QUALITY',
+        displayName: 'Shenava Koochik v1.0 (Persian FastConformer CTC)',
+        architecture: 'nemo-ctc',
+        quantization: 'FP32',
+        licenseSpdx: 'Apache-2.0',
+        supportedLanguages: ['fa'],
+        // Sherpa exposes CTC token onsets for this export, but not token durations or frame log-probs.
+        // Do not advertise true word spans until a real Persian forced-aligner is integrated.
+        supportsNativeWordTimestamps: false,
+        rootDir: dir,
+        diskSizeBytes: fileSizeSafe(koochikModel) + fileSizeSafe(koochikTokens),
+        requiredFiles: files,
+        integrityVerified: true,
+        extraCliArgs: [
+          '--model-type=nemo_ctc',
+          `--nemo-ctc-model=${koochikModel}`,
+          `--tokens=${koochikTokens}`,
+        ],
+      });
+    }
+
     // 1. Shenava Rizeh NeMo FastConformer CTC Persian INT8
     const nemoModel = path.join(dir, 'model.int8.onnx');
     const nemoTokens = path.join(dir, 'tokens.txt');
@@ -325,7 +454,9 @@ function discoverModelsInRoot(rootDir: string): InstalledLocalNeuralModel[] {
         quantization: 'INT8',
         licenseSpdx: 'Apache-2.0',
         supportedLanguages: ['fa'],
-        supportsNativeWordTimestamps: true,
+        // Sherpa NeMo CTC exposes token onset timestamps but no token durations for this path.
+        // Word-level endpoints remain unavailable until a real forced aligner is connected.
+        supportsNativeWordTimestamps: false,
         rootDir: dir,
         diskSizeBytes: fileSizeSafe(nemoModel) + fileSizeSafe(nemoTokens),
         requiredFiles: files,
@@ -431,51 +562,95 @@ function discoverModelsInRoot(rootDir: string): InstalledLocalNeuralModel[] {
  * Reconstructs honest word-level timestamps strictly from genuine SentencePiece token timestamps
  * emitted by CTC models (e.g., Shenava Rizeh). Returns [] if model emitted no timestamps.
  */
-function buildWordTimingsFromTokens(
+export function buildWordTimingsFromTokens(
   tokens: readonly string[] | undefined,
   timestamps: readonly number[] | undefined,
+  durations: readonly number[] | undefined,
   chunkOffsetSec: number,
   chunkEndSec: number,
 ): LocalNeuralWordTiming[] {
-  if (!Array.isArray(tokens) || !Array.isArray(timestamps) || tokens.length === 0 || tokens.length !== timestamps.length) {
+  if (
+    !Array.isArray(tokens) ||
+    !Array.isArray(timestamps) ||
+    !Array.isArray(durations) ||
+    tokens.length === 0 ||
+    tokens.length !== timestamps.length ||
+    tokens.length !== durations.length ||
+    !Number.isFinite(chunkOffsetSec) ||
+    !Number.isFinite(chunkEndSec) ||
+    chunkEndSec <= chunkOffsetSec
+  ) {
     return [];
   }
+
   const words: LocalNeuralWordTiming[] = [];
   let currentWord = '';
   let currentStart = -1;
+  let currentEnd = -1;
 
-  for (let i = 0; i < tokens.length; i++) {
-    const rawTok = tokens[i];
-    const ts = Number(timestamps[i]);
-    if (!Number.isFinite(ts)) continue;
-    const startsNewWord = rawTok.startsWith(' ') || rawTok.startsWith('▁');
-    const cleanPiece = rawTok.replace(/^[\s▁]+/, '');
-
-    if (startsNewWord && currentWord.length > 0) {
-      const nextStart = chunkOffsetSec + ts;
+  const flushCurrentWord = () => {
+    if (!currentWord || currentStart < 0 || currentEnd <= currentStart) return;
+    const startSec = Math.max(chunkOffsetSec, Math.min(chunkEndSec, currentStart));
+    const endSec = Math.max(startSec, Math.min(chunkEndSec, currentEnd));
+    if (endSec > startSec) {
       words.push({
         word: currentWord,
-        startSec: Number(currentStart.toFixed(3)),
-        endSec: Number(Math.max(currentStart + 0.04, Math.min(chunkEndSec, nextStart)).toFixed(3)),
+        startSec: Number(startSec.toFixed(3)),
+        endSec: Number(endSec.toFixed(3)),
       });
+    }
+  };
+
+  for (let i = 0; i < tokens.length; i++) {
+    const rawToken = tokens[i];
+    const timestamp = Number(timestamps[i]);
+    const duration = Number(durations[i]);
+    if (!Number.isFinite(timestamp) || !Number.isFinite(duration) || timestamp < 0 || duration <= 0) {
+      // If even one emitted piece has no valid acoustic span, do not publish a misleading
+      // word timeline for this chunk. Segment timestamps remain available as the fallback.
+      return [];
+    }
+
+    const tokenStart = chunkOffsetSec + timestamp;
+    const tokenEnd = tokenStart + duration;
+    if (
+      !Number.isFinite(tokenStart) ||
+      !Number.isFinite(tokenEnd) ||
+      tokenStart >= chunkEndSec ||
+      tokenEnd <= chunkOffsetSec
+    ) {
+      return [];
+    }
+
+    const startsNewWord = rawToken.startsWith(' ') || rawToken.startsWith('▁');
+    const cleanPiece = rawToken.replace(/^[\s▁]+/, '');
+    if (!cleanPiece) continue;
+
+    if (startsNewWord && currentWord.length > 0) {
+      flushCurrentWord();
       currentWord = cleanPiece;
-      currentStart = chunkOffsetSec + ts;
+      currentStart = tokenStart;
+      currentEnd = tokenEnd;
     } else {
       if (currentWord.length === 0) {
-        currentStart = chunkOffsetSec + ts;
+        currentStart = tokenStart;
+        currentEnd = tokenEnd;
+      } else {
+        currentStart = Math.min(currentStart, tokenStart);
+        currentEnd = Math.max(currentEnd, tokenEnd);
       }
       currentWord += cleanPiece;
     }
   }
 
-  if (currentWord.length > 0 && currentStart >= 0) {
-    words.push({
-      word: currentWord,
-      startSec: Number(currentStart.toFixed(3)),
-      endSec: Number(Math.max(currentStart + 0.08, chunkEndSec).toFixed(3)),
-    });
-  }
+  flushCurrentWord();
 
+  // Guard against malformed decoder output that would move backwards in the source timeline.
+  for (let i = 1; i < words.length; i++) {
+    if (words[i].startSec < words[i - 1].startSec || words[i].endSec <= words[i].startSec) {
+      return [];
+    }
+  }
   return words;
 }
 
@@ -492,6 +667,204 @@ export interface EnsuredShenavaModelArtifacts {
   readonly tokensBytes: number;
   readonly tokensSha256Hex: string;
   readonly sampleWavPath: string | null;
+}
+
+function resolvePersistentSherpaPythonWorker(model: InstalledLocalNeuralModel): {
+  readonly pythonPath: string;
+  readonly workerScriptPath: string;
+  readonly modelPath: string;
+  readonly tokensPath: string;
+} | null {
+  if (model.architecture !== 'nemo-ctc') return null;
+
+  const moduleDirectory = path.dirname(fileURLToPath(import.meta.url));
+  const workerCandidates = [
+    process.env.AVAPARDAZ_SHERPA_WORKER,
+    path.join(moduleDirectory, 'shahab_sherpa_worker.py'),
+    path.resolve(moduleDirectory, '../../companion/shahab_sherpa_worker.py'),
+    path.resolve(process.cwd(), 'companion/shahab_sherpa_worker.py'),
+  ].filter((value): value is string => Boolean(value && value.trim()));
+  const workerScriptPath = workerCandidates.find((candidate) => {
+    try { return fs.statSync(candidate).isFile(); } catch { return false; }
+  });
+
+  const pythonName = process.platform === 'win32' ? 'python.exe' : 'python';
+  const configuredPython = process.env.AVAPARDAZ_SHERPA_PYTHON?.trim();
+  const pythonCandidates = configuredPython
+    ? [configuredPython]
+    : [
+        path.join(os.homedir(), '.avapardaz', 'runtime', 'sherpa-venv', process.platform === 'win32' ? 'Scripts' : 'bin', pythonName),
+        path.join(AVAPARDAZ_HOME, 'runtime', 'sherpa-venv', process.platform === 'win32' ? 'Scripts' : 'bin', pythonName),
+      ];
+  const pythonPath = pythonCandidates.find((candidate) => {
+    try { return fs.statSync(candidate).isFile(); } catch { return false; }
+  });
+
+  const modelPath = model.requiredFiles.find((file) => /\.onnx$/i.test(file));
+  const tokensPath = model.requiredFiles.find((file) => /tokens\.txt$/i.test(file));
+  if (!workerScriptPath || !pythonPath || !modelPath || !tokensPath) return null;
+
+  return {
+    pythonPath,
+    workerScriptPath,
+    modelPath: path.isAbsolute(modelPath) ? modelPath : path.join(model.rootDir, modelPath),
+    tokensPath: path.isAbsolute(tokensPath) ? tokensPath : path.join(model.rootDir, tokensPath),
+  };
+}
+
+async function startPersistentSherpaPythonWorker(params: {
+  readonly model: InstalledLocalNeuralModel;
+  readonly numThreads: number;
+  readonly signal?: AbortSignal;
+  readonly memoryTracker?: NativeIngestionMemoryTracker;
+  readonly readChildRssBytes: (pid: number | undefined) => number;
+}): Promise<PersistentSherpaPythonWorkerSession | null> {
+  const resolved = resolvePersistentSherpaPythonWorker(params.model);
+  if (!resolved) return null;
+
+  const env: NodeJS.ProcessEnv = {
+    ...process.env,
+    http_proxy: 'http://127.0.0.1:9',
+    https_proxy: 'http://127.0.0.1:9',
+    HTTP_PROXY: 'http://127.0.0.1:9',
+    HTTPS_PROXY: 'http://127.0.0.1:9',
+    HF_HUB_OFFLINE: '1',
+    TRANSFORMERS_OFFLINE: '1',
+    PYTHONNOUSERSITE: '1',
+    PYTHONDONTWRITEBYTECODE: '1',
+  };
+
+  const child = spawn(resolved.pythonPath, [
+    resolved.workerScriptPath,
+    '--model', resolved.modelPath,
+    '--tokens', resolved.tokensPath,
+    '--num-threads', String(params.numThreads),
+    '--provider', 'cpu',
+  ], {
+    env,
+    shell: false,
+    stdio: ['pipe', 'pipe', 'pipe'],
+  });
+  const lineReader = createInterface({ input: child.stdout, crlfDelay: Infinity });
+  const lineIterator = lineReader[Symbol.asyncIterator]();
+  let stderrTail = '';
+  let sequence = 0;
+  let closed = false;
+  let busy = false;
+  let killedByAbort = false;
+
+  child.stderr.on('data', (chunk: Buffer) => {
+    stderrTail = `${stderrTail}${chunk.toString('utf8')}`.slice(-64 * 1024);
+  });
+
+  const onAbort = () => {
+    killedByAbort = true;
+    try { child.kill('SIGKILL'); } catch { /* best effort */ }
+  };
+  if (params.signal) {
+    if (params.signal.aborted) onAbort();
+    else params.signal.addEventListener('abort', onAbort, { once: true });
+  }
+
+  const readJsonLine = async (): Promise<Record<string, unknown>> => {
+    const next = await lineIterator.next();
+    if (next.done) {
+      if (killedByAbort || params.signal?.aborted) throw new Error('TRANSCRIPTION_CANCELLED');
+      throw new Error(`SHAHAB_PYTHON_WORKER_EXITED: ${stderrTail.split('\n').slice(-6).join(' | ')}`);
+    }
+    try {
+      return JSON.parse(next.value) as Record<string, unknown>;
+    } catch {
+      throw new Error(`SHAHAB_PYTHON_WORKER_PROTOCOL_ERROR: ${String(next.value).slice(0, 240)}`);
+    }
+  };
+
+  params.memoryTracker?.recordChildProcessRss(params.readChildRssBytes(child.pid));
+  const rssTimer = params.memoryTracker
+    ? setInterval(() => params.memoryTracker?.recordChildProcessRss(params.readChildRssBytes(child.pid)), 1_000)
+    : null;
+  rssTimer?.unref?.();
+
+  const close = async () => {
+    if (closed) return;
+    closed = true;
+    if (rssTimer) clearInterval(rssTimer);
+    params.memoryTracker?.recordChildProcessRss(params.readChildRssBytes(child.pid));
+    params.signal?.removeEventListener('abort', onAbort);
+    try {
+      if (child.exitCode === null && child.signalCode === null && !killedByAbort) {
+        child.stdin.write(`${JSON.stringify({ type: 'shutdown', requestId: 'shutdown' })}\n`);
+        child.stdin.end();
+      }
+    } catch { /* child may already be gone */ }
+    if (child.exitCode === null && child.signalCode === null) {
+      await new Promise<void>((resolve) => {
+        const timer = setTimeout(() => {
+          try { child.kill('SIGKILL'); } catch { /* best effort */ }
+          resolve();
+        }, 1500);
+        child.once('close', () => { clearTimeout(timer); resolve(); });
+      });
+    }
+    lineReader.close();
+  };
+
+  try {
+    if (params.signal?.aborted) throw new Error('TRANSCRIPTION_CANCELLED');
+    let readyTimeout: NodeJS.Timeout | undefined;
+    const ready = await Promise.race([
+      readJsonLine(),
+      new Promise<never>((_, reject) => {
+        readyTimeout = setTimeout(() => reject(new Error('SHAHAB_PYTHON_WORKER_START_TIMEOUT')), 90_000);
+      }),
+    ]).finally(() => {
+      if (readyTimeout) clearTimeout(readyTimeout);
+    });
+    if (ready.type !== 'ready' || ready.ok !== true) {
+      throw new Error(`SHAHAB_PYTHON_WORKER_START_FAILED: ${String(ready.error ?? 'Invalid worker readiness response')}`);
+    }
+  } catch (error) {
+    await close();
+    throw error;
+  }
+
+  return {
+    pid: child.pid,
+    transcribe: async (wavPath: string): Promise<SherpaJsonOutput> => {
+      if (closed) throw new Error('SHAHAB_PYTHON_WORKER_CLOSED');
+      if (busy) throw new Error('SHAHAB_PYTHON_WORKER_CONCURRENT_REQUEST_REJECTED');
+      if (params.signal?.aborted) throw new Error('TRANSCRIPTION_CANCELLED');
+      busy = true;
+      const requestId = `shb_${++sequence}`;
+      try {
+        const payload = `${JSON.stringify({ type: 'transcribe', requestId, wavPath })}\n`;
+        if (!child.stdin.write(payload)) {
+          await new Promise<void>((resolve, reject) => {
+            child.stdin.once('drain', resolve);
+            child.stdin.once('error', reject);
+          });
+        }
+        const response = await readJsonLine();
+        if (response.type !== 'result' || response.requestId !== requestId) {
+          throw new Error('SHAHAB_PYTHON_WORKER_RESPONSE_MISMATCH');
+        }
+        if (response.ok !== true) {
+          throw new Error(`SHAHAB_PYTHON_INFERENCE_FAILED: ${String(response.error ?? 'Unknown inference error')}`);
+        }
+        return {
+          lang: typeof response.lang === 'string' ? response.lang : undefined,
+          text: typeof response.text === 'string' ? response.text : '',
+          tokens: Array.isArray(response.tokens) ? response.tokens.map(String) : [],
+          timestamps: Array.isArray(response.timestamps) ? response.timestamps.map(Number) : [],
+          durations: Array.isArray(response.durations) ? response.durations.map(Number) : [],
+          ysLogProbs: Array.isArray(response.ysLogProbs) ? response.ysLogProbs.map(Number) : [],
+        };
+      } finally {
+        busy = false;
+      }
+    },
+    close,
+  };
 }
 
 export class LocalSherpaNeuralEngine {
@@ -804,10 +1177,11 @@ export class LocalSherpaNeuralEngine {
     }
 
     // Smart language-aware routing:
-    // - Pure Persian ('fa'): prefer Whisper large-v3-turbo INT8 if installed for quality, else Shenava Rizeh INT8 (ultra-fast Persian)
-    // - English / Bilingual / Auto: NEVER pick Persian-only Shenava Rizeh; pick Whisper large-v3-turbo INT8 -> Whisper Base INT8
+    // - Pure Persian ('fa'): Koochik FP32 quality baseline -> Rizeh INT8 lightweight fallback.
+    // - English / bilingual / auto: only select a model whose manifest explicitly supports that language.
     if (languageHint === 'fa') {
       return (
+        verifiedModels.find((m) => m.modelId === 'Reza2kn/Shenava-Koochik-v1.0-sherpa-onnx') ??
         verifiedModels.find((m) => m.modelId === 'Reza2kn/Shenava-Rizeh') ??
         verifiedModels.find((m) => m.modelId === 'openai/whisper-large-v3-turbo-int8') ??
         verifiedModels.find((m) => m.modelId === 'openai/whisper-base-fp32') ??
@@ -823,22 +1197,44 @@ export class LocalSherpaNeuralEngine {
     );
   }
 
-  private readLinuxProcRssBytes(pid: number | undefined): number {
-    if (!pid || process.platform !== 'linux') return 0;
-    try {
-      const fd = fs.openSync(`/proc/${pid}/status`, 'r');
+  private readChildProcessRssBytes(pid: number | undefined): number {
+    if (!pid || !Number.isInteger(pid) || pid <= 0) return 0;
+    if (process.platform === 'linux') {
       try {
-        const buf = Buffer.allocUnsafe(2048);
-        const n = fs.readSync(fd, buf, 0, buf.byteLength, 0);
-        const text = buf.subarray(0, n).toString('utf8');
-        const m = text.match(/VmRSS:\s+(\d+)\s+kB/i);
-        return m ? Number(m[1]) * 1024 : 0;
-      } finally {
-        fs.closeSync(fd);
+        const fd = fs.openSync(`/proc/${pid}/status`, 'r');
+        try {
+          const buf = Buffer.allocUnsafe(2048);
+          const n = fs.readSync(fd, buf, 0, buf.byteLength, 0);
+          const match = buf.subarray(0, n).toString('utf8').match(/VmRSS:\s+(\d+)\s+kB/i);
+          return match ? Number(match[1]) * 1024 : 0;
+        } finally {
+          fs.closeSync(fd);
+        }
+      } catch {
+        return 0;
       }
-    } catch {
-      return 0;
     }
+    if (process.platform === 'darwin') {
+      const result = spawnSync('ps', ['-o', 'rss=', '-p', String(pid)], {
+        encoding: 'utf8',
+        timeout: 750,
+        windowsHide: true,
+      });
+      if (result.status !== 0 || result.error) return 0;
+      const kilobytes = Number.parseInt(result.stdout.trim(), 10);
+      return Number.isFinite(kilobytes) && kilobytes > 0 ? kilobytes * 1024 : 0;
+    }
+    if (process.platform === 'win32') {
+      const result = spawnSync('tasklist.exe', ['/FI', `PID eq ${pid}`, '/FO', 'CSV', '/NH'], {
+        encoding: 'utf8',
+        timeout: 1000,
+        windowsHide: true,
+      });
+      if (result.status !== 0 || result.error) return 0;
+      const match = result.stdout.match(/\"([\d,]+) K\"/);
+      return match ? Number(match[1].replace(/,/g, '')) * 1024 : 0;
+    }
+    return 0;
   }
 
   private async runSherpaSingleWav(params: {
@@ -888,7 +1284,7 @@ export class LocalSherpaNeuralEngine {
 
       const sampleChildRss = () => {
         if (!params.memoryTracker || !child.pid) return;
-        const childRss = this.readLinuxProcRssBytes(child.pid);
+        const childRss = this.readChildProcessRssBytes(child.pid);
         if (childRss > 0) {
           params.memoryTracker.recordChildProcessRss(childRss);
         }
@@ -953,6 +1349,155 @@ export class LocalSherpaNeuralEngine {
           }
         }
         resolve({ text: '' });
+      });
+    });
+  }
+
+  /**
+   * Processes all already-bounded WAV chunks in one Sherpa CLI session. The native
+   * recognizer loads its model once, then decodes every supplied path and emits one
+   * JSON record per input. This is the no-Python packaged fallback for long recordings.
+   */
+  private async runSherpaBatchWavs(params: {
+    readonly binaryPath: string;
+    readonly libDir: string | null;
+    readonly model: InstalledLocalNeuralModel;
+    readonly wavPaths: readonly string[];
+    readonly languageHint?: 'fa' | 'en' | 'fa-en' | 'auto';
+    readonly numThreads: number;
+    readonly signal?: AbortSignal;
+    readonly memoryTracker?: NativeIngestionMemoryTracker;
+  }): Promise<SherpaJsonOutput[]> {
+    if (params.wavPaths.length === 0) return [];
+    if (params.signal?.aborted) throw new Error('TRANSCRIPTION_CANCELLED');
+
+    const args = [...params.model.extraCliArgs];
+    if (params.model.architecture === 'nemo-ctc' && !args.some((arg) => arg.startsWith('--model-type='))) {
+      args.push('--model-type=nemo_ctc');
+    }
+    if (params.model.architecture === 'whisper') {
+      args.push('--model-type=whisper');
+      if (params.languageHint === 'fa' || params.languageHint === 'en') {
+        args.push(`--whisper-language=${params.languageHint}`);
+      }
+    }
+    args.push(`--num-threads=${params.numThreads}`, '--debug=false', '--print-args=false', ...params.wavPaths);
+
+    const env: NodeJS.ProcessEnv = {
+      ...process.env,
+      http_proxy: 'http://127.0.0.1:9',
+      https_proxy: 'http://127.0.0.1:9',
+      HTTP_PROXY: 'http://127.0.0.1:9',
+      HTTPS_PROXY: 'http://127.0.0.1:9',
+      HF_HUB_OFFLINE: '1',
+      TRANSFORMERS_OFFLINE: '1',
+    };
+    if (params.libDir) {
+      const libraryPathName = process.platform === 'darwin' ? 'DYLD_LIBRARY_PATH' : 'LD_LIBRARY_PATH';
+      env[libraryPathName] = `${params.libDir}${path.delimiter}${env[libraryPathName] ?? ''}`;
+    }
+
+    return await new Promise<SherpaJsonOutput[]>((resolve, reject) => {
+      const child = spawn(params.binaryPath, args, {
+        env,
+        shell: false,
+        windowsHide: true,
+        stdio: ['ignore', 'pipe', 'pipe'],
+      });
+      const stdout: Buffer[] = [];
+      let stdoutBytes = 0;
+      let stderrTail = '';
+      let settled = false;
+      let killedByAbort = false;
+
+      const sampleRss = () => {
+        if (!child.pid || !params.memoryTracker) return;
+        params.memoryTracker.recordChildProcessRss(this.readChildProcessRssBytes(child.pid));
+        params.memoryTracker.sampleProcessRss();
+      };
+      sampleRss();
+      const rssTimer = setInterval(sampleRss, 1_000);
+      rssTimer.unref?.();
+
+      const cleanup = () => {
+        clearInterval(rssTimer);
+        params.signal?.removeEventListener('abort', onAbort);
+        sampleRss();
+      };
+      const fail = (error: Error) => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        reject(error);
+      };
+      const onAbort = () => {
+        killedByAbort = true;
+        try { child.kill('SIGKILL'); } catch { /* best effort */ }
+      };
+      if (params.signal) {
+        if (params.signal.aborted) onAbort();
+        else params.signal.addEventListener('abort', onAbort, { once: true });
+      }
+
+      child.stdout.on('data', (chunk: Buffer) => {
+        sampleRss();
+        stdoutBytes += chunk.byteLength;
+        if (stdoutBytes > 32 * 1024 * 1024) {
+          fail(new Error('SHAHAB_BATCH_OUTPUT_LIMIT_EXCEEDED'));
+          try { child.kill('SIGKILL'); } catch { /* best effort */ }
+          return;
+        }
+        stdout.push(Buffer.from(chunk));
+      });
+      child.stderr.on('data', (chunk: Buffer) => {
+        sampleRss();
+        stderrTail = `${stderrTail}${chunk.toString('utf8')}`.slice(-64 * 1024);
+      });
+      child.on('error', (error) => fail(error));
+      child.on('close', (code) => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        if (killedByAbort || params.signal?.aborted) {
+          reject(new Error('TRANSCRIPTION_CANCELLED'));
+          return;
+        }
+        if (code !== 0) {
+          reject(new Error(`SHERPA_BATCH_EXIT_${code}: ${stderrTail.split('\n').slice(-8).join(' | ')}`));
+          return;
+        }
+
+        const output = Buffer.concat(stdout).toString('utf8');
+        const parsed: SherpaJsonOutput[] = [];
+        for (const rawLine of output.split(/\r?\n/)) {
+          const line = rawLine.trim();
+          if (!line.startsWith('{') || !line.endsWith('}')) continue;
+          try {
+            const item = JSON.parse(line) as Record<string, unknown>;
+            if (typeof item.text !== 'string' && !Array.isArray(item.tokens)) continue;
+            parsed.push({
+              lang: typeof item.lang === 'string' ? item.lang : undefined,
+              text: typeof item.text === 'string' ? item.text : '',
+              tokens: Array.isArray(item.tokens) ? item.tokens.map(String) : [],
+              timestamps: Array.isArray(item.timestamps) ? item.timestamps.map(Number) : [],
+              durations: Array.isArray(item.durations) ? item.durations.map(Number) : [],
+              ysLogProbs: Array.isArray(item.ys_log_probs)
+                ? item.ys_log_probs.map(Number)
+                : Array.isArray(item.ysLogProbs)
+                  ? item.ysLogProbs.map(Number)
+                  : [],
+            });
+          } catch {
+            // Sherpa emits informational lines around its JSON result records.
+          }
+        }
+        if (parsed.length !== params.wavPaths.length) {
+          reject(new Error(
+            `SHERPA_BATCH_RESULT_COUNT_MISMATCH: expected ${params.wavPaths.length}, received ${parsed.length}. stdout=${output.slice(-2048)}`,
+          ));
+          return;
+        }
+        resolve(parsed);
       });
     });
   }
@@ -1041,45 +1586,26 @@ export class LocalSherpaNeuralEngine {
 
       canonicalSource.markInferenceStarted();
 
-      for (let i = 0; i < ranges.length; i++) {
-        if (request.signal?.aborted) {
-          throw new Error('TRANSCRIPTION_CANCELLED');
-        }
-        const range = ranges[i];
-        const chunkWavPath = path.join(tempDir, `chunk_${i}.wav`);
-        await canonicalSource.exportCanonicalChunkWavToFile(
-          range.startSample,
-          range.endSample,
-          chunkWavPath,
-          request.signal,
-        );
+      // Prefer one persistent Sherpa Python recognizer for all CTC chunks when the
+      // official local Python binding is installed. Packaged installs without it
+      // retain the native CLI path; inference remains CPU-only and offline either way.
+      let persistentWorker: PersistentSherpaPythonWorkerSession | null = null;
+      if (model.architecture === 'nemo-ctc') {
+        persistentWorker = await startPersistentSherpaPythonWorker({
+          model,
+          numThreads,
+          signal: request.signal,
+          memoryTracker,
+          readChildRssBytes: (pid) => this.readChildProcessRssBytes(pid),
+        });
+      }
 
+      const appendDecodedChunk = (index: number, out: SherpaJsonOutput) => {
+        const range = ranges[index];
         const chunkStartSec = Number((range.startSample / sampleRate).toFixed(3));
         const chunkEndSec = Number((range.endSample / sampleRate).toFixed(3));
-
-        let out: SherpaJsonOutput;
-        try {
-          out = await this.runSherpaSingleWav({
-            binaryPath,
-            libDir,
-            model,
-            wavPath: chunkWavPath,
-            languageHint,
-            numThreads,
-            signal: request.signal,
-            memoryTracker,
-          });
-        } finally {
-          // Clean up chunk WAV immediately after child process terminates to keep temp disk usage O(1)
-          try {
-            fs.unlinkSync(chunkWavPath);
-          } catch {
-            // ignore
-          }
-        }
-
         const segText = String(out.text ?? '').trim();
-        const words = buildWordTimingsFromTokens(out.tokens, out.timestamps, chunkStartSec, chunkEndSec);
+        const words = buildWordTimingsFromTokens(out.tokens, out.timestamps, out.durations, chunkStartSec, chunkEndSec);
         if (words.length > 0) hasAnyWordTimestamps = true;
 
         const langTag: DetectedLanguageTag =
@@ -1088,8 +1614,8 @@ export class LocalSherpaNeuralEngine {
             : detectTextLanguageTag(segText).language;
 
         segments.push({
-          id: `seg_${i}`,
-          index: i,
+          id: `seg_${index}`,
+          index,
           startSec: chunkStartSec,
           endSec: chunkEndSec,
           text: segText,
@@ -1098,15 +1624,70 @@ export class LocalSherpaNeuralEngine {
           timestampGranularity: words.length > 0 ? 'WORD' : 'SEGMENT',
           words,
         });
-
-        const pct = Math.min(100, Math.round(((i + 1) / ranges.length) * 100));
+        const pct = Math.min(100, Math.round(((index + 1) / ranges.length) * 100));
         request.onProgress?.({
           percent: pct,
-          currentChunk: i + 1,
+          currentChunk: index + 1,
           totalChunks: ranges.length,
           elapsedMs: Math.round(performance.now() - t0),
-          partialText: segments.map((s) => s.text).filter(Boolean).join(' ').trim(),
+          partialText: segments.map((segment) => segment.text).filter(Boolean).join(' ').trim(),
         });
+      };
+
+      try {
+        if (persistentWorker) {
+          // Python binding keeps the recognizer and model resident while each WAV is
+          // decoded and released before the next chunk, bounding working audio memory.
+          for (let i = 0; i < ranges.length; i++) {
+            if (request.signal?.aborted) throw new Error('TRANSCRIPTION_CANCELLED');
+            const range = ranges[i];
+            const chunkWavPath = path.join(tempDir, `chunk_${i}.wav`);
+            await canonicalSource.exportCanonicalChunkWavToFile(
+              range.startSample,
+              range.endSample,
+              chunkWavPath,
+              request.signal,
+            );
+            try {
+              const out = await persistentWorker.transcribe(chunkWavPath);
+              appendDecodedChunk(i, out);
+            } finally {
+              try { fs.unlinkSync(chunkWavPath); } catch { /* best effort cleanup */ }
+            }
+          }
+        } else {
+          // Native CLI fallback: its batch mode also loads the model exactly once.
+          // Chunk WAVs are file-backed; no full-recording PCM is materialized in Node.
+          const chunkWavPaths: string[] = [];
+          for (let i = 0; i < ranges.length; i++) {
+            if (request.signal?.aborted) throw new Error('TRANSCRIPTION_CANCELLED');
+            const chunkWavPath = path.join(tempDir, `chunk_${i}.wav`);
+            const range = ranges[i];
+            await canonicalSource.exportCanonicalChunkWavToFile(
+              range.startSample,
+              range.endSample,
+              chunkWavPath,
+              request.signal,
+            );
+            chunkWavPaths.push(chunkWavPath);
+          }
+          const batchResults = await this.runSherpaBatchWavs({
+            binaryPath,
+            libDir,
+            model,
+            wavPaths: chunkWavPaths,
+            languageHint,
+            numThreads,
+            signal: request.signal,
+            memoryTracker,
+          });
+          for (let i = 0; i < batchResults.length; i++) {
+            if (request.signal?.aborted) throw new Error('TRANSCRIPTION_CANCELLED');
+            appendDecodedChunk(i, batchResults[i]);
+          }
+        }
+      } finally {
+        await persistentWorker?.close();
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);

@@ -23,6 +23,33 @@ const MAX_DECODED_DURATION_SEC = 7200; // 2 hours max decoded audio per request
 const MAX_DECODED_PCM_BYTES = 128 * 1024 * 1024; // 128 MB hard cap on decoded raw PCM output
 const TARGET_SR = 16_000;
 
+function resolveFfmpegBinary(): string {
+  return process.env.FFMPEG_BINARY_PATH?.trim() || 'ffmpeg';
+}
+
+function resolveFfprobeBinary(): string {
+  return process.env.FFPROBE_BINARY_PATH?.trim() || 'ffprobe';
+}
+
+let cachedSoxrAvailability: boolean | null = null;
+
+function resolveResamplerFilter(): string {
+  if (cachedSoxrAvailability === null) {
+    try {
+      execFileSync(
+        resolveFfmpegBinary(),
+        ['-hide_banner', '-v', 'error', '-f', 'lavfi', '-i', 'anullsrc=r=16000:cl=mono', '-t', '0.01', '-af', 'aresample=resampler=soxr:precision=28', '-f', 'null', '-'],
+        { stdio: 'ignore', timeout: 3000 },
+      );
+      cachedSoxrAvailability = true;
+    } catch {
+      cachedSoxrAvailability = false;
+    }
+  }
+  // SoXR is preferred for high-quality resampling; fall back to FFmpeg's built-in SWR when the binary lacks libsoxr.
+  return cachedSoxrAvailability ? 'aresample=resampler=soxr:precision=28' : 'aresample=resampler=swr';
+}
+
 export function detectAudioContainerFormat(bytes: Buffer, filename = ''): AudioContainerFormat {
   if (bytes.length >= 12) {
     const riff = bytes.subarray(0, 4).toString('ascii');
@@ -55,7 +82,7 @@ export function detectAudioContainerFormat(bytes: Buffer, filename = ''): AudioC
 
 export function isFfmpegAvailable(): boolean {
   try {
-    execFileSync('ffmpeg', ['-version'], { stdio: 'ignore', timeout: 3000 });
+    execFileSync(resolveFfmpegBinary(), ['-version'], { stdio: 'ignore', timeout: 3000 });
     return true;
   } catch {
     return false;
@@ -69,7 +96,7 @@ export function probeAudioStreamInfo(filePath: string): {
 } {
   try {
     const raw = execFileSync(
-      'ffprobe',
+      resolveFfprobeBinary(),
       [
         '-v',
         'error',
@@ -411,7 +438,7 @@ export function ingestAudioBufferToCanonical16kMono(params: {
 
     // Decode via ffmpeg at 16kHz with strict duration & output size caps
     execFileSync(
-      'ffmpeg',
+      resolveFfmpegBinary(),
       [
         '-y',
         '-v',
@@ -424,7 +451,7 @@ export function ingestAudioBufferToCanonical16kMono(params: {
         '-fs',
         String(MAX_DECODED_PCM_BYTES),
         '-af',
-        'aresample=resampler=soxr:precision=28',
+        resolveResamplerFilter(),
         '-acodec',
         'pcm_s16le',
         '-ar',
@@ -496,7 +523,7 @@ export function ingestAudioBufferToCanonical16kMono(params: {
 }
 
 async function runProcessWithPipeBytes(params: {
-  readonly bin: 'ffmpeg' | 'ffprobe';
+  readonly bin: string;
   readonly args: readonly string[];
   readonly stdinBytes?: Buffer;
   readonly maxStdoutBytes: number;
@@ -603,7 +630,7 @@ async function probeAudioStreamInfoAsync(params: {
   try {
     const targetArg = params.inputSource.kind === 'pipe' ? 'pipe:0' : params.inputSource.filePath;
     const { stdout } = await runProcessWithPipeBytes({
-      bin: 'ffprobe',
+      bin: resolveFfprobeBinary(),
       args: [
         '-v',
         'error',
@@ -694,7 +721,7 @@ export async function ingestAudioBufferToCanonical16kMonoAsync(params: {
     '-t',
     String(MAX_DECODED_DURATION_SEC),
     '-af',
-    'aresample=resampler=soxr:precision=28',
+    resolveResamplerFilter(),
     '-acodec',
     'pcm_f32le',
     '-ar',
@@ -717,7 +744,7 @@ export async function ingestAudioBufferToCanonical16kMonoAsync(params: {
     });
     const pChannels = probed.channels === 2 ? 2 : 1;
     const { stdout } = await runProcessWithPipeBytes({
-      bin: 'ffmpeg',
+      bin: resolveFfmpegBinary(),
       args: buildFfmpegArgs('pipe:0', pChannels),
       stdinBytes: rawBytes,
       maxStdoutBytes: maxFloatStdoutBytes,
@@ -754,7 +781,7 @@ export async function ingestAudioBufferToCanonical16kMonoAsync(params: {
         });
         probeChannels = streamInfo.channels === 2 ? 2 : 1;
         const { stdout } = await runProcessWithPipeBytes({
-          bin: 'ffmpeg',
+          bin: resolveFfmpegBinary(),
           args: buildFfmpegArgs(inputPath, probeChannels),
           maxStdoutBytes: maxFloatStdoutBytes,
           timeoutMs: 25_000,
@@ -791,7 +818,7 @@ export async function ingestAudioBufferToCanonical16kMonoAsync(params: {
         });
         probeChannels = streamInfo.channels === 2 ? 2 : 1;
         const { stdout } = await runProcessWithPipeBytes({
-          bin: 'ffmpeg',
+          bin: resolveFfmpegBinary(),
           args: buildFfmpegArgs(inputPath, probeChannels),
           maxStdoutBytes: maxFloatStdoutBytes,
           timeoutMs: 25_000,
@@ -880,7 +907,7 @@ export function encodeFloat32ToContainerWithFfmpeg(
                 : ['-acodec', 'libopus', '-b:a', '64k'];
 
     execFileSync(
-      'ffmpeg',
+      resolveFfmpegBinary(),
       ['-y', '-v', 'error', '-f', 's16le', '-ar', String(sampleRate), '-ac', '1', '-i', pcmPath, ...codecArgs, outPath],
       { timeout: 15_000 },
     );

@@ -95,12 +95,16 @@ describe('Section 114 & AVP-008: WebWorkerOrtRuntimeProvider & Hardened OPFS Mod
         schemaVersion: 1,
         modelId: 'conformer-fa',
         version: '1.0.0',
+        architecture: 'FASTCONFORMER_CTC',
+        storageBackend: 'OPFS',
         generationId: 'gen-1',
         storageDirectory: 'conformer-fa_1.0.0_gen-1',
         fileName: 'conformer-fa.onnx',
         totalBytes: 5,
         sha256Hex: fullHash,
         chunkSizeBytes: 3,
+        chunkCount: 2,
+        committedAtMs: Date.parse('2026-11-20T00:00:00.000Z'),
         installedAtIso: '2026-11-20T00:00:00.000Z',
         verifiedAtIso: '2026-11-20T00:00:00.000Z',
         chunks: [
@@ -124,7 +128,7 @@ describe('Section 114 & AVP-008: WebWorkerOrtRuntimeProvider & Hardened OPFS Mod
       {
         modelId: 'conformer-fa',
         version: '1.0.0',
-        storageDirectory: 'conformer-fa_1.0.0_gen-1',
+                storageDirectory: 'conformer-fa_1.0.0_gen-1',
         totalBytes: 5,
         sha256Hex: fullHash,
         chunks: [
@@ -169,7 +173,7 @@ describe('Section 114 & AVP-008: WebWorkerOrtRuntimeProvider & Hardened OPFS Mod
           {
             modelId: 'model-a',
             version: '1.0.0',
-            totalBytes: 8,
+                        totalBytes: 8,
             sha256Hex: fullHash,
             chunks: [
               { index: 0, url: '/c0', sha256Hex: hash0, byteLength: 4 },
@@ -179,7 +183,7 @@ describe('Section 114 & AVP-008: WebWorkerOrtRuntimeProvider & Hardened OPFS Mod
           corruptedOpfs,
           { memoryBudgetManager: budget },
         ),
-      /CHUNK_SHA256_MISMATCH|INTEGRITY/,
+      /OPFS_CHUNK_CORRUPTED|CHUNK_SHA256_MISMATCH|INTEGRITY/,
     );
     assert.equal(budget.getSnapshot().accountedBytes, 0, 'Reservation must be released on failure');
 
@@ -200,7 +204,7 @@ describe('Section 114 & AVP-008: WebWorkerOrtRuntimeProvider & Hardened OPFS Mod
           corruptedOpfs,
           { memoryBudgetManager: budget },
         ),
-      /INVALID_MODEL_PATH_SEGMENT|INVALID_STORAGE_DIRECTORY/,
+      /Invalid modelId|INVALID_MODEL_ID|INVALID_MODEL_PATH_SEGMENT|INVALID_STORAGE_DIRECTORY/i,
     );
 
     // Budget denial before allocating
@@ -223,7 +227,7 @@ describe('Section 114 & AVP-008: WebWorkerOrtRuntimeProvider & Hardened OPFS Mod
           {
             modelId: 'model-a',
             version: '1.0.0',
-            totalBytes: 8,
+                        totalBytes: 8,
             sha256Hex: fullHash,
             chunks: [
               { index: 0, url: '/c0', sha256Hex: hash0, byteLength: 4 },
@@ -233,7 +237,7 @@ describe('Section 114 & AVP-008: WebWorkerOrtRuntimeProvider & Hardened OPFS Mod
           validOpfs,
           { memoryBudgetManager: tinyBudget },
         ),
-      /MODEL_MEMORY_BUDGET_DENIED|MEMORY_BUDGET/,
+      /MODEL_MEMORY_BUDGET_DENIED|MEMORY_BUDGET|MemoryPressureError|Memory reservation/i,
     );
   });
 

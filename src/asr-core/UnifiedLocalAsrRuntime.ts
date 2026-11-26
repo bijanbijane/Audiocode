@@ -360,6 +360,7 @@ export class LocalAsrRuntimeResolver {
     readonly preference: RuntimeSelectionPreference;
     readonly requestedCloudMode?: boolean;
     readonly preferBrowserWhenModelInstalled?: boolean;
+    readonly preferNativeCompanionWhenReady?: boolean;
     readonly hasBrowserInstalledModel?: boolean;
   }): Promise<RuntimeResolutionResult> {
     if (params.requestedCloudMode || !AVAPARDAZ_LOCAL_EXECUTION_POLICY.localOnlyEnforced) {
@@ -423,6 +424,21 @@ export class LocalAsrRuntimeResolver {
         reason: 'NATIVE_COMPANION_RUNTIME_SELECTED',
         checkedTargets,
       };
+    }
+
+    // Product policy can prefer the installed/native Companion engine (SHAHAB Koochik)
+    // while retaining Browser WASM as an automatic fallback if the local service is unavailable.
+    if (params.preferNativeCompanionWhenReady && this.adapters.nativeCompanion) {
+      checkedTargets.push(this.adapters.nativeCompanion.runtimeTarget);
+      const health = await this.adapters.nativeCompanion.getHealth();
+      if (health.runtimeReady) {
+        return {
+          selectedAdapter: this.adapters.nativeCompanion,
+          selectedTarget: this.adapters.nativeCompanion.runtimeTarget,
+          reason: 'AUTO_LOCAL_SELECTED_NATIVE_COMPANION_PRIMARY',
+          checkedTargets,
+        };
+      }
     }
 
     // AUTO_LOCAL: If a local browser model is installed, prefer independent Browser Local Runtime first

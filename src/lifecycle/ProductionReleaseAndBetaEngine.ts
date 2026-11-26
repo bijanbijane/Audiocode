@@ -47,6 +47,7 @@ import path from 'node:path';
 import {
   KNOWN_MODEL_ARTIFACT_PROVENANCE,
   verifyModelFilesIntegrity,
+  verifyShahabKoochikModelFiles,
 } from '../asr-core/LocalSherpaNeuralEngine';
 import { sanitizeLogPayload } from '../security/LocalPrivacyPolicy';
 import {
@@ -60,19 +61,19 @@ export const AVAPARDAZ_BETA_RELEASE_IDENTITY = Object.freeze({
   isStableRelease: false,
   appVersion: '2.0.0-beta.1',
   betaVersion: '2.0.0-beta.1',
-  buildId: 'avp-20261123-phase1ci-beta1',
-  commitHash: '53443caef656db4bc6e57edad7927ee8106067ca',
+  buildId: process.env.AVAPARDAZ_BUILD_ID?.trim() || 'LOCAL_UNBUILT_WORKTREE',
+  commitHash: process.env.AVAPARDAZ_GIT_COMMIT?.trim() || 'UNBUILT',
   pluginVersion: '1.0.0',
   companionVersion: '1.0.0',
   asrCoreVersion: '2.0.0',
-  nativeRuntimeVersion: 'sherpa-onnx-v2.0.2',
-  modelId: 'Reza2kn/Shenava-Rizeh',
+  nativeRuntimeVersion: 'sherpa-onnx-v2.0.3',
+  modelId: 'Reza2kn/Shenava-Koochik-v1.0-sherpa-onnx',
   modelVersion: '1.0.0',
   ipcProtocolVersion: '1.0.0',
   extensionBundleId: 'ir.avapardaz.audition.cep',
   primaryTargetPlatform: 'darwin-arm64 (macOS Apple Silicon M2 / 8 GB Unified Memory)',
   supportedPlatforms: ['darwin-arm64', 'linux-x64'] as const,
-  buildDateIso: '2026-11-23T00:00:00.000Z',
+  buildDateIso: new Date().toISOString(),
 });
 
 export type FirstRunTerminalStatus =
@@ -120,6 +121,7 @@ export interface InstalledDirectoryLayout {
   readonly runtimeLibDir: string;
   readonly modelsDir: string;
   readonly shenavaModelDir: string;
+  readonly shahabKoochikModelDir: string;
   readonly cepExtensionDir: string;
   readonly configDir: string;
   readonly userDataDir: string;
@@ -151,6 +153,7 @@ export function resolveInstalledDirectoryLayout(
       'models',
       'sherpa-onnx-nemo-ctc-fa-shenava-rizeh-v1.0-non-streaming-int8-2026-06-26',
     ),
+    shahabKoochikModelDir: path.join(root, 'models', 'shahab-koochik-v1.0-sherpa-onnx'),
     cepExtensionDir: customCepExtensionDir
       ? path.resolve(customCepExtensionDir)
       : path.join(root, 'cep-extension', AVAPARDAZ_BETA_RELEASE_IDENTITY.extensionBundleId),
@@ -440,12 +443,26 @@ export function evaluateInstalledFirstRunStatus(params: {
   }
 
   // 4. Check Native Sherpa Runtime binaries & shared libraries
-  const offlineBin = path.join(layout.runtimeBinDir, 'sherpa-onnx-offline');
+  const offlineBinCandidates = [
+    path.join(layout.runtimeBinDir, 'sherpa-onnx-offline'),
+    path.join(layout.runtimeDir, 'sherpa-venv', 'bin', 'sherpa-onnx-offline'),
+    path.join(layout.runtimeDir, 'sherpa-venv', 'bin', 'sherpa-onnx-offline.exe'),
+  ];
+  const offlineBin = offlineBinCandidates.find((candidate) => fs.existsSync(candidate)) ?? offlineBinCandidates[0];
   const streamingBridgeBin = path.join(layout.runtimeBinDir, 'sherpa-onnx-streaming-bridge');
-  const cApiLibLinux = path.join(layout.runtimeLibDir, 'libsherpa-onnx-c-api.so');
-  const cApiLibMac = path.join(layout.runtimeLibDir, 'libsherpa-onnx-c-api.dylib');
-  const ortLibLinux = path.join(layout.runtimeLibDir, 'libonnxruntime.so');
-  const ortLibMac = path.join(layout.runtimeLibDir, 'libonnxruntime.dylib');
+  const runtimeLibraryDirs = [
+    layout.runtimeLibDir,
+    ...['3.11', '3.12', '3.13'].flatMap((version) => [
+      path.join(layout.runtimeDir, 'lib', `python${version}`, 'site-packages', 'sherpa_onnx', 'lib'),
+      path.join(layout.runtimeDir, 'sherpa-venv', 'lib', `python${version}`, 'site-packages', 'sherpa_onnx', 'lib'),
+    ]),
+  ];
+  const hasOnnxRuntimeLibrary = runtimeLibraryDirs.some((dir) =>
+    ['libonnxruntime.so', 'libonnxruntime.dylib', 'onnxruntime.dll'].some((name) => fs.existsSync(path.join(dir, name))),
+  );
+  const hasSherpaCApiLibrary = runtimeLibraryDirs.some((dir) =>
+    ['libsherpa-onnx-c-api.so', 'libsherpa-onnx-c-api.dylib', 'sherpa-onnx-c-api.dll'].some((name) => fs.existsSync(path.join(dir, name))),
+  );
 
   let nativeBinExecutable = false;
   try {
@@ -455,11 +472,8 @@ export function evaluateInstalledFirstRunStatus(params: {
     nativeBinExecutable = false;
   }
 
-  const hasSharedLibs =
-    (fs.existsSync(cApiLibLinux) || fs.existsSync(cApiLibMac)) &&
-    (fs.existsSync(ortLibLinux) || fs.existsSync(ortLibMac));
-
-  const nativeSherpaReady = nativeBinExecutable && hasSharedLibs;
+  // The offline CLI requires ONNX Runtime; the separate Sherpa C API bridge is optional.
+  const nativeSherpaReady = nativeBinExecutable && hasOnnxRuntimeLibrary;
   if (!nativeSherpaReady) {
     return {
       status: 'RUNTIME_ERROR',
@@ -479,15 +493,30 @@ export function evaluateInstalledFirstRunStatus(params: {
       details: {
         offlineBinExists: fs.existsSync(offlineBin),
         streamingBridgeExists: fs.existsSync(streamingBridgeBin),
-        hasSharedLibs,
+        hasOnnxRuntimeLibrary,
+        hasSherpaCApiLibrary,
+        runtimeLibraryDirs,
       },
     };
   }
 
-  // 5. Check ASR Model existence and SHA-256 integrity
-  const modelOnnxPath = path.join(layout.shenavaModelDir, 'model.int8.onnx');
-  const tokensPath = path.join(layout.shenavaModelDir, 'tokens.txt');
-  const modelInstalled = fs.existsSync(modelOnnxPath) && fs.existsSync(tokensPath);
+  // 5. Check the primary Koochik model first, retaining the smaller Rizeh INT8 fallback.
+  const koochikModelOnnxPath = path.join(layout.shahabKoochikModelDir, 'model.onnx');
+  const koochikTokensPath = path.join(layout.shahabKoochikModelDir, 'tokens.txt');
+  const koochikPresent = fs.existsSync(koochikModelOnnxPath) && fs.existsSync(koochikTokensPath);
+  const koochikVerified = koochikPresent && verifyShahabKoochikModelFiles(layout.shahabKoochikModelDir);
+  const rizehModelOnnxPath = path.join(layout.shenavaModelDir, 'model.int8.onnx');
+  const rizehTokensPath = path.join(layout.shenavaModelDir, 'tokens.txt');
+  const rizehPresent = fs.existsSync(rizehModelOnnxPath) && fs.existsSync(rizehTokensPath);
+  const rizehVerified = rizehPresent && verifyModelFilesIntegrity([rizehModelOnnxPath, rizehTokensPath]);
+  const selectedModelId = koochikVerified
+    ? 'Reza2kn/Shenava-Koochik-v1.0-sherpa-onnx'
+    : rizehVerified
+      ? 'Reza2kn/Shenava-Rizeh'
+      : null;
+  const modelInstalled = koochikPresent || rizehPresent;
+  const modelIntegrityVerified = selectedModelId !== null;
+  const selectedModelDirectory = koochikVerified ? layout.shahabKoochikModelDir : layout.shenavaModelDir;
 
   if (!modelInstalled) {
     return {
@@ -503,13 +532,12 @@ export function evaluateInstalledFirstRunStatus(params: {
       tempSpaceAvailable: true,
       userMessageFa: 'مدل تشخیص گفتار فارسی روی سیستم نصب نشده است.',
       remediationStepsFa: [
-        'بسته مدل آفلاین فارسی (Shenava-Rizeh INT8) را از طریق نصب‌کننده یا گزینه نصب مدل وارد کنید.',
+        'بسته مدل اصلی فارسی Shenava Koochik را نصب کنید؛ در صورت نیاز، مدل سبک‌تر Shenava-Rizeh نیز به‌عنوان جایگزین پشتیبانی می‌شود.',
       ],
-      details: { shenavaModelDir: layout.shenavaModelDir },
+      details: { shahabKoochikModelDir: layout.shahabKoochikModelDir, shenavaModelDir: layout.shenavaModelDir },
     };
   }
 
-  const modelIntegrityVerified = verifyModelFilesIntegrity([modelOnnxPath, tokensPath]);
   if (!modelIntegrityVerified) {
     return {
       status: 'MODEL_INVALID',
@@ -526,7 +554,7 @@ export function evaluateInstalledFirstRunStatus(params: {
       remediationStepsFa: [
         'نصب‌کننده آواپرداز را اجرا کنید تا مدل سالم جایگزین فایل ناقص شود.',
       ],
-      details: { modelOnnxPath, tokensPath },
+      details: { koochikPresent, rizehPresent, shahabKoochikModelDir: layout.shahabKoochikModelDir, shenavaModelDir: layout.shenavaModelDir },
     };
   }
 
@@ -789,9 +817,14 @@ export class AvapardazProductionInstaller {
         throw new Error(`NATIVE_RUNTIME_SOURCE_MISSING: ${params.sources.runtimeDir}`);
       }
       copyDirectoryRecursiveSync(params.sources.runtimeDir, stageRuntimeDir);
-      const stagedOfflineBin = path.join(stageRuntimeDir, 'bin', 'sherpa-onnx-offline');
-      if (!fs.existsSync(stagedOfflineBin)) {
-        throw new Error('NATIVE_RUNTIME_BINARY_MISSING: sherpa-onnx-offline not found in package.');
+      const stagedOfflineBinCandidates = [
+        path.join(stageRuntimeDir, 'bin', 'sherpa-onnx-offline'),
+        path.join(stageRuntimeDir, 'sherpa-venv', 'bin', 'sherpa-onnx-offline'),
+        path.join(stageRuntimeDir, 'sherpa-venv', 'bin', 'sherpa-onnx-offline.exe'),
+      ];
+      const stagedOfflineBin = stagedOfflineBinCandidates.find((candidate) => fs.existsSync(candidate));
+      if (!stagedOfflineBin) {
+        throw new Error('NATIVE_RUNTIME_BINARY_MISSING: sherpa-onnx-offline not found in legacy or lean runtime package layout.');
       }
       fs.chmodSync(stagedOfflineBin, 0o755);
       const stagedBridgeBin = path.join(stageRuntimeDir, 'bin', 'sherpa-onnx-streaming-bridge');
@@ -811,57 +844,78 @@ export class AvapardazProductionInstaller {
         messageFa: 'موتور بومی Sherpa-ONNX و کتابخانه‌های پردازش صوت نصب شدند.',
       });
 
-      // Step 6: Verify & Install Local ASR Model (never overwrite a healthy installed model with a corrupt one!)
-      const existingModelOnnx = path.join(layout.shenavaModelDir, 'model.int8.onnx');
-      const existingModelTokens = path.join(layout.shenavaModelDir, 'tokens.txt');
-      const existingModelHealthy =
-        fs.existsSync(existingModelOnnx) &&
-        fs.existsSync(existingModelTokens) &&
-        verifyModelFilesIntegrity([existingModelOnnx, existingModelTokens]);
+      // Step 6: Verify & Install the primary Koochik model, retaining Rizeh as a fallback.
+      const existingKoochikHealthy = verifyShahabKoochikModelFiles(layout.shahabKoochikModelDir);
+      const existingRizehOnnx = path.join(layout.shenavaModelDir, 'model.int8.onnx');
+      const existingRizehTokens = path.join(layout.shenavaModelDir, 'tokens.txt');
+      const existingRizehHealthy =
+        fs.existsSync(existingRizehOnnx) &&
+        fs.existsSync(existingRizehTokens) &&
+        verifyModelFilesIntegrity([existingRizehOnnx, existingRizehTokens]);
+      let selectedInstalledModelId = existingKoochikHealthy
+        ? 'Reza2kn/Shenava-Koochik-v1.0-sherpa-onnx'
+        : existingRizehHealthy
+          ? 'Reza2kn/Shenava-Rizeh'
+          : null;
 
       if (!params.skipModelInstall && params.sources.modelDir) {
-        const srcOnnx = path.join(params.sources.modelDir, 'model.int8.onnx');
-        const srcTokens = path.join(params.sources.modelDir, 'tokens.txt');
-        const candidateModelValid =
-          fs.existsSync(srcOnnx) &&
-          fs.existsSync(srcTokens) &&
-          verifyModelFilesIntegrity([srcOnnx, srcTokens]);
+        const sourceModelDir = path.resolve(params.sources.modelDir);
+        const candidateKoochikValid = verifyShahabKoochikModelFiles(sourceModelDir);
+        const candidateRizehOnnx = path.join(sourceModelDir, 'model.int8.onnx');
+        const candidateRizehTokens = path.join(sourceModelDir, 'tokens.txt');
+        const candidateRizehValid =
+          fs.existsSync(candidateRizehOnnx) &&
+          fs.existsSync(candidateRizehTokens) &&
+          verifyModelFilesIntegrity([candidateRizehOnnx, candidateRizehTokens]);
 
-        if (!candidateModelValid) {
+        if (!candidateKoochikValid && !candidateRizehValid) {
           throw new Error(
-            'MODEL_PACKAGE_CORRUPT: Candidate ASR model failed SHA-256 integrity check; installation aborted before activating corrupt model.',
+            'MODEL_PACKAGE_CORRUPT: Candidate Koochik or Rizeh model failed pinned SHA-256 integrity verification; installation aborted.',
           );
         }
+
+        const selectedSourceModelId = candidateKoochikValid
+          ? 'Reza2kn/Shenava-Koochik-v1.0-sherpa-onnx'
+          : 'Reza2kn/Shenava-Rizeh';
+        const selectedSourceModelDir = candidateKoochikValid
+          ? layout.shahabKoochikModelDir
+          : layout.shenavaModelDir;
+        const alreadyHealthy = candidateKoochikValid ? existingKoochikHealthy : existingRizehHealthy;
 
         if (params.failMidInstallAfterStep === 'MODEL') {
           throw new Error('SIMULATED_MID_INSTALL_INTERRUPTION_AT_MODEL');
         }
 
-        if (!existingModelHealthy) {
+        if (!alreadyHealthy) {
           const stageModelDir = path.join(stageRootDir, 'model_stage');
-          copyDirectoryRecursiveSync(params.sources.modelDir, stageModelDir);
+          copyDirectoryRecursiveSync(sourceModelDir, stageModelDir);
           fs.mkdirSync(layout.modelsDir, { recursive: true, mode: 0o755 });
-          fs.rmSync(layout.shenavaModelDir, { recursive: true, force: true });
-          fs.renameSync(stageModelDir, layout.shenavaModelDir);
+          // Replace only the selected model directory after the staged copy is complete.
+          // A healthy alternate model (Koochik or Rizeh) is never removed as a side effect.
+          fs.rmSync(selectedSourceModelDir, { recursive: true, force: true });
+          fs.renameSync(stageModelDir, selectedSourceModelDir);
         }
+        selectedInstalledModelId = selectedSourceModelId;
 
         wizardSteps.push({
           stepNumber: 6,
           stepId: 'MODEL_STATUS',
           titleFa: 'بررسی و نصب مدل تشخیص گفتار فارسی',
           status: 'COMPLETED',
-          messageFa: existingModelHealthy
-            ? 'مدل فارسی سالم قبلی شناسایی و بدون نیاز به کپی مجدد حفظ شد.'
-            : 'مدل فارسی Shenava-Rizeh INT8 با تایید SHA-256 نصب شد.',
+          messageFa: alreadyHealthy
+            ? `مدل سالم ${selectedSourceModelId} شناسایی و بدون کپی مجدد حفظ شد.`
+            : candidateKoochikValid
+              ? 'مدل اصلی فارسی Shenava Koochik FP32 با بررسی SHA-256 نصب شد.'
+              : 'مدل جایگزین سبک‌تر Shenava-Rizeh INT8 با بررسی SHA-256 نصب شد.',
         });
       } else {
         wizardSteps.push({
           stepNumber: 6,
           stepId: 'MODEL_STATUS',
           titleFa: 'بررسی مدل تشخیص گفتار فارسی',
-          status: existingModelHealthy ? 'COMPLETED' : 'WARNING',
-          messageFa: existingModelHealthy
-            ? 'مدل فارسی سالم قبلی در سیستم موجود است.'
+          status: selectedInstalledModelId ? 'COMPLETED' : 'WARNING',
+          messageFa: selectedInstalledModelId
+            ? `مدل سالم ${selectedInstalledModelId} در سیستم موجود است.`
             : 'مدل فارسی در این نصب انتخاب نشد؛ پس از نصب باید مدل آفلاین وارد شود.',
         });
       }
@@ -903,9 +957,13 @@ export class AvapardazProductionInstaller {
       const companionHash = computeFileSha256Sync(
         path.join(layout.companionDir, 'avapardaz-companion.mjs'),
       ).sha256;
-      const runtimeBinHash = computeFileSha256Sync(
+      const installedRuntimeBinary = [
         path.join(layout.runtimeBinDir, 'sherpa-onnx-offline'),
-      ).sha256;
+        path.join(layout.runtimeDir, 'sherpa-venv', 'bin', 'sherpa-onnx-offline'),
+        path.join(layout.runtimeDir, 'sherpa-venv', 'bin', 'sherpa-onnx-offline.exe'),
+      ].find((candidate) => fs.existsSync(candidate));
+      if (!installedRuntimeBinary) throw new Error('INSTALLED_SHERPA_BINARY_MISSING_AFTER_ACTIVATION');
+      const runtimeBinHash = computeFileSha256Sync(installedRuntimeBinary).sha256;
       const cepManifestHash = computeFileSha256Sync(
         path.join(layout.cepExtensionDir, 'CSXS', 'manifest.xml'),
       ).sha256;
@@ -923,7 +981,7 @@ export class AvapardazProductionInstaller {
         asrCoreVersion: AVAPARDAZ_BETA_RELEASE_IDENTITY.asrCoreVersion,
         nativeRuntimeVersion: AVAPARDAZ_BETA_RELEASE_IDENTITY.nativeRuntimeVersion,
         ipcProtocolVersion: AVAPARDAZ_BETA_RELEASE_IDENTITY.ipcProtocolVersion,
-        modelId: AVAPARDAZ_BETA_RELEASE_IDENTITY.modelId,
+        modelId: selectedInstalledModelId ?? AVAPARDAZ_BETA_RELEASE_IDENTITY.modelId,
         modelVersion: AVAPARDAZ_BETA_RELEASE_IDENTITY.modelVersion,
         platform,
         arch,
@@ -933,7 +991,7 @@ export class AvapardazProductionInstaller {
         offlineOnlyEnforced: true,
         componentChecksums: {
           'companion/avapardaz-companion.mjs': companionHash,
-          'runtime/bin/sherpa-onnx-offline': runtimeBinHash,
+          [path.relative(layout.installRoot, installedRuntimeBinary).split(path.sep).join('/')]: runtimeBinHash,
           'cep-extension/CSXS/manifest.xml': cepManifestHash,
         },
       };
@@ -975,7 +1033,7 @@ export class AvapardazProductionInstaller {
       });
 
       const nativeRuntimeBytes = computeDirectorySizeSync(layout.runtimeDir);
-      const modelBytes = computeDirectorySizeSync(layout.shenavaModelDir);
+      const modelBytes = computeDirectorySizeSync(layout.shahabKoochikModelDir) + computeDirectorySizeSync(layout.shenavaModelDir);
       const companionBytes = computeDirectorySizeSync(layout.companionDir);
       const cepPluginBytes = computeDirectorySizeSync(layout.cepExtensionDir);
       const appBytes = computeDirectorySizeSync(layout.appDir);
@@ -1091,7 +1149,9 @@ export class AvapardazPackageUpdateManager {
       case 'NATIVE_RUNTIME':
         return this.layout.runtimeDir;
       case 'ASR_MODEL':
-        return this.layout.shenavaModelDir;
+        return fs.existsSync(path.join(this.layout.shahabKoochikModelDir, 'model.onnx'))
+          ? this.layout.shahabKoochikModelDir
+          : this.layout.shenavaModelDir;
     }
   }
 
@@ -1782,11 +1842,40 @@ export function runCleanEnvironmentInstalledVerification(params: {
 } {
   const t0 = performance.now();
   const { layout } = params;
-  const binPath = path.join(layout.runtimeBinDir, 'sherpa-onnx-offline');
-  const modelOnnx = path.join(layout.shenavaModelDir, 'model.int8.onnx');
-  const tokensTxt = path.join(layout.shenavaModelDir, 'tokens.txt');
+  const binaryCandidates = [
+    path.join(layout.runtimeBinDir, 'sherpa-onnx-offline'),
+    path.join(layout.runtimeDir, 'sherpa-venv', 'bin', 'sherpa-onnx-offline'),
+    path.join(layout.runtimeDir, 'sherpa-venv', 'bin', 'sherpa-onnx-offline.exe'),
+  ];
+  const binPath = binaryCandidates.find((candidate) => fs.existsSync(candidate));
+  const koochikModel = path.join(layout.shahabKoochikModelDir, 'model.onnx');
+  const koochikTokens = path.join(layout.shahabKoochikModelDir, 'tokens.txt');
+  const rizehModel = path.join(layout.shenavaModelDir, 'model.int8.onnx');
+  const rizehTokens = path.join(layout.shenavaModelDir, 'tokens.txt');
+  const selectedModel = fs.existsSync(koochikModel) && fs.existsSync(koochikTokens)
+    ? { modelPath: koochikModel, tokensPath: koochikTokens, modelType: 'nemo_ctc' as const }
+    : fs.existsSync(rizehModel) && fs.existsSync(rizehTokens)
+      ? { modelPath: rizehModel, tokensPath: rizehTokens, modelType: 'nemo_ctc' as const }
+      : null;
 
-  if (!fs.existsSync(binPath) || !fs.existsSync(modelOnnx) || !fs.existsSync(tokensTxt)) {
+  const runtimeLibraryCandidates = [
+    layout.runtimeLibDir,
+    ...['3.11', '3.12', '3.13'].flatMap((version) => [
+      path.join(layout.runtimeDir, 'lib', `python${version}`, 'site-packages', 'sherpa_onnx', 'lib'),
+      path.join(layout.runtimeDir, 'sherpa-venv', 'lib', `python${version}`, 'site-packages', 'sherpa_onnx', 'lib'),
+    ]),
+  ];
+  const runtimeLibraryDir = runtimeLibraryCandidates.find((candidate) => {
+    try {
+      return fs.readdirSync(candidate).some((name) =>
+        /^(?:libonnxruntime\.(?:dylib|so(?:\.|$))|onnxruntime\.dll)$/.test(name),
+      );
+    } catch {
+      return false;
+    }
+  }) ?? layout.runtimeLibDir;
+
+  if (!binPath || !selectedModel || !fs.existsSync(params.sampleWavPath)) {
     return {
       ok: false,
       nativeSherpaExitCode: null,
@@ -1798,7 +1887,7 @@ export function runCleanEnvironmentInstalledVerification(params: {
     };
   }
 
-  // Copy sample WAV into installed tempDir so child process touches zero files in the source repo
+  // Copy sample WAV into installed tempDir so child process touches zero files in the source repo.
   fs.mkdirSync(layout.tempDir, { recursive: true, mode: 0o700 });
   const isolatedWavPath = path.join(layout.tempDir, 'clean_env_verify.wav');
   fs.copyFileSync(params.sampleWavPath, isolatedWavPath);
@@ -1808,8 +1897,8 @@ export function runCleanEnvironmentInstalledVerification(params: {
       HOME: layout.userDataDir,
       TMPDIR: layout.tempDir,
       PATH: '/usr/bin:/bin',
-      LD_LIBRARY_PATH: layout.runtimeLibDir,
-      DYLD_LIBRARY_PATH: layout.runtimeLibDir,
+      LD_LIBRARY_PATH: runtimeLibraryDir,
+      DYLD_LIBRARY_PATH: runtimeLibraryDir,
       http_proxy: 'http://127.0.0.1:9',
       https_proxy: 'http://127.0.0.1:9',
       HTTP_PROXY: 'http://127.0.0.1:9',
@@ -1821,9 +1910,12 @@ export function runCleanEnvironmentInstalledVerification(params: {
     const res = spawnSync(
       binPath,
       [
-        `--nemo-ctc-model=${modelOnnx}`,
-        `--tokens=${tokensTxt}`,
+        `--model-type=${selectedModel.modelType}`,
+        `--nemo-ctc-model=${selectedModel.modelPath}`,
+        `--tokens=${selectedModel.tokensPath}`,
         '--num-threads=2',
+        '--debug=false',
+        '--print-args=false',
         isolatedWavPath,
       ],
       {
@@ -1831,12 +1923,13 @@ export function runCleanEnvironmentInstalledVerification(params: {
         env: isolatedEnv,
         encoding: 'utf8',
         timeout: 30_000,
+        maxBuffer: 4 * 1024 * 1024,
       },
     );
 
     const combinedOut = `${res.stdout ?? ''}\n${res.stderr ?? ''}`;
     let recognizedText = '';
-    for (const line of combinedOut.split('\n')) {
+    for (const line of combinedOut.split(/\r?\n/)) {
       const trimmed = line.trim();
       if (trimmed.startsWith('{') && trimmed.endsWith('}')) {
         try {
@@ -1845,7 +1938,7 @@ export function runCleanEnvironmentInstalledVerification(params: {
             recognizedText = parsed.text.trim();
           }
         } catch {
-          // ignore
+          // Non-JSON progress lines are ignored; inference exit status remains authoritative.
         }
       }
     }

@@ -1,3 +1,6 @@
+import { streamPcmSourceAsCanonicalWav } from '../../asr-core/StreamingCanonicalPcmWav';
+import type { NativeCompanionAudioSourceRequest } from '../../asr-core/NativeCompanionTransport';
+
 /**
  * AVAPARDAZ — BROWSER CLIENT FOR SHARED LOCAL COMPANION SERVICE
  *
@@ -423,6 +426,203 @@ export class CompanionWebClient {
     }
   }
 
+  /**
+   * Streams a source range-reader into Companion's file-backed transfer protocol.
+   * The browser never creates a full-recording PCM array or WAV ArrayBuffer.
+   */
+  public async transcribeAudioSource(
+    params: NativeCompanionAudioSourceRequest,
+  ): Promise<CompanionTranscriptionResult> {
+    if (params.signal?.aborted) throw new Error('TRANSCRIPTION_CANCELLED');
+    if (!Number.isInteger(params.sampleRate) || params.sampleRate < 8_000 || params.sampleRate > 192_000) {
+      throw new Error('INVALID_SOURCE_SAMPLE_RATE');
+    }
+    if (!Number.isSafeInteger(params.totalSamples) || params.totalSamples <= 0) {
+      throw new Error('INVALID_SOURCE_SAMPLE_COUNT');
+    }
+
+    const safeFilename = params.filename.endsWith('.wav') ? params.filename : `${params.filename}.wav`;
+    const outputSamples = Math.floor(params.totalSamples / (params.sampleRate / 16_000));
+    const expectedBytes = 44 + outputSamples * 4;
+    const totalChunks = Math.ceil(expectedBytes / UPLOAD_CHUNK_BYTES);
+    const startedAt = performance.now();
+
+    const initialized = await this.sendIpc<{
+      ok: boolean;
+      transferId?: string;
+      code?: string;
+      message?: string;
+    }>(
+      'CAPABILITY_EXECUTE',
+      {
+        action: 'AUDIO_TRANSFER_INIT',
+        filename: safeFilename,
+        format: 'wav',
+        sampleRateHz: 16_000,
+        channels: 1,
+        endianness: 'little',
+        expectedBytes,
+        expectedFrames: outputSamples,
+        totalChunks,
+      },
+      params.signal,
+    );
+    if (!initialized.ok || !initialized.transferId) {
+      throw new Error(initialized.message || initialized.code || 'AUDIO_TRANSFER_INIT_FAILED');
+    }
+
+    const transferId = initialized.transferId;
+    let transferFinalized = false;
+    let submittedJobId: string | null = null;
+    let uploadBuffer = new Uint8Array(UPLOAD_CHUNK_BYTES);
+    let uploadBufferUsed = 0;
+    let chunksSent = 0;
+
+    const flushUploadChunk = async () => {
+      if (uploadBufferUsed === 0) return;
+      if (params.signal?.aborted) throw new Error('TRANSCRIPTION_CANCELLED');
+      const chunk = uploadBuffer.subarray(0, uploadBufferUsed);
+      const response = await this.sendIpc<{ ok?: boolean; error?: string; message?: string }>(
+        'CAPABILITY_EXECUTE',
+        {
+          action: 'AUDIO_TRANSFER_CHUNK',
+          transferId,
+          chunkIndex: chunksSent,
+          chunkBase64: bytesToBase64(chunk),
+        },
+        params.signal,
+      );
+      if (response.ok === false) {
+        throw new Error(response.message || response.error || `AUDIO_TRANSFER_CHUNK_${chunksSent}_FAILED`);
+      }
+      chunksSent += 1;
+      uploadBuffer = new Uint8Array(UPLOAD_CHUNK_BYTES);
+      uploadBufferUsed = 0;
+      params.onProgress?.({
+        progressPct: Math.min(15, Math.round((chunksSent / totalChunks) * 15)),
+        currentChunk: chunksSent,
+        totalChunks,
+        elapsedMs: Math.round(performance.now() - startedAt),
+      });
+    };
+
+    const appendWavBytes = async (bytes: Uint8Array) => {
+      let cursor = 0;
+      while (cursor < bytes.byteLength) {
+        if (params.signal?.aborted) throw new Error('TRANSCRIPTION_CANCELLED');
+        const capacity = UPLOAD_CHUNK_BYTES - uploadBufferUsed;
+        const copyCount = Math.min(capacity, bytes.byteLength - cursor);
+        uploadBuffer.set(bytes.subarray(cursor, cursor + copyCount), uploadBufferUsed);
+        uploadBufferUsed += copyCount;
+        cursor += copyCount;
+        if (uploadBufferUsed === UPLOAD_CHUNK_BYTES) await flushUploadChunk();
+      }
+    };
+
+    try {
+      const streamed = await streamPcmSourceAsCanonicalWav({
+        sampleRate: params.sampleRate,
+        totalSamples: params.totalSamples,
+        readSourceRange: params.readSourceRange,
+        signal: params.signal,
+        chunkSizeSamples: 16_384,
+        onWavChunk: appendWavBytes,
+        onProgress: (percent) => {
+          params.onProgress?.({
+            progressPct: Math.min(15, Math.round(percent * 0.15)),
+            currentChunk: chunksSent,
+            totalChunks,
+            elapsedMs: Math.round(performance.now() - startedAt),
+          });
+        },
+      });
+
+      await flushUploadChunk();
+      if (streamed.totalWavBytes !== expectedBytes || streamed.sampleCount !== outputSamples) {
+        throw new Error('AUDIO_TRANSFER_STREAM_SIZE_MISMATCH');
+      }
+      if (chunksSent !== totalChunks) {
+        throw new Error(`AUDIO_TRANSFER_CHUNK_COUNT_MISMATCH: ${chunksSent}/${totalChunks}`);
+      }
+
+      const finalized = await this.sendIpc<{
+        ok: boolean;
+        code?: string;
+        message?: string;
+        sha256?: string;
+      }>(
+        'CAPABILITY_EXECUTE',
+        { action: 'AUDIO_TRANSFER_FINALIZE', transferId },
+        params.signal,
+      );
+      if (!finalized.ok) {
+        throw new Error(finalized.message || finalized.code || 'AUDIO_TRANSFER_FINALIZE_FAILED');
+      }
+      transferFinalized = true;
+
+      const submitted = await this.sendIpc<{ ok: boolean; job: CompanionJobStatus; message?: string; error?: string }>(
+        'JOB_SUBMIT',
+        {
+          transferId,
+          filename: safeFilename,
+          languageHint: params.languageHint ?? 'auto',
+          modelId: params.modelId,
+        },
+        params.signal,
+      );
+      if (!submitted.ok || !submitted.job?.jobId) {
+        throw new Error(submitted.message || submitted.error || 'COMPANION_JOB_SUBMIT_FAILED');
+      }
+
+      const jobId = submitted.job.jobId;
+      submittedJobId = jobId;
+      params.onProgress?.({
+        progressPct: Math.max(15, submitted.job.progressPct),
+        currentChunk: submitted.job.currentChunk,
+        totalChunks: submitted.job.totalChunks,
+        elapsedMs: submitted.job.elapsedMs,
+      });
+
+      const onAbort = () => {
+        void this.sendIpc('JOB_CANCEL', { jobId }).catch(() => {});
+      };
+      if (params.signal?.aborted) onAbort();
+      else params.signal?.addEventListener('abort', onAbort, { once: true });
+
+      try {
+        while (true) {
+          if (params.signal?.aborted) throw new Error('TRANSCRIPTION_CANCELLED');
+          await new Promise((resolve) => setTimeout(resolve, 350));
+          const polled = await this.sendIpc<{ ok: boolean; job: CompanionJobStatus }>(
+            'JOB_STATUS',
+            { jobId },
+            params.signal,
+          );
+          const job = polled.job;
+          params.onProgress?.({
+            progressPct: Math.max(15, job.progressPct),
+            currentChunk: job.currentChunk,
+            totalChunks: job.totalChunks,
+            elapsedMs: job.elapsedMs,
+          });
+          if (job.status === 'COMPLETED' && job.result) return job.result;
+          if (job.status === 'CANCELLED') throw new Error('TRANSCRIPTION_CANCELLED');
+          if (job.status === 'FAILED') throw new Error(job.errorMessage || job.errorCode || 'LOCAL_INFERENCE_FAILED');
+        }
+      } finally {
+        params.signal?.removeEventListener('abort', onAbort);
+      }
+    } catch (error) {
+      if (!submittedJobId) {
+        await this.sendIpc(
+          'CAPABILITY_EXECUTE',
+          { action: 'AUDIO_TRANSFER_ABORT', transferId },
+        ).catch(() => {});
+      }
+      throw error;
+    }
+  }
+
   public async fetchBundledSamplePersianAudio(signal?: AbortSignal): Promise<{
     readonly filename: string;
     readonly modelId: string;
@@ -441,7 +641,7 @@ export class CompanionWebClient {
     }
     return {
       filename: resp.filename || 'shenava-sample-0.wav',
-      modelId: resp.modelId || 'Reza2kn/Shenava-Rizeh',
+      modelId: resp.modelId || 'Reza2kn/Shenava-Koochik-v1.0-sherpa-onnx',
       mimeType: resp.mimeType || 'audio/wav',
       wavBytes: base64ToBytes(resp.audioBase64),
     };

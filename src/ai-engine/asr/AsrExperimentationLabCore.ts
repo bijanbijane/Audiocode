@@ -301,13 +301,13 @@ export function buildIsolatedInferenceConfig(
   return Object.freeze({
     expectedLanguage: rawConfig.expectedLanguage,
     mode: rawConfig.mode,
-    keyterms: Object.freeze(cleanKeyterms),
+    ...(!isFrozen ? { keyterms: Object.freeze(cleanKeyterms) } : {}),
     ...(cleanPrompt !== undefined ? { contextPrompt: cleanPrompt } : {}),
     ...(typeof rawConfig.timeoutMs === 'number' && Number.isFinite(rawConfig.timeoutMs)
       ? { timeoutMs: Math.max(10, Math.trunc(rawConfig.timeoutMs)) }
       : {}),
     ...(isFrozen ? { isFrozenTestSample: true } : {}),
-  });
+  }) as EngineAdapterConfig;
 }
 
 /**

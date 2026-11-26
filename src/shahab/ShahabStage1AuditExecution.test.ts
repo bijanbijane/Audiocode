@@ -209,7 +209,10 @@ test('SHB-F02: extractKaldiFbank80 applies Kaldi 32768 scaling (+2*ln(32768) pow
 // SHB-F05: Async Non-Blocking Pipe FFmpeg Multi-Format Ingestion & AbortSignal
 // ============================================================================
 
-test('SHB-F05: ingestAudioBufferToCanonical16kMonoAsync decodes MP3/FLAC/OGG via pipe without avapardaz-ingest temp dirs or blocking event loop', async () => {
+test(
+  'SHB-F05: ingestAudioBufferToCanonical16kMonoAsync decodes MP3/FLAC/OGG via pipe without avapardaz-ingest temp dirs or blocking event loop',
+  { skip: isFfmpegAvailable() ? false : 'FFmpeg is required for MP3/FLAC/OGG codec integration smoke tests' },
+  async () => {
   assert.equal(isFfmpegAvailable(), true, 'ffmpeg binary must be available in execution environment');
   const speech = buildSpeechLikeWaveform(0.8, 16000, 0.3);
 

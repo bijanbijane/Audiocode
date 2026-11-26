@@ -81,6 +81,7 @@ export interface StudioLocalAsrRunRequest {
   readonly totalSamples: number;
   readonly readSourceRange: (startSample: number, count: number) => Promise<Float32Array>;
   readonly preference: RuntimeSelectionPreference;
+  readonly preferNativeCompanionWhenReady?: boolean;
   readonly requestedCloudMode?: boolean;
   readonly languageHint?: 'fa' | 'en' | 'fa-en' | 'auto';
   readonly explicitModelDescriptor?: AsrModelLoadDescriptor;
@@ -145,6 +146,7 @@ export class UnifiedLocalAsrWorkflowService {
       preference: request.preference,
       requestedCloudMode: false,
       preferBrowserWhenModelInstalled: true,
+      preferNativeCompanionWhenReady: request.preferNativeCompanionWhenReady === true,
       hasBrowserInstalledModel,
     });
 
