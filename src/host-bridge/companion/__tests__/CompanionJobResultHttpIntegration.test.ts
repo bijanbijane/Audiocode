@@ -160,6 +160,20 @@ test('Companion HTTP IPC returns CEP DTO only to Audition and preserves canonica
   }, { Authorization: `Bearer ${session.session_token}` });
 
   try {
+    const invalidClientIdentity = await httpJson(port, 'POST', '/api/v2/companion/handshake', {
+      ipc_protocol_version: COMPANION_IPC_PROTOCOL_VERSION,
+      host_id: 'adobe-audition',
+      client_instance_id: 'not-a-secure-client-identity',
+      host_version: '24.0',
+      panel_version: '1.0.0',
+      host_adapter_version: '1.0.0',
+      expected_contract_version: CANONICAL_CONTRACT_VERSION,
+      expected_asr_contract_version: AVAPARDAZ_ASR_CONTRACT_VERSION,
+      expected_cep_transcript_schema_version: '1.0.0',
+    });
+    assert.equal(invalidClientIdentity.status, 409);
+    assert.ok(invalidClientIdentity.json.incompatibility_reasons.some((reason: string) => reason.includes('client_instance_id')));
+
     const auditionClientInstanceId = 'a'.repeat(64);
     const auditionSession = await handshake('adobe-audition', auditionClientInstanceId);
     const webSession = await handshake('cli-test', 'c'.repeat(64));
