@@ -6,6 +6,7 @@ import {
   mapLocalNeuralResultToCepTranscriptDto,
 } from '../CepTranscriptDto';
 import { mapCompanionJobResultForExecutionMode } from '../CompanionJobResultMapper';
+import type { CompanionJobRecord } from '../LocalCompanionService';
 
 test('CEP transcript mapper emits a versioned DTO and preserves raw/normalized text and timing', () => {
   const nativeResult = {
@@ -118,12 +119,12 @@ test('only the Audition CEP execution mode receives the versioned job-result DTO
     result: nativeResult,
     errorCode: null,
     errorMessage: null,
-  } as const;
+  } as unknown as CompanionJobRecord;
 
-  const cepJob = mapCompanionJobResultForExecutionMode(job as never, 'audition-cep');
+  const cepJob = mapCompanionJobResultForExecutionMode(job, 'audition-cep');
   assert.equal(cepJob.result?.schemaVersion, CEP_TRANSCRIPT_SCHEMA_VERSION);
 
-  const webJob = mapCompanionJobResultForExecutionMode(job as never, 'web-client');
+  const webJob = mapCompanionJobResultForExecutionMode(job, 'web-client');
   assert.equal(webJob, job);
   assert.equal(webJob.result, nativeResult);
 });
