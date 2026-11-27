@@ -407,6 +407,35 @@ describe('Backend Security & Reliability Audit Remediation Suite (P0 #1–12 & P
       )
     ).toThrow('SECURITY_PATH_TRAVERSAL_FORBIDDEN');
 
+    const pathFixtureRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'paudio-ffmpeg-path-'));
+    try {
+      const allowedAudioRoot = path.join(pathFixtureRoot, 'allowed');
+      fs.mkdirSync(allowedAudioRoot);
+      const canonicalAudioPath = path.join(allowedAudioRoot, 'actual.wav');
+      const symlinkAudioPath = path.join(allowedAudioRoot, 'linked.wav');
+      const outsideAudioPath = path.join(pathFixtureRoot, 'outside.wav');
+      fs.writeFileSync(canonicalAudioPath, 'audio');
+      fs.writeFileSync(outsideAudioPath, 'audio');
+      fs.symlinkSync(canonicalAudioPath, symlinkAudioPath);
+      expect(
+        NodeStreamingAudioIngestTranscoder.validateSafeLocalAudioPath(
+          symlinkAudioPath,
+          allowedAudioRoot
+        )
+      ).toBe(fs.realpathSync.native(canonicalAudioPath));
+
+      const outsideSymlinkPath = path.join(allowedAudioRoot, 'outside-link.wav');
+      fs.symlinkSync(outsideAudioPath, outsideSymlinkPath);
+      expect(() =>
+        NodeStreamingAudioIngestTranscoder.validateSafeLocalAudioPath(
+          outsideSymlinkPath,
+          allowedAudioRoot
+        )
+      ).toThrow('SECURITY_PATH_TRAVERSAL_FORBIDDEN');
+    } finally {
+      fs.rmSync(pathFixtureRoot, { recursive: true, force: true });
+    }
+
     // B) P0 #11: WebSocket gateway blocks opening parallel sessions when remaining quota < 5s per active socket
     const mockDb: PgPoolLike = {
       async query<TRow>() {
