@@ -249,3 +249,33 @@ All four failed jobs independently show the same pattern: `runner_id=0`, empty `
 This repeated pattern across different commits, both workflows, main pushes and PR events makes a repository-wide Actions execution/configuration or account-level runner availability issue substantially more likely than a source-code regression. It still does not identify the exact setting or service-side cause; billing, spending limits and repository Actions policy remain owner-side checks.
 
 **Engineering decision:** pause application-code changes intended to fix CI. Keep CI gates intact. Resume code-level diagnosis only after a GitHub Actions job is actually assigned a runner and records its first step.
+
+## 13. Correction: temporary runner-diagnostics workflow did trigger (2026-11-27)
+
+The earlier wording in Section 11 that the temporary diagnostic workflow "was not scheduled" was inaccurate and is corrected here.
+
+GitHub Actions did create a PR-triggered run for the temporary workflow:
+
+- [Temporary GitHub Runner Diagnostics — run 46013656016](https://github.com/bijanbijane/Audiocode/actions/runs/46013656016)
+
+Its job payload was inspected directly. It shows `runner_id=0`, empty `runner_name`, zero recorded steps, and failure after approximately two seconds. Therefore, the diagnostic workflow **was triggered but failed before runner allocation**, exactly like the two product workflows. It did not reach checkout, Node/Bun setup, or the shell smoke-test commands, so it provides no toolchain or runner-environment result.
+
+The temporary workflow file was subsequently deleted from the PR branch and its absence was verified with a GitHub 404 response. No diagnostic workflow remains in the branch.
+
+### Latest CI observation
+
+The newest product-workflow runs on the current PR head `493ba25961be08472b1cc5842f1a71fabd1d7118` are:
+
+- [AVAPARDAZ Quality & Release Gates — 46014006026](https://github.com/bijanbijane/Audiocode/actions/runs/46014006026)
+- [Architecture Governance — 46014005836](https://github.com/bijanbijane/Audiocode/actions/runs/46014005836)
+
+Their failed jobs again show `runner_id=0`, no runner name and no recorded steps. AVAPARDAZ Level 2–5 jobs were skipped after Level 1 failed.
+
+### Corrected disposition
+
+- Diagnostic workflow: **TRIGGERED; PRE-RUNNER FAILURE** (not "not scheduled").
+- Product workflows: **PRE-RUNNER FAILURE pattern persists**.
+- Application commands: **NOT EXECUTED / NO EVIDENCE**.
+- Root cause within GitHub account/repository Actions configuration or GitHub service: **NOT YET IDENTIFIED**.
+- Temporary workflow: **REMOVED; absence verified**.
+- Source-code changes and gate relaxations: **NONE**.
