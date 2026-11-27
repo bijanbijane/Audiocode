@@ -275,6 +275,19 @@ test('AVP-P0-004 + AVP-P0-006: Hardened loopback HTTP Companion IPC enforces req
     assert.equal(hs.json.compatible, true);
     assert.equal(hs.json.asr_contract_version, '2.0.0');
     assert.equal(hs.json.cep_transcript_schema_version, '1.0.0');
+
+    // Existing Web Companion / CLI clients remain compatible without CEP-only request fields.
+    const webHandshake = await httpJson(port, 'POST', '/api/v2/companion/handshake', {
+      ipc_protocol_version: COMPANION_IPC_PROTOCOL_VERSION,
+      host_id: 'cli-test',
+      host_version: 'web-1.0.0',
+      panel_version: '1.0.0',
+      host_adapter_version: '1.0.0',
+      expected_contract_version: CANONICAL_CONTRACT_VERSION,
+    });
+    assert.equal(webHandshake.status, 200);
+    assert.equal(webHandshake.json.compatible, true);
+
     const { session_id, session_token } = hs.json;
 
     // Expired request_id envelope rejected with IPC_REQUEST_EXPIRED
