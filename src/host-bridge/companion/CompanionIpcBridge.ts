@@ -186,6 +186,9 @@ export class CompanionIpcBridge {
     }
 
     const reasons: string[] = [];
+    if (!['adobe-audition', 'premiere-pro', 'davinci-resolve', 'cli-test'].includes(req.host_id)) {
+      reasons.push(`Unsupported host_id "${String(req.host_id)}".`);
+    }
     if (req.ipc_protocol_version !== COMPANION_IPC_PROTOCOL_VERSION) {
       reasons.push(
         `Unsupported ipc_protocol_version "${String(req.ipc_protocol_version)}" (expected "${COMPANION_IPC_PROTOCOL_VERSION}").`,
@@ -361,7 +364,7 @@ export class CompanionIpcBridge {
       };
     }
     if (
-      (session.hostId === 'adobe-audition' && env.execution_mode !== undefined && env.execution_mode !== 'audition-cep') ||
+      (session.hostId === 'adobe-audition' && env.execution_mode !== 'audition-cep') ||
       (session.hostId !== 'adobe-audition' && env.execution_mode === 'audition-cep')
     ) {
       return {
