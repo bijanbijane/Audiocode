@@ -27,6 +27,10 @@ import {
   SingleFlightReadThroughCache,
 } from './cache/BackendReadThroughCacheAndMetrics';
 import { AdvisoryLockCoordinator } from './ops/BackendJobOutboxAndAdvisoryLockService';
+import {
+  BackendBatchHttpSubmissionController,
+  type CompletedAsrJobArtifactStore,
+} from './gateway/BackendBatchHttpSubmissionController';
 
 export interface BackendAppFactoryConfig {
   readonly ed25519PrivateKeyPem: string;
@@ -38,6 +42,7 @@ export interface BackendAppFactoryConfig {
   readonly cdnBaseUrl: string;
   readonly enableServerSideAsrInference: boolean;
   readonly enableRequestLogging?: boolean;
+  readonly artifactStore?: CompletedAsrJobArtifactStore;
 }
 
 export interface FastifyInjectOptions {
@@ -273,6 +278,7 @@ export class BuiltInFastifyRouter implements TestableFastifyInstance {
 
 export interface BuiltBackendApplication {
   readonly fastify: TestableFastifyInstance;
+  readonly authAndPayment: BackendAuthAndPaymentService;
   readonly sharedCache: SingleFlightReadThroughCache;
   readonly enterpriseKeys: EnterpriseApiKeyAndQuotaManager;
   readonly externalGateway: BackendExternalApiProxyService;
@@ -316,6 +322,12 @@ export function buildBackendApplication(
   );
   const externalGateway = new BackendExternalApiProxyService(db);
   const enterpriseKeys = new EnterpriseApiKeyAndQuotaManager(db);
+  const batchSubmissionController = new BackendBatchHttpSubmissionController(
+    db,
+    enterpriseKeys,
+    config.artifactStore ?? { getCompletedTokensForJob: async () => null },
+    config.enableServerSideAsrInference,
+  );
   const advisoryLocks = new AdvisoryLockCoordinator(db);
 
   // 1. Security preHandler guarding all user license endpoints with EdDSA (Ed25519) JWT verification
@@ -343,6 +355,7 @@ export function buildBackendApplication(
   revocationService.registerRoutes(fastify);
   canaryRolloutService.registerRoutes(fastify);
   externalGateway.registerRoutes(fastify);
+  batchSubmissionController.registerRoutes(fastify);
 
   // 3. Admin-only endpoint for issuing B2B Enterprise API Keys
   fastify.post<{
@@ -379,6 +392,7 @@ export function buildBackendApplication(
 
   return {
     fastify,
+    authAndPayment,
     sharedCache,
     enterpriseKeys,
     externalGateway,
