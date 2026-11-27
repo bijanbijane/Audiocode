@@ -58,11 +58,12 @@ No compatibility row or release gate is considered verified until the correspond
 
 ## Implementation progress (2026-11-27)
 
-- Added `src/host-bridge/companion/CepTranscriptDto.ts` with explicit schema version `1.0.0` and a mapper from the native inference result.
+- Added `src/host-bridge/companion/CepTranscriptDto.ts` with explicit schema version `1.0.0` and a mapper from the native inference result. Normalization profile selection follows the detected language.
+- Added `src/host-bridge/companion/CompanionJobResultMapper.ts` to apply the CEP DTO only for `audition-cep` execution mode; Web and native Companion consumers retain the original job result type.
 - The DTO preserves the existing CEP `text` field as a compatibility alias while separately exposing `rawText` and `normalizedText`; timestamps and word timings are copied without synthesis.
 - The native inference result currently exposes no calibrated confidence values. The CEP DTO therefore reports `confidence: null` and `UNAVAILABLE_UNCALIBRATED`, rather than inventing a zero.
 - The handshake now negotiates ASR contract `2.0.0` and CEP transcript schema `1.0.0` independently for Adobe Audition clients. Other execution modes retain their existing handshake request requirements.
 - `JOB_STATUS`, `JOB_RECONNECT`, and `JOB_LIST` map completed results only when `execution_mode` is `audition-cep`; other consumers retain the original job result shape.
 - The CEP client validates both negotiated versions and the returned result schema before applying a transcript.
-- Added focused mapper and handshake tests. They have not yet been observed executing because GitHub Actions jobs continue to fail before exposing steps.
+- Added focused mapper, execution-mode isolation, handshake compatibility, and legacy Web handshake tests. They have not yet been observed executing because GitHub Actions jobs continue to fail before exposing steps.
 - Cross-runtime concrete-adapter parity and live Audition host validation remain unimplemented / unverified.
