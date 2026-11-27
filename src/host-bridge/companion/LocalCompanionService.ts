@@ -45,6 +45,7 @@ import {
   type TranscriptExportFormat,
 } from '../../utils/subtitleExporter';
 import { sanitizeDiagnosticString } from '../../security/SecurityTrustBoundaryGuards';
+import { mapLocalNeuralResultToCepTranscriptDto } from './CepTranscriptDto';
 
 export const COMPANION_SERVICE_VERSION = '1.0.0' as const;
 
@@ -1089,12 +1090,21 @@ export class LocalCompanionService {
             res.status(404).json({ ok: false, error: 'JOB_NOT_FOUND', message: 'Unknown jobId.', request_id: auth.envelope.request_id });
             return;
           }
-          res.json({ ok: true, job, reconnected: command === 'JOB_RECONNECT', request_id: auth.envelope.request_id });
+          const responseJob =
+            auth.envelope.execution_mode === 'audition-cep' && job.result
+              ? { ...job, result: mapLocalNeuralResultToCepTranscriptDto(job.result) }
+              : job;
+          res.json({ ok: true, job: responseJob, reconnected: command === 'JOB_RECONNECT', request_id: auth.envelope.request_id });
           return;
         }
 
         case 'JOB_LIST': {
-          res.json({ ok: true, jobs: this.listJobs(), request_id: auth.envelope.request_id });
+          const jobs = this.listJobs().map((job) =>
+            auth.envelope.execution_mode === 'audition-cep' && job.result
+              ? { ...job, result: mapLocalNeuralResultToCepTranscriptDto(job.result) }
+              : job,
+          );
+          res.json({ ok: true, jobs, request_id: auth.envelope.request_id });
           return;
         }
 
