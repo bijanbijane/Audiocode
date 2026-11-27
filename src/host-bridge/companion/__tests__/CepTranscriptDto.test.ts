@@ -109,6 +109,7 @@ test('only the Audition CEP execution mode receives the versioned job-result DTO
     modelId: 'test-model',
     languageHint: 'en',
     sourceName: 'clip.wav',
+    sourceIdentity: { displayName: 'clip.wav', audioSha256: 'c'.repeat(64) },
     progressPct: 100,
     currentChunk: 1,
     totalChunks: 1,
@@ -123,8 +124,11 @@ test('only the Audition CEP execution mode receives the versioned job-result DTO
 
   const cepJob = mapCompanionJobResultForExecutionMode(job, 'audition-cep');
   assert.equal(cepJob.result?.schemaVersion, CEP_TRANSCRIPT_SCHEMA_VERSION);
+  assert.equal(cepJob.jobId, 'job-1');
+  assert.equal(cepJob.sourceIdentity?.displayName, 'clip.wav');
 
   const webJob = mapCompanionJobResultForExecutionMode(job, 'web-client');
   assert.equal(webJob, job);
   assert.equal(webJob.result, nativeResult);
+  assert.equal(webJob.sourceIdentity?.audioSha256, 'c'.repeat(64));
 });
