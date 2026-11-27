@@ -190,6 +190,16 @@ test('Companion HTTP IPC returns CEP DTO only to Audition and preserves canonica
     assert.equal('schemaVersion' in webStatus.json.job.result, false);
     assert.equal('normalizedText' in webStatus.json.job.result, false);
 
+    const auditionReconnect = await ipc(auditionSession, 'audition-cep', 'JOB_RECONNECT', { jobId: submitted.job!.jobId });
+    const webReconnect = await ipc(webSession, 'web-client', 'JOB_RECONNECT', { jobId: submitted.job!.jobId });
+    assert.equal(auditionReconnect.status, 200);
+    assert.equal(webReconnect.status, 200);
+    assert.equal(auditionReconnect.json.reconnected, true);
+    assert.equal(webReconnect.json.reconnected, true);
+    assert.equal(auditionReconnect.json.job.result.schemaVersion, '1.0.0');
+    assert.equal(webReconnect.json.job.result.rawText, 'متن خام');
+    assert.equal('schemaVersion' in webReconnect.json.job.result, false);
+
     const auditionList = await ipc(auditionSession, 'audition-cep', 'JOB_LIST', {});
     const webList = await ipc(webSession, 'web-client', 'JOB_LIST', {});
     assert.equal(auditionList.status, 200);
