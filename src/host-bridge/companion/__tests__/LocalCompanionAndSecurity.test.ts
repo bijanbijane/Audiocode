@@ -465,6 +465,102 @@ test('Chunked Companion upload and same-origin reverse-proxy guard work securely
     const hs = (await previewHs.json()) as { compatible: boolean; session_id: string; session_token: string };
     assert.equal(hs.compatible, true);
 
+    // Session B must not append to or abort a staged upload owned by session A.
+    const secondHsResp = await fetch(`${baseUrl}/handshake`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        ipc_protocol_version: '1.0.0',
+        host_id: 'cli-test',
+        host_version: 'web-1.0.0',
+        panel_version: '1.0.0',
+        host_adapter_version: '1.0.0',
+        expected_contract_version: '2.0.0',
+      }),
+    });
+    assert.equal(secondHsResp.status, 200);
+    const secondHs = (await secondHsResp.json()) as { compatible: boolean; session_id: string; session_token: string };
+    assert.equal(secondHs.compatible, true);
+
+    const uploadInitResp = await fetch(`${baseUrl}/ipc`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${hs.session_token}` },
+      body: JSON.stringify({
+        ipc_protocol_version: '1.0.0',
+        session_id: hs.session_id,
+        nonce: 'owner-upload-init',
+        timestamp_ms: Date.now(),
+        command: 'CAPABILITY_EXECUTE',
+        payload: { action: 'AUDIO_UPLOAD_INIT', filename: 'owner-isolation.wav' },
+      }),
+    });
+    assert.equal(uploadInitResp.status, 200);
+    const ownerUpload = (await uploadInitResp.json()) as { ok: boolean; uploadId: string };
+    assert.equal(ownerUpload.ok, true);
+
+    const foreignAppendResp = await fetch(`${baseUrl}/ipc`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${secondHs.session_token}` },
+      body: JSON.stringify({
+        ipc_protocol_version: '1.0.0',
+        session_id: secondHs.session_id,
+        nonce: 'owner-upload-foreign-append',
+        timestamp_ms: Date.now(),
+        command: 'CAPABILITY_EXECUTE',
+        payload: {
+          action: 'AUDIO_UPLOAD_CHUNK',
+          uploadId: ownerUpload.uploadId,
+          chunkBase64: Buffer.from('foreign').toString('base64'),
+        },
+      }),
+    });
+    assert.equal(foreignAppendResp.status, 403);
+    assert.equal((await foreignAppendResp.json()).error, 'UPLOAD_OWNER_MISMATCH');
+
+    const foreignAbortResp = await fetch(`${baseUrl}/ipc`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${secondHs.session_token}` },
+      body: JSON.stringify({
+        ipc_protocol_version: '1.0.0',
+        session_id: secondHs.session_id,
+        nonce: 'owner-upload-foreign-abort',
+        timestamp_ms: Date.now(),
+        command: 'CAPABILITY_EXECUTE',
+        payload: { action: 'AUDIO_UPLOAD_ABORT', uploadId: ownerUpload.uploadId },
+      }),
+    });
+    assert.equal(foreignAbortResp.status, 200);
+
+    const ownerAppendResp = await fetch(`${baseUrl}/ipc`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${hs.session_token}` },
+      body: JSON.stringify({
+        ipc_protocol_version: '1.0.0',
+        session_id: hs.session_id,
+        nonce: 'owner-upload-owner-append',
+        timestamp_ms: Date.now(),
+        command: 'CAPABILITY_EXECUTE',
+        payload: {
+          action: 'AUDIO_UPLOAD_CHUNK',
+          uploadId: ownerUpload.uploadId,
+          chunkBase64: Buffer.from('owner').toString('base64'),
+        },
+      }),
+    });
+    assert.equal(ownerAppendResp.status, 200);
+    await fetch(`${baseUrl}/ipc`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${hs.session_token}` },
+      body: JSON.stringify({
+        ipc_protocol_version: '1.0.0',
+        session_id: hs.session_id,
+        nonce: 'owner-upload-owner-abort',
+        timestamp_ms: Date.now(),
+        command: 'CAPABILITY_EXECUTE',
+        payload: { action: 'AUDIO_UPLOAD_ABORT', uploadId: ownerUpload.uploadId },
+      }),
+    });
+
     // 2. Foreign cross-origin CSRF Origin is STILL blocked with 403!
     const foreignCsrf = await fetch(`${baseUrl}/handshake`, {
       method: 'POST',
