@@ -38,6 +38,8 @@ import type { ShahabAsrEngine } from '../workflow/SmartAudioEditContracts';
 import { LocalCompanionService } from '../host-bridge/companion/LocalCompanionService';
 import { COMPANION_IPC_PROTOCOL_VERSION } from '../host-bridge/companion/CompanionIpcBridge';
 import { CANONICAL_CONTRACT_VERSION } from '../processing-engine/capabilities/CanonicalCapabilityContracts';
+import { AVAPARDAZ_ASR_CONTRACT_VERSION } from '../asr-core/AsrContractVersion';
+import { CEP_TRANSCRIPT_SCHEMA_VERSION } from '../host-bridge/companion/CepTranscriptDto';
 
 const HOSTED_TEST_SECRET = 'phase1a-test-hosted-session-secret-min-32-chars-ok!';
 
@@ -946,6 +948,8 @@ test('Phase 1A (Native Companion): Blocks proxy-mode Host DNS rebinding without 
         panel_version: '1.0.0',
         host_adapter_version: '1.0.0',
         expected_contract_version: CANONICAL_CONTRACT_VERSION,
+        expected_asr_contract_version: AVAPARDAZ_ASR_CONTRACT_VERSION,
+        expected_cep_transcript_schema_version: CEP_TRANSCRIPT_SCHEMA_VERSION,
       }),
     });
     assert.equal(hs.status, 200);
