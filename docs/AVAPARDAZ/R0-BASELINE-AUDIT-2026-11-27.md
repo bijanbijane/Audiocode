@@ -613,7 +613,8 @@ This section records implementation work performed on the PR #6 branch after the
 ### 23.1. Implemented
 
 - Added `src/asr-core/AsrContractVersion.ts` as the single source of the canonical ASR contract version. `UnifiedLocalAsrRuntime.ts` re-exports the same constant to preserve existing imports; the IPC bridge now imports the lightweight version module rather than loading the ASR runtime module.
-- Added `src/host-bridge/companion/CepTranscriptDto.ts` with versioned `CepTranscriptResultV1` / `CepTranscriptSegmentV1` and a single mapper from `LocalNeuralTranscriptionResult`.
+- Added `src/host-bridge/companion/CepTranscriptDto.ts` with versioned `CepTranscriptResultV1` / `CepTranscriptSegmentV1` and a single mapper from `LocalNeuralTranscriptionResult`; normalized profile selection follows detected language.
+- Added `src/host-bridge/companion/CompanionJobResultMapper.ts` to centralize host-specific result serialization with narrow TypeScript overloads.
 - The DTO retains the CEP editor's `text` field as a compatibility alias, while exposing `rawText` and `normalizedText` separately. Existing word timings and timestamp granularity are preserved; no synthetic timing is introduced.
 - Native inference output currently has no calibrated confidence value. The CEP DTO explicitly emits `confidence: null` and `confidenceStatus: UNAVAILABLE_UNCALIBRATED`; it does not coerce unavailable confidence to zero.
 - The Companion handshake independently checks `expected_asr_contract_version` and `expected_cep_transcript_schema_version` for Adobe Audition clients and returns the served versions. The IPC protocol and generic capability contract remain separate.
@@ -622,8 +623,8 @@ This section records implementation work performed on the PR #6 branch after the
 
 ### 23.2. Tests added (execution not yet verified)
 
-- `src/host-bridge/companion/__tests__/CepTranscriptDto.test.ts`: DTO version, raw/normalized text, timestamp/word preservation, and unavailable-confidence semantics.
-- `src/host-bridge/companion/__tests__/CompanionProductionIpcAndCep.test.ts`: missing and unsupported schema rejection, successful independent version negotiation, returned version fields, and CEP static contract checks.
+- `src/host-bridge/companion/__tests__/CepTranscriptDto.test.ts`: DTO version, language-specific normalized text, raw/normalized text, timestamp/word preservation, unavailable-confidence semantics, and CEP-vs-Web serialization isolation.
+- `src/host-bridge/companion/__tests__/CompanionProductionIpcAndCep.test.ts`: missing and unsupported schema rejection, successful independent version negotiation, returned version fields, backward-compatible Web handshake, and CEP static contract checks.
 - These tests are committed but have not been confirmed as executed. Latest Actions runs remain pre-step failures; see Section 23.3.
 
 ### 23.3. Validation status
