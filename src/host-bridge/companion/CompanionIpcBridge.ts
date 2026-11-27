@@ -352,6 +352,21 @@ export class CompanionIpcBridge {
       };
     }
 
+    const expectedToken = this.signSessionToken(session.sessionId, session.expiresAtMs);
+    const providedBuf = Buffer.from(params.bearerToken);
+    const expectedBuf = Buffer.from(expectedToken);
+    if (
+      providedBuf.length !== expectedBuf.length ||
+      !crypto.timingSafeEqual(providedBuf, expectedBuf)
+    ) {
+      return {
+        ok: false,
+        statusCode: 401,
+        code: 'IPC_TOKEN_INVALID',
+        message: 'Invalid Companion IPC session token.',
+      };
+    }
+
     if (
       env.execution_mode !== undefined &&
       !['native-companion', 'audition-cep', 'web-client'].includes(env.execution_mode)
@@ -372,21 +387,6 @@ export class CompanionIpcBridge {
         statusCode: 409,
         code: 'IPC_VERSION_MISMATCH',
         message: 'execution_mode does not match the host identity established by this IPC session.',
-      };
-    }
-
-    const expectedToken = this.signSessionToken(session.sessionId, session.expiresAtMs);
-    const providedBuf = Buffer.from(params.bearerToken);
-    const expectedBuf = Buffer.from(expectedToken);
-    if (
-      providedBuf.length !== expectedBuf.length ||
-      !crypto.timingSafeEqual(providedBuf, expectedBuf)
-    ) {
-      return {
-        ok: false,
-        statusCode: 401,
-        code: 'IPC_TOKEN_INVALID',
-        message: 'Invalid Companion IPC session token.',
       };
     }
 
