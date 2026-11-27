@@ -288,6 +288,63 @@ test('AVP-P0-004 + AVP-P0-006: Hardened loopback HTTP Companion IPC enforces req
     assert.equal(webHandshake.status, 200);
     assert.equal(webHandshake.json.compatible, true);
 
+    // A non-Audition session cannot opt into the CEP result DTO at request time.
+    const wrongHostMode = await httpJson(
+      port,
+      'POST',
+      '/api/v2/companion/ipc',
+      {
+        ipc_protocol_version: COMPANION_IPC_PROTOCOL_VERSION,
+        session_id: webHandshake.json.session_id,
+        nonce: 'n-wrong-host-mode',
+        timestamp_ms: Date.now(),
+        execution_mode: 'audition-cep',
+        command: 'JOB_LIST',
+        payload: {},
+      },
+      { Authorization: `Bearer ${webHandshake.json.session_token}` },
+    );
+    assert.equal(wrongHostMode.status, 409);
+    assert.equal(wrongHostMode.json.error, 'IPC_VERSION_MISMATCH');
+
+    // Unknown execution modes are rejected before command dispatch.
+    const invalidMode = await httpJson(
+      port,
+      'POST',
+      '/api/v2/companion/ipc',
+      {
+        ipc_protocol_version: COMPANION_IPC_PROTOCOL_VERSION,
+        session_id: webHandshake.json.session_id,
+        nonce: 'n-invalid-mode',
+        timestamp_ms: Date.now(),
+        execution_mode: 'unknown-client',
+        command: 'JOB_LIST',
+        payload: {},
+      },
+      { Authorization: `Bearer ${webHandshake.json.session_token}` },
+    );
+    assert.equal(invalidMode.status, 400);
+    assert.equal(invalidMode.json.error, 'IPC_INVALID_ENVELOPE');
+
+    // Audition sessions cannot downgrade to a non-CEP serialization mode.
+    const wrongAuditionMode = await httpJson(
+      port,
+      'POST',
+      '/api/v2/companion/ipc',
+      {
+        ipc_protocol_version: COMPANION_IPC_PROTOCOL_VERSION,
+        session_id: hs.json.session_id,
+        nonce: 'n-wrong-audition-mode',
+        timestamp_ms: Date.now(),
+        execution_mode: 'web-client',
+        command: 'JOB_LIST',
+        payload: {},
+      },
+      { Authorization: `Bearer ${hs.json.session_token}` },
+    );
+    assert.equal(wrongAuditionMode.status, 409);
+    assert.equal(wrongAuditionMode.json.error, 'IPC_VERSION_MISMATCH');
+
     const { session_id, session_token } = hs.json;
 
     // Expired request_id envelope rejected with IPC_REQUEST_EXPIRED
