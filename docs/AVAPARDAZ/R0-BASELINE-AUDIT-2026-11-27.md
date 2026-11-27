@@ -525,3 +525,36 @@ Engineering has not silently selected or removed any of these targets. This sect
 - Live Audition host acceptance: NOT_TESTED.
 - No compatibility row is promoted to Supported, Verified or Accepted by this reconciliation.
 - No runtime code, packaging, CI gate or product behavior changed.
+
+## 21. CEP host declaration and ASR contract drift review (2026-11-27)
+
+A read-only comparison of the frozen Engine Interface Specification, current runtime TypeScript contract, Companion IPC bridge and CEP manifest found two actionable contract-governance gaps.
+
+### 21.1. CEP manifest range is broader than the tested host matrix
+
+- `packages/audition-cep-plugin/CSXS/manifest.xml` declares host `AUDT` with version range `[22.0,99.9]` and CSXS runtime `11.0`.
+- `docs/shahab/SHAHAB_ADOBE_HOST_VERSION_MATRIX.md` lists Audition 25.x only, with all live-host tests `NOT_TESTED`.
+- The manifest range is a loader declaration, not a compatibility guarantee. It advertises a broad host-version interval for which this audit found no corresponding acceptance evidence.
+
+### 21.2. Frozen ASR specification and implementation contract differ structurally
+
+The frozen `docs/AVAPARDAZ/ENGINE-INTERFACE-SPEC.md` (v2.0) defines `AsrRuntimeAdapter` with `warmup()`, `transcribeBatch()`, `transcribeStream()` and `unloadModel()`, and a transcript schema containing `status`, `modelSha256`, `isGenuineNeuralModel`, `executedOffline`, `audioSha256` and per-segment `confidenceStatus`.
+
+The current `src/asr-core/UnifiedLocalAsrRuntime.ts` instead exports `LocalAsrRuntimeAdapter` with `initializeRuntime()`, `validateModel()`, `transcribe()`, `cancel()`, `getHealth()`, `getResourceUsage()` and `dispose()`. Its `AvapardazTranscriptResult` uses `runtimeName`, `executionProvider`, `modelSha256Hex`, `architecture`, `offlineVerified`, `sampleRateHz`, `durationSec` and `peakMemoryBytes`; segment/word shapes also differ.
+
+These are materially different public TypeScript contracts, not merely naming variations. The specification's claim that both clients consume one identical schema is not established by the current runtime interface. Companion IPC is separately versioned as `1.0.0`; its handshake carries a canonical contract version, so future changes must preserve explicit compatibility negotiation.
+
+### 21.3. Risk and recommended disposition
+
+- Risk: teams and consumers may rely on a stale frozen document, producing incompatible adapters, transcript serialization or test fixtures.
+- Do not blindly rename fields or force the implementation back to the older spec. Inventory runtime adapters, serialization boundaries, IPC payloads and consumers; then decide whether the implementation is the intended canonical v2 contract or a versioned migration is required.
+- Add compile-time conformance tests for Browser and Native adapters and round-trip serialization tests at the Companion IPC boundary after selecting the canonical schema.
+- Narrow the CEP host range only after product-owner target selection and live host tests, not as an unreviewed change in this audit.
+
+### 21.4. Status
+
+- CEP manifest host range: declared `22.0–99.9`; tested support NOT_ESTABLISHED.
+- Frozen Engine Interface Specification ↔ current TypeScript runtime contract: DRIFT CONFIRMED / reconciliation required.
+- Companion IPC protocol: `1.0.0`; unchanged.
+- No source code, manifest, runtime API, test, CI gate or product scope changed.
+- R0 remains IN PROGRESS; no gate passed by this documentation-only comparison.
