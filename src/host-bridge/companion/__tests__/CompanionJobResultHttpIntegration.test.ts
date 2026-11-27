@@ -1,6 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import express from 'express';
 import { LocalCompanionService } from '../LocalCompanionService';
 import { COMPANION_IPC_PROTOCOL_VERSION } from '../CompanionIpcBridge';
@@ -110,9 +113,10 @@ async function httpJson(
 }
 
 test('Companion HTTP IPC returns CEP DTO only to Audition and preserves canonical Web result for completed jobs', async () => {
+  const stagingDir = fs.mkdtempSync(path.join(os.tmpdir(), 'avp-job-result-http-'));
   const service = new LocalCompanionService({
     neuralEngine: new FixtureNeuralEngine() as unknown as LocalSherpaNeuralEngine,
-    transferStagingDir: '/tmp/avp-job-result-http-integration',
+    transferStagingDir: stagingDir,
   });
   const app = express();
   app.use('/api/v2/companion', service.createExpressRouter());
@@ -125,7 +129,7 @@ test('Companion HTTP IPC returns CEP DTO only to Audition and preserves canonica
     const response = await httpJson(port, 'POST', '/api/v2/companion/handshake', {
       ipc_protocol_version: COMPANION_IPC_PROTOCOL_VERSION,
       host_id: hostId,
-      host_version: 'fixture-host',
+      host_version: '24.0',
       panel_version: '1.0.0',
       host_adapter_version: '1.0.0',
       expected_contract_version: CANONICAL_CONTRACT_VERSION,
@@ -138,6 +142,7 @@ test('Companion HTTP IPC returns CEP DTO only to Audition and preserves canonica
     return response.json;
   };
 
+  let nonceCounter = 0;
   const ipc = async (
     session: any,
     executionMode: 'audition-cep' | 'web-client',
@@ -146,7 +151,7 @@ test('Companion HTTP IPC returns CEP DTO only to Audition and preserves canonica
   ) => httpJson(port, 'POST', '/api/v2/companion/ipc', {
     ipc_protocol_version: COMPANION_IPC_PROTOCOL_VERSION,
     session_id: session.session_id,
-    nonce: `nonce-${executionMode}-${command}-${Math.random()}`,
+    nonce: `nonce-${executionMode}-${command}-${++nonceCounter}`,
     timestamp_ms: Date.now(),
     execution_mode: executionMode,
     command,
@@ -195,5 +200,6 @@ test('Companion HTTP IPC returns CEP DTO only to Audition and preserves canonica
   } finally {
     service.beginGracefulShutdown('Test teardown');
     await new Promise<void>((resolve) => server.close(() => resolve()));
+    fs.rmSync(stagingDir, { recursive: true, force: true });
   }
 });
