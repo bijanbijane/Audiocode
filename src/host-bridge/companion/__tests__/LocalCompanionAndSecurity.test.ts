@@ -247,6 +247,8 @@ test('Red-Team: Live Companion HTTP server enforces HMAC auth, nonce replay, Ori
         panel_version: '1.0.0',
         host_adapter_version: '1.0.0',
         expected_contract_version: '2.0.0',
+        expected_asr_contract_version: '2.0.0',
+        expected_cep_transcript_schema_version: '1.0.0',
       }),
     });
     assert.equal(hsResp.status, 200);
