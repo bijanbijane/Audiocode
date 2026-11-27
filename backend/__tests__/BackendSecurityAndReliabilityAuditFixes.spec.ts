@@ -437,6 +437,23 @@ describe('Backend Security & Reliability Audit Remediation Suite (P0 #1–12 & P
     expect(s3).not.toBeNull();
     await s3!.finalizeAndClose();
 
+    // Concurrent opens must not both observe the same unreserved five-second balance.
+    const concurrentSessions = await Promise.all([
+      wsGateway.openAuthenticatedSession({
+        enterpriseApiKey: 'paudio_live_ws',
+        socket: noopSocket,
+        transcribeWindowFn: async () => [],
+      }),
+      wsGateway.openAuthenticatedSession({
+        enterpriseApiKey: 'paudio_live_ws',
+        socket: noopSocket,
+        transcribeWindowFn: async () => [],
+      }),
+    ]);
+    expect(concurrentSessions.filter((session) => session !== null)).toHaveLength(1);
+    const remainingSession = concurrentSessions.find((session) => session !== null);
+    await remainingSession!.finalizeAndClose();
+
     // C) P1 #11: NodeAsrModelSessionPool prevents concurrent loadAndWarmupModel from exceeding memory budget
     const slowOrt: OrtRuntimeProvider = {
       createTensor: (type, data, dims) => ({ type, data, dims } as OrtTensorLike),
