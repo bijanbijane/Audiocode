@@ -10,9 +10,9 @@
 - Default branch: `main`
 - Main baseline / current main HEAD observed: `e73394f8e00e477f1de0046e04fd233681610563`
 - Working branch: `docs/r0-baseline-audit-2026-11-27`
-- Latest fully validated implementation HEAD: `f7c84c54fb378b5cdbecd8e3d760ce534c6bd637`
+- Latest fully validated implementation HEAD: `bc8dfc2d1ae568528f39010c8c0a41cd35506606`
 - PR: [#6 — R0 baseline and Audition CEP ASR boundary](https://github.com/bijanbijane/Audiocode/pull/6) — OPEN, DRAFT, not merged.
-- Latest PR metadata observed: 37 changed files; 136 commits; 2,303 additions; 148 deletions.
+- Latest PR metadata observed: 37 changed files; 139 commits; 2,317 additions; 150 deletions.
 - All implementation changes in this execution are on the PR branch through GitHub. No local Mac checkout is used.
 
 ## Roadmap status
@@ -22,7 +22,7 @@ R0 — Baseline, scope and dual-platform release gates: **IN PROGRESS**. CI base
 | Task | Priority | Status | Evidence / remaining acceptance |
 |---|---:|---|---|
 | R0-BASE-01 — Record repository baseline and reconcile approved delivery scope | P0 | IMPLEMENTED | Initial audit: `docs/AVAPARDAZ/R0-BASELINE-AUDIT-2026-11-27.md`; approved scope is mirrored in the delivery roadmap. R0 exit criteria remain open. |
-| R0-CI-02 — Establish executable CI baseline | P0 | PASS — CI EXECUTED | Four workflows passed on `f7c84c5`: Architecture Governance / Reliability, Web+API container build, AVAPARDAZ Quality Gates Levels 1–5, and Standalone Platform API Readiness. Exact run IDs are recorded below. |
+| R0-CI-02 — Establish executable CI baseline | P0 | PASS — CI EXECUTED | Four workflows passed on `bc8dfc2`: Architecture Governance / Reliability, Web+API container build, AVAPARDAZ Quality Gates Levels 1–5, and Standalone Platform API Readiness. Exact run IDs are recorded below. |
 | R0-SEC-08 — Enforce session ownership for Companion jobs | P0 | IMPLEMENTED / TESTED | Jobs and staged audio resources use a stable, random 256-bit client-instance capability scoped by host. A renewed IPC session from the same CEP installation can recover its jobs; another client, including another Audition client, receives 404. Job accessors require an explicit owner. HTTP regression coverage passed in Level 2–4 and architecture suites. |
 | R0-IPC-03 — Version and isolate the Audition CEP transcript boundary | P1 | IMPLEMENTED / TESTED | CEP DTO, mapper, independent schema negotiation, execution-mode-specific result serialization and HTTP integration coverage passed in the quality suite. |
 | R0-CONSUMER-04 — Complete repository-wide IPC consumer inventory | P1 | IN PROGRESS | Targeted source scan identified the CEP panel client and `CompanionWebClient` as the active job IPC clients; both now send a stable client identity. The Companion router is the sole HTTP IPC dispatcher found in the reviewed paths. Broader repository-wide semantic audit remains open; retain legacy response fields until closure. |
@@ -32,7 +32,7 @@ R0 — Baseline, scope and dual-platform release gates: **IN PROGRESS**. CI base
 
 ## Latest implemented changes
 
-- Companion session ownership and reconnect: a random 256-bit `client_instance_id` is stored in CEP `localStorage` and held for the lifetime of a Web client. The IPC bridge derives a host-scoped owner from this capability, so re-handshaking no longer strands in-memory jobs when the panel reloads or the short-lived session renews. Distinct client identities remain isolated even for the same host. Status, reconnect, list, cancel, audio upload and transfer actions use the same owner. Job accessor methods now require an explicit owner; integration tests poll completion through authenticated IPC rather than bypassing the ownership boundary.
+- Companion session ownership and reconnect: a random 256-bit `client_instance_id` is stored in CEP `localStorage` and held for the lifetime of a Web client. The IPC bridge derives a host-scoped owner from this capability, so re-handshaking no longer strands in-memory jobs when the panel reloads or the short-lived session renews. Distinct client identities remain isolated even for the same host. Status, reconnect, list, cancel, audio upload and transfer actions use the same owner. Job accessor methods now require an explicit owner; integration tests poll completion through authenticated IPC rather than bypassing the ownership boundary. CEP and Web IPC nonce fallbacks use cryptographic randomness rather than `Math.random`.
 - Audition CEP boundary: versioned transcript DTO and mapper; independent ASR/CEP schema negotiation; Audition and Web Companion job-result serialization remain execution-mode-specific.
 - Enterprise export isolation: artifact exports fail closed when tenant provenance is missing or mismatched; regression tests cover both cross-tenant and unowned artifacts.
 - Invoice authorization: invoice routes are registered and included in authenticated-user route protection; ownership mismatch returns an explicit denial.
@@ -45,17 +45,17 @@ R0 — Baseline, scope and dual-platform release gates: **IN PROGRESS**. CI base
 
 ## Validation evidence
 
-Validated implementation HEAD: `f7c84c54fb378b5cdbecd8e3d760ce534c6bd637`.
+Validated implementation HEAD: `bc8dfc2d1ae568528f39010c8c0a41cd35506606`.
 
 | Check | Result | Evidence |
 |---|---|---|
-| Architecture Governance, Reliability & Release Quality Gate | PASS | Run `46070223028`; TypeScript compilation, Vitest integration, Unit/Reliability/Fault-Injection, E2E quality gates, production bundle and release manifest all completed successfully. |
-| Unit / Reliability / Fault-Injection | PASS | 283 tests passed; 0 failed; run job `140745106320`. |
+| Architecture Governance, Reliability & Release Quality Gate | PASS | Run `46070705179`; TypeScript compilation, Vitest integration, Unit/Reliability/Fault-Injection, E2E quality gates, production bundle and release manifest all completed successfully. |
+| Unit / Reliability / Fault-Injection | PASS | 283 tests passed; 0 failed; run job `140746701176`. |
 | Vitest integration and quality suites | PASS | Run job `140745106320`; 22 test files and 98 tests passed; the subsequent Node integration suite also passed. |
-| AVAPARDAZ Quality & Release Gates, Levels 1–5 | PASS | Run `46070222987`; all five levels completed successfully, including real ORT, DSP, workflow, linguistic, IPC/security and Audition CEP packaging checks. The targeted Companion HTTP IPC integration test passed, including same-client recovery after re-handshake and cross-client denial. |
-| Standalone Platform API Readiness | PASS | Run `46070222981`; install, typecheck, test and build completed successfully. |
-| Web/API container build | PASS | Run `46070222971`; independent web and API images built successfully. |
-| TypeScript compilation / zero circular dependencies / SBOM | PASS | Architecture workflow `46070223028`. |
+| AVAPARDAZ Quality & Release Gates, Levels 1–5 | PASS | Run `46070705246`; all five levels completed successfully, including real ORT, DSP, workflow, linguistic, IPC/security and Audition CEP packaging checks. The targeted Companion HTTP IPC integration test passed, including same-client recovery after re-handshake and cross-client denial. |
+| Standalone Platform API Readiness | PASS | Run `46070705226`; install, typecheck, test and build completed successfully. |
+| Web/API container build | PASS | Run `46070705150`; independent web and API images built successfully. |
+| TypeScript compilation / zero circular dependencies / SBOM | PASS | Architecture workflow `46070705179`. |
 | Live Audition host tests | BLOCKED | No authorized live macOS and Windows hosts; CI packaging is not equivalent to live-host acceptance. |
 
 Non-blocking observations from the production build:
@@ -67,7 +67,7 @@ Non-blocking observations from the production build:
 1. Live Audition workflow acceptance on both macOS and Windows remains unverified.
 2. Exact Audition host versions, OS builds, hardware minimums and audio-format support matrix require owner approval.
 3. Internal installation, signing/trust and update policy remains open.
-4. Full IPC consumer inventory remains incomplete; legacy DTO compatibility must be preserved until it is complete. The client-instance ID is a bearer-like local capability stored in CEP localStorage; it must not be logged or exposed to untrusted same-origin scripts.
+4. Full IPC consumer inventory remains incomplete; legacy DTO compatibility must be preserved until it is complete. The client-instance ID is a bearer-like local capability stored in CEP localStorage; it must not be logged or exposed to untrusted same-origin scripts. The Companion job store remains in-memory, so reconnect does not survive a Companion process restart.
 5. WebSocket session reservations are in-process only; they do not coordinate quota reservations across multiple backend replicas. Server-side ASR remains disabled by default in V1.
 6. Word-level Persian timing remains gated by independent human-gold alignment evidence; do not enable automatic edits based on unverified word boundaries.
 7. Large Vite chunks and the dependency deprecation warning are non-blocking technical debt, not release acceptance evidence.
