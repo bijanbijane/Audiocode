@@ -5,6 +5,7 @@ import {
   CEP_TRANSCRIPT_SCHEMA_VERSION,
   mapLocalNeuralResultToCepTranscriptDto,
 } from '../CepTranscriptDto';
+import { mapCompanionJobResultForExecutionMode } from '../CompanionJobResultMapper';
 
 test('CEP transcript mapper emits a versioned DTO and preserves raw/normalized text and timing', () => {
   const nativeResult = {
@@ -81,4 +82,48 @@ test('CEP transcript mapper represents unavailable confidence as null, never as 
   assert.equal(dto.confidenceStatus, 'UNAVAILABLE_UNCALIBRATED');
   assert.equal(dto.segments[0].confidence, null);
   assert.equal(dto.segments[0].confidenceStatus, 'UNAVAILABLE_UNCALIBRATED');
+});
+
+test('only the Audition CEP execution mode receives the versioned job-result DTO', () => {
+  const nativeResult = {
+    modelId: 'test-model',
+    architecture: 'whisper',
+    quantization: 'FP32',
+    offlineVerified: true,
+    durationSec: 1,
+    processingTimeMs: 200,
+    realTimeFactor: 0.2,
+    dominantLanguage: 'en',
+    rawText: 'hello',
+    normalizedByProfile: { 'EN-NORM-V1': 'HELLO' },
+    timestampGranularity: 'SEGMENT',
+    sampleRateHz: 16000,
+    channelCount: 1,
+    audioSha256: 'c'.repeat(64),
+    segments: [],
+  } as unknown as LocalNeuralTranscriptionResult;
+  const job = {
+    jobId: 'job-1',
+    status: 'COMPLETED',
+    modelId: 'test-model',
+    languageHint: 'en',
+    sourceName: 'clip.wav',
+    progressPct: 100,
+    currentChunk: 1,
+    totalChunks: 1,
+    createdAtIso: '2026-11-27T00:00:00.000Z',
+    updatedAtIso: '2026-11-27T00:00:01.000Z',
+    elapsedMs: 1000,
+    partialText: 'hello',
+    result: nativeResult,
+    errorCode: null,
+    errorMessage: null,
+  } as const;
+
+  const cepJob = mapCompanionJobResultForExecutionMode(job as never, 'audition-cep');
+  assert.equal(cepJob.result?.schemaVersion, CEP_TRANSCRIPT_SCHEMA_VERSION);
+
+  const webJob = mapCompanionJobResultForExecutionMode(job as never, 'web-client');
+  assert.equal(webJob, job);
+  assert.equal(webJob.result, nativeResult);
 });
