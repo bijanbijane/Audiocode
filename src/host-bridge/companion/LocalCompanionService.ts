@@ -87,6 +87,7 @@ export interface CompanionJobRecord {
 interface InternalJobEntry {
   record: CompanionJobRecord;
   abortController: AbortController;
+  readonly ownerId: string;
 }
 
 const ALLOWED_AUDIO_EXTENSIONS = new Set([
@@ -702,7 +703,11 @@ export class LocalCompanionService {
       errorMessage: null,
     };
 
-    const entry: InternalJobEntry = { record: initialRecord, abortController };
+    const entry: InternalJobEntry = {
+      record: initialRecord,
+      abortController,
+      ownerId: params.ownerId ?? 'local-default',
+    };
     this.jobs.set(jobId, entry);
     this.trimOldJobs();
     this.syncLifecycleState();
@@ -806,17 +811,21 @@ export class LocalCompanionService {
     return { ok: true, statusCode: 202, job: initialRecord };
   }
 
-  public getJob(jobId: string): CompanionJobRecord | null {
-    return this.jobs.get(jobId)?.record ?? null;
-  }
-
-  public listJobs(): readonly CompanionJobRecord[] {
-    return Array.from(this.jobs.values()).map((j) => j.record);
-  }
-
-  public cancelJob(jobId: string): { readonly ok: boolean; readonly job?: CompanionJobRecord } {
+  public getJob(jobId: string, ownerId?: string): CompanionJobRecord | null {
     const entry = this.jobs.get(jobId);
-    if (!entry) return { ok: false };
+    if (!entry || (ownerId !== undefined && entry.ownerId !== ownerId)) return null;
+    return entry.record;
+  }
+
+  public listJobs(ownerId?: string): readonly CompanionJobRecord[] {
+    return Array.from(this.jobs.values())
+      .filter((entry) => ownerId === undefined || entry.ownerId === ownerId)
+      .map((entry) => entry.record);
+  }
+
+  public cancelJob(jobId: string, ownerId?: string): { readonly ok: boolean; readonly job?: CompanionJobRecord } {
+    const entry = this.jobs.get(jobId);
+    if (!entry || (ownerId !== undefined && entry.ownerId !== ownerId)) return { ok: false };
     if (entry.record.status === 'RUNNING' || entry.record.status === 'QUEUED') {
       entry.abortController.abort();
       entry.record = {
@@ -1085,7 +1094,7 @@ export class LocalCompanionService {
         case 'JOB_STATUS':
         case 'JOB_RECONNECT': {
           const jobId = typeof p.jobId === 'string' ? p.jobId : '';
-          const job = this.getJob(jobId);
+          const job = this.getJob(jobId, auth.envelope.session_id);
           if (!job) {
             res.status(404).json({ ok: false, error: 'JOB_NOT_FOUND', message: 'Unknown jobId.', request_id: auth.envelope.request_id });
             return;
@@ -1096,7 +1105,7 @@ export class LocalCompanionService {
         }
 
         case 'JOB_LIST': {
-          const jobs = this.listJobs().map((job) =>
+          const jobs = this.listJobs(auth.envelope.session_id).map((job) =>
             mapCompanionJobResultForExecutionMode(job, auth.envelope.execution_mode),
           );
           res.json({ ok: true, jobs, request_id: auth.envelope.request_id });
@@ -1105,7 +1114,7 @@ export class LocalCompanionService {
 
         case 'JOB_CANCEL': {
           const jobId = typeof p.jobId === 'string' ? p.jobId : '';
-          const cancelled = this.cancelJob(jobId);
+          const cancelled = this.cancelJob(jobId, auth.envelope.session_id);
           if (!cancelled.ok) {
             res.status(404).json({ ok: false, error: 'JOB_NOT_FOUND', message: 'Unknown jobId.', request_id: auth.envelope.request_id });
             return;
