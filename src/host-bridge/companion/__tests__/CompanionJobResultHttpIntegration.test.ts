@@ -193,13 +193,14 @@ test('Companion HTTP IPC returns CEP DTO only to Audition and preserves canonica
       assert.ok(submitted.json.job?.jobId);
       const jobId = submitted.json.job.jobId as string;
 
-      let completed = service.getJob(jobId);
-      for (let attempt = 0; attempt < 20 && completed?.status !== 'COMPLETED'; attempt++) {
+      let completed = await ipc(session, executionMode, 'JOB_STATUS', { jobId });
+      for (let attempt = 0; attempt < 20 && completed.json.job?.status !== 'COMPLETED'; attempt++) {
         await new Promise<void>((resolve) => setImmediate(resolve));
-        completed = service.getJob(jobId);
+        completed = await ipc(session, executionMode, 'JOB_STATUS', { jobId });
       }
-      assert.equal(completed?.status, 'COMPLETED');
-      assert.ok(completed?.result);
+      assert.equal(completed.status, 200);
+      assert.equal(completed.json.job?.status, 'COMPLETED');
+      assert.ok(completed.json.job?.result);
       return jobId;
     };
 
