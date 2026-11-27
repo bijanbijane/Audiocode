@@ -1063,7 +1063,7 @@ export class LocalCompanionService {
         case 'JOB_STATUS':
         case 'JOB_RECONNECT': {
           const jobId = typeof p.jobId === 'string' ? p.jobId : '';
-          const job = this.getJob(jobId, envelope.session_id);
+          const job = this.getJob(jobId, sessionOwnerId);
           if (!job) {
             res.status(404).json({ ok: false, error: 'JOB_NOT_FOUND', message: 'Unknown jobId.', request_id: envelope.request_id });
             return;
@@ -1074,7 +1074,7 @@ export class LocalCompanionService {
         }
 
         case 'JOB_LIST': {
-          const jobs = this.listJobs(envelope.session_id).map((job) =>
+          const jobs = this.listJobs(sessionOwnerId).map((job) =>
             mapCompanionJobResultForExecutionMode(job, envelope.execution_mode),
           );
           res.json({ ok: true, jobs, request_id: envelope.request_id });
@@ -1083,7 +1083,7 @@ export class LocalCompanionService {
 
         case 'JOB_CANCEL': {
           const jobId = typeof p.jobId === 'string' ? p.jobId : '';
-          const cancelled = this.cancelJob(jobId, envelope.session_id);
+          const cancelled = this.cancelJob(jobId, sessionOwnerId);
           if (!cancelled.ok) {
             res.status(404).json({ ok: false, error: 'JOB_NOT_FOUND', message: 'Unknown jobId.', request_id: envelope.request_id });
             return;
