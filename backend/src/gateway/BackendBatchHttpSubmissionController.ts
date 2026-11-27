@@ -153,7 +153,7 @@ export class BackendBatchHttpSubmissionController {
       }
       // Missing tenant provenance is not proof of ownership: fail closed against IDOR.
       if (artifact.organizationId !== keyCtx.organizationId) {
-        return reply.status(403).send({ error: 'FORBIDDEN_TENANT_MISMATCH' });
+        return reply.status(403).send({ error: 'FORBIDDEN_CROSS_TENANT_JOB_ACCESS' });
       }
 
       if (fmt === 'srt') {
