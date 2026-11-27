@@ -214,6 +214,9 @@ describe('Backend Security & Reliability Audit Remediation Suite (P0 #1–12 & P
             if (sql.includes('pg_try_advisory_lock')) {
               return { rows: [{ acquired: true }] as unknown as TRow[], rowCount: 1 };
             }
+            if (sql.includes('pg_advisory_unlock')) {
+              return { rows: [{ unlocked: true }] as unknown as TRow[], rowCount: 1 };
+            }
             if (sql.includes('INSERT INTO schema_migrations')) {
               executedOrder.push(String(params[0]));
             }
