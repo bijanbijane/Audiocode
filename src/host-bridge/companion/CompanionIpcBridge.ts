@@ -11,7 +11,7 @@
 
 import crypto from 'node:crypto';
 import { CANONICAL_CONTRACT_VERSION } from '../../processing-engine/capabilities/CanonicalCapabilityContracts';
-import { AVAPARDAZ_ASR_CONTRACT_VERSION } from '../../asr-core/UnifiedLocalAsrRuntime';
+import { AVAPARDAZ_ASR_CONTRACT_VERSION } from '../../asr-core/AsrContractVersion';
 import { CEP_TRANSCRIPT_SCHEMA_VERSION } from './CepTranscriptDto';
 
 export const COMPANION_IPC_PROTOCOL_VERSION = '1.0.0' as const;
