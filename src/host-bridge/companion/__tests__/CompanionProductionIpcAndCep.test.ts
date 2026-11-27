@@ -355,6 +355,8 @@ test('AVP-P0-004 + AVP-P0-006: Hardened loopback HTTP Companion IPC enforces req
     // Verify CEP client & host scripts contain sourceIdentity + SOURCE_CHANGED guard & zero innerHTML XSS
     const cepApp = fs.readFileSync(path.resolve(process.cwd(), 'packages/audition-cep-plugin/client/app.js'), 'utf8');
     const cepJsx = fs.readFileSync(path.resolve(process.cwd(), 'packages/audition-cep-plugin/jsx/auditionHost.jsx'), 'utf8');
+    const webClient = fs.readFileSync(path.resolve(process.cwd(), 'src/host-bridge/companion/CompanionWebClient.ts'), 'utf8');
+    assert.equal((webClient.match(/execution_mode: 'web-client'/g) || []).length, 2);
     assert.equal(cepApp.includes('SOURCE_CHANGED'), true);
     assert.equal(cepApp.includes('JOB_RECONNECT'), true);
     assert.equal(cepApp.includes('expected_asr_contract_version'), true);
