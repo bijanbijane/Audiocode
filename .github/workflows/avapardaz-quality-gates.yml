@@ -79,6 +79,7 @@ jobs:
             src/workflow/CanonicalProjectWorkflowAndDsp.test.ts \
             src/asr-core/PersianLinguisticCorrectionAndLexical.test.ts \
             src/host-bridge/companion/__tests__/CompanionProductionIpcAndCep.test.ts \
+            src/host-bridge/companion/__tests__/CompanionJobResultHttpIntegration.test.ts \
             src/security/ArchitectureAndSecurityGuardrails.test.ts \
             src/host-bridge/companion/__tests__/LocalCompanionAndSecurity.test.ts \
             src/workflow/StudioWorkflowController.pass4.test.ts
