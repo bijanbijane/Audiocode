@@ -478,3 +478,50 @@ SBOM generation is inventory/provenance evidence, not a vulnerability-advisory s
 - R0: **IN PROGRESS**; no gate is passed and no executable test PASS is established.
 
 Next action remains owner-side GitHub Actions settings/billing verification, followed by rerunning the workflows and examining the first actual step/log once available. Keep all repository work on GitHub; do not use a local Mac checkout.
+
+
+## 20. Reconciliation of Adobe Audition host compatibility evidence (2026-11-27)
+
+A focused comparison of the four compatibility/integration documents on `main` confirms that the current internal platform support contract is not yet frozen.
+
+### 20.1. Source-document findings
+
+- `docs/shahab/SHAHAB_ADOBE_HOST_VERSION_MATRIX.md` identifies Audition 25.x on Windows 11 x86_64 and macOS 14/15 arm64/x86_64. Both live-host rows are `NOT_TESTED`.
+- `docs/AVAPARDAZ/HARDWARE-COMPATIBILITY-MATRIX.md` describes a broader candidate set: Windows 10/11 x86_64, Windows 11 ARM64 (conditional on Audition host support), macOS Apple Silicon and macOS Intel. All Audition desktop rows are `Unverified`.
+- `docs/AVAPARDAZ/PHASE-09-TEST-REPORT.md` records Linux x86_64 execution only and explicitly blocks live Audition GUI and physical consumer-hardware acceptance.
+- `docs/shahab/SHAHAB_ADOBE_INTEGRATION_TEST_REPORT.md` reports passing SDK offset mapping, interchange generation, authenticated local bridge and privacy/recovery checks, while the installed live Audition GUI remains `NOT_TESTED`.
+
+### 20.2. Reconciled interpretation
+
+These documents describe different evidence levels and must not be merged into one claim of support:
+
+| Combination | Candidate evidence | Current acceptance status |
+|---|---|---|
+| Windows 11 x86_64 + Audition 25.x | Explicit in SHAHAB host matrix | NOT_TESTED |
+| macOS 14/15 arm64 + Audition 25.x | Explicit in SHAHAB host matrix | NOT_TESTED |
+| macOS 14/15 x86_64 + Audition 25.x | Explicit in SHAHAB host matrix | NOT_TESTED |
+| Windows 10 x86_64 + Audition >=24.0 | Broader hardware matrix only | UNVERIFIED; not yet approved for internal v1 |
+| Windows 11 ARM64 | Conditional row in broader matrix | UNVERIFIED; Adobe host support not established here |
+
+The approved roadmap's requirement is **both macOS and Windows**. It does not itself approve every architecture or OS version listed in the broader historical matrix. The narrower SHAHAB matrix is a candidate baseline, not proof of compatibility or a product-owner approval.
+
+### 20.3. Required R0 closure inputs
+
+Before platform acceptance can begin, the internal support contract must specify:
+
+1. Exact Audition major/minor/build version(s).
+2. Minimum Windows version/build and CPU architecture.
+3. Minimum macOS version/build and whether Intel is in or out of internal v1.
+4. Whether Windows ARM64 is explicitly excluded, evaluated, or supported.
+5. Minimum RAM/CPU and supported audio formats.
+6. A repeatable live-host test protocol executed on both operating systems.
+
+Engineering has not silently selected or removed any of these targets. This section records the discrepancy and the decision required; it does not change approved product scope.
+
+### 20.4. Status
+
+- Platform scope: both macOS and Windows remain required.
+- Exact OS/Audition/architecture matrix: OPEN / NOT FROZEN.
+- Live Audition host acceptance: NOT_TESTED.
+- No compatibility row is promoted to Supported, Verified or Accepted by this reconciliation.
+- No runtime code, packaging, CI gate or product behavior changed.
