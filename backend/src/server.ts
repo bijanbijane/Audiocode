@@ -67,11 +67,9 @@ export class SlidingWindowRateLimiter {
       for (const [bucketKey, bucket] of this.buckets) {
         if (now > bucket.resetAtMs) this.buckets.delete(bucketKey);
       }
-      while (this.buckets.size >= this.maxTrackedBuckets) {
-        const leastRecentlyUsedKey = this.buckets.keys().next().value;
-        if (leastRecentlyUsedKey === undefined) break;
-        this.buckets.delete(leastRecentlyUsedKey);
-      }
+      // Never evict a live bucket: doing so would let an attacker rotate source keys
+      // to reset their rate limit. Fail closed until an existing window expires.
+      if (this.buckets.size >= this.maxTrackedBuckets) return false;
     }
 
     this.buckets.set(key, { count: 1, resetAtMs: now + windowMs });
