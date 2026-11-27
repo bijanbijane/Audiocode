@@ -79,6 +79,15 @@ describe('Backend Security & Reliability Audit Remediation Suite (P0 #1–12 & P
         }
         return { rows: [] as unknown as TRow[], rowCount: 1 };
       },
+      async connect() {
+        const pool = this;
+        return {
+          query<TRow>(sql: string, params: unknown[] = []) {
+            return pool.query<TRow>(sql, params);
+          },
+          release() {},
+        };
+      },
     };
 
     const app = buildBackendApplication(mockDb, {
