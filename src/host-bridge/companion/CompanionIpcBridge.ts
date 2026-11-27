@@ -11,6 +11,8 @@
 
 import crypto from 'node:crypto';
 import { CANONICAL_CONTRACT_VERSION } from '../../processing-engine/capabilities/CanonicalCapabilityContracts';
+import { AVAPARDAZ_ASR_CONTRACT_VERSION } from '../../asr-core/UnifiedLocalAsrRuntime';
+import { CEP_TRANSCRIPT_SCHEMA_VERSION } from './CepTranscriptDto';
 
 export const COMPANION_IPC_PROTOCOL_VERSION = '1.0.0' as const;
 export const MIN_SUPPORTED_PANEL_MAJOR = 1 as const;
@@ -23,12 +25,16 @@ export interface CompanionHandshakeRequest {
   readonly panel_version: string;
   readonly host_adapter_version: string;
   readonly expected_contract_version: string;
+  readonly expected_asr_contract_version?: string;
+  readonly expected_cep_transcript_schema_version?: string;
 }
 
 export interface CompanionHandshakeResponse {
   readonly compatible: boolean;
   readonly ipc_protocol_version: typeof COMPANION_IPC_PROTOCOL_VERSION;
   readonly companion_contract_version: typeof CANONICAL_CONTRACT_VERSION;
+  readonly asr_contract_version: typeof AVAPARDAZ_ASR_CONTRACT_VERSION;
+  readonly cep_transcript_schema_version: typeof CEP_TRANSCRIPT_SCHEMA_VERSION;
   readonly session_id: string | null;
   readonly session_token: string | null;
   readonly expires_at: string | null;
@@ -150,6 +156,8 @@ export class CompanionIpcBridge {
           compatible: false,
           ipc_protocol_version: COMPANION_IPC_PROTOCOL_VERSION,
           companion_contract_version: CANONICAL_CONTRACT_VERSION,
+          asr_contract_version: AVAPARDAZ_ASR_CONTRACT_VERSION,
+          cep_transcript_schema_version: CEP_TRANSCRIPT_SCHEMA_VERSION,
           session_id: null,
           session_token: null,
           expires_at: null,
@@ -167,6 +175,8 @@ export class CompanionIpcBridge {
           compatible: false,
           ipc_protocol_version: COMPANION_IPC_PROTOCOL_VERSION,
           companion_contract_version: CANONICAL_CONTRACT_VERSION,
+          asr_contract_version: AVAPARDAZ_ASR_CONTRACT_VERSION,
+          cep_transcript_schema_version: CEP_TRANSCRIPT_SCHEMA_VERSION,
           session_id: null,
           session_token: null,
           expires_at: null,
@@ -186,6 +196,18 @@ export class CompanionIpcBridge {
         `Contract mismatch: caller expects "${String(req.expected_contract_version)}", companion serves "${CANONICAL_CONTRACT_VERSION}".`,
       );
     }
+    if (req.host_id === 'adobe-audition') {
+      if (req.expected_asr_contract_version !== AVAPARDAZ_ASR_CONTRACT_VERSION) {
+        reasons.push(
+          `ASR contract mismatch: caller expects "${String(req.expected_asr_contract_version)}", companion serves "${AVAPARDAZ_ASR_CONTRACT_VERSION}".`,
+        );
+      }
+      if (req.expected_cep_transcript_schema_version !== CEP_TRANSCRIPT_SCHEMA_VERSION) {
+        reasons.push(
+          `CEP transcript schema mismatch: caller expects "${String(req.expected_cep_transcript_schema_version)}", companion serves "${CEP_TRANSCRIPT_SCHEMA_VERSION}".`,
+        );
+      }
+    }
     const panelMajor = parseMajorVersion(req.panel_version);
     if (panelMajor === null || panelMajor < MIN_SUPPORTED_PANEL_MAJOR) {
       reasons.push(`Invalid or unsupported panel_version "${String(req.panel_version)}".`);
@@ -202,6 +224,8 @@ export class CompanionIpcBridge {
           compatible: false,
           ipc_protocol_version: COMPANION_IPC_PROTOCOL_VERSION,
           companion_contract_version: CANONICAL_CONTRACT_VERSION,
+          asr_contract_version: AVAPARDAZ_ASR_CONTRACT_VERSION,
+          cep_transcript_schema_version: CEP_TRANSCRIPT_SCHEMA_VERSION,
           session_id: null,
           session_token: null,
           expires_at: null,
@@ -230,6 +254,8 @@ export class CompanionIpcBridge {
         compatible: true,
         ipc_protocol_version: COMPANION_IPC_PROTOCOL_VERSION,
         companion_contract_version: CANONICAL_CONTRACT_VERSION,
+          asr_contract_version: AVAPARDAZ_ASR_CONTRACT_VERSION,
+          cep_transcript_schema_version: CEP_TRANSCRIPT_SCHEMA_VERSION,
         session_id: sessionId,
         session_token: token,
         expires_at: new Date(expiresAtMs).toISOString(),
