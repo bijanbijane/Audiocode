@@ -286,6 +286,7 @@ export class CompanionWebClient {
         body: JSON.stringify({
           ipc_protocol_version: '1.0.0',
           session_id: this.sessionId,
+          execution_mode: 'web-client',
           nonce: generateNonce(),
           timestamp_ms: Date.now(),
           command,
