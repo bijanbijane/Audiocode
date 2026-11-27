@@ -549,7 +549,19 @@ describe('Backend Security & Reliability Audit Remediation Suite (P0 #1–12 & P
         if (sql.includes('pg_try_advisory_lock')) {
           return { rows: [{ acquired: true }] as unknown as TRow[], rowCount: 1 };
         }
+        if (sql.includes('pg_advisory_unlock')) {
+          return { rows: [{ unlocked: true }] as unknown as TRow[], rowCount: 1 };
+        }
         return { rows: [] as unknown as TRow[], rowCount: 0 };
+      },
+      async connect() {
+        const pool = this;
+        return {
+          query<TRow>(sql: string, params: unknown[] = []) {
+            return pool.query<TRow>(sql, params);
+          },
+          release() {},
+        };
       },
     };
     const cron = new BackendBackgroundCronDaemon(
