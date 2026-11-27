@@ -273,6 +273,8 @@ test('AVP-P0-004 + AVP-P0-006: Hardened loopback HTTP Companion IPC enforces req
     });
     assert.equal(hs.status, 200);
     assert.equal(hs.json.compatible, true);
+    assert.equal(hs.json.asr_contract_version, '2.0.0');
+    assert.equal(hs.json.cep_transcript_schema_version, '1.0.0');
     const { session_id, session_token } = hs.json;
 
     // Expired request_id envelope rejected with IPC_REQUEST_EXPIRED
