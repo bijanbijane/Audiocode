@@ -973,6 +973,7 @@ export class LocalCompanionService {
       }
 
       const envelope = auth.envelope;
+      const sessionOwnerId = auth.ownerId ?? `session:${envelope.session_id}`;
       const { command, payload } = envelope;
       const p = (payload && typeof payload === 'object' ? payload : {}) as Record<string, unknown>;
 
@@ -1039,7 +1040,7 @@ export class LocalCompanionService {
             audioBase64: typeof p.audioBase64 === 'string' ? p.audioBase64 : undefined,
             uploadId: typeof p.uploadId === 'string' ? p.uploadId : undefined,
             transferId: typeof p.transferId === 'string' ? p.transferId : undefined,
-            ownerId: envelope.session_id,
+            ownerId: sessionOwnerId,
             filename: typeof p.filename === 'string' ? p.filename : undefined,
             sourceIdentity,
             maxChunkDurationSec: typeof p.maxChunkDurationSec === 'number' ? p.maxChunkDurationSec : undefined,
@@ -1096,7 +1097,6 @@ export class LocalCompanionService {
 
         case 'CAPABILITY_EXECUTE': {
           const action = typeof p.action === 'string' ? p.action : '';
-          const sessionOwnerId = envelope.session_id;
           if (action === 'AUDIO_TRANSFER_INIT') {
             const initRes = this.audioTransfers.initTransfer({
               filename: typeof p.filename === 'string' ? p.filename : undefined,
