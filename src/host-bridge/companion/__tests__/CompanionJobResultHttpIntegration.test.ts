@@ -202,6 +202,15 @@ test('Companion HTTP IPC returns CEP DTO only to Audition and preserves canonica
     assert.equal('schemaVersion' in webStatus.json.job.result, false);
     assert.equal('normalizedText' in webStatus.json.job.result, false);
 
+    // Cancellation responses preserve the same execution-mode DTO contract.
+    const auditionCancel = await ipc(auditionSession, 'audition-cep', 'JOB_CANCEL', { jobId: auditionJobId });
+    const webCancel = await ipc(webSession, 'web-client', 'JOB_CANCEL', { jobId: webJobId });
+    assert.equal(auditionCancel.status, 200);
+    assert.equal(webCancel.status, 200);
+    assert.equal(auditionCancel.json.job.result.schemaVersion, '1.0.0');
+    assert.equal(webCancel.json.job.result.rawText, 'متن خام');
+    assert.equal('schemaVersion' in webCancel.json.job.result, false);
+
     // A valid but different session cannot read, reconnect to, or cancel another session's job.
     const crossSessionStatus = await ipc(webSession, 'web-client', 'JOB_STATUS', { jobId: auditionJobId });
     const crossSessionReconnect = await ipc(webSession, 'web-client', 'JOB_RECONNECT', { jobId: auditionJobId });
