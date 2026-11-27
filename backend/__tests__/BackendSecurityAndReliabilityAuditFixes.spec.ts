@@ -51,6 +51,9 @@ describe('Backend Security & Reliability Audit Remediation Suite (P0 #1–12 & P
     let insertedLeaseId = '';
     const mockDb: PgPoolLike = {
       async query<TRow>(sql: string, params: unknown[] = []) {
+        if (sql.includes('FROM users WHERE id')) {
+          return { rows: [{ id: String(params[0]), status: 'ACTIVE' }] as unknown as TRow[], rowCount: 1 };
+        }
         if (sql.includes('FROM subscriptions')) {
           return {
             rows: [
@@ -124,11 +127,15 @@ describe('Backend Security & Reliability Audit Remediation Suite (P0 #1–12 & P
     expect(idorInvRes.json().error).toBe('FORBIDDEN_INVOICE_IDOR_MISMATCH');
 
     // C) P0 #4 & #10: Legitimate lease issuance uses pure UUID v4 and is verifiable by client OfflineCryptoVerifier
+    const legitDeviceFingerprintHash = crypto
+      .createHash('sha256')
+      .update('fp_legit_1', 'utf8')
+      .digest('hex');
     const validLeaseRes = await app.fastify.inject({
       method: 'POST',
       url: '/api/v1/license/lease',
       headers: { authorization: `Bearer ${user1Jwt}` },
-      payload: { deviceFingerprintHash: 'fp_legit_1' },
+      payload: { deviceFingerprintHash: legitDeviceFingerprintHash },
     });
     expect(validLeaseRes.statusCode).toBe(200);
     expect(insertedLeaseId).toMatch(
