@@ -234,7 +234,33 @@ test('AVP-P0-004 + AVP-P0-006: Hardened loopback HTTP Companion IPC enforces req
     assert.equal(evilOrigin.status, 403);
     assert.equal(evilOrigin.json.error, 'UNTRUSTED_ORIGIN_BLOCKED');
 
-    // Handshake succeeds over loopback
+    // Audition handshake rejects missing ASR and CEP DTO versions independently of IPC.
+    const missingAsrVersion = await httpJson(port, 'POST', '/api/v2/companion/handshake', {
+      ipc_protocol_version: COMPANION_IPC_PROTOCOL_VERSION,
+      host_id: 'adobe-audition',
+      host_version: '24.0',
+      panel_version: '1.0.0',
+      host_adapter_version: '1.0.0',
+      expected_contract_version: CANONICAL_CONTRACT_VERSION,
+      expected_cep_transcript_schema_version: '1.0.0',
+    });
+    assert.equal(missingAsrVersion.status, 409);
+    assert.ok(missingAsrVersion.json.incompatibility_reasons.some((reason: string) => reason.includes('ASR contract mismatch')));
+
+    const unsupportedCepSchema = await httpJson(port, 'POST', '/api/v2/companion/handshake', {
+      ipc_protocol_version: COMPANION_IPC_PROTOCOL_VERSION,
+      host_id: 'adobe-audition',
+      host_version: '24.0',
+      panel_version: '1.0.0',
+      host_adapter_version: '1.0.0',
+      expected_contract_version: CANONICAL_CONTRACT_VERSION,
+      expected_asr_contract_version: '2.0.0',
+      expected_cep_transcript_schema_version: '9.0.0',
+    });
+    assert.equal(unsupportedCepSchema.status, 409);
+    assert.ok(unsupportedCepSchema.json.incompatibility_reasons.some((reason: string) => reason.includes('CEP transcript schema mismatch')));
+
+    // Handshake succeeds only when IPC, canonical capability, ASR and CEP DTO versions agree.
     const hs = await httpJson(port, 'POST', '/api/v2/companion/handshake', {
       ipc_protocol_version: COMPANION_IPC_PROTOCOL_VERSION,
       host_id: 'adobe-audition',
@@ -242,6 +268,8 @@ test('AVP-P0-004 + AVP-P0-006: Hardened loopback HTTP Companion IPC enforces req
       panel_version: '1.0.0',
       host_adapter_version: '1.0.0',
       expected_contract_version: CANONICAL_CONTRACT_VERSION,
+      expected_asr_contract_version: '2.0.0',
+      expected_cep_transcript_schema_version: '1.0.0',
     });
     assert.equal(hs.status, 200);
     assert.equal(hs.json.compatible, true);
