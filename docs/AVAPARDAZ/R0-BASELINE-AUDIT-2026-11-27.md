@@ -625,7 +625,7 @@ This section records implementation work performed on the PR #6 branch after the
 
 - `src/host-bridge/companion/__tests__/CepTranscriptDto.test.ts`: DTO version, language-specific normalized text, raw/normalized text, timestamp/word preservation, unavailable-confidence semantics, and CEP-vs-Web serialization isolation.
 - `src/host-bridge/companion/__tests__/CompanionProductionIpcAndCep.test.ts`: missing and unsupported schema rejection, successful independent version negotiation, returned version fields, backward-compatible Web handshake, and CEP static contract checks.
-- Updated existing Audition handshake fixtures in `LocalCompanionAndSecurity.test.ts` and `Phase1BCompanionStreamingAndMemory.test.ts` to send the required schema versions.
+- Updated the CEP reconnect fixture in `Phase1BCompanionStreamingAndMemory.test.ts` to send the required schema versions. Reclassified the generic offline-ASR/security test in `LocalCompanionAndSecurity.test.ts` as `cli-test`, so it continues to exercise the non-CEP compatibility handshake.
 - These tests are committed but have not been confirmed as executed. Latest Actions runs remain pre-step failures; see Section 23.3.
 
 ### 23.3. Validation status
