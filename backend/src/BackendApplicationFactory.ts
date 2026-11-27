@@ -12,7 +12,7 @@ import type {
   FastifyReplyLike,
   PgPoolLike,
 } from './PlatformBackendServices';
-import { PlatformBackendServices } from './PlatformBackendServices';
+import { PlatformBackendServices, verifySecretKeyConstantTime } from './PlatformBackendServices';
 import { BackendAuthAndPaymentService } from './BackendAuthAndPaymentService';
 import { BackendLicenseAndModelRevocationService } from './BackendLicenseAndModelRevocationService';
 import { isProtectedAuthenticatedUserRoute } from './license/DeviceSeatEnforcementService';
@@ -369,7 +369,7 @@ export function buildBackendApplication(
       monthlyAudioSecondsLimit: number;
     };
   }>('/api/v1/admin/enterprise-keys', async (request, reply) => {
-    if (request.headers['x-admin-api-key'] !== config.adminApiSecretKey) {
+    if (!verifySecretKeyConstantTime(request.headers['x-admin-api-key'], config.adminApiSecretKey)) {
       return reply.status(401).send({ error: 'ADMIN_UNAUTHORIZED' });
     }
     const created = await enterpriseKeys.issueNewEnterpriseApiKey(request.body);
