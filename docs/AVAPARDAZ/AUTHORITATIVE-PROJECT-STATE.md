@@ -481,3 +481,40 @@ This addendum supersedes only older claims about the current primary Persian mod
 - **Timing limitation:** Koochik's current Sherpa output gives token onset timestamps but no reliable token durations. Therefore the current output is segment-timed. Word-level end-time claims remain blocked pending a real Persian forced aligner and gold boundary data.
 - **Verification still outstanding:** 60–120 minute stress tests with measured peak RSS and cancellation/recovery; conversational/noisy/dialect/overlap corpus evaluation; Windows x64 and actual Adobe Audition GUI acceptance; matched head-to-head benchmark against alternative ASR systems.
 - Detailed evidence, metrics, protocol and acceptance gates: `docs/shahab/SHAHAB_ENGINE01_AUDIT_AND_FLEURS_EVALUATION_2026-11-26.md`.
+
+
+---
+
+## ۱۹. حاکمیت وضعیت جاری و رودمپ مصوب ۲۷ نوامبر ۲۰۲۶
+
+**این بخش به‌عنوان الحاقیهٔ جدیدتر، مرجع تفسیر دامنه و هدف انتشار جاری است.** سند حاضر در ۲۳ نوامبر ۲۰۲۶ تهیه شده و بخش‌هایی از آن به roadmap و وضعیت انتشار قبلی اشاره دارند. در ۲۷ نوامبر، مالک محصول تصمیم جدید و صریحی ثبت کرده است؛ از این تاریخ، برای برنامهٔ اجرایی فعلی، سند زیر ملاک است:
+
+- `docs/AVAPARDAZ/DELIVERY-ROADMAP-INTERNAL-2026-11-27.md`
+- شناسه: `AVP-DELIVERY-ROADMAP-1.1`
+- دامنه: **Adobe Audition CEP + Native Companion + shared Core**
+- هدف انتشار: **Internal Release**
+- پلتفرم‌های الزامی: **macOS و Windows**
+- Web Studio مستقل و مسیر Browser/WASM/OPFS: **Post-v1 / خارج از مسیر بحرانی**
+- پرداخت، مجوز تجاری و انتشار عمومی: **خارج از دامنهٔ انتشار داخلی**
+
+### ۱۹.۱. حل تعارض با احکام تاریخی
+
+1. عبارات قدیمی دربارهٔ «Public Commercial Release» در بخش‌های ۱، ۱۱، ۱۶ و ۱۷، سوابق تصمیم و محدودیت انتشار تجاری قبلی هستند؛ آن‌ها به معنی توقف یا ممنوعیت نسخهٔ داخلی مصوب ۲۷ نوامبر نیستند.
+2. الزام امضای عمومی/Notarization برای `.dmg`، Authenticode برای `.msi` و امضای عمومی `.zxp` خودکار به شرط انتشار داخلی تبدیل نمی‌شود. مدل اعتماد، نصب و توزیع داخلی باید در R0 تعیین و مستند شود؛ الزامات امنیتی واقعی سیستم‌عامل و سازمان همچنان باید رعایت شوند.
+3. گپ دیتاست، نبود شواهد کافی برای word-level alignment، ریسک‌های حافظه و نبود آزمون میزبان واقعی macOS/Windows همچنان یافته‌های فنی معتبرند و با تغییر دامنه حذف نمی‌شوند. اثر هرکدام بر Gateهای R1 تا R7 مطابق رودمپ داخلی ارزیابی می‌شود.
+4. وضعیت «Internal Engineering Qualification» در مانیفست تاریخی، به‌تنهایی به معنی عبور از Gateهای رودمپ جدید یا پذیرش محصول روی هر دو سیستم‌عامل نیست. معیارهای جدید و شواهد مستقل آن‌ها حاکم‌اند.
+5. این الحاقیه هیچ قابلیت یا Gateای را به `VERIFIED` یا `ACCEPTED` ارتقا نمی‌دهد.
+
+### ۱۹.۲. آخرین وضعیت ممیزی GitHub در R0
+
+- مخزن رسمی: `bijanbijane/Audiocode`، خصوصی، شاخهٔ پیش‌فرض `main`.
+- baseline ثبت‌شده در آغاز رودمپ: `e73394f8e00e477f1de0046e04fd233681610563`.
+- گزارش جاری R0 در شاخهٔ `docs/r0-baseline-audit-2026-11-27` و PR #6 نگهداری می‌شود؛ PR باز و Draft است و به `main` ادغام نشده است.
+- در چند اجرای مستقل روی push به `main` و pull request، Jobهای دو Workflow اصلی و نیز یک Workflow تشخیصی موقت با `runner_id=0`، نام Runner خالی و صفر Step پایان یافته‌اند. این شواهد نشان‌دهندهٔ شکست پیش از تخصیص Runner است؛ علت دقیق در تنظیمات Billing/Actions یا سرویس GitHub هنوز مشخص نشده است.
+- Workflow تشخیصی موقت واقعاً trigger شد، اما پیش از اجرای نخستین Step شکست خورد؛ فایل آن بعداً حذف و نبودش در شاخه تأیید شد.
+- تا تخصیص Runner و ثبت Step، هیچ نتیجه‌ای برای TypeScript، Unit Test، Build یا سایر commandهای پروژه قابل ادعا نیست.
+- شاخهٔ ممیزی فقط مستندات را تغییر داده است؛ کد محصول و Quality Gateها تغییر نکرده‌اند. `main` دست‌نخورده مانده است.
+
+### ۱۹.۳. وضعیت پذیرش
+
+R0 همچنان **IN PROGRESS** است. دامنه و مسیر تحویل مصوب‌اند، اما تعیین دقیق ماتریس Audition/macOS/Windows، مدل اعتماد توزیع داخلی، baseline اجرایی CI و دسترسی به میزبان‌های فیزیکی/مجاز هر دو سیستم‌عامل هنوز برای خروج از R0 لازم‌اند. تا آن زمان، هیچ Gate عبور نکرده است.
