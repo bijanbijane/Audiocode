@@ -432,3 +432,49 @@ GitHub REST Job payload برای هر دو Job اصلی، `head_sha=0c5e26089464
 **تفسیر:** مشکل در مرحله تخصیص/آغاز Job در GitHub Actions یا دسترسی Runner باقی است؛ علت دقیق هنوز UNKNOWN است. Repository Actions permissions و Billing از طریق اتصال فعلی قابل بررسی نبودند. تغییر کد یا تضعیف Gateها توجیه ندارد تا مالک تنظیمات را بررسی و تخصیص Runner ممکن شود.
 
 این بخش آخرین اجرای قابل مشاهده در این بازبینی را ثبت می‌کند. هر commit مستنداتی جدید خود می‌تواند Workflow تازه‌ای ایجاد کند؛ نتیجه آن اجرا باید مستقل از نتایج این بخش بررسی شود.
+
+
+## 19. Latest PR-head CI recheck and log retrieval outcome (2026-11-27)
+
+### 19.1. Repository and PR state
+
+- Repository: `bijanbijane/Audiocode` (private); default branch: `main`.
+- PR #6: **OPEN / DRAFT / NOT MERGED**; base `main`; mergeable reported true.
+- PR head at this recheck: `548e3f2a445d5dcd4e56e9cd73d2fb4999c2bf08`.
+- The `main` base SHA remains `e73394f8e00e477f1de0046e04fd233681610563`.
+
+### 19.2. Workflow runs associated with this PR head
+
+- [Architecture Governance — run 46016441665](https://github.com/bijanbijane/Audiocode/actions/runs/46016441665)
+- [AVAPARDAZ Quality & Release Gates — run 46016441656](https://github.com/bijanbijane/Audiocode/actions/runs/46016441656)
+
+The commit-to-runs endpoint associates both runs with the PR head above. Job summaries report:
+
+- Architecture Governance primary job: `failure`.
+- AVAPARDAZ Level 1: `failure`.
+- AVAPARDAZ Level 2–4 and Level 5: `skipped`.
+- The job-step endpoint returned an empty array for both primary jobs.
+- Job-log retrieval returned GitHub `404 BlobNotFound`; no decoded job log was available.
+
+The connector's normalized job summaries for these runs do not expose `runner_id` or `runner_name`. Therefore this section does **not** claim direct runner-allocation evidence for these specific run IDs. The evidence establishes only that the primary jobs failed without retrievable step summaries/logs and that dependent levels were skipped. Earlier runs documented in Sections 16–18 separately contain explicit `runner_id=0` observations.
+
+### 19.3. Workflow definition and dependency-audit review
+
+The current PR-branch workflow files were read back:
+
+- `.github/workflows/avapardaz-quality-gates.yml` installs with `bun install --frozen-lockfile`, runs five focused Node test files, builds, checks the ORT WASM asset and runs TypeScript lint in Level 1. Its Level 5 audit runs `npm audit --audit-level=high` only when `package-lock.json` exists; otherwise it emits a warning that npm audit cannot audit `bun.lock`.
+- `.github/workflows/ci-quality-gate.yml` generates a CycloneDX SBOM from the Bun lockfile and runs typecheck, Vitest, Node tests, quality gates and build.
+- `package.json` confirms the relevant script definitions. The repository uses `bun.lock`; `package-lock.json` is absent.
+
+SBOM generation is inventory/provenance evidence, not a vulnerability-advisory scan. The current AVAPARDAZ Level 5 fallback is warning-only when the npm lockfile is absent. A Bun-lockfile-compatible vulnerability scan remains an open supply-chain requirement. No workflow, lockfile, dependency, source code or gate was changed in this review.
+
+### 19.4. Disposition
+
+- Latest PR-head workflow results: **FAILURE**, with no step summaries or retrievable logs.
+- Exact cause of these two latest job failures: **UNKNOWN**; direct runner fields unavailable in the normalized response.
+- Application commands: **NO EXECUTION EVIDENCE** from these two runs.
+- Dependency advisory scan against the authoritative Bun lockfile: **OPEN / NOT ESTABLISHED**.
+- PR #6 remains open and Draft; `main` and product code remain unchanged.
+- R0: **IN PROGRESS**; no gate is passed and no executable test PASS is established.
+
+Next action remains owner-side GitHub Actions settings/billing verification, followed by rerunning the workflows and examining the first actual step/log once available. Keep all repository work on GitHub; do not use a local Mac checkout.
