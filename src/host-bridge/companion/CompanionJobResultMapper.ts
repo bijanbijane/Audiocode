@@ -24,6 +24,10 @@ export function mapCompanionJobResultForExecutionMode(
 export function mapCompanionJobResultForExecutionMode(
   job: CompanionJobRecord,
   executionMode: 'native-companion' | 'audition-cep' | 'web-client' | undefined,
+): CompanionJobResponse;
+export function mapCompanionJobResultForExecutionMode(
+  job: CompanionJobRecord,
+  executionMode: 'native-companion' | 'audition-cep' | 'web-client' | undefined,
 ): CompanionJobResponse {
   if (executionMode !== 'audition-cep' || job.result === null) {
     return job;
