@@ -99,7 +99,12 @@ function generateNonce(): string {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
     return crypto.randomUUID();
   }
-  return `n_${Date.now()}_${Math.random().toString(36).slice(2, 12)}`;
+  if (typeof crypto !== 'undefined' && typeof crypto.getRandomValues === 'function') {
+    const bytes = new Uint8Array(16);
+    crypto.getRandomValues(bytes);
+    return `n_${Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('')}`;
+  }
+  throw new Error('Secure random generator is required for IPC nonce generation.');
 }
 
 function bytesToBase64(bytes: Uint8Array): string {
