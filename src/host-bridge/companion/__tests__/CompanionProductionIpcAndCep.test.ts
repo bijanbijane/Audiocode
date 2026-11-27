@@ -309,6 +309,7 @@ test('AVP-P0-004 + AVP-P0-006: Hardened loopback HTTP Companion IPC enforces req
         request_id: 'req-list-1',
         timestamp_ms: Date.now(),
         expires_at_ms: Date.now() + 60_000,
+        execution_mode: 'audition-cep',
         command: 'JOB_LIST',
         payload: {},
       },
@@ -343,6 +344,9 @@ test('AVP-P0-004 + AVP-P0-006: Hardened loopback HTTP Companion IPC enforces req
     const cepJsx = fs.readFileSync(path.resolve(process.cwd(), 'packages/audition-cep-plugin/jsx/auditionHost.jsx'), 'utf8');
     assert.equal(cepApp.includes('SOURCE_CHANGED'), true);
     assert.equal(cepApp.includes('JOB_RECONNECT'), true);
+    assert.equal(cepApp.includes('expected_asr_contract_version'), true);
+    assert.equal(cepApp.includes('expected_cep_transcript_schema_version'), true);
+    assert.equal(cepApp.includes('job.result.schemaVersion'), true);
     assert.equal(/\.innerHTML\s*=/.test(cepApp), false);
     assert.equal(cepJsx.includes('fileSizeBytes'), true);
     assert.equal(cepJsx.includes('fileModifiedMs'), true);
