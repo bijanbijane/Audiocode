@@ -1005,7 +1005,8 @@ export class LocalCompanionService {
         return;
       }
 
-      const { command, payload } = auth.envelope;
+      const envelope = envelope;
+      const { command, payload } = envelope;
       const p = (payload && typeof payload === 'object' ? payload : {}) as Record<string, unknown>;
 
       switch (command) {
@@ -1071,7 +1072,7 @@ export class LocalCompanionService {
             audioBase64: typeof p.audioBase64 === 'string' ? p.audioBase64 : undefined,
             uploadId: typeof p.uploadId === 'string' ? p.uploadId : undefined,
             transferId: typeof p.transferId === 'string' ? p.transferId : undefined,
-            ownerId: auth.envelope.session_id,
+            ownerId: envelope.session_id,
             filename: typeof p.filename === 'string' ? p.filename : undefined,
             sourceIdentity,
             maxChunkDurationSec: typeof p.maxChunkDurationSec === 'number' ? p.maxChunkDurationSec : undefined,
@@ -1083,52 +1084,52 @@ export class LocalCompanionService {
               ok: false,
               error: submitted.code,
               message: submitted.message,
-              request_id: auth.envelope.request_id,
+              request_id: envelope.request_id,
             });
             return;
           }
-          res.status(202).json({ ok: true, job: submitted.job, request_id: auth.envelope.request_id });
+          res.status(202).json({ ok: true, job: submitted.job, request_id: envelope.request_id });
           return;
         }
 
         case 'JOB_STATUS':
         case 'JOB_RECONNECT': {
           const jobId = typeof p.jobId === 'string' ? p.jobId : '';
-          const job = this.getJob(jobId, auth.envelope.session_id);
+          const job = this.getJob(jobId, envelope.session_id);
           if (!job) {
-            res.status(404).json({ ok: false, error: 'JOB_NOT_FOUND', message: 'Unknown jobId.', request_id: auth.envelope.request_id });
+            res.status(404).json({ ok: false, error: 'JOB_NOT_FOUND', message: 'Unknown jobId.', request_id: envelope.request_id });
             return;
           }
-          const responseJob = mapCompanionJobResultForExecutionMode(job, auth.envelope.execution_mode);
-          res.json({ ok: true, job: responseJob, reconnected: command === 'JOB_RECONNECT', request_id: auth.envelope.request_id });
+          const responseJob = mapCompanionJobResultForExecutionMode(job, envelope.execution_mode);
+          res.json({ ok: true, job: responseJob, reconnected: command === 'JOB_RECONNECT', request_id: envelope.request_id });
           return;
         }
 
         case 'JOB_LIST': {
-          const jobs = this.listJobs(auth.envelope.session_id).map((job) =>
-            mapCompanionJobResultForExecutionMode(job, auth.envelope.execution_mode),
+          const jobs = this.listJobs(envelope.session_id).map((job) =>
+            mapCompanionJobResultForExecutionMode(job, envelope.execution_mode),
           );
-          res.json({ ok: true, jobs, request_id: auth.envelope.request_id });
+          res.json({ ok: true, jobs, request_id: envelope.request_id });
           return;
         }
 
         case 'JOB_CANCEL': {
           const jobId = typeof p.jobId === 'string' ? p.jobId : '';
-          const cancelled = this.cancelJob(jobId, auth.envelope.session_id);
+          const cancelled = this.cancelJob(jobId, envelope.session_id);
           if (!cancelled.ok) {
-            res.status(404).json({ ok: false, error: 'JOB_NOT_FOUND', message: 'Unknown jobId.', request_id: auth.envelope.request_id });
+            res.status(404).json({ ok: false, error: 'JOB_NOT_FOUND', message: 'Unknown jobId.', request_id: envelope.request_id });
             return;
           }
           const responseJob = cancelled.job
-            ? mapCompanionJobResultForExecutionMode(cancelled.job, auth.envelope.execution_mode)
+            ? mapCompanionJobResultForExecutionMode(cancelled.job, envelope.execution_mode)
             : undefined;
-          res.json({ ok: true, job: responseJob, request_id: auth.envelope.request_id });
+          res.json({ ok: true, job: responseJob, request_id: envelope.request_id });
           return;
         }
 
         case 'CAPABILITY_EXECUTE': {
           const action = typeof p.action === 'string' ? p.action : '';
-          const sessionOwnerId = auth.envelope.session_id;
+          const sessionOwnerId = envelope.session_id;
           if (action === 'AUDIO_TRANSFER_INIT') {
             const initRes = this.audioTransfers.initTransfer({
               filename: typeof p.filename === 'string' ? p.filename : undefined,
