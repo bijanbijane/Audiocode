@@ -131,7 +131,7 @@ describe('ROVER Ensemble, Stage Latency Profiler & Enterprise Batch HTTP Control
       quotaMgr,
       {
         getCompletedTokensForJob: async (jobId) =>
-          jobId === 'job_ent_55' ? { audioDurationSec: 1.0, tokens: sampleTokens } : null,
+          jobId === 'job_ent_55' ? { audioDurationSec: 1.0, tokens: sampleTokens, organizationId: 'org_1' } : null,
       },
       true
     );
