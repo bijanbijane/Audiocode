@@ -15,7 +15,7 @@ import type {
 import { PlatformBackendServices } from './PlatformBackendServices';
 import { BackendAuthAndPaymentService } from './BackendAuthAndPaymentService';
 import { BackendLicenseAndModelRevocationService } from './BackendLicenseAndModelRevocationService';
-import { isProtectedLicenseRoute } from './license/DeviceSeatEnforcementService';
+import { isProtectedAuthenticatedUserRoute } from './license/DeviceSeatEnforcementService';
 import { BackendModelCanaryRolloutService } from './rollout/BackendModelCanaryRolloutService';
 import { BackendExternalApiProxyService } from './gateway/BackendExternalApiProxyService';
 import {
@@ -27,6 +27,7 @@ import {
   SingleFlightReadThroughCache,
 } from './cache/BackendReadThroughCacheAndMetrics';
 import { AdvisoryLockCoordinator } from './ops/BackendJobOutboxAndAdvisoryLockService';
+import { BackendBillingInvoiceAndUsageLedger } from './billing/BackendBillingInvoiceAndUsageLedger';
 import {
   BackendBatchHttpSubmissionController,
   type CompletedAsrJobArtifactStore,
@@ -321,6 +322,7 @@ export function buildBackendApplication(
     config.adminApiSecretKey,
   );
   const externalGateway = new BackendExternalApiProxyService(db);
+  const billingLedger = new BackendBillingInvoiceAndUsageLedger(db);
   const enterpriseKeys = new EnterpriseApiKeyAndQuotaManager(db);
   const batchSubmissionController = new BackendBatchHttpSubmissionController(
     db,
@@ -332,7 +334,7 @@ export function buildBackendApplication(
 
   // 1. Security preHandler guarding all user license endpoints with EdDSA (Ed25519) JWT verification
   fastify.addHook('preHandler', async (request, reply) => {
-    if (!isProtectedLicenseRoute(request.url)) return;
+    if (!isProtectedAuthenticatedUserRoute(request.url)) return;
 
     const authHeader = request.headers?.authorization;
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
@@ -355,6 +357,7 @@ export function buildBackendApplication(
   revocationService.registerRoutes(fastify);
   canaryRolloutService.registerRoutes(fastify);
   externalGateway.registerRoutes(fastify);
+  billingLedger.registerRoutes(fastify);
   batchSubmissionController.registerRoutes(fastify);
 
   // 3. Admin-only endpoint for issuing B2B Enterprise API Keys
