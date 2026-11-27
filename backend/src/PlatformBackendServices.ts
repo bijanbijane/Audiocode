@@ -64,6 +64,28 @@ export type BackendModelTier = 'GROUP_A' | 'GROUP_B';
 export type BackendModelLifecycleStatus = 'ACTIVE' | 'SUPPORTED' | 'DEPRECATED' | 'REVOKED';
 
 const MAX_MODEL_CHUNK_BYTES = 16 * 1024 * 1024;
+
+/**
+ * Constant-time comparison for configured API secrets. Rejects weak/empty secrets
+ * and unequal byte lengths before the timing-safe byte comparison.
+ */
+export function verifySecretKeyConstantTime(candidate: unknown, expected: unknown): boolean {
+  if (
+    typeof candidate !== 'string' ||
+    typeof expected !== 'string' ||
+    candidate.length < 16 ||
+    expected.length < 16
+  ) {
+    return false;
+  }
+
+  const candidateBytes = Buffer.from(candidate, 'utf8');
+  const expectedBytes = Buffer.from(expected, 'utf8');
+  return (
+    candidateBytes.byteLength === expectedBytes.byteLength &&
+    crypto.timingSafeEqual(candidateBytes, expectedBytes)
+  );
+}
 const PUBLIC_MODEL_RELEASE_STATUSES = new Set([
   'ACTIVE',
   'SUPPORTED',
