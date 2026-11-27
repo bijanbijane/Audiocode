@@ -171,3 +171,31 @@ The only registered Desktop Commander device, `MacBook-Air.local`, is currently 
 4. Fix only the demonstrated root cause on a focused branch, then rerun the affected test and complete Level-1 gate.
 
 No source code was changed, no CI workflow was edited, and no R0 gate is passed by this follow-up.
+
+
+## 10. GitHub-only execution constraint and CI retry (2026-11-27)
+
+The execution method is now explicitly constrained to the official GitHub repository and GitHub-hosted automation. No Mac/Desktop Commander session or local checkout is to be used as the development or test environment. Repository inspection and edits are performed through GitHub; executable validation must run in GitHub Actions. Accordingly, the earlier references in Sections 7–9 to restoring a local checkout or inspecting a local working tree are superseded. The remote branch, commit and PR state are the authoritative state available to this workflow.
+
+### Additional workflow evidence
+
+The exact Level-1 workflow definitions were inspected on `main`:
+
+- `.github/workflows/avapardaz-quality-gates.yml` runs `bun install --frozen-lockfile`, five focused Node test files, then (with `if: always()`) the production Vite build, the self-hosted ORT WASM asset check, and `npm run lint`.
+- `.github/workflows/ci-quality-gate.yml` runs Bun install, cargo-deny, Madge, CycloneDX SBOM generation, TypeScript lint, Vitest, Node reliability tests, quality-gate tests and production build.
+
+The `package.json` scripts and `bun.lock` are present. The five focused AVAPARDAZ Level-1 test paths and the configured Vitest quality-gate spec path were confirmed to exist. This is static inspection only; no command has yet been executed successfully in a GitHub runner during this audit.
+
+The failed workflow jobs were retried through GitHub Actions (failed-jobs-only) for runs:
+
+- [AVAPARDAZ Quality & Release Gates, attempt 2](https://github.com/bijanbijane/Audiocode/actions/runs/46010718548)
+- [Architecture Governance, Reliability & Release Quality Gate, attempt 2](https://github.com/bijanbijane/Audiocode/actions/runs/46010718553)
+
+Both retries again concluded `failure`. The job summaries returned no step records, and job-log retrieval again returned `BlobNotFound`. The original baseline jobs exposed `runner_id: 0`, empty step arrays and effectively immediate completion; this suggests a runner/job-initialization or Actions observability issue, but it does **not** prove the root cause. No specific source-code defect has been established.
+
+### Updated disposition
+
+- CI status: **FAILURE — cause still UNKNOWN**. Re-run did not provide executable logs or step evidence.
+- Source-code fix: **NOT MADE**. Changing application code or weakening gates without a demonstrated failure would be speculative.
+- R0: **IN PROGRESS**. No gate is passed.
+- Next action: obtain usable GitHub Actions step/job diagnostics (including runner assignment and first failing step) for these existing workflows, then reproduce and fix only a demonstrated defect. Keep all edits on a dedicated GitHub branch and validate them with Actions; do not use a local Mac checkout.
