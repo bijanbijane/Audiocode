@@ -1119,7 +1119,10 @@ export class LocalCompanionService {
             res.status(404).json({ ok: false, error: 'JOB_NOT_FOUND', message: 'Unknown jobId.', request_id: auth.envelope.request_id });
             return;
           }
-          res.json({ ok: true, job: cancelled.job, request_id: auth.envelope.request_id });
+          const responseJob = cancelled.job
+            ? mapCompanionJobResultForExecutionMode(cancelled.job, auth.envelope.execution_mode)
+            : undefined;
+          res.json({ ok: true, job: responseJob, request_id: auth.envelope.request_id });
           return;
         }
 
