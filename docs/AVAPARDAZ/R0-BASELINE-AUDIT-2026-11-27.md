@@ -233,3 +233,19 @@ Do not change source code or relax CI checks based on these results. The reposit
 - Exact Actions execution-layer cause: **UNKNOWN / OWNER SETTINGS CHECK REQUIRED**.
 - Source changes for CI: **NONE**.
 - R0: **IN PROGRESS; no gate passed**.
+
+
+## 12. Cross-run confirmation of the pre-runner pattern (2026-11-27)
+
+To distinguish a one-off failure from a persistent runner-allocation issue, job payloads were also inspected for earlier runs on the repository:
+
+- [AVAPARDAZ PR run 46005452215](https://github.com/bijanbijane/Audiocode/actions/runs/46005452215)
+- [Architecture Governance PR run 46005452116](https://github.com/bijanbijane/Audiocode/actions/runs/46005452116)
+- [AVAPARDAZ main run 46005599076](https://github.com/bijanbijane/Audiocode/actions/runs/46005599076)
+- [Architecture Governance main run 46005599082](https://github.com/bijanbijane/Audiocode/actions/runs/46005599082)
+
+All four failed jobs independently show the same pattern: `runner_id=0`, empty `runner_name`, zero recorded steps, and completion in approximately two seconds. The latest pair of PR runs (46013373171 / 46013373182) show the same pattern.
+
+This repeated pattern across different commits, both workflows, main pushes and PR events makes a repository-wide Actions execution/configuration or account-level runner availability issue substantially more likely than a source-code regression. It still does not identify the exact setting or service-side cause; billing, spending limits and repository Actions policy remain owner-side checks.
+
+**Engineering decision:** pause application-code changes intended to fix CI. Keep CI gates intact. Resume code-level diagnosis only after a GitHub Actions job is actually assigned a runner and records its first step.
