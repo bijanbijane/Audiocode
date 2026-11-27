@@ -58,7 +58,7 @@ test('CEP transcript mapper represents unavailable confidence as null, never as 
     realTimeFactor: 0.2,
     dominantLanguage: 'en',
     rawText: 'hello',
-    normalizedByProfile: { 'FA-RELAXED-V1': 'hello' },
+    normalizedByProfile: { 'FA-RELAXED-V1': 'hello', 'EN-NORM-V1': 'HELLO' },
     timestampGranularity: 'SEGMENT',
     sampleRateHz: 16000,
     channelCount: 1,
@@ -69,7 +69,7 @@ test('CEP transcript mapper represents unavailable confidence as null, never as 
       startSec: 0,
       endSec: 1,
       text: 'hello',
-      normalizedByProfile: { 'FA-RELAXED-V1': 'hello' },
+      normalizedByProfile: { 'FA-RELAXED-V1': 'hello', 'EN-NORM-V1': 'HELLO' },
       language: 'en',
       timestampGranularity: 'SEGMENT',
       words: [],
@@ -77,6 +77,7 @@ test('CEP transcript mapper represents unavailable confidence as null, never as 
   } as unknown as LocalNeuralTranscriptionResult;
 
   const dto = mapLocalNeuralResultToCepTranscriptDto(nativeResult);
+  assert.equal(dto.normalizedText, 'HELLO');
   assert.equal(dto.confidenceStatus, 'UNAVAILABLE_UNCALIBRATED');
   assert.equal(dto.segments[0].confidence, null);
   assert.equal(dto.segments[0].confidenceStatus, 'UNAVAILABLE_UNCALIBRATED');
