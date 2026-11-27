@@ -326,6 +326,24 @@ test('AVP-P0-004 + AVP-P0-006: Hardened loopback HTTP Companion IPC enforces req
     assert.equal(invalidMode.status, 400);
     assert.equal(invalidMode.json.error, 'IPC_INVALID_ENVELOPE');
 
+    // Audition sessions must explicitly use the negotiated CEP DTO mode.
+    const missingAuditionMode = await httpJson(
+      port,
+      'POST',
+      '/api/v2/companion/ipc',
+      {
+        ipc_protocol_version: COMPANION_IPC_PROTOCOL_VERSION,
+        session_id: hs.json.session_id,
+        nonce: 'n-missing-audition-mode',
+        timestamp_ms: Date.now(),
+        command: 'JOB_LIST',
+        payload: {},
+      },
+      { Authorization: `Bearer ${hs.json.session_token}` },
+    );
+    assert.equal(missingAuditionMode.status, 409);
+    assert.equal(missingAuditionMode.json.error, 'IPC_VERSION_MISMATCH');
+
     // Audition sessions cannot downgrade to a non-CEP serialization mode.
     const wrongAuditionMode = await httpJson(
       port,
