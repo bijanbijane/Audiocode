@@ -660,3 +660,26 @@ The three workflow runs are associated with the same PR head SHA `5a94dd1b12600d
 A static review of the current CEP DTO and response mapper found the native result's `offlineVerified: true` contract consistent with the DTO type, and the mapper is scoped to `audition-cep` for `JOB_STATUS`, `JOB_RECONNECT`, and `JOB_LIST`. This is source inspection only, not runtime validation. The repository-wide consumer inventory remains incomplete because GitHub code search returned no indexed matches; do not treat the targeted scan as exhaustive.
 
 **Required unblock:** repository owner to inspect GitHub Repository Settings → Actions → General and account Billing / Actions usage, then rerun the workflows after runner allocation is restored. No workflow gates were weakened and no source-code changes were made to disguise the pre-step failure.
+
+
+## 21. CI retry metadata and static boundary review — 2026-11-27
+
+The three failed workflow runs from section 20 were retried using GitHub's failed-job rerun operation. Attempt 2 reproduced the same pre-runner failure:
+
+| Workflow run | Attempt 2 Job | Runner ID | Runner name | Steps | Conclusion |
+|---|---:|---:|---|---:|---|
+| [46021339127](https://github.com/bijanbijane/Audiocode/actions/runs/46021339127) | 140582225775 | 0 | empty | 0 | failure |
+| [46021338875](https://github.com/bijanbijane/Audiocode/actions/runs/46021338875) | 140582247718 | 0 | empty | 0 | failure |
+| [46021338916](https://github.com/bijanbijane/Audiocode/actions/runs/46021338916) | 140582264860 | 0 | empty | 0 | failure |
+
+For all three failed jobs, the run-attempt jobs endpoint explicitly returned `runner_id: 0`, empty `runner_name`, and `steps: []`. Downloading each job log returned HTTP 404 / `BlobNotFound`; no executable log exists to inspect. This is direct evidence that the jobs failed before a runner was allocated. It still does not identify whether the underlying cause is repository Actions policy, account usage/billing, or a GitHub-side service issue.
+
+### Static review notes
+
+- The CEP client sends `execution_mode: audition-cep` on IPC requests, negotiates ASR and CEP schema versions at handshake, and rejects completed job results whose `schemaVersion` differs. The Web client explicitly sends `execution_mode: web-client` on both normal and retry requests.
+- Native result segments are assembled from raw Sherpa chunk text and receive per-segment normalization profiles. The CEP DTO's use of `segment.text` as the legacy `text` alias and its profile-based `normalizedText` mapping is consistent with that source contract.
+- `CompanionJobResultMapper` is imported by `LocalCompanionService` with the reverse type dependency erased by TypeScript's `import type`; static inspection shows no runtime circular import introduced by this helper.
+- Remaining coverage gap: tests cover the pure mapper and handshake/IPC compatibility, but do not yet drive a completed job through the actual service HTTP route and assert the CEP-vs-Web response payloads end-to-end.
+- Boundary-hardening follow-up: `execution_mode` is currently read from each authenticated IPC envelope, while the session also stores the handshake `hostId`. The mode affects response serialization, not job authorization, but the service does not bind the requested mode to the session's handshake identity. Consider validating allowed mode values and enforcing a consistent mode per session in a separately tested change.
+
+No code changes were made during this static review. All source-level conclusions remain unverified by compiler, test runner, build, or live Audition execution. R0 remains IN PROGRESS; no Gate is promoted.
