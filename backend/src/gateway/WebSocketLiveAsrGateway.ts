@@ -29,6 +29,7 @@ export class LiveWsAsrSessionController {
   private bufferedPcm16kChunks: Float32Array[] = [];
   private isProcessingQueue = false;
   private isClosed = false;
+  private onCloseNotified = false;
 
   private committedWordsHistory: string[] = [];
   private accumulatedUnbilledSamples = 0;
@@ -44,7 +45,8 @@ export class LiveWsAsrSessionController {
     private readonly enterpriseKeyId: string,
     private readonly quotaManager: EnterpriseApiKeyAndQuotaManager,
     private readonly socket: LiveWsSocketLike,
-    transcribeWindowFn: (pcm16k: Float32Array) => Promise<RawWordPrediction[]>
+    transcribeWindowFn: (pcm16k: Float32Array) => Promise<RawWordPrediction[]>,
+    private readonly onClose?: () => void,
   ) {
     this.stabilizer = new LocalAgreement2StreamStabilizer(transcribeWindowFn, 0.35, 20.0);
   }
@@ -206,6 +208,7 @@ export class LiveWsAsrSessionController {
     } catch {
       // Socket already closed by peer
     }
+    this.notifyClosed();
   }
 
   private closeSession(code: number, reason: string): void {
@@ -218,6 +221,13 @@ export class LiveWsAsrSessionController {
     } catch {
       // Socket already closed by peer
     }
+    this.notifyClosed();
+  }
+
+  private notifyClosed(): void {
+    if (this.onCloseNotified) return;
+    this.onCloseNotified = true;
+    this.onClose?.();
   }
 
   private isChunkSilence(chunk: Float32Array): boolean {
@@ -239,11 +249,25 @@ export class LiveWsAsrSessionController {
 }
 
 export class WebSocketLiveAsrGateway {
+  private static readonly MINIMUM_SESSION_QUOTA_SECONDS = 5;
+  private readonly activeSessionsByKey = new Map<string, number>();
+
   constructor(
     private readonly quotaManager: EnterpriseApiKeyAndQuotaManager,
     /** Architecture Rule 3: Server-side live ASR is disabled in V1 by default and gated behind Enterprise flag */
-    private readonly enableServerSideAsrInference: boolean
-  ) {}
+    private readonly enableServerSideAsrInference: boolean,
+    private readonly maxParallelSessionsPerKey = 2,
+  ) {
+    if (!Number.isSafeInteger(maxParallelSessionsPerKey) || maxParallelSessionsPerKey < 1) {
+      throw new Error('INVALID_MAX_PARALLEL_SESSIONS_PER_KEY');
+    }
+  }
+
+  private releaseActiveSession(keyId: string): void {
+    const activeCount = this.activeSessionsByKey.get(keyId) ?? 0;
+    if (activeCount <= 1) this.activeSessionsByKey.delete(keyId);
+    else this.activeSessionsByKey.set(keyId, activeCount - 1);
+  }
 
   public async openAuthenticatedSession(params: {
     enterpriseApiKey: string;
@@ -262,32 +286,48 @@ export class WebSocketLiveAsrGateway {
       return null;
     }
 
+    let reservedKeyId: string | undefined;
     try {
       const ctx = await this.quotaManager.authenticateAndAuthorizeScope(
         params.enterpriseApiKey,
         'CLOUD_ASR_ENTERPRISE'
       );
-      if (ctx.remainingAudioSeconds <= 0) {
+      const activeCount = this.activeSessionsByKey.get(ctx.keyId) ?? 0;
+      if (activeCount >= this.maxParallelSessionsPerKey) {
+        throw new Error('PARALLEL_SESSION_LIMIT_REACHED');
+      }
+      const requiredQuotaSeconds =
+        (activeCount + 1) * WebSocketLiveAsrGateway.MINIMUM_SESSION_QUOTA_SECONDS;
+      if (ctx.remainingAudioSeconds < requiredQuotaSeconds) {
         throw new Error('QUOTA_EXHAUSTED');
       }
+
+      // Reserve one five-second minimum per active socket in-process before creating the session.
+      // The synchronous map update after authentication prevents concurrent opens from racing.
+      this.activeSessionsByKey.set(ctx.keyId, activeCount + 1);
+      reservedKeyId = ctx.keyId;
 
       const sessionId = `ws_asr_${Date.now()}_${crypto.randomBytes(8).toString('hex')}`;
       params.socket.send(
         JSON.stringify({
           type: 'SESSION_READY',
           sessionId,
-          remainingQuotaSeconds: ctx.remainingAudioSeconds,
+          remainingQuotaSeconds: Math.max(0, ctx.remainingAudioSeconds - requiredQuotaSeconds),
         })
       );
 
-      return new LiveWsAsrSessionController(
+      const session = new LiveWsAsrSessionController(
         sessionId,
         ctx.keyId,
         this.quotaManager,
         params.socket,
-        params.transcribeWindowFn
+        params.transcribeWindowFn,
+        () => this.releaseActiveSession(ctx.keyId),
       );
+      reservedKeyId = undefined;
+      return session;
     } catch (err) {
+      if (reservedKeyId) this.releaseActiveSession(reservedKeyId);
       const code = err instanceof Error ? err.message : 'UNAUTHORIZED';
       params.socket.send(
         JSON.stringify({
