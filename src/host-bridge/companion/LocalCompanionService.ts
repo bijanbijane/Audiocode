@@ -778,21 +778,21 @@ export class LocalCompanionService {
     return { ok: true, statusCode: 202, job: initialRecord };
   }
 
-  public getJob(jobId: string, ownerId?: string): CompanionJobRecord | null {
+  public getJob(jobId: string, ownerId: string): CompanionJobRecord | null {
     const entry = this.jobs.get(jobId);
-    if (!entry || (ownerId !== undefined && entry.ownerId !== ownerId)) return null;
+    if (!entry || entry.ownerId !== ownerId) return null;
     return entry.record;
   }
 
-  public listJobs(ownerId?: string): readonly CompanionJobRecord[] {
+  public listJobs(ownerId: string): readonly CompanionJobRecord[] {
     return Array.from(this.jobs.values())
-      .filter((entry) => ownerId === undefined || entry.ownerId === ownerId)
+      .filter((entry) => entry.ownerId === ownerId)
       .map((entry) => entry.record);
   }
 
-  public cancelJob(jobId: string, ownerId?: string): { readonly ok: boolean; readonly job?: CompanionJobRecord } {
+  public cancelJob(jobId: string, ownerId: string): { readonly ok: boolean; readonly job?: CompanionJobRecord } {
     const entry = this.jobs.get(jobId);
-    if (!entry || (ownerId !== undefined && entry.ownerId !== ownerId)) return { ok: false };
+    if (!entry || entry.ownerId !== ownerId) return { ok: false };
     if (entry.record.status === 'RUNNING' || entry.record.status === 'QUEUED') {
       entry.abortController.abort();
       entry.record = {
