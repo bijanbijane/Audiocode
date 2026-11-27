@@ -307,6 +307,25 @@ test('AVP-P0-004 + AVP-P0-006: Hardened loopback HTTP Companion IPC enforces req
     assert.equal(wrongHostMode.status, 409);
     assert.equal(wrongHostMode.json.error, 'IPC_VERSION_MISMATCH');
 
+    // A known session ID without its bearer token must not reveal host/mode policy.
+    const unauthenticatedModeProbe = await httpJson(
+      port,
+      'POST',
+      '/api/v2/companion/ipc',
+      {
+        ipc_protocol_version: COMPANION_IPC_PROTOCOL_VERSION,
+        session_id: webHandshake.json.session_id,
+        nonce: 'n-unauthenticated-mode-probe',
+        timestamp_ms: Date.now(),
+        execution_mode: 'unknown-client',
+        command: 'JOB_LIST',
+        payload: {},
+      },
+      { Authorization: 'Bearer invalid-session-token' },
+    );
+    assert.equal(unauthenticatedModeProbe.status, 401);
+    assert.equal(unauthenticatedModeProbe.json.error, 'IPC_TOKEN_INVALID');
+
     // Unknown execution modes are rejected before command dispatch.
     const invalidMode = await httpJson(
       port,
