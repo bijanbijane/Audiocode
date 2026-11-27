@@ -358,3 +358,31 @@ No product scope change is proposed by this audit. These are unresolved acceptan
 - Candidate platform combinations: **NOT APPROVED / NOT VERIFIED**.
 - Product source and CI gate definitions: **UNCHANGED** by this update.
 - No R0 gate is passed.
+
+
+## 16. اصلاح انتساب اجرای CI به commit و تأیید runner_id (2026-11-27)
+
+بازخوانی مستقیم REST endpointهای GitHub Actions جزئیات دقیق‌تری از دو اجرای بخش ۱۵ فراهم کرد و لازم است عبارت «روی HEAD جاری PR» دقیق‌تر شود:
+
+- commit فعلی PR هنگام این اصلاح: `0c5e260894646f2bde5501ea2af526e2a1ea2aea` (ثبت‌شده در 14:25:20 UTC).
+- دو اجرای `46014529274` و `46014529304` در 14:17:07 UTC ایجاد شده‌اند و هر دو Job، صریحاً `head_sha=7c19e312d2dcbc907fdc44f6696b498bc07aacde` دارند.
+- بنابراین این دو اجرا مربوط به commit قبلی PR هستند، نه commit فعلی `0c5e260`. گزارش بخش ۱۵ نباید به‌عنوان CI اجراشده روی commit جدید تفسیر شود.
+- REST Job payload برای اجرای Architecture Governance نشان می‌دهد: `runner_id=0`، `runner_name=""` و `steps=[]`.
+- REST Job payload برای AVAPARDAZ Level 1 نیز همین مقادیر را نشان می‌دهد. دو Job وابسته Level 2–4 و Level 5 با conclusion برابر `skipped` ثبت شده‌اند.
+- هر دو Job اصلی حدود دو ثانیه پس از ایجاد خاتمه یافته‌اند.
+
+**نتیجه اصلاح‌شده:** شواهد مستقیم، شکست پیش از تخصیص Runner را برای commit `7c19e312` تأیید می‌کند. برای commit فعلی `0c5e260` هنوز اجرای CI مشاهده نشده است؛ پس نباید ادعا کرد که commit فعلی CI را اجرا کرده یا در آن شکست خورده است. پس از رفع مانع Actions، اجرای جدید روی HEAD فعلی لازم است.
+
+### وضعیت lockfile و ممیزی زنجیره تأمین — نکته تکمیلی
+
+بازخوانی فایل‌های واقعی روی `main` تأیید کرد:
+
+- `package.json` دارای scriptهای lint، build، unit، quality-gate، stress و e2e است.
+- CI اصلی نصب را با `bun install --frozen-lockfile` انجام می‌دهد و SBOM را از Bun تولید می‌کند.
+- Workflow مربوط به AVAPARDAZ در Level 5 فقط در صورت وجود `package-lock.json`، `npm audit` را اجرا می‌کند؛ در غیر این صورت صرفاً warning می‌دهد که npm audit قادر به ممیزی `bun.lock` نیست.
+- بنابراین وجود SBOM به‌تنهایی اثبات نمی‌کند که advisory/vulnerability scan برای dependency graph قفل‌شده انجام شده است. یک اسکن آسیب‌پذیری سازگار با lockfile واقعی هنوز باید به‌عنوان نیاز R0/R6 تعیین‌تکلیف شود.
+- هیچ lockfile موازی یا صوری ایجاد نشد و هیچ dependency یا workflow در این مرحله تغییر نکرد.
+
+### Traceability
+
+این اصلاح صرفاً مستنداتی است. PR #6 باز و Draft باقی می‌ماند؛ `main`، کد محصول و CI gateها بدون تغییرند. R0 همچنان IN PROGRESS است و هیچ تست اجرایی PASS نشده است.
