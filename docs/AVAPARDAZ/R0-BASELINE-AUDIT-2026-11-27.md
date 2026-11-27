@@ -639,6 +639,6 @@ This section records implementation work performed on the PR #6 branch after the
 
 1. Obtain an Actions run with an allocated runner, then run typecheck/build and the focused Companion tests; investigate the first actual application-level failure.
 2. Add service-level integration coverage proving that a completed job is mapped for CEP and remains unchanged for Web Companion consumers.
-3. Complete a repository-wide consumer inventory for `JOB_STATUS`, `JOB_RECONNECT`, and `JOB_LIST`.
+3. Complete a repository-wide consumer inventory for `JOB_STATUS`, `JOB_RECONNECT`, and `JOB_LIST`. A targeted scan of 19 companion/Audition-related files found CEP `JOB_STATUS`/`JOB_RECONNECT` use and Web `JOB_STATUS` use; `JOB_LIST` is currently exposed by the service and exercised by tests.
 4. Add concrete Browser-versus-Native adapter conformance using equivalent deterministic model/audio fixtures when the test harness permits.
 5. Validate the CEP/Companion pair in live Adobe Audition on both approved platform families; R0 and platform acceptance remain IN PROGRESS.
