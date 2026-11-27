@@ -603,5 +603,40 @@ Deeper source inspection refines Section 21: the two ASR runtime adapters are st
 - CEP direct IPC result DTO versus canonical adapter DTO: DIFFERENT / undocumented compatibility boundary.
 - Version negotiation: IPC and capability versions are checked; ASR schema version is not independently negotiated.
 - Confidence availability semantics: information loss CONFIRMED in Browser and Native adapter mapping.
-- No source code, tests, manifest, IPC behavior, CI gate or product scope changed in this audit.
+- At the time of this audit, no source code, tests, manifest, IPC behavior, CI gate or product scope had changed.
 - R0 remains IN PROGRESS; no gate passed.
+
+## 23. ASR / CEP contract-boundary implementation progress (2026-11-27)
+
+This section records implementation work performed on the PR #6 branch after the read-only findings in Sections 21–22. It does not promote any R0 gate.
+
+### 23.1. Implemented
+
+- Added `src/asr-core/AsrContractVersion.ts` as the single source of the canonical ASR contract version. `UnifiedLocalAsrRuntime.ts` re-exports the same constant to preserve existing imports; the IPC bridge now imports the lightweight version module rather than loading the ASR runtime module.
+- Added `src/host-bridge/companion/CepTranscriptDto.ts` with versioned `CepTranscriptResultV1` / `CepTranscriptSegmentV1` and a single mapper from `LocalNeuralTranscriptionResult`.
+- The DTO retains the CEP editor's `text` field as a compatibility alias, while exposing `rawText` and `normalizedText` separately. Existing word timings and timestamp granularity are preserved; no synthetic timing is introduced.
+- Native inference output currently has no calibrated confidence value. The CEP DTO explicitly emits `confidence: null` and `confidenceStatus: UNAVAILABLE_UNCALIBRATED`; it does not coerce unavailable confidence to zero.
+- The Companion handshake independently checks `expected_asr_contract_version` and `expected_cep_transcript_schema_version` for Adobe Audition clients and returns the served versions. The IPC protocol and generic capability contract remain separate.
+- `JOB_STATUS`, `JOB_RECONNECT`, and `JOB_LIST` map completed job results only for `execution_mode: audition-cep`. Other execution modes retain the existing `LocalNeuralTranscriptionResult` payload.
+- The CEP panel sends both expected versions, validates the handshake response, and rejects a completed result with an unexpected DTO schema version.
+
+### 23.2. Tests added (execution not yet verified)
+
+- `src/host-bridge/companion/__tests__/CepTranscriptDto.test.ts`: DTO version, raw/normalized text, timestamp/word preservation, and unavailable-confidence semantics.
+- `src/host-bridge/companion/__tests__/CompanionProductionIpcAndCep.test.ts`: missing and unsupported schema rejection, successful independent version negotiation, returned version fields, and CEP static contract checks.
+- These tests are committed but have not been confirmed as executed. Latest Actions runs remain pre-step failures; see Section 23.3.
+
+### 23.3. Validation status
+
+- GitHub Actions on PR #6 head `b47f8de299ee578bd722442533f6390161eb8afd`: AVAPARDAZ Quality & Release Gates, Architecture Governance, and Separated Web/API Container Build all concluded failure.
+- The exposed job payloads contain `steps: null`; no test, typecheck, lint, or build result is available. Do not interpret these as application failures or successes.
+- No local or Mac execution was used. All source changes were made directly through the official GitHub repository interface.
+- No production deployment, merge, or live service operation occurred.
+
+### 23.4. Remaining work
+
+1. Obtain an Actions run with an allocated runner, then run typecheck/build and the focused Companion tests; investigate the first actual application-level failure.
+2. Add service-level integration coverage proving that a completed job is mapped for CEP and remains unchanged for Web Companion consumers.
+3. Complete a repository-wide consumer inventory for `JOB_STATUS`, `JOB_RECONNECT`, and `JOB_LIST`.
+4. Add concrete Browser-versus-Native adapter conformance using equivalent deterministic model/audio fixtures when the test harness permits.
+5. Validate the CEP/Companion pair in live Adobe Audition on both approved platform families; R0 and platform acceptance remain IN PROGRESS.
