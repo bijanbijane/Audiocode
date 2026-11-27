@@ -54,7 +54,7 @@ No compatibility row or release gate is considered verified until the correspond
 
 - Confirm all `JOB_STATUS`, `JOB_RECONNECT`, and `JOB_LIST` consumers before selecting the exact response envelope.
 - Confirm whether any CEP consumer relies on serialized `LocalNeuralTranscriptionResult` fields outside the inspected panel path.
-- Confirm whether any additional CEP consumer relies on serialized `LocalNeuralTranscriptionResult` fields outside the inspected panel path.
+- Targeted inventory across 19 companion/Audition-related source and test files found the CEP panel consuming `JOB_STATUS` and `JOB_RECONNECT`, and `CompanionWebClient` consuming `JOB_STATUS`; `JOB_LIST` is currently exposed by the service and exercised by tests. Complete a repository-wide consumer scan before removing or changing the legacy result shape.
 
 ## Implementation progress (2026-11-27)
 
