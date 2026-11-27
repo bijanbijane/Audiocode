@@ -10,7 +10,7 @@
 - Default branch: `main`
 - Main baseline / current main HEAD observed: `e73394f8e00e477f1de0046e04fd233681610563`
 - Working branch: `docs/r0-baseline-audit-2026-11-27`
-- Branch HEAD after the current security-fix batch: `fa79c3e8d0d5458935015cc82b5a56f88a4316b5`
+- Branch HEAD after the execution-state refresh: `937d98c57c232dad5e85d7a4d9c091019927ce68`
 - PR: [#6 — R0 baseline and Audition CEP ASR boundary](https://github.com/bijanbijane/Audiocode/pull/6) — OPEN, DRAFT, not merged.
 - Repository changes in this execution are made through GitHub on the PR branch. No local Mac checkout is used.
 
@@ -21,7 +21,8 @@ R0 — Baseline, scope and dual-platform release gates: **IN PROGRESS**. No road
 | Task | Priority | Status | Evidence / remaining acceptance |
 |---|---:|---|---|
 | R0-BASE-01 — Record repository baseline and reconcile approved delivery scope | P0 | IMPLEMENTED | Initial audit: `docs/AVAPARDAZ/R0-BASELINE-AUDIT-2026-11-27.md`; approved scope is mirrored in the delivery roadmap. R0 exit criteria remain open. |
-| R0-CI-02 — Establish executable CI baseline | P0 | BLOCKED | Latest runs `46027251745`, `46027251831`, `46027251747` on head `fa79c3e...` failed before any job steps were reported. Jobs `140601723502`, `140601723854`, `140601723739` returned empty step lists; Level 2–5 were skipped. Exact root cause is unknown. |
+| R0-CI-02 — Establish executable CI baseline | P0 | BLOCKED | Latest runs `46027406671`, `46027406571`, `46027406573` on head `937d98c...` failed before any job steps were reported. Jobs `140602251794`, `140602250605`, `140602250945` returned empty step lists; Level 2–5 were skipped. Exact root cause is unknown. |
+| R0-SEC-08 — Enforce session ownership for Companion jobs | P0 | IMPLEMENTED | Job owner is stored internally and checked on IPC status, reconnect, list and cancel. Cross-session HTTP regression assertions were added; execution is blocked by unavailable CI runner. |
 | R0-IPC-03 — Version and isolate the Audition CEP transcript boundary | P1 | IMPLEMENTED | PR #6 adds the CEP DTO, mapper, independent schema negotiation, and execution-mode-specific result serialization. Added tests are not yet verified by an executed CI run. |
 | R0-CONSUMER-04 — Complete repository-wide IPC consumer inventory | P1 | IN PROGRESS | Targeted tree scan reviewed 20 Companion/Audition/IPC source and test files. Confirmed production consumers include CEP `JOB_STATUS`/`JOB_RECONNECT`, Web Companion `JOB_STATUS`, and service-side `JOB_LIST`; a full semantic consumer audit remains open. Do not remove legacy response fields before closure. |
 | R0-PLATFORM-05 — Approve exact Audition / OS / hardware / audio-format matrix | P1 | BLOCKED | Candidate matrix exists in the R0 audit; exact builds, minimum hardware, architectures and formats are not owner-approved. |
@@ -41,7 +42,7 @@ R0 — Baseline, scope and dual-platform release gates: **IN PROGRESS**. No road
 |---|---|---|
 | Repository / branch metadata | PASS | GitHub reports push permission; `main` and PR branch refs were read directly. |
 | PR state | PASS | PR #6 is open, draft, based on `main`, not merged. |
-| CI Level 1 / primary jobs | BLOCKED | Latest runs `46027251745`, `46027251831`, `46027251747` failed with zero recorded steps; Level 2–5 dependent jobs skipped where applicable. |
+| CI Level 1 / primary jobs | BLOCKED | Latest runs `46027406671`, `46027406571`, `46027406573` failed with zero recorded steps; Level 2–5 dependent jobs skipped where applicable. |
 | Unit / integration tests | NOT AVAILABLE | No successful runner execution or test output is available. |
 | Typecheck / lint | NOT AVAILABLE | No command execution evidence. |
 | Production build / packaging | NOT AVAILABLE | No command execution evidence. |
@@ -51,12 +52,12 @@ No test, build, lint, or typecheck is claimed to have passed in this execution s
 
 ## Open blockers and risks
 
-1. GitHub Actions runner allocation / pre-step failure: exact cause UNKNOWN. Latest two security-fix commits triggered six workflow runs across their heads; all jobs failed with zero steps. Repository owner must inspect Actions policy and account billing/usage. Do not weaken quality gates or repeatedly rerun without a change in runner availability.
+1. GitHub Actions runner allocation / pre-step failure: exact cause UNKNOWN. The latest three workflow runs on head `937d98c...` also failed with zero recorded steps. Repository owner must inspect Actions policy and account billing/usage. Do not weaken quality gates or repeatedly rerun without a change in runner availability.
 2. Job data was previously accessible across authenticated IPC sessions because job lookup/list/cancel did not enforce the submitting session owner. Owner scoping is now implemented and regression coverage added, but remains unverified until CI executes.
-2. The HTTP integration test and concrete Browser-vs-Native adapter parity tests remain unexecuted/unproven.
-3. Full IPC consumer inventory remains incomplete; legacy DTO compatibility must be preserved until it is complete.
-4. Exact platform matrix, internal trust/distribution model, and live Audition test hosts remain outstanding.
-5. Word-level Persian timing remains gated by independent human-gold alignment evidence; do not enable automatic edits based on unverified word boundaries.
+3. The HTTP integration test and concrete Browser-vs-Native adapter parity tests remain unexecuted/unproven.
+4. Full IPC consumer inventory remains incomplete; legacy DTO compatibility must be preserved until it is complete.
+5. Exact platform matrix, internal trust/distribution model, and live Audition test hosts remain outstanding.
+6. Word-level Persian timing remains gated by independent human-gold alignment evidence; do not enable automatic edits based on unverified word boundaries.
 
 ## Next execution order
 
