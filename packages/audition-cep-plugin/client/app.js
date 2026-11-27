@@ -68,7 +68,14 @@
     if (window.crypto && typeof window.crypto.randomUUID === "function") {
       return window.crypto.randomUUID();
     }
-    return "cep_" + Date.now() + "_" + Math.random().toString(36).slice(2, 12);
+    if (window.crypto && typeof window.crypto.getRandomValues === "function") {
+      var bytes = new Uint8Array(16);
+      window.crypto.getRandomValues(bytes);
+      return "cep_" + Array.prototype.map.call(bytes, function (byte) {
+        return byte.toString(16).padStart(2, "0");
+      }).join("");
+    }
+    throw new Error("Secure random generator is unavailable for IPC nonce generation");
   }
 
   function showNotice(msg, isError) {
