@@ -428,6 +428,15 @@ describe('Backend Security & Reliability Audit Remediation Suite (P0 #1–12 & P
     expect(s2).toBeNull();
     await s1!.finalizeAndClose();
 
+    // Closing the first session releases its local reservation for a later connection.
+    const s3 = await wsGateway.openAuthenticatedSession({
+      enterpriseApiKey: 'paudio_live_ws',
+      socket: noopSocket,
+      transcribeWindowFn: async () => [],
+    });
+    expect(s3).not.toBeNull();
+    await s3!.finalizeAndClose();
+
     // C) P1 #11: NodeAsrModelSessionPool prevents concurrent loadAndWarmupModel from exceeding memory budget
     const slowOrt: OrtRuntimeProvider = {
       createTensor: (type, data, dims) => ({ type, data, dims } as OrtTensorLike),
