@@ -133,3 +133,41 @@ Therefore, word-level timing is not accepted as a safe input to automatic edits.
 ## 8. Next action
 
 The next engineering action is to obtain a runnable checkout at baseline commit `e73394f8e00e477f1de0046e04fd233681610563`, reproduce the two failing Level-1 CI workflows, and capture the first failing command and complete logs. Do not start feature implementation until this blocker is understood.
+
+## 9. Follow-up evidence collected after the initial snapshot
+
+### Pull request validation
+
+The documentation-only R0 pull request (#6) is still **OPEN / DRAFT / NOT MERGED**. Its head commit is `afb0cf8b8bdf8068019c89b30912182a184742aa`.
+
+GitHub Actions also ran against the PR head and reproduced the same two workflow-level failures:
+
+- [AVAPARDAZ Quality & Release Gates — PR validation](https://github.com/bijanbijane/Audiocode/actions/runs/46009771297): Level 1 failed; Levels 2–5 skipped.
+- [Architecture Governance, Reliability & Release Quality Gate — PR validation](https://github.com/bijanbijane/Audiocode/actions/runs/46009771370): failed.
+
+Each failed check reports one annotation, but the GitHub connector returned no step list or log URL for the jobs. The job-log download endpoint returned `BlobNotFound`; the annotation endpoint is not exposed through the current GitHub connector. Consequently the failing command and root cause remain **UNKNOWN**. The failure is reproducible at workflow level, not yet reproducible locally.
+
+### Static validation of the Level-1 test paths
+
+The five files invoked by the AVAPARDAZ Level-1 focused regression command were individually fetched from `main` and all exist:
+
+- `src/ai-engine/asr/SileroVadOnnxRunner.test.ts`
+- `src/ai-engine/asr/SpeakerEmbeddingOnnxRunner.test.ts`
+- `src/ai-engine/asr/WespeakerKaldiFbank80.test.ts`
+- `src/ai-engine/asr/LocalWeSpeakerDiarizationService.test.ts`
+- `src/ai-engine/MultiSpeakerDiarizationAndCrosstalkEngine.test.ts`
+
+The configured Vitest file `src/quality-gate/__tests__/full-pipeline.spec.ts` also exists. This rules out missing test-file paths as the obvious static explanation, but does not establish that the tests pass or that imports resolve at runtime.
+
+### Execution environment availability
+
+The only registered Desktop Commander device, `MacBook-Air.local`, is currently **OFFLINE** (last seen approximately 23 hours before this check). No local checkout, branch state, working tree, package install, test execution, or physical macOS/Windows host test could be inspected from this session.
+
+### Revised next action
+
+1. Restore an authorized online development host or provide another runnable checkout environment.
+2. At the baseline commit, inspect `git status --short --branch` before changing files.
+3. Run the exact failing workflow commands in sequence and capture stdout/stderr, exit codes and environment versions; identify the first failure before modifying code.
+4. Fix only the demonstrated root cause on a focused branch, then rerun the affected test and complete Level-1 gate.
+
+No source code was changed, no CI workflow was edited, and no R0 gate is passed by this follow-up.
