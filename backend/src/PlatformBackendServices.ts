@@ -246,7 +246,7 @@ export class PlatformBackendServices {
       if (body.userId !== undefined) {
         if (typeof body.userId !== 'string' || body.userId !== authenticatedUserId) {
           return reply.status(403).send({
-            error: 'FORBIDDEN_USER_MISMATCH',
+            error: 'FORBIDDEN_USER_IDOR_MISMATCH',
             messageFa: 'شناسه کاربر درخواست با هویت احراز‌شده مطابقت ندارد.',
           });
         }
