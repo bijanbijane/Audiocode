@@ -643,3 +643,20 @@ This section records implementation work performed on the PR #6 branch after the
 3. Complete a repository-wide consumer inventory for `JOB_STATUS`, `JOB_RECONNECT`, and `JOB_LIST`. A targeted scan of 19 companion/Audition-related files found CEP `JOB_STATUS`/`JOB_RECONNECT` use and Web `JOB_STATUS` use; `JOB_LIST` is currently exposed by the service and exercised by tests.
 4. Add concrete Browser-versus-Native adapter conformance using equivalent deterministic model/audio fixtures when the test harness permits.
 5. Validate the CEP/Companion pair in live Adobe Audition on both approved platform families; R0 and platform acceptance remain IN PROGRESS.
+
+
+## 20. CI recheck — PR #6 head 5a94dd1 (2026-11-27)
+
+A fresh recheck of the current PR head confirms that the execution-layer failure persists across all three configured workflows:
+
+| Workflow run | Workflow | Job result | Step evidence |
+|---|---|---|---|
+| [46020314768](https://github.com/bijanbijane/Audiocode/actions/runs/46020314768) | Architecture Governance, Reliability & Release Quality Gate | failure | Job 140577949529; `steps: null`, `logs_url: null` |
+| [46020314616](https://github.com/bijanbijane/Audiocode/actions/runs/46020314616) | AVAPARDAZ Quality & Release Gates | Level 1 failure; Levels 2–5 skipped | Job 140577948653; `steps: null`, `logs_url: null` |
+| [46020314640](https://github.com/bijanbijane/Audiocode/actions/runs/46020314640) | Separated Web and API Container Build | failure | Job 140577948821; `steps: null`, `logs_url: null` |
+
+The three workflow runs are associated with the same PR head SHA `5a94dd1b12600dc738387d1182be988df3ac7972`. No step-level logs or command results were exposed. This recheck therefore does not establish a TypeScript, test, build, packaging, or application-code failure; it also provides no passing validation evidence. The exact Actions execution-layer cause remains UNKNOWN.
+
+A static review of the current CEP DTO and response mapper found the native result's `offlineVerified: true` contract consistent with the DTO type, and the mapper is scoped to `audition-cep` for `JOB_STATUS`, `JOB_RECONNECT`, and `JOB_LIST`. This is source inspection only, not runtime validation. The repository-wide consumer inventory remains incomplete because GitHub code search returned no indexed matches; do not treat the targeted scan as exhaustive.
+
+**Required unblock:** repository owner to inspect GitHub Repository Settings → Actions → General and account Billing / Actions usage, then rerun the workflows after runner allocation is restored. No workflow gates were weakened and no source-code changes were made to disguise the pre-step failure.
