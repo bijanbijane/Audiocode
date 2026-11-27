@@ -630,7 +630,7 @@ This section records implementation work performed on the PR #6 branch after the
 
 ### 23.3. Validation status
 
-- GitHub Actions on PR #6 head `c64342312385da75512deb1eb3d96a508350ab8f`: AVAPARDAZ Quality & Release Gates (`46019988058`), Architecture Governance (`46019988017`), and Separated Web/API Container Build (`46019988139`) all concluded failure.
+- GitHub Actions on PR #6 head `71b5d9fa11c67907d11a4f3c7db145f9f858d19b`: AVAPARDAZ Quality & Release Gates (`46020174488`), Architecture Governance (`46020174379`), and Separated Web/API Container Build (`46020174384`) all concluded failure.
 - The exposed job payloads contain `steps: null`; no test, typecheck, lint, or build result is available. Do not interpret these as application failures or successes.
 - No local or Mac execution was used. All source changes were made directly through the official GitHub repository interface.
 - No production deployment, merge, or live service operation occurred.
