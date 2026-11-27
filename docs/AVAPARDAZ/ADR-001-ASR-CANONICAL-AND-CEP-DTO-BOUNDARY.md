@@ -1,6 +1,6 @@
 # ADR-001 — Canonical ASR Contract and Adobe Audition CEP DTO Boundary
 
-- **Status:** Proposed for implementation on PR #6
+- **Status:** Accepted for implementation on PR #6; implementation in progress
 - **Date:** 2026-11-27
 - **Scope:** Internal Adobe Audition CEP + Native Companion + shared ASR core
 - **Decision owner:** Product owner / AudioCode maintainer
@@ -54,4 +54,15 @@ No compatibility row or release gate is considered verified until the correspond
 
 - Confirm all `JOB_STATUS`, `JOB_RECONNECT`, and `JOB_LIST` consumers before selecting the exact response envelope.
 - Confirm whether any CEP consumer relies on serialized `LocalNeuralTranscriptionResult` fields outside the inspected panel path.
-- Trace confidence provenance from the native inference engine before finalizing the DTO confidence status mapping.
+- Confirm whether any additional CEP consumer relies on serialized `LocalNeuralTranscriptionResult` fields outside the inspected panel path.
+
+## Implementation progress (2026-11-27)
+
+- Added `src/host-bridge/companion/CepTranscriptDto.ts` with explicit schema version `1.0.0` and a mapper from the native inference result.
+- The DTO preserves the existing CEP `text` field as a compatibility alias while separately exposing `rawText` and `normalizedText`; timestamps and word timings are copied without synthesis.
+- The native inference result currently exposes no calibrated confidence values. The CEP DTO therefore reports `confidence: null` and `UNAVAILABLE_UNCALIBRATED`, rather than inventing a zero.
+- The handshake now negotiates ASR contract `2.0.0` and CEP transcript schema `1.0.0` independently for Adobe Audition clients. Other execution modes retain their existing handshake request requirements.
+- `JOB_STATUS`, `JOB_RECONNECT`, and `JOB_LIST` map completed results only when `execution_mode` is `audition-cep`; other consumers retain the original job result shape.
+- The CEP client validates both negotiated versions and the returned result schema before applying a transcript.
+- Added focused mapper and handshake tests. They have not yet been observed executing because GitHub Actions jobs continue to fail before exposing steps.
+- Cross-runtime concrete-adapter parity and live Audition host validation remain unimplemented / unverified.
