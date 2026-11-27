@@ -1,4 +1,6 @@
 import { spawn } from 'node:child_process';
+import fs from 'node:fs';
+import path from 'node:path';
 
 export interface StreamedAsrWindowChunk {
   readonly windowIndex: number;
@@ -14,6 +16,71 @@ export interface StreamedAsrWindowChunk {
  */
 export class NodeStreamingAudioIngestTranscoder {
   private static readonly TARGET_RATE = 16000;
+
+  /**
+   * Validates an FFmpeg input as a local filesystem path. When an allowed root is
+   * supplied, canonicalizes existing symlink prefixes before enforcing confinement.
+   */
+  public static validateSafeLocalAudioPath(inputPath: unknown, allowedRoot?: string): string {
+    if (
+      typeof inputPath !== 'string' ||
+      inputPath.trim().length === 0 ||
+      inputPath.includes('\0')
+    ) {
+      throw new Error('INVALID_FFMPEG_INPUT_PATH');
+    }
+
+    const candidate = inputPath.trim();
+    if (candidate.startsWith('-')) {
+      throw new Error('SECURITY_FFMPEG_OPTION_INJECTION');
+    }
+    if (
+      /^(?:concat|subfile|pipe|crypto|data|file|https?|ftp|rtmp|rtsp):/i.test(candidate) ||
+      candidate.includes('://')
+    ) {
+      throw new Error('SECURITY_SSRF_PROTOCOL_FORBIDDEN');
+    }
+
+    const resolvedPath = path.resolve(candidate);
+    if (allowedRoot !== undefined) {
+      if (
+        typeof allowedRoot !== 'string' ||
+        allowedRoot.trim().length === 0 ||
+        allowedRoot.includes('\0')
+      ) {
+        throw new Error('SECURITY_PATH_TRAVERSAL_FORBIDDEN');
+      }
+      const canonicalPath = this.resolveExistingPathPrefix(resolvedPath);
+      const canonicalRoot = this.resolveExistingPathPrefix(path.resolve(allowedRoot));
+      const relativePath = path.relative(canonicalRoot, canonicalPath);
+      if (
+        relativePath === '..' ||
+        relativePath.startsWith('..' + path.sep) ||
+        path.isAbsolute(relativePath)
+      ) {
+        throw new Error('SECURITY_PATH_TRAVERSAL_FORBIDDEN');
+      }
+    }
+
+    return resolvedPath;
+  }
+
+  private static resolveExistingPathPrefix(candidatePath: string): string {
+    let current = path.resolve(candidatePath);
+    const missingSegments: string[] = [];
+
+    while (!fs.existsSync(current)) {
+      const parent = path.dirname(current);
+      if (parent === current) {
+        return path.resolve(candidatePath);
+      }
+      missingSegments.unshift(path.basename(current));
+      current = parent;
+    }
+
+    const canonicalPrefix = fs.realpathSync.native(current);
+    return path.resolve(canonicalPrefix, ...missingSegments);
+  }
 
   /**
    * Pure byte-stream chunker over arbitrary binary chunks (used by both live ffmpeg stdout and unit tests)
@@ -119,23 +186,17 @@ export class NodeStreamingAudioIngestTranscoder {
 
   public static async *streamAudioFileAsOverlapping16kWindows(params: {
     inputFilePath: string;
+    allowedRoot?: string;
     windowDurationSec?: number;
     overlapDurationSec?: number;
     maxAllowedDurationSec?: number;
     ffmpegBinaryPath?: string;
     abortSignal?: AbortSignal;
   }): AsyncGenerator<StreamedAsrWindowChunk, void, void> {
-    if (
-      typeof params.inputFilePath !== 'string' ||
-      params.inputFilePath.trim().length === 0 ||
-      params.inputFilePath.includes('\0') ||
-      params.inputFilePath.startsWith('-') ||
-      /^(?:concat|subfile|pipe|crypto|data|file|http|https|ftp|rtmp|rtsp):/i.test(
-        params.inputFilePath.trim(),
-      )
-    ) {
-      throw new Error('INVALID_FFMPEG_INPUT_PATH');
-    }
+    const safeInputPath = this.validateSafeLocalAudioPath(
+      params.inputFilePath,
+      params.allowedRoot,
+    );
 
     const ffmpeg = spawn(
       params.ffmpegBinaryPath ?? 'ffmpeg',
@@ -144,7 +205,7 @@ export class NodeStreamingAudioIngestTranscoder {
         '-v',
         'error',
         '-i',
-        params.inputFilePath,
+        safeInputPath,
         '-vn',
         '-ac',
         '1',
