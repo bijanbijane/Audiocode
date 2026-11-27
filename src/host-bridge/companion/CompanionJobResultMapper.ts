@@ -1,5 +1,5 @@
 import type { LocalNeuralTranscriptionResult } from '../../asr-core/LocalSherpaNeuralEngine';
-import type { CompanionJobRecord } from './LocalCompanionService';
+import type { CompanionJobRecord } from './CompanionJobContracts';
 import {
   mapLocalNeuralResultToCepTranscriptDto,
   type CepTranscriptResultV1,
