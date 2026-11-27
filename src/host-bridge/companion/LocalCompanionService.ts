@@ -1005,7 +1005,7 @@ export class LocalCompanionService {
         return;
       }
 
-      const envelope = envelope;
+      const envelope = auth.envelope;
       const { command, payload } = envelope;
       const p = (payload && typeof payload === 'object' ? payload : {}) as Record<string, unknown>;
 
