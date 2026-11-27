@@ -412,3 +412,23 @@ GitHub REST Job payload برای هر دو Job اصلی، `head_sha=0c5e26089464
 - source code و CI workflow definitions: بدون تغییر.
 - R0: IN PROGRESS؛ هیچ Gate عبور نکرده است.
 - تست اجرایی PASS: صفر.
+
+
+## 18. تکرار شکست پیش از تخصیص Runner روی commit گزارش تکمیلی (2026-11-27)
+
+پس از ثبت commit `9d9ee5a22bdd5b5d7d0a697fcdfcff12c95eb1de`، دو Workflow اصلی دوباره اجرا شدند:
+
+- [AVAPARDAZ Quality & Release Gates — run 46016368048](https://github.com/bijanbijane/Audiocode/actions/runs/46016368048)
+- [Architecture Governance — run 46016367978](https://github.com/bijanbijane/Audiocode/actions/runs/46016367978)
+
+هر دو Job اصلی با `head_sha=9d9ee5a22bdd5b5d7d0a697fcdfcff12c95eb1de` ثبت شده‌اند. REST payload نشان می‌دهد:
+
+- AVAPARDAZ Level 1: `runner_id=0`، `runner_name="")، `steps=[])، پایان حدود ۷ ثانیه پس از شروع.
+- Architecture Governance: `runner_id=0`، `runner_name="")، `steps=[])، پایان حدود ۲ ثانیه پس از شروع.
+- AVAPARDAZ Level 2–4 و Level 5: `skipped`.
+
+این شواهد تکرار همان شکست پیش از تخصیص Runner روی commit گزارش تکمیلی را تأیید می‌کنند. هیچ command مربوط به برنامه اجرا نشده است.
+
+**تفسیر:** مشکل در مرحله تخصیص/آغاز Job در GitHub Actions یا دسترسی Runner باقی است؛ علت دقیق هنوز UNKNOWN است. Repository Actions permissions و Billing از طریق اتصال فعلی قابل بررسی نبودند. تغییر کد یا تضعیف Gateها توجیه ندارد تا مالک تنظیمات را بررسی و تخصیص Runner ممکن شود.
+
+این بخش آخرین اجرای قابل مشاهده در این بازبینی را ثبت می‌کند. هر commit مستنداتی جدید خود می‌تواند Workflow تازه‌ای ایجاد کند؛ نتیجه آن اجرا باید مستقل از نتایج این بخش بررسی شود.
