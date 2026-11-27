@@ -242,13 +242,11 @@ test('Red-Team: Live Companion HTTP server enforces HMAC auth, nonce replay, Ori
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         ipc_protocol_version: '1.0.0',
-        host_id: 'adobe-audition',
-        host_version: '24.0',
+        host_id: 'cli-test',
+        host_version: 'test-1.0.0',
         panel_version: '1.0.0',
         host_adapter_version: '1.0.0',
         expected_contract_version: '2.0.0',
-        expected_asr_contract_version: '2.0.0',
-        expected_cep_transcript_schema_version: '1.0.0',
       }),
     });
     assert.equal(hsResp.status, 200);
