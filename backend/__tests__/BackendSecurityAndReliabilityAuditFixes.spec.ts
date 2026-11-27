@@ -304,10 +304,15 @@ describe('Backend Security & Reliability Audit Remediation Suite (P0 #1–12 & P
       cdnBaseUrl: 'https://cdn.local',
       enableServerSideAsrInference: true,
       artifactStore: {
-        getCompletedTokensForJob: async (jobId) =>
-          jobId === 'job_org1_secret'
-            ? { audioDurationSec: 1.0, tokens: sampleTokens, organizationId: 'org_1_owner' }
-            : null,
+        getCompletedTokensForJob: async (jobId) => {
+          if (jobId === 'job_org1_secret') {
+            return { audioDurationSec: 1.0, tokens: sampleTokens, organizationId: 'org_1_owner' };
+          }
+          if (jobId === 'job_org1_unowned') {
+            return { audioDurationSec: 1.0, tokens: sampleTokens };
+          }
+          return null;
+        },
       },
     });
 
@@ -348,7 +353,16 @@ describe('Backend Security & Reliability Audit Remediation Suite (P0 #1–12 & P
       headers: { 'x-enterprise-api-key': 'paudio_live_org2_key' },
     });
     expect(crossTenantExport.statusCode).toBe(403);
-    expect(crossTenantExport.json().error).toBe('FORBIDDEN_CROSS_TENANT_JOB_ACCESS');
+    expect(crossTenantExport.json().error).toBe('FORBIDDEN_TENANT_MISMATCH');
+
+    // Missing tenant provenance must also fail closed; it cannot grant cross-tenant export.
+    const unownedArtifactExport = await app.fastify.inject({
+      method: 'GET',
+      url: '/api/v1/enterprise/asr/jobs/job_org1_unowned/export?format=json',
+      headers: { 'x-enterprise-api-key': 'paudio_live_org2_key' },
+    });
+    expect(unownedArtifactExport.statusCode).toBe(403);
+    expect(unownedArtifactExport.json().error).toBe('FORBIDDEN_TENANT_MISMATCH');
   });
 
   it('4. [P0 #9, P0 #11, P1 #2, P1 #7, P1 #11, P1 #12] Enforces FFmpeg SSRF/option guard, WebSocket parallel session cap, bounded caches, pre-await session pool memory reservation, and cron canary evaluation', async () => {
