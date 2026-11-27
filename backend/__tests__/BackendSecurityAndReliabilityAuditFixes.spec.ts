@@ -380,11 +380,17 @@ describe('Backend Security & Reliability Audit Remediation Suite (P0 #1–12 & P
     expect(() =>
       NodeStreamingAudioIngestTranscoder.validateSafeLocalAudioPath('-f lavfi')
     ).toThrow('SECURITY_FFMPEG_OPTION_INJECTION');
-    expect(() =>
-      NodeStreamingAudioIngestTranscoder.validateSafeLocalAudioPath(
-        'http://169.254.169.254/latest/meta-data/'
-      )
-    ).toThrow('SECURITY_SSRF_PROTOCOL_FORBIDDEN');
+    for (const protocolInput of [
+      'http://169.254.169.254/latest/meta-data/',
+      'cache:http://127.0.0.1/private',
+      'lavfi:movie=/etc/passwd',
+      'smb://127.0.0.1/share/audio.wav',
+      'concat:https://example.invalid/audio',
+    ]) {
+      expect(() =>
+        NodeStreamingAudioIngestTranscoder.validateSafeLocalAudioPath(protocolInput)
+      ).toThrow('SECURITY_SSRF_PROTOCOL_FORBIDDEN');
+    }
     expect(() =>
       NodeStreamingAudioIngestTranscoder.validateSafeLocalAudioPath(
         '/etc/passwd',
