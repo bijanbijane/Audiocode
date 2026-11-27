@@ -353,7 +353,7 @@ describe('Backend Security & Reliability Audit Remediation Suite (P0 #1–12 & P
       headers: { 'x-enterprise-api-key': 'paudio_live_org2_key' },
     });
     expect(crossTenantExport.statusCode).toBe(403);
-    expect(crossTenantExport.json().error).toBe('FORBIDDEN_TENANT_MISMATCH');
+    expect(crossTenantExport.json().error).toBe('FORBIDDEN_CROSS_TENANT_JOB_ACCESS');
 
     // Missing tenant provenance must also fail closed; it cannot grant cross-tenant export.
     const unownedArtifactExport = await app.fastify.inject({
@@ -362,7 +362,7 @@ describe('Backend Security & Reliability Audit Remediation Suite (P0 #1–12 & P
       headers: { 'x-enterprise-api-key': 'paudio_live_org2_key' },
     });
     expect(unownedArtifactExport.statusCode).toBe(403);
-    expect(unownedArtifactExport.json().error).toBe('FORBIDDEN_TENANT_MISMATCH');
+    expect(unownedArtifactExport.json().error).toBe('FORBIDDEN_CROSS_TENANT_JOB_ACCESS');
   });
 
   it('4. [P0 #9, P0 #11, P1 #2, P1 #7, P1 #11, P1 #12] Enforces FFmpeg SSRF/option guard, WebSocket parallel session cap, bounded caches, pre-await session pool memory reservation, and cron canary evaluation', async () => {
