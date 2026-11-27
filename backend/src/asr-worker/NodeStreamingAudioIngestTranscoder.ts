@@ -34,10 +34,12 @@ export class NodeStreamingAudioIngestTranscoder {
     if (candidate.startsWith('-')) {
       throw new Error('SECURITY_FFMPEG_OPTION_INJECTION');
     }
-    if (
-      /^(?:concat|subfile|pipe|crypto|data|file|https?|ftp|rtmp|rtsp):/i.test(candidate) ||
-      candidate.includes('://')
-    ) {
+    // FFmpeg supports many input protocols beyond HTTP (e.g. cache:, lavfi:, smb:).
+    // Accept drive-letter paths on Windows, but reject every other URI scheme and UNC share.
+    const isWindowsDrivePath = /^[a-zA-Z]:[\\/]/.test(candidate);
+    const hasUriScheme =
+      /^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(candidate) && !isWindowsDrivePath;
+    if (hasUriScheme || candidate.startsWith('\\\\')) {
       throw new Error('SECURITY_SSRF_PROTOCOL_FORBIDDEN');
     }
 
