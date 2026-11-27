@@ -10,7 +10,7 @@
 - Default branch: `main`
 - Main baseline / current main HEAD observed: `e73394f8e00e477f1de0046e04fd233681610563`
 - Working branch: `docs/r0-baseline-audit-2026-11-27`
-- Branch HEAD after the execution-state refresh: `937d98c57c232dad5e85d7a4d9c091019927ce68`
+- Last audited implementation HEAD before this status update: `b30aebdcd83749f6ce4d2e9e6a6c5cd88265e332`
 - PR: [#6 — R0 baseline and Audition CEP ASR boundary](https://github.com/bijanbijane/Audiocode/pull/6) — OPEN, DRAFT, not merged.
 - Repository changes in this execution are made through GitHub on the PR branch. No local Mac checkout is used.
 
@@ -21,7 +21,7 @@ R0 — Baseline, scope and dual-platform release gates: **IN PROGRESS**. No road
 | Task | Priority | Status | Evidence / remaining acceptance |
 |---|---:|---|---|
 | R0-BASE-01 — Record repository baseline and reconcile approved delivery scope | P0 | IMPLEMENTED | Initial audit: `docs/AVAPARDAZ/R0-BASELINE-AUDIT-2026-11-27.md`; approved scope is mirrored in the delivery roadmap. R0 exit criteria remain open. |
-| R0-CI-02 — Establish executable CI baseline | P0 | BLOCKED | Latest runs `46027406671`, `46027406571`, `46027406573` on head `937d98c...` failed before any job steps were reported. Jobs `140602251794`, `140602250605`, `140602250945` returned empty step lists; Level 2–5 were skipped. Exact root cause is unknown. |
+| R0-CI-02 — Establish executable CI baseline | P0 | BLOCKED | Latest runs `46027634892`, `46027634709`, `46027634787` on implementation head `b7aa087...` failed before any job steps were reported. Jobs `140603031723`, `140603031217`, `140603031374` returned empty step lists; Level 2–5 were skipped. Exact root cause is unknown. |
 | R0-SEC-08 — Enforce session ownership for Companion jobs | P0 | IMPLEMENTED | Job owner is stored internally and checked on IPC status, reconnect, list and cancel. Cross-session HTTP regression assertions were added; execution is blocked by unavailable CI runner. |
 | R0-IPC-03 — Version and isolate the Audition CEP transcript boundary | P1 | IMPLEMENTED | PR #6 adds the CEP DTO, mapper, independent schema negotiation, and execution-mode-specific result serialization. Added tests are not yet verified by an executed CI run. |
 | R0-CONSUMER-04 — Complete repository-wide IPC consumer inventory | P1 | IN PROGRESS | Targeted tree scan reviewed 20 Companion/Audition/IPC source and test files. Confirmed production consumers include CEP `JOB_STATUS`/`JOB_RECONNECT`, Web Companion `JOB_STATUS`, and service-side `JOB_LIST`; a full semantic consumer audit remains open. Do not remove legacy response fields before closure. |
@@ -34,6 +34,8 @@ R0 — Baseline, scope and dual-platform release gates: **IN PROGRESS**. No road
 - `a180c56cf848b8e5f85924b389fb9d835a24c69d` adds `execution_mode: audition-cep` to two IPC test fixtures so the host/mode guard does not pre-empt the intended expiry and duplicate-request assertions.
 - `6ad15325ec3248f66d0e3b7e969d1fa8bd8be78d` adds an internal owner ID to each Companion job and enforces owner matching for IPC `JOB_STATUS`, `JOB_RECONNECT`, `JOB_LIST`, and `JOB_CANCEL`. Cross-session lookups and cancellation return the same 404 response as unknown jobs.
 - `fa79c3e8d0d5458935015cc82b5a56f88a4316b5` expands the HTTP integration test to submit jobs through authenticated sessions and assert that sessions cannot read, reconnect to, list, or cancel another session's job.
+- `b7aa0877f5a33fbc2e31651237c58a77d62a6517` applies the execution-mode DTO mapper to `JOB_CANCEL` responses, keeping the CEP contract consistent across all job-result commands.
+- `b30aebdcd83749f6ce4d2e9e6a6c5cd88265e332` adds HTTP regression assertions for CEP-vs-Web cancellation response shape.
 - These changes are IMPLEMENTED but not VERIFIED: the CI runner has not executed any steps.
 
 ## Validation evidence
@@ -42,7 +44,7 @@ R0 — Baseline, scope and dual-platform release gates: **IN PROGRESS**. No road
 |---|---|---|
 | Repository / branch metadata | PASS | GitHub reports push permission; `main` and PR branch refs were read directly. |
 | PR state | PASS | PR #6 is open, draft, based on `main`, not merged. |
-| CI Level 1 / primary jobs | BLOCKED | Latest runs `46027406671`, `46027406571`, `46027406573` failed with zero recorded steps; Level 2–5 dependent jobs skipped where applicable. |
+| CI Level 1 / primary jobs | BLOCKED | Latest runs `46027634892`, `46027634709`, `46027634787` failed with zero recorded steps; Level 2–5 dependent jobs skipped where applicable. |
 | Unit / integration tests | NOT AVAILABLE | No successful runner execution or test output is available. |
 | Typecheck / lint | NOT AVAILABLE | No command execution evidence. |
 | Production build / packaging | NOT AVAILABLE | No command execution evidence. |
