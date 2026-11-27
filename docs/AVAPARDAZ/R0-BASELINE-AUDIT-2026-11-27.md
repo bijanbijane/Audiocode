@@ -386,3 +386,29 @@ No product scope change is proposed by this audit. These are unresolved acceptan
 ### Traceability
 
 این اصلاح صرفاً مستنداتی است. PR #6 باز و Draft باقی می‌ماند؛ `main`، کد محصول و CI gateها بدون تغییرند. R0 همچنان IN PROGRESS است و هیچ تست اجرایی PASS نشده است.
+
+
+## 17. CI result on the current PR HEAD (2026-11-27)
+
+پس از commit `0c5e260894646f2bde5501ea2af526e2a1ea2aea`، دو workflow اصلی روی همین SHA اجرا شدند:
+
+- [AVAPARDAZ Quality & Release Gates — run 46015793367](https://github.com/bijanbijane/Audiocode/actions/runs/46015793367)
+- [Architecture Governance — run 46015793347](https://github.com/bijanbijane/Audiocode/actions/runs/46015793347)
+
+GitHub REST Job payload برای هر دو Job اصلی، `head_sha=0c5e260894646f2bde5501ea2af526e2a1ea2aea` را تأیید می‌کند و جزئیات زیر را ثبت کرده است:
+
+- AVAPARDAZ Level 1: `runner_id=0`، `runner_name=""`، `steps=[]`؛ شکست در حدود یک ثانیه.
+- Architecture Governance: `runner_id=0`، `runner_name=""`، `steps=[]`؛ شکست در حدود دو ثانیه.
+- AVAPARDAZ Level 2–4 و Level 5: `skipped`.
+
+**نتیجه:** این بار همان شکست پیش از تخصیص Runner مستقیماً روی HEAD فعلی PR نیز تأیید شد. هیچ command پروژه اجرا نشده است؛ پس هنوز هیچ نتیجه‌ای درباره سلامت یا نقص lint، تست، build، بسته‌بندی یا کد محصول نداریم. علت نهایی همچنان UNKNOWN است.
+
+تلاش برای خواندن Repository Actions permissions از GitHub connector با محدودیت endpoint مجاز متوقف شد؛ تنظیمات Billing و spending limit نیز از دسترس این اتصال خارج است. بنابراین رفع مانع نیازمند بررسی تنظیمات از سوی مالک مخزن/حساب است.
+
+### وضعیت
+
+- PR #6: OPEN / DRAFT / NOT MERGED.
+- main: بدون تغییر.
+- source code و CI workflow definitions: بدون تغییر.
+- R0: IN PROGRESS؛ هیچ Gate عبور نکرده است.
+- تست اجرایی PASS: صفر.
