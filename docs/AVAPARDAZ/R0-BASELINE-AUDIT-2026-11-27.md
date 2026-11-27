@@ -542,7 +542,7 @@ The frozen `docs/AVAPARDAZ/ENGINE-INTERFACE-SPEC.md` (v2.0) defines `AsrRuntimeA
 
 The current `src/asr-core/UnifiedLocalAsrRuntime.ts` instead exports `LocalAsrRuntimeAdapter` with `initializeRuntime()`, `validateModel()`, `transcribe()`, `cancel()`, `getHealth()`, `getResourceUsage()` and `dispose()`. Its `AvapardazTranscriptResult` uses `runtimeName`, `executionProvider`, `modelSha256Hex`, `architecture`, `offlineVerified`, `sampleRateHz`, `durationSec` and `peakMemoryBytes`; segment/word shapes also differ.
 
-These are materially different public TypeScript contracts, not merely naming variations. The specification's claim that both clients consume one identical schema is not established by the current runtime interface. Companion IPC is separately versioned as `1.0.0`; its handshake carries a canonical contract version, so future changes must preserve explicit compatibility negotiation.
+These are materially different public TypeScript contracts, not merely naming variations. **Correction from the deeper consumer audit in Section 22:** both current ASR adapters do implement the same `LocalAsrRuntimeAdapter` and return the same `AvapardazTranscriptResult` at the adapter boundary. The remaining issue is not adapter symmetry; it is whether downstream product consumers (especially the CEP panel's direct IPC path) consume that same canonical transcript DTO. Companion IPC is separately versioned as `1.0.0`; its handshake carries `CANONICAL_CONTRACT_VERSION`, not an explicit ASR transcript-schema version.
 
 ### 21.3. Risk and recommended disposition
 
@@ -558,3 +558,50 @@ These are materially different public TypeScript contracts, not merely naming va
 - Companion IPC protocol: `1.0.0`; unchanged.
 - No source code, manifest, runtime API, test, CI gate or product scope changed.
 - R0 remains IN PROGRESS; no gate passed by this documentation-only comparison.
+
+## 22. ASR consumer-boundary, version negotiation and confidence semantics audit (2026-11-27)
+
+Deeper source inspection refines Section 21: the two ASR runtime adapters are structurally symmetric at their internal adapter boundary, but the Adobe Audition CEP product path bypasses that canonical adapter DTO and consumes the Companion service DTO directly.
+
+### 22.1. Adapter boundary is shared; CEP IPC consumer is not
+
+- `src/asr-core/UnifiedLocalAsrRuntime.ts` exports `LocalAsrRuntimeAdapter` and `AvapardazTranscriptResult` with `AVAPARDAZ_ASR_CONTRACT_VERSION = 2.0.0`.
+- `src/asr-core/BrowserOnnxAsrRuntimeAdapter.ts` and `src/asr-core/NativeCompanionAsrRuntimeAdapter.ts` both explicitly `implements LocalAsrRuntimeAdapter`; Native converts `LocalNeuralTranscriptionResult` through `normalizeNativeResultToCanonical()`.
+- However, `packages/audition-cep-plugin/client/app.js` sends `JOB_STATUS`, then maps `job.result.segments` using `s.text`. `src/host-bridge/companion/LocalCompanionService.ts` stores/returns `LocalNeuralTranscriptionResult`, whose segment DTO uses `text` and `normalizedByProfile`. The Browser adapter's canonical segment uses `rawText` and `normalizedText` instead.
+- Therefore the internal adapter contract is shared, but the CEP panel's direct Companion IPC path is a separate DTO boundary and does not consume `AvapardazTranscriptResult` as specified in the frozen Engine Interface document. This may be an intentional compatibility layer, but it is not documented as such and no explicit versioned mapper at the CEP boundary was found in the inspected path.
+
+### 22.2. Version identifiers are separate namespaces
+
+- ASR adapter schema: `AVAPARDAZ_ASR_CONTRACT_VERSION = 2.0.0`.
+- Canonical capability envelope: `CANONICAL_CONTRACT_VERSION = 2.0.0`.
+- Companion IPC envelope: `COMPANION_IPC_PROTOCOL_VERSION = 1.0.0`.
+- Unified Processing API: `UNIFIED_PROCESSING_CONTRACT_VERSION = 1.0.0`.
+- The IPC handshake validates `expected_contract_version` against `CANONICAL_CONTRACT_VERSION`; CEP currently hardcodes `2.0.0`. Equal string values do not establish a compile-time dependency between the ASR transcript schema and the capability contract. A transcript-only breaking change could therefore evade the handshake unless an explicit ASR schema version is included in the negotiation or DTO envelope.
+
+### 22.3. Existing cross-runtime test does not prove runtime parity
+
+`src/asr-core/RealOnnxAndCrossRuntimeConformance.test.ts` contains a test named “Browser vs Native canonical parity”. The inspected assertions verify Browser capability negotiation and a Browser missing-model error, then call `normalizeNativeResultToCanonical()` on a synthetic Native result and validate its timestamps. They do not run both concrete adapters on the same fixture/model/audio and compare their serialized canonical outputs. The test is useful for Native normalization and Browser isolation, but its title overstates end-to-end cross-runtime conformance coverage.
+
+### 22.4. Confidence availability is collapsed into a numeric zero
+
+- `src/asr-core/CoreAsrContracts.ts` defines `ConfidenceStatus` as `CALIBRATED | UNAVAILABLE_UNCALIBRATED`.
+- `src/processing-engine/UnifiedProcessingContract.ts` preserves `confidenceStatus` and nullable `calibratedConfidence` on `UnifiedTranscriptSegment`.
+- The lower-level `AvapardazWordSpan` in `UnifiedLocalAsrRuntime.ts` requires a numeric `confidence` and has no confidence-status field. Browser mapping converts non-finite confidence to `0`; Native mapping converts absent/non-finite confidence to `0`, then derives segment confidence by averaging words (or `0` for an empty segment).
+- This loses the distinction between a measured/calibrated zero and unavailable/un-calibrated confidence. It can mislead downstream ranking or editing logic if numeric confidence is treated as a probability. Preserve explicit availability/calibration metadata or use nullable confidence before exposing this as a canonical public result.
+
+### 22.5. Required follow-up and disposition
+
+1. Document the intended boundary architecture: either have CEP consume a versioned canonical transcript DTO, or explicitly define and version the legacy Companion IPC job-result DTO plus its mapper to the canonical ASR result.
+2. Give ASR transcript schema its own explicit negotiated version (or bind it by type/reference to the capability contract version) instead of relying on equal literal `2.0.0` values.
+3. Add a real cross-runtime conformance test that runs Browser and Native adapters against equivalent deterministic fixtures and compares normalized schema invariants; retain the existing focused tests.
+4. Preserve confidence availability/calibration semantics end-to-end; do not silently encode unavailable confidence as `0`.
+5. Run the tests only after GitHub Actions runner allocation is restored; current Actions failures still expose no executed test steps.
+
+### 22.6. Status
+
+- Shared adapter interface: CONFIRMED at TypeScript declaration level; runtime parity NOT_VERIFIED.
+- CEP direct IPC result DTO versus canonical adapter DTO: DIFFERENT / undocumented compatibility boundary.
+- Version negotiation: IPC and capability versions are checked; ASR schema version is not independently negotiated.
+- Confidence availability semantics: information loss CONFIRMED in Browser and Native adapter mapping.
+- No source code, tests, manifest, IPC behavior, CI gate or product scope changed in this audit.
+- R0 remains IN PROGRESS; no gate passed.
