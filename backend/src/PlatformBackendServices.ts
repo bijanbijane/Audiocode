@@ -699,6 +699,32 @@ export class PlatformBackendServices {
       };
     }>('/api/v1/telemetry/model-delivery', async (request, reply) => {
       const b = request.body;
+      const allowedEventTypes = new Set([
+        'CHUNK_DOWNLOAD_OK',
+        'CHUNK_FAILURE',
+        'RESUME_SUCCESS',
+        'CACHE_HIT',
+      ]);
+      if (
+        !b ||
+        typeof b !== 'object' ||
+        typeof b.modelId !== 'string' ||
+        !/^[a-zA-Z0-9_-]{1,64}$/.test(b.modelId) ||
+        typeof b.version !== 'string' ||
+        !/^[a-zA-Z0-9.+_-]{1,64}$/.test(b.version) ||
+        typeof b.eventType !== 'string' ||
+        !allowedEventTypes.has(b.eventType) ||
+        typeof b.bytesTransferred !== 'number' ||
+        !Number.isSafeInteger(b.bytesTransferred) ||
+        b.bytesTransferred < 0 ||
+        (b.chunkIndex !== undefined &&
+          (!Number.isSafeInteger(b.chunkIndex) || b.chunkIndex < 0)) ||
+        (b.deviceTier !== undefined &&
+          (typeof b.deviceTier !== 'string' || b.deviceTier.length > 32))
+      ) {
+        return reply.status(400).send({ error: 'INVALID_MODEL_DELIVERY_TELEMETRY' });
+      }
+
       await this.db.query(
         `INSERT INTO model_delivery_telemetry
          (model_id, version, event_type, chunk_index, bytes_transferred, device_tier)
