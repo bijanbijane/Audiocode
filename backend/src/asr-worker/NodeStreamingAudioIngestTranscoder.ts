@@ -44,6 +44,7 @@ export class NodeStreamingAudioIngestTranscoder {
     }
 
     const resolvedPath = path.resolve(candidate);
+    let validatedPath = resolvedPath;
     if (allowedRoot !== undefined) {
       if (
         typeof allowedRoot !== 'string' ||
@@ -62,9 +63,11 @@ export class NodeStreamingAudioIngestTranscoder {
       ) {
         throw new Error('SECURITY_PATH_TRAVERSAL_FORBIDDEN');
       }
+      // Pass the canonical target to FFmpeg, not the symlink path that was checked.
+      validatedPath = canonicalPath;
     }
 
-    return resolvedPath;
+    return validatedPath;
   }
 
   private static resolveExistingPathPrefix(candidatePath: string): string {
