@@ -488,7 +488,11 @@ describe('Backend Security & Reliability Audit Remediation Suite (P0 #1–12 & P
     for (let i = 0; i < 20; i++) {
       limiter.isAllowed(`ip_${i}`, 10, 60_000);
     }
-    expect(limiter.trackedBucketsCount).toBeLessThanOrEqual(5);
+    expect(limiter.trackedBucketsCount).toBe(5);
+    // A full limiter must not evict active buckets and silently reset prior clients' limits.
+    expect(limiter.isAllowed('ip_0', 10, 60_000)).toBe(true);
+    expect(limiter.isAllowed('ip_overflow', 10, 60_000)).toBe(false);
+    expect(limiter.trackedBucketsCount).toBe(5);
 
     const boundedCache = new SingleFlightReadThroughCache(3);
     for (let i = 0; i < 10; i++) {
