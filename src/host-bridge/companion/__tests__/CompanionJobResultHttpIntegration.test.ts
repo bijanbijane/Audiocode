@@ -124,11 +124,12 @@ test('Companion HTTP IPC returns CEP DTO only to Audition and preserves canonica
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
   const port = (server.address() as { port: number }).port;
 
-  const handshake = async (hostId: 'adobe-audition' | 'cli-test') => {
+  const handshake = async (hostId: 'adobe-audition' | 'cli-test', clientInstanceId?: string) => {
     const audition = hostId === 'adobe-audition';
     const response = await httpJson(port, 'POST', '/api/v2/companion/handshake', {
       ipc_protocol_version: COMPANION_IPC_PROTOCOL_VERSION,
       host_id: hostId,
+      ...(clientInstanceId ? { client_instance_id: clientInstanceId } : {}),
       host_version: '24.0',
       panel_version: '1.0.0',
       host_adapter_version: '1.0.0',
@@ -159,8 +160,10 @@ test('Companion HTTP IPC returns CEP DTO only to Audition and preserves canonica
   }, { Authorization: `Bearer ${session.session_token}` });
 
   try {
-    const auditionSession = await handshake('adobe-audition');
-    const webSession = await handshake('cli-test');
+    const auditionClientInstanceId = 'a'.repeat(64);
+    const auditionSession = await handshake('adobe-audition', auditionClientInstanceId);
+    const webSession = await handshake('cli-test', 'c'.repeat(64));
+    const otherAuditionSession = await handshake('adobe-audition', 'b'.repeat(64));
 
     const submitAndWait = async (
       session: any,
@@ -215,9 +218,13 @@ test('Companion HTTP IPC returns CEP DTO only to Audition and preserves canonica
     const crossSessionStatus = await ipc(webSession, 'web-client', 'JOB_STATUS', { jobId: auditionJobId });
     const crossSessionReconnect = await ipc(webSession, 'web-client', 'JOB_RECONNECT', { jobId: auditionJobId });
     const crossSessionCancel = await ipc(webSession, 'web-client', 'JOB_CANCEL', { jobId: auditionJobId });
+    const sameHostOtherClientStatus = await ipc(otherAuditionSession, 'audition-cep', 'JOB_STATUS', { jobId: auditionJobId });
+    const sameHostOtherClientReconnect = await ipc(otherAuditionSession, 'audition-cep', 'JOB_RECONNECT', { jobId: auditionJobId });
     assert.equal(crossSessionStatus.status, 404);
     assert.equal(crossSessionReconnect.status, 404);
     assert.equal(crossSessionCancel.status, 404);
+    assert.equal(sameHostOtherClientStatus.status, 404);
+    assert.equal(sameHostOtherClientReconnect.status, 404);
 
     const auditionReconnect = await ipc(auditionSession, 'audition-cep', 'JOB_RECONNECT', { jobId: auditionJobId });
     const webReconnect = await ipc(webSession, 'web-client', 'JOB_RECONNECT', { jobId: webJobId });
@@ -228,6 +235,18 @@ test('Companion HTTP IPC returns CEP DTO only to Audition and preserves canonica
     assert.equal(auditionReconnect.json.job.result.schemaVersion, '1.0.0');
     assert.equal(webReconnect.json.job.result.rawText, 'متن خام');
     assert.equal('schemaVersion' in webReconnect.json.job.result, false);
+
+    // A new authenticated IPC session from the same CEP installation can recover its persisted job.
+    const auditionReloadSession = await handshake('adobe-audition', auditionClientInstanceId);
+    const recoveredAfterReload = await ipc(
+      auditionReloadSession,
+      'audition-cep',
+      'JOB_RECONNECT',
+      { jobId: auditionJobId },
+    );
+    assert.equal(recoveredAfterReload.status, 200);
+    assert.equal(recoveredAfterReload.json.job.jobId, auditionJobId);
+    assert.equal(recoveredAfterReload.json.job.result.schemaVersion, '1.0.0');
 
     const auditionList = await ipc(auditionSession, 'audition-cep', 'JOB_LIST', {});
     const webList = await ipc(webSession, 'web-client', 'JOB_LIST', {});
