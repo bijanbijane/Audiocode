@@ -15,6 +15,14 @@ export type CompanionJobResponse = Omit<CompanionJobRecord, 'result'> & {
  */
 export function mapCompanionJobResultForExecutionMode(
   job: CompanionJobRecord,
+  executionMode: 'audition-cep',
+): Omit<CompanionJobRecord, 'result'> & { readonly result: CepTranscriptResultV1 | null };
+export function mapCompanionJobResultForExecutionMode(
+  job: CompanionJobRecord,
+  executionMode: 'native-companion' | 'web-client' | undefined,
+): CompanionJobRecord;
+export function mapCompanionJobResultForExecutionMode(
+  job: CompanionJobRecord,
   executionMode: 'native-companion' | 'audition-cep' | 'web-client' | undefined,
 ): CompanionJobResponse {
   if (executionMode !== 'audition-cep' || job.result === null) {
