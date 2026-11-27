@@ -27,6 +27,8 @@ export interface CompanionHandshakeRequest {
   readonly expected_contract_version: string;
   readonly expected_asr_contract_version?: string;
   readonly expected_cep_transcript_schema_version?: string;
+  /** Stable, random client capability used only to reattach this installation across IPC sessions. */
+  readonly client_instance_id?: string;
 }
 
 export interface CompanionHandshakeResponse {
@@ -85,6 +87,7 @@ export interface CompanionIpcEnvelope<TPayload = unknown> {
 
 interface ActiveCompanionSession {
   readonly sessionId: string;
+  readonly ownerId: string;
   readonly hostId: CompanionHandshakeRequest['host_id'];
   readonly expiresAtMs: number;
   readonly seenNonces: Set<string>;
@@ -186,6 +189,12 @@ export class CompanionIpcBridge {
     }
 
     const reasons: string[] = [];
+    if (
+      req.client_instance_id !== undefined &&
+      (typeof req.client_instance_id !== 'string' || !/^[a-f0-9]{64}$/i.test(req.client_instance_id))
+    ) {
+      reasons.push('Invalid client_instance_id: expected 64 hexadecimal characters.');
+    }
     if (!['adobe-audition', 'premiere-pro', 'davinci-resolve', 'cli-test'].includes(req.host_id)) {
       reasons.push(`Unsupported host_id "${String(req.host_id)}".`);
     }
@@ -245,6 +254,9 @@ export class CompanionIpcBridge {
 
     this.sessions.set(sessionId, {
       sessionId,
+      ownerId: req.client_instance_id
+        ? `client:${req.host_id}:${req.client_instance_id.toLowerCase()}`
+        : `session:${sessionId}`,
       hostId: req.host_id,
       expiresAtMs,
       seenNonces: new Set<string>(),
@@ -277,6 +289,7 @@ export class CompanionIpcBridge {
     readonly code?: string;
     readonly message?: string;
     readonly envelope?: CompanionIpcEnvelope;
+    readonly ownerId?: string;
   } {
     if (!isLoopbackRemoteAddress(params.remoteAddress)) {
       return {
@@ -463,6 +476,7 @@ export class CompanionIpcBridge {
       ok: true,
       statusCode: 200,
       envelope: env as CompanionIpcEnvelope,
+      ownerId: session.ownerId,
     };
   }
 
