@@ -70,7 +70,11 @@ export class DatabaseMigrationRunner {
         const files = fs
           .readdirSync(migrationsDir)
           .filter((f) => f.endsWith('.sql'))
-          .sort((a, b) => a.localeCompare(b));
+          .sort((a, b) => {
+            if (a === 'schema.sql') return b === 'schema.sql' ? 0 : -1;
+            if (b === 'schema.sql') return 1;
+            return a.localeCompare(b);
+          });
 
         const appliedNow: string[] = [];
         const skipped: string[] = [];
