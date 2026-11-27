@@ -384,7 +384,7 @@ describe('Backend Security & Reliability Audit Remediation Suite (P0 #1–12 & P
     expect(unownedArtifactExport.json().error).toBe('FORBIDDEN_CROSS_TENANT_JOB_ACCESS');
   });
 
-  it('4. [P0 #9, P0 #11, P1 #2, P1 #7, P1 #11, P1 #12] Enforces FFmpeg SSRF/option guard, WebSocket parallel session cap, bounded caches, pre-await session pool memory reservation, and cron canary evaluation', async () => {
+  it('4. [P0 #9, P0 #11, P1 #2, P1 #7, P1 #11] Enforces FFmpeg protocol guard, WebSocket quota reservation, bounded caches, pre-await session memory reservation, and lock-protected cron sweeps', async () => {
     // A) P0 #9: FFmpeg input path validator blocks CLI flags, SSRF URLs, and path traversal
     expect(() =>
       NodeStreamingAudioIngestTranscoder.validateSafeLocalAudioPath('-f lavfi')
@@ -572,7 +572,7 @@ describe('Backend Security & Reliability Audit Remediation Suite (P0 #1–12 & P
     ).rejects.toThrow('WATCHDOG_MEMORY_LIMIT_EXCEEDED');
     expect(terminatedReason).toBe('MEMORY_LIMIT');
 
-    // F) P1 #12: BackendBackgroundCronDaemon invokes canaryEvaluatorFn during sweep tick
+    // F) BackendBackgroundCronDaemon runs its maintenance sweep under a pinned advisory lock.
     const cronDb: PgPoolLike = {
       async query<TRow>(sql: string) {
         if (sql.includes('pg_try_advisory_lock')) {
@@ -593,13 +593,12 @@ describe('Backend Security & Reliability Audit Remediation Suite (P0 #1–12 & P
         };
       },
     };
-    const cron = new BackendBackgroundCronDaemon(
-      cronDb,
-      async () => {},
-      false,
-      async () => 2
-    );
+    const cron = new BackendBackgroundCronDaemon(cronDb, async () => {}, false);
     const tick = await cron.runSingleSweepTick();
-    expect(tick.canariesEvaluated).toBe(2);
+    expect(tick).toEqual({
+      executed: true,
+      outboxDispatched: 0,
+      staleJobsRequeued: 0,
+    });
   });
 });
