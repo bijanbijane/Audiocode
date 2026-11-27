@@ -293,3 +293,68 @@ The job payloads again show `runner_id=0`, empty `runner_name`, zero steps and f
 The authoritative-state and R0 report files were fetched back from the PR branch after the writes. Their updated content hashes were confirmed. PR #6 remains OPEN / DRAFT / NOT MERGED; base is `main`; the main branch was not modified.
 
 **No executable validation passed.** The only completed verification in this update is GitHub read-back of the two documentation files and PR metadata.
+
+
+
+## 15. Latest PR-head CI recheck and R0 decision inventory (2026-11-27)
+
+### 15.1. Remote state revalidated
+
+- PR #6 remains **OPEN / DRAFT / NOT MERGED**.
+- PR head at the start of this recheck: `7c19e312d2dcbc907fdc44f6696b498bc07aacde`.
+- PR base remains `main` at `e73394f8e00e477f1de0046e04fd233681610563`.
+- No changes were made to `main`.
+
+### 15.2. New Actions evidence on the current PR head
+
+Two additional workflow runs were discovered for the current PR head:
+
+- [Architecture Governance — run 46014529274](https://github.com/bijanbijane/Audiocode/actions/runs/46014529274)
+- [AVAPARDAZ Quality & Release Gates — run 46014529304](https://github.com/bijanbijane/Audiocode/actions/runs/46014529304)
+
+The GitHub job summaries report both primary jobs as failed. The available job-step endpoint returns an empty step array for both jobs. The AVAPARDAZ dependent Level 2–4 and Level 5 jobs are skipped. The job summaries do not expose a log URL. This is consistent with the previously observed pre-step failure pattern, but this connector response alone does not expose the runner assignment fields for these two latest jobs.
+
+**Disposition:** the latest runs still provide no evidence that lint, typecheck, tests, build, packaging, or security-audit commands executed. CI remains blocked at workflow/job initialization or an earlier unobservable stage; the exact cause remains **UNKNOWN**. Do not treat these runs as application test failures, and do not weaken or bypass any gate.
+
+### 15.3. Correction of superseded execution instructions
+
+Sections 7–9 contain historical wording that requests a local checkout, local working-tree inspection, or a restored local development host. Those instructions are superseded by Section 10 and the explicit GitHub-only execution constraint. For this project workflow:
+
+- Repository state is inspected remotely through the official GitHub repository.
+- File edits are made through GitHub on the existing audit branch.
+- Executable validation is performed only through GitHub Actions.
+- No Mac/Desktop Commander or local checkout is requested or used.
+
+The historical text is retained for audit traceability; it is not an active prerequisite for this workflow.
+
+### 15.4. Platform-matrix reconciliation
+
+A fresh read of the two source matrices confirms that the candidate platform scope is not yet a single approved compatibility contract:
+
+- `docs/shahab/SHAHAB_ADOBE_HOST_VERSION_MATRIX.md` lists Audition 25.x on Windows 11 x86_64 and macOS 14/15 arm64/x86_64; both live-host tests are `NOT_TESTED`.
+- `docs/AVAPARDAZ/HARDWARE-COMPATIBILITY-MATRIX.md` lists a broader desktop-plugin candidate range: Windows 10/11 x86_64, Windows 11 ARM64 (conditional on Audition support), macOS Apple Silicon, and macOS Intel. Every Audition desktop row remains `Unverified`.
+
+These documents are not evidence that any listed combination is supported. In particular, they differ on Windows 10, Windows ARM64, and whether Intel macOS is part of the required compatibility set. The current roadmap requires both macOS and Windows, but does not itself freeze these architecture/version sub-targets.
+
+**R0 action:** preserve these combinations as candidates only. Do not mark them Supported or Verified until the product owner freezes the internal support matrix and live host acceptance evidence is collected. The exact Audition build, minimum OS builds, CPU architectures, minimum hardware, and input/output formats remain open.
+
+### 15.5. R0 decision and blocker inventory
+
+| Item | Current classification | Next required action |
+|---|---|---|
+| GitHub Actions runner/job initialization | BLOCKED / cause UNKNOWN | Repository owner checks Actions policy and account usage/spending limits; rerun the existing workflows and capture the first actual step |
+| Audition × OS × CPU support matrix | OPEN / candidate evidence only | Freeze exact target combinations; then run live host acceptance on both operating systems |
+| Internal package trust and distribution | OPEN / owner decision | Decide internal cohort installation/update trust model and whether signing/notarization is required for that model |
+| Minimum hardware and supported audio formats | OPEN / not established | Define reproducible minimum configurations and format acceptance against the current renderer/host workflow |
+| Physical macOS and Windows host evidence | BLOCKED / NOT_TESTED | Obtain authorized host access and execute the same acceptance protocol on each platform |
+
+No product scope change is proposed by this audit. These are unresolved acceptance inputs, not decisions made by engineering.
+
+### 15.6. Current status
+
+- R0: **IN PROGRESS**.
+- CI application commands: **NO EXECUTION EVIDENCE** from the latest runs.
+- Live Audition GUI acceptance: **NOT_TESTED** on both target operating systems.
+- Candidate platform combinations: **NOT APPROVED / NOT VERIFIED**.
+- Product source and CI gate definitions: **UNCHANGED** by this update.
+- No R0 gate is passed.
