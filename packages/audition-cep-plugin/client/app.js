@@ -14,6 +14,7 @@
     companionUrl: "http://127.0.0.1:47291/api/v2/companion",
     sessionId: null,
     sessionToken: null,
+    clientInstanceId: null,
     cepTranscriptSchemaVersion: null,
     activeJobId: null,
     activeTransferId: null,
@@ -108,6 +109,31 @@
     $("btnRedo").disabled = state.redoStack.length === 0;
   }
 
+  function getClientInstanceId() {
+    if (state.clientInstanceId) return state.clientInstanceId;
+    var storageKey = "avp_cep_client_instance_v1";
+    try {
+      var saved = localStorage.getItem(storageKey);
+      if (typeof saved === "string" && /^[a-f0-9]{64}$/i.test(saved)) {
+        state.clientInstanceId = saved.toLowerCase();
+        return state.clientInstanceId;
+      }
+      if (!window.crypto || typeof window.crypto.getRandomValues !== "function") {
+        throw new Error("Secure random generator is unavailable");
+      }
+      var bytes = new Uint8Array(32);
+      window.crypto.getRandomValues(bytes);
+      var id = Array.prototype.map.call(bytes, function (byte) {
+        return byte.toString(16).padStart(2, "0");
+      }).join("");
+      localStorage.setItem(storageKey, id);
+      state.clientInstanceId = id;
+      return id;
+    } catch (err) {
+      throw new Error("امکان ذخیره هویت امن پنل برای بازیابی پردازش وجود ندارد: " + err.message);
+    }
+  }
+
   async function ensureHandshake() {
     if (state.sessionId && state.sessionToken) return;
     var resp = await fetch(state.companionUrl + "/handshake", {
@@ -116,6 +142,7 @@
       body: JSON.stringify({
         ipc_protocol_version: "1.0.0",
         host_id: "adobe-audition",
+        client_instance_id: getClientInstanceId(),
         host_version: "24.0",
         panel_version: "1.0.0",
         host_adapter_version: "1.0.0",
