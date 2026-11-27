@@ -683,3 +683,18 @@ For all three failed jobs, the run-attempt jobs endpoint explicitly returned `ru
 - Boundary-hardening follow-up: `execution_mode` is currently read from each authenticated IPC envelope, while the session also stores the handshake `hostId`. The mode affects response serialization, not job authorization, but the service does not bind the requested mode to the session's handshake identity. Consider validating allowed mode values and enforcing a consistent mode per session in a separately tested change.
 
 No code changes were made during this static review. All source-level conclusions remain unverified by compiler, test runner, build, or live Audition execution. R0 remains IN PROGRESS; no Gate is promoted.
+
+
+## 22. CI verification on the updated audit commit — 2026-11-27
+
+The documentation commit `db12b30a5991b73aeed99e04959e46b08b262281` triggered all three pull-request workflows. The initial attempts again failed before runner allocation:
+
+| Workflow run | Failed job | Runner ID | Steps | Conclusion |
+|---|---:|---:|---:|---|
+| [46021859347](https://github.com/bijanbijane/Audiocode/actions/runs/46021859347) | 140583223425 (Level 1) | 0 | 0 | failure |
+| [46021859500](https://github.com/bijanbijane/Audiocode/actions/runs/46021859500) | 140583224553 | 0 | 0 | failure |
+| [46021859268](https://github.com/bijanbijane/Audiocode/actions/runs/46021859268) | 140583223669 | 0 | 0 | failure |
+
+The raw run-attempt job payloads report `runner_id: 0`, empty `runner_name`, and `steps: []` for each failed primary job. AVAPARDAZ Levels 2–5 were skipped because Level 1 failed. This repeats the pre-runner failure on a new commit and confirms that the previous static-review documentation change did not alter the failure mode. No project command is evidenced as executed; exact cause remains unknown.
+
+R0 remains IN PROGRESS. No code, workflow, or gate changes were made in response to this failure.
