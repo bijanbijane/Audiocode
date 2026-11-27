@@ -621,6 +621,8 @@ test('Scenario 16: Real drain backpressure verification, RF64 (>4 GiB) header bu
           panel_version: '1.0.0',
           host_adapter_version: '1.0.0',
           expected_contract_version: CANONICAL_CONTRACT_VERSION,
+          expected_asr_contract_version: '2.0.0',
+          expected_cep_transcript_schema_version: '1.0.0',
         }),
       });
       const hsData = (await hsResp.json()) as {
