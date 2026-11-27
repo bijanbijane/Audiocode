@@ -85,7 +85,7 @@ export interface CompanionIpcEnvelope<TPayload = unknown> {
 
 interface ActiveCompanionSession {
   readonly sessionId: string;
-  readonly hostId: string;
+  readonly hostId: CompanionHandshakeRequest['host_id'];
   readonly expiresAtMs: number;
   readonly seenNonces: Set<string>;
   readonly seenRequestIds: Set<string>;
@@ -242,7 +242,7 @@ export class CompanionIpcBridge {
 
     this.sessions.set(sessionId, {
       sessionId,
-      hostId: typeof req.host_id === 'string' ? req.host_id : 'unknown',
+      hostId: req.host_id,
       expiresAtMs,
       seenNonces: new Set<string>(),
       seenRequestIds: new Set<string>(),
@@ -346,6 +346,29 @@ export class CompanionIpcBridge {
         statusCode: 401,
         code: 'IPC_SESSION_EXPIRED',
         message: 'Companion IPC session has expired; perform handshake again.',
+      };
+    }
+
+    if (
+      env.execution_mode !== undefined &&
+      !['native-companion', 'audition-cep', 'web-client'].includes(env.execution_mode)
+    ) {
+      return {
+        ok: false,
+        statusCode: 400,
+        code: 'IPC_INVALID_ENVELOPE',
+        message: 'execution_mode must be native-companion, audition-cep, or web-client.',
+      };
+    }
+    if (
+      (session.hostId === 'adobe-audition' && env.execution_mode !== undefined && env.execution_mode !== 'audition-cep') ||
+      (session.hostId !== 'adobe-audition' && env.execution_mode === 'audition-cep')
+    ) {
+      return {
+        ok: false,
+        statusCode: 409,
+        code: 'IPC_VERSION_MISMATCH',
+        message: 'execution_mode does not match the host identity established by this IPC session.',
       };
     }
 
