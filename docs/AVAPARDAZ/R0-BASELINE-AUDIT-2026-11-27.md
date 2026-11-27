@@ -199,3 +199,37 @@ Both retries again concluded `failure`. The job summaries returned no step recor
 - Source-code fix: **NOT MADE**. Changing application code or weakening gates without a demonstrated failure would be speculative.
 - R0: **IN PROGRESS**. No gate is passed.
 - Next action: obtain usable GitHub Actions step/job diagnostics (including runner assignment and first failing step) for these existing workflows, then reproduce and fix only a demonstrated defect. Keep all edits on a dedicated GitHub branch and validate them with Actions; do not use a local Mac checkout.
+
+
+## 11. Runner allocation diagnosis (2026-11-27)
+
+A fresh PR-triggered validation occurred after the report update:
+
+- [AVAPARDAZ Quality & Release Gates](https://github.com/bijanbijane/Audiocode/actions/runs/46013373171)
+- [Architecture Governance, Reliability & Release Quality Gate](https://github.com/bijanbijane/Audiocode/actions/runs/46013373182)
+
+The AVAPARDAZ Level-1 job payload was inspected directly through the Actions jobs endpoint. It reports:
+
+- `runner_id: 0`
+- `runner_name: ""`
+- `steps: []`
+- job started at 14:09:33 UTC and completed at 14:09:35 UTC
+- conclusion: `failure`
+
+The Architecture Governance job shows the same failure pattern in the run summary: it completed in approximately two seconds, with no step summaries or downloadable logs. Dependent AVAPARDAZ jobs were skipped because Level 1 failed.
+
+**Finding:** these observed runs do not demonstrate a TypeScript, test, build, or application-code failure. The failing job did not report assignment to a GitHub-hosted runner and no workflow step was recorded. The most precise current classification is **pre-runner / Actions execution-layer failure**. The exact underlying reason (for example account billing/spending limits, repository Actions policy, or GitHub runner-service failure) is still unverified because repository Actions settings and check annotations are not readable through the available connector.
+
+A temporary runner-diagnostics workflow was briefly added to the PR branch, but GitHub did not schedule it because a newly introduced workflow file on a PR branch is not eligible to trigger from that same PR when it is absent from the base branch. It was removed immediately; no diagnostic workflow remains in the branch.
+
+### Required next action
+
+Do not change source code or relax CI checks based on these results. The repository owner must inspect GitHub **Settings → Actions → General** and account **Billing / Actions usage** for this private repository, confirm Actions are enabled and spending limits/available minutes permit hosted runners, then rerun the existing workflows. Once a job is assigned a runner and produces steps, continue with the first actual failing command. This settings/billing verification is outside the read/write capabilities of the current repository connector.
+
+### Current R0 CI disposition
+
+- Runner allocation: **NOT OBSERVED** for the latest failed Level-1 jobs (`runner_id=0`).
+- Application-level CI failure: **NOT ESTABLISHED**.
+- Exact Actions execution-layer cause: **UNKNOWN / OWNER SETTINGS CHECK REQUIRED**.
+- Source changes for CI: **NONE**.
+- R0: **IN PROGRESS; no gate passed**.
