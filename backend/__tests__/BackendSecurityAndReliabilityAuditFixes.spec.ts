@@ -205,14 +205,22 @@ describe('Backend Security & Reliability Audit Remediation Suite (P0 #1–12 & P
 
     const executedOrder: string[] = [];
     const migDb: PgPoolLike = {
-      async query<TRow>(sql: string, params: unknown[] = []) {
-        if (sql.includes('pg_try_advisory_lock')) {
-          return { rows: [{ acquired: true }] as unknown as TRow[], rowCount: 1 };
-        }
-        if (sql.includes('INSERT INTO schema_migrations')) {
-          executedOrder.push(String(params[0]));
-        }
-        return { rows: [] as unknown as TRow[], rowCount: 1 };
+      async query<TRow>() {
+        throw new Error('Migration runner must use its pinned PostgreSQL client.');
+      },
+      async connect(): Promise<PgPoolClientLike> {
+        return {
+          async query<TRow>(sql: string, params: unknown[] = []) {
+            if (sql.includes('pg_try_advisory_lock')) {
+              return { rows: [{ acquired: true }] as unknown as TRow[], rowCount: 1 };
+            }
+            if (sql.includes('INSERT INTO schema_migrations')) {
+              executedOrder.push(String(params[0]));
+            }
+            return { rows: [] as unknown as TRow[], rowCount: 1 };
+          },
+          release() {},
+        };
       },
     };
 
