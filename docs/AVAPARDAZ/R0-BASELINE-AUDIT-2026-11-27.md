@@ -618,13 +618,14 @@ This section records implementation work performed on the PR #6 branch after the
 - The DTO retains the CEP editor's `text` field as a compatibility alias, while exposing `rawText` and `normalizedText` separately. Existing word timings and timestamp granularity are preserved; no synthetic timing is introduced.
 - Native inference output currently has no calibrated confidence value. The CEP DTO explicitly emits `confidence: null` and `confidenceStatus: UNAVAILABLE_UNCALIBRATED`; it does not coerce unavailable confidence to zero.
 - The Companion handshake independently checks `expected_asr_contract_version` and `expected_cep_transcript_schema_version` for Adobe Audition clients and returns the served versions. The IPC protocol and generic capability contract remain separate.
-- `JOB_STATUS`, `JOB_RECONNECT`, and `JOB_LIST` map completed job results only for `execution_mode: audition-cep`. Other execution modes retain the existing `LocalNeuralTranscriptionResult` payload.
+- `JOB_STATUS`, `JOB_RECONNECT`, and `JOB_LIST` map completed job results only for `execution_mode: audition-cep`. Other execution modes retain the existing `LocalNeuralTranscriptionResult` payload. `CompanionWebClient` now explicitly marks both normal and retry IPC requests as `web-client`.
 - The CEP panel sends both expected versions, validates the handshake response, and rejects a completed result with an unexpected DTO schema version.
 
 ### 23.2. Tests added (execution not yet verified)
 
 - `src/host-bridge/companion/__tests__/CepTranscriptDto.test.ts`: DTO version, language-specific normalized text, raw/normalized text, timestamp/word preservation, unavailable-confidence semantics, and CEP-vs-Web serialization isolation.
 - `src/host-bridge/companion/__tests__/CompanionProductionIpcAndCep.test.ts`: missing and unsupported schema rejection, successful independent version negotiation, returned version fields, backward-compatible Web handshake, and CEP static contract checks.
+- Updated existing Audition handshake fixtures in `LocalCompanionAndSecurity.test.ts` and `Phase1BCompanionStreamingAndMemory.test.ts` to send the required schema versions.
 - These tests are committed but have not been confirmed as executed. Latest Actions runs remain pre-step failures; see Section 23.3.
 
 ### 23.3. Validation status
