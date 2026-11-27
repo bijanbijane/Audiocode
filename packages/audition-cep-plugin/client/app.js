@@ -14,6 +14,7 @@
     companionUrl: "http://127.0.0.1:47291/api/v2/companion",
     sessionId: null,
     sessionToken: null,
+    cepTranscriptSchemaVersion: null,
     activeJobId: null,
     activeTransferId: null,
     transferCancelled: false,
@@ -119,14 +120,20 @@
         panel_version: "1.0.0",
         host_adapter_version: "1.0.0",
         expected_contract_version: "2.0.0",
+        expected_asr_contract_version: "2.0.0",
+        expected_cep_transcript_schema_version: "1.0.0",
       }),
     });
     var data = await resp.json();
     if (!resp.ok || !data.compatible || !data.session_token) {
       throw new Error((data.incompatibility_reasons || []).join("; ") || "Handshake rejected");
     }
+    if (data.asr_contract_version !== "2.0.0" || data.cep_transcript_schema_version !== "1.0.0") {
+      throw new Error("Companion returned an unsupported ASR or CEP transcript schema version");
+    }
     state.sessionId = data.session_id;
     state.sessionToken = data.session_token;
+    state.cepTranscriptSchemaVersion = data.cep_transcript_schema_version;
   }
 
   async function sendIpc(command, payload) {
@@ -524,6 +531,9 @@
         $("elapsedLabel").textContent = ((job.elapsedMs || 0) / 1000).toFixed(1) + " ثانیه";
 
         if (job.status === "COMPLETED" && job.result) {
+          if (job.result.schemaVersion !== state.cepTranscriptSchemaVersion) {
+            throw new Error("Unsupported CEP transcript DTO version: " + String(job.result.schemaVersion));
+          }
           var expectedSrc = job.sourceIdentity || state.activeSourceIdentity;
           if (!isSourceIdentityMatching(expectedSrc, state.currentAuditionSourceIdentity)) {
             $("btnStartJob").disabled = false;
