@@ -42,6 +42,22 @@ export interface CepTranscriptResultV1 {
   readonly segments: readonly CepTranscriptSegmentV1[];
 }
 
+function selectNormalizedText(
+  rawText: string,
+  language: LocalNeuralTranscriptionResult['dominantLanguage'],
+  profiles: LocalNeuralTranscriptionResult['normalizedByProfile'],
+): string {
+  const profile =
+    language === 'fa'
+      ? 'FA-RELAXED-V1'
+      : language === 'en'
+        ? 'EN-NORM-V1'
+        : language === 'fa-en'
+          ? 'MIXED-NORM-V1'
+          : 'RAW_UNMODIFIED';
+  return profiles[profile] ?? rawText;
+}
+
 /**
  * Maps the native inference DTO into the versioned Adobe Audition panel contract.
  * The core LocalNeuralTranscriptionResult remains unchanged for other consumers.
@@ -60,7 +76,7 @@ export function mapLocalNeuralResultToCepTranscriptDto(
     realTimeFactor: result.realTimeFactor,
     dominantLanguage: result.dominantLanguage,
     rawText: result.rawText,
-    normalizedText: result.normalizedByProfile['FA-RELAXED-V1'] ?? result.rawText,
+    normalizedText: selectNormalizedText(result.rawText, result.dominantLanguage, result.normalizedByProfile),
     sampleRateHz: result.sampleRateHz,
     channelCount: result.channelCount,
     audioSha256: result.audioSha256,
@@ -75,7 +91,7 @@ export function mapLocalNeuralResultToCepTranscriptDto(
         endSec: segment.endSec,
         text: rawText,
         rawText,
-        normalizedText: segment.normalizedByProfile['FA-RELAXED-V1'] ?? rawText,
+        normalizedText: selectNormalizedText(rawText, segment.language, segment.normalizedByProfile),
         language: segment.language,
         timestampGranularity: segment.timestampGranularity,
         confidence: null,
