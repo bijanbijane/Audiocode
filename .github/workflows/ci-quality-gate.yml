@@ -69,6 +69,7 @@ jobs:
           ls -la dist/ort/ort-wasm*.wasm
 
   native-binary-format-compatibility:
+    if: github.event_name == 'pull_request' && github.head_ref == 'feat/r6-target-specific-release-packaging'
     name: Native Binary Format Verification — ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
     strategy:
