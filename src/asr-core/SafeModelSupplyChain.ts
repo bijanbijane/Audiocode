@@ -27,14 +27,23 @@ import { promisify } from 'node:util';
 const execFileAsync = promisify(execFile);
 
 /**
- * Explicit allowlist grounded strictly in the real documented model/runtime URLs
- * in `LocalSherpaNeuralEngine.ts` (`github.com/k2-fsa/sherpa-onnx/releases/download/...`)
- * and GitHub Releases asset redirect hosts.
+ * Exact HTTPS hosts used by GitHub Releases and the official Hugging Face Hub/Xet
+ * download path. Keep this explicit; do not use wildcard suffix matching.
  */
 export const ALLOWED_MODEL_DOWNLOAD_HOSTS: readonly string[] = Object.freeze([
   'github.com',
   'objects.githubusercontent.com',
   'release-assets.githubusercontent.com',
+  'huggingface.co',
+  'cas-server.xethub.hf.co',
+  'cas-server.xethub-eu.hf.co',
+  'transfer.xethub.hf.co',
+  'transfer.xethub-eu.hf.co',
+  'us.aws.cdn.hf.co',
+  'us.gcp.cdn.hf.co',
+  'cdn-lfs-us-1.hf.co',
+  'cdn-lfs-eu-1.hf.co',
+  'cas-bridge.xethub.hf.co',
 ]);
 
 export type ModelSupplyChainErrorCode =
