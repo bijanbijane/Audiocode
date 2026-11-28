@@ -433,6 +433,43 @@ test('Adobe Audition CEP plugin contains verified AUDT manifest, CSP-protected U
   assert.ok(jsx.includes('avpGetActiveDocumentInfo'));
 });
 
+test('Companion transfer lifecycle metadata is isolated by owner while active and after cleanup', () => {
+  const stagingDir = fs.mkdtempSync(path.join(os.tmpdir(), 'avp-transfer-owner-boundary-'));
+  const service = new LocalCompanionService({ transferStagingDir: stagingDir });
+  try {
+    const initialized = service.audioTransfers.initTransfer({
+      filename: 'owner-boundary.pcm',
+      format: 'pcm_s16le',
+      sampleRateHz: 16_000,
+      channels: 1,
+      endianness: 'little',
+      expectedBytes: 2,
+      expectedFrames: 1,
+      totalChunks: 1,
+      ownerId: 'owner-A',
+    });
+    assert.equal(initialized.ok, true);
+    const transferId = initialized.transferId!;
+
+    assert.equal(service.audioTransfers.getTransferLifecycleState(transferId, 'owner-A'), 'CREATED');
+    assert.equal(service.audioTransfers.getTransferLifecycleState(transferId, 'owner-B'), null);
+    assert.deepEqual(service.audioTransfers.getTransferStateHistory(transferId, 'owner-B'), []);
+
+    assert.equal(service.audioTransfers.abortTransfer(transferId, { ownerId: 'owner-A' }), true);
+    assert.equal(service.audioTransfers.getTransferLifecycleState(transferId, 'owner-A'), 'CLEANED');
+    assert.deepEqual(service.audioTransfers.getTransferStateHistory(transferId, 'owner-A'), [
+      'CREATED',
+      'CANCELLED',
+      'CLEANED',
+    ]);
+    assert.equal(service.audioTransfers.getTransferLifecycleState(transferId, 'owner-B'), null);
+    assert.deepEqual(service.audioTransfers.getTransferStateHistory(transferId, 'owner-B'), []);
+  } finally {
+    service.audioTransfers.cleanupAll();
+    fs.rmSync(stagingDir, { recursive: true, force: true });
+  }
+});
+
 test('Staged upload service APIs fail closed without the owning client identity', () => {
   const service = new LocalCompanionService();
   const submitWithoutOwner = service.submitTranscriptionJob as unknown as (
