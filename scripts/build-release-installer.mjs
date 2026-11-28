@@ -18,8 +18,14 @@ import * as path from 'node:path';
 import * as crypto from 'node:crypto';
 import * as os from 'node:os';
 import { execSync } from 'node:child_process';
+import { assertRuntimeTargetMatches, resolveAvapardazReleaseTarget } from './release-targets.mjs';
 
 const REPO_ROOT = process.cwd();
+const RELEASE_TARGET = resolveAvapardazReleaseTarget({
+  platform: process.env.AVAPARDAZ_TARGET_PLATFORM?.trim() || process.platform,
+  arch: process.env.AVAPARDAZ_TARGET_ARCH?.trim() || process.arch,
+});
+assertRuntimeTargetMatches({ target: RELEASE_TARGET, runtimeTarget: process.env.AVAPARDAZ_SHERPA_RUNTIME_TARGET?.trim() });
 const RELEASE_VERSION = '2.0.0-beta.1';
 const NEXT_UPDATE_VERSION = '2.0.0-beta.2';
 const BUILD_TIMESTAMP = new Date();
@@ -35,8 +41,8 @@ const GIT_DIRTY_FILE_COUNT = GIT_STATUS.split(/\r?\n/).filter(Boolean).length;
 const WEB_DIST_ROOT = path.resolve(process.env.AVAPARDAZ_WEB_DIST_DIR?.trim() || path.join(REPO_ROOT, 'dist'));
 const outputArg = process.argv.find((arg) => arg.startsWith('--outdir='))?.slice('--outdir='.length);
 const DIST_RELEASE = path.resolve(outputArg?.trim() || path.join(REPO_ROOT, 'dist-release'));
-const PKG_ROOT = path.join(DIST_RELEASE, `avapardaz-v${RELEASE_VERSION}`);
-const UPDATE_STAGE_ROOT = path.join(DIST_RELEASE, `update-stage-v${NEXT_UPDATE_VERSION}`);
+const PKG_ROOT = path.join(DIST_RELEASE, `avapardaz-v${RELEASE_VERSION}-${RELEASE_TARGET.id}`);
+const UPDATE_STAGE_ROOT = path.join(DIST_RELEASE, `update-stage-v${NEXT_UPDATE_VERSION}-${RELEASE_TARGET.id}`);
 const DOCS_OUT_DIR = path.join(DIST_RELEASE, 'docs');
 
 const SHERPA_PYTHON_VERSION = process.env.AVAPARDAZ_SHERPA_PYTHON_VERSION?.trim() || '3.11';
@@ -44,7 +50,7 @@ const AVAPARDAZ_USER_MODEL_ROOT = process.env.AVAPARDAZ_MODELS_DIR?.trim() || pa
 const SHERPA_RUNTIME_ROOT = process.env.AVAPARDAZ_SHERPA_RUNTIME_DIR?.trim() || path.join(os.homedir(), '.avapardaz', 'runtime', 'sherpa-venv');
 const SHERPA_RIZEH_MODEL_DIR = process.env.AVAPARDAZ_SHERPA_RIZEH_MODEL_DIR?.trim() || path.join(AVAPARDAZ_USER_MODEL_ROOT, 'sherpa-onnx-nemo-ctc-fa-shenava-rizeh-v1.0-non-streaming-int8-2026-06-26');
 const SHAHAB_KOOCHIK_MODEL_DIR = process.env.AVAPARDAZ_SHERPA_KOOCHIK_MODEL_DIR?.trim() || path.join(AVAPARDAZ_USER_MODEL_ROOT, 'shahab-koochik-v1.0-sherpa-onnx');
-const SHERPA_BINARY_SOURCE = path.join(SHERPA_RUNTIME_ROOT, 'bin', process.platform === 'win32' ? 'sherpa-onnx-offline.exe' : 'sherpa-onnx-offline');
+const SHERPA_BINARY_SOURCE = path.join(SHERPA_RUNTIME_ROOT, 'bin', RELEASE_TARGET.sherpaBinaryName);
 const SHERPA_ONNXRUNTIME_LIBRARY_SOURCE = path.join(SHERPA_RUNTIME_ROOT, 'lib', `python${SHERPA_PYTHON_VERSION}`, 'site-packages', 'sherpa_onnx', 'lib');
 const SHAHAB_KOOCHIK_MODEL_BYTES = 458_819_249;
 const SHAHAB_KOOCHIK_MODEL_SHA256 = '6a564b5541920ce1c37bbc91d22e4b3a6838648b9b327eb88997e8db1f90950d';
@@ -186,11 +192,7 @@ const sherpaStandaloneBinary = path.join(payloadDir, 'runtime', 'sherpa-venv', '
 fs.copyFileSync(SHERPA_BINARY_SOURCE, sherpaStandaloneBinary);
 fs.chmodSync(sherpaStandaloneBinary, 0o755);
 
-const onnxRuntimeLibrary = path.join(SHERPA_ONNXRUNTIME_LIBRARY_SOURCE, 'libonnxruntime.dylib');
-const onnxRuntimeLibraryLinux = path.join(SHERPA_ONNXRUNTIME_LIBRARY_SOURCE, 'libonnxruntime.so');
-const onnxRuntimeLibraryWindows = path.join(SHERPA_ONNXRUNTIME_LIBRARY_SOURCE, 'onnxruntime.dll');
-const onnxRuntimeLibrarySource = [onnxRuntimeLibrary, onnxRuntimeLibraryLinux, onnxRuntimeLibraryWindows]
-  .find((candidate) => fs.existsSync(candidate));
+const onnxRuntimeLibrarySource = path.join(SHERPA_ONNXRUNTIME_LIBRARY_SOURCE, RELEASE_TARGET.onnxRuntimeLibraryName);
 if (!onnxRuntimeLibrarySource) {
   throw new Error(`SHERPA_ONNXRUNTIME_LIBRARY_MISSING: ${SHERPA_ONNXRUNTIME_LIBRARY_SOURCE}`);
 }
@@ -351,6 +353,14 @@ const bridgeBinPath = path.join(payloadDir, 'runtime', 'bin', 'sherpa-onnx-strea
 
 const packageManifest = {
   productName: 'AvaPardaz (آواپرداز)',
+  target: {
+    id: RELEASE_TARGET.id,
+    platform: RELEASE_TARGET.platform,
+    arch: RELEASE_TARGET.arch,
+    os: RELEASE_TARGET.osLabel,
+    architecture: RELEASE_TARGET.architectureLabel,
+  },
+  buildHost: { platform: process.platform, arch: process.arch },
   version: RELEASE_VERSION,
   releaseChannel: 'BETA',
   buildId: BUILD_ID,
@@ -360,7 +370,7 @@ const packageManifest = {
   workingTreeDirty: GIT_WORKTREE_DIRTY,
   dirtyFileCount: GIT_DIRTY_FILE_COUNT,
   buildStatus: 'LOCAL_UNRELEASED_WORKTREE_BUILD',
-  architecture: `${process.platform}-${process.arch}`,
+  architecture: RELEASE_TARGET.id,
   components: {
     webApp: { path: 'payload/app/index.html', version: RELEASE_VERSION },
     companion: {
@@ -448,11 +458,11 @@ fs.writeFileSync(
 );
 
 // 11. Create Release & Update tarballs
-const installerTarball = path.join(DIST_RELEASE, `avapardaz-installer-v${RELEASE_VERSION}.tar.gz`);
-const updateTarball = path.join(DIST_RELEASE, `avapardaz-update-v${NEXT_UPDATE_VERSION}.tar.gz`);
+const installerTarball = path.join(DIST_RELEASE, `avapardaz-installer-v${RELEASE_VERSION}-${RELEASE_TARGET.id}.tar.gz`);
+const updateTarball = path.join(DIST_RELEASE, `avapardaz-update-v${NEXT_UPDATE_VERSION}-${RELEASE_TARGET.id}.tar.gz`);
 
-execSync(`tar -czf "${installerTarball}" -C "${DIST_RELEASE}" "avapardaz-v${RELEASE_VERSION}"`);
-execSync(`tar -czf "${updateTarball}" -C "${DIST_RELEASE}" "update-stage-v${NEXT_UPDATE_VERSION}"`);
+execSync(`tar -czf "${installerTarball}" -C "${DIST_RELEASE}" "avapardaz-v${RELEASE_VERSION}-${RELEASE_TARGET.id}"`);
+execSync(`tar -czf "${updateTarball}" -C "${DIST_RELEASE}" "update-stage-v${NEXT_UPDATE_VERSION}-${RELEASE_TARGET.id}"`);
 
 // 12. Write all required User, Release, Update, Rollback, Uninstall & License documentation
 const docsMap = {
