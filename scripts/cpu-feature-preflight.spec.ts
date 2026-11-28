@@ -1,9 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
-import { verifyRequiredCpuFeatures } from './cpu-feature-preflight.mjs';
+import { verifyRequiredCpuFeatures, type CpuProbeSpawnSync } from './cpu-feature-preflight.mjs';
 
 describe('installer CPU feature preflight', () => {
   it('accepts the required NEON baseline only for Apple Silicon', () => {
-    const spawnSync = vi.fn();
+    const spawnSync = vi.fn<CpuProbeSpawnSync>();
     expect(verifyRequiredCpuFeatures(['NEON'], {
       platform: 'darwin',
       arch: 'arm64',
@@ -18,7 +18,7 @@ describe('installer CPU feature preflight', () => {
   });
 
   it('requires the Intel macOS AVX2 sysctl to return exactly 1', () => {
-    const spawnSync = vi.fn(() => ({ status: 0, stdout: '1\n', stderr: '' }));
+    const spawnSync = vi.fn<CpuProbeSpawnSync>(() => ({ status: 0, stdout: '1\n', stderr: '' }));
     expect(verifyRequiredCpuFeatures(['AVX2'], {
       platform: 'darwin',
       arch: 'x64',
@@ -32,14 +32,14 @@ describe('installer CPU feature preflight', () => {
     const missing = verifyRequiredCpuFeatures(['AVX2'], {
       platform: 'darwin',
       arch: 'x64',
-      spawnSync: vi.fn(() => ({ status: 0, stdout: '0\n', stderr: '' })),
+      spawnSync: vi.fn<CpuProbeSpawnSync>(() => ({ status: 0, stdout: '0\n', stderr: '' })),
     });
     expect(missing.supported).toBe(false);
     expect(missing.reason).toContain('CPU_FEATURE_UNAVAILABLE');
   });
 
   it('uses the Windows kernel feature API for AVX2 and fails closed when unavailable', () => {
-    const spawnSync = vi.fn(() => ({ status: 0, stdout: '', stderr: '' }));
+    const spawnSync = vi.fn<CpuProbeSpawnSync>(() => ({ status: 0, stdout: '', stderr: '' }));
     expect(verifyRequiredCpuFeatures(['AVX2'], {
       platform: 'win32',
       arch: 'x64',
@@ -54,7 +54,7 @@ describe('installer CPU feature preflight', () => {
     const unavailable = verifyRequiredCpuFeatures(['AVX2'], {
       platform: 'win32',
       arch: 'x64',
-      spawnSync: vi.fn(() => ({ status: 1, stdout: '', stderr: '' })),
+      spawnSync: vi.fn<CpuProbeSpawnSync>(() => ({ status: 1, stdout: '', stderr: '' })),
     });
     expect(unavailable.supported).toBe(false);
     expect(unavailable.reason).toContain('CPU_FEATURE_UNAVAILABLE');
@@ -64,12 +64,12 @@ describe('installer CPU feature preflight', () => {
     expect(verifyRequiredCpuFeatures(['AVX2'], {
       platform: 'linux',
       arch: 'x64',
-      spawnSync: vi.fn(),
+      spawnSync: vi.fn<CpuProbeSpawnSync>(),
     }).supported).toBe(false);
     expect(verifyRequiredCpuFeatures(['AVX512'], {
       platform: 'darwin',
       arch: 'x64',
-      spawnSync: vi.fn(),
+      spawnSync: vi.fn<CpuProbeSpawnSync>(),
     }).reason).toContain('CPU_FEATURE_UNRECOGNIZED');
     expect(verifyRequiredCpuFeatures([])).toEqual({ supported: true, checked: [], reason: null });
   });
