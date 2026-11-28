@@ -17,7 +17,7 @@ Do not mark `R0-DIST-07`, `R0-PLATFORM-05`, or `R0-HOST-06` complete based on pa
 ### 1. Platform target mismatch
 
 - `src/lifecycle/ProductionReleaseAndBetaEngine.ts` declares `supportedPlatforms: ['darwin-arm64', 'linux-x64']`; Windows is absent, and macOS Intel is absent.
-- The approved V1 scope requires macOS + Windows. The exact OS builds, Audition versions, CPU architectures, minimum hardware, and supported audio formats are still not owner-approved.
+- The approved V1 scope requires macOS + Windows. The prior R0 baseline audit lists candidate targets of Windows 11 x64, macOS 14/15 arm64 + Intel, and Audition 25.x; these are explicitly candidates, not approvals, and both live-host targets remain `NOT_TESTED`. Exact OS builds, Audition minor/build versions, minimum hardware, and supported audio formats are still not owner-approved.
 - `packages/audition-cep-plugin/CSXS/manifest.xml` currently declares Audition host `AUDT [22.0,99.9]` and CSXS 11.0. This is a broad compatibility declaration, not a verified host matrix.
 
 ### 2. Two different installer paths
@@ -25,7 +25,7 @@ Do not mark `R0-DIST-07`, `R0-PLATFORM-05`, or `R0-HOST-06` complete based on pa
 **CEP-only package**
 
 - `packages/audition-cep-plugin/scripts/package-plugin.mjs` creates a `.tar.gz` archive and a SHA-256 file manifest.
-- The generated release manifest explicitly sets `codeSigned: false` and `notarized: false`; it states that production distribution requires Apple Developer ID, Windows Authenticode, and ZXPSignCmd signing credentials.
+- The generated release manifest explicitly sets `codeSigned: false` and `notarized: false`; it states that production distribution requires Apple Developer ID, Windows Authenticode, and ZXPSignCmd signing credentials. The prior R0 baseline audit explicitly re-scoped public signing as not automatically mandatory for an internal release; the internal trust policy remains an owner decision, not an assumed production requirement.
 - `install-macos.sh` and `install-windows.ps1` copy only the CEP extension files into Adobe's CEP extension directory. They do not install the Companion daemon, native runtime, or ASR models, and they do not register or start a Companion background process.
 - Optional beta debug switches set CEP `PlayerDebugMode` for CSXS 11 and 12. This is a machine-wide CEP debug setting, not an AVAPARDAZ-only trust grant; it must remain opt-in and must not be enabled in a production installer.
 - The plugin installer scripts use recursive copy/merge rather than a versioned atomic swap. Existing extension files may remain when a later package removes or renames files.
