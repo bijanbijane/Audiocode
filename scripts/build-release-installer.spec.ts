@@ -25,6 +25,7 @@ describe('full release installer path resolution', () => {
     expect(packagerSource).toContain("SHERPA_RUNTIME_MANIFEST_MISSING");
     expect(packagerSource).toContain("SHERPA_RUNTIME_MANIFEST_PROVENANCE_MISMATCH");
     expect(packagerSource).toContain("sherpaRuntimeProvenance");
+    expect(packagerSource).toContain("requiredCpuFeatures");
     expect(packagerSource).toContain("RELEASE_TARGET.platform !== 'win32'");
     expect(packagerSource).toContain("RELEASE_TARGET.onnxRuntimeLibraryName");
     expect(packagerSource).toContain("install-windows.ps1");
