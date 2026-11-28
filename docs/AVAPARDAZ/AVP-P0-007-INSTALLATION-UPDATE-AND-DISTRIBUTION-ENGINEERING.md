@@ -66,4 +66,4 @@ Remaining release acceptance:
 - Adobe Audition 25.x CEP installation/registration and Companion startup/reconnect/cancel workflows.
 - Final package signing, pinned trust-root verification, and update signature enforcement.
 
-A later Vitest run caught one obsolete source assertion in `build-release-installer.spec.ts`; it was removed. CI on the latest commit is rerunning, so the earlier successful native runtime jobs are evidence for the pinned runtime provisioning code, not a claim that the latest complete workflow is green.
+Latest fully validated head `c800f3f218ce6973946b4bc4320ed3ead17bc911` completed both applicable workflows successfully: AVAPARDAZ Quality Gates Levels 1–5; Architecture Governance with Vitest 29 files / 123 tests, 32 Node reliability/fault-injection tests, TypeScript compilation, zero-circular dependency check, SBOM, license audit, E2E quality gates, production build and release-manifest verification. Native binary parser tests passed on four runners and pinned native runtime provisioning + CLI smoke tests passed on all three approved target architectures. The earlier obsolete assertion and malformed symlink fixture were corrected.
