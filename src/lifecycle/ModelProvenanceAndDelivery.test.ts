@@ -313,6 +313,90 @@ test('AVP-P0-007: update orchestration requires real Ed25519 signatures, binds m
     assert.equal(replayDownloaded, false);
   }
 
+  // A pinned render job defers activation; after release, the staged artifact resumes without re-download.
+  const deferredOrch = new ComponentUpdateOrchestrator({
+    BROWSER_APP: '1.0.0',
+    NATIVE_COMPANION: '1.0.0',
+    AUDITION_CEP_EXTENSION: '1.0.0',
+    MODEL_ARTIFACT: '1.0.0',
+  }, trustedSigningKeys);
+  deferredOrch.pinActiveJob('render-1');
+  const deferredRes = await deferredOrch.executeSafeUpdate({
+    manifest: signManifest({
+      component: 'NATIVE_COMPANION',
+      version: '1.1.0',
+      sha256Hex: goodHash,
+      sizeBytes: 10_000_000,
+    }),
+    availableDiskBytes: 50_000_000,
+    downloadAndVerifySha256: async () => ({ ok: true, actualSha256Hex: goodHash }),
+    stageArtifact: async () => ({ ok: true, stagingDir: '/tmp/deferred-stage-1.1.0' }),
+    activateArtifact: async () => ({ ok: true }),
+    verifyPostActivationHealth: async () => ({ ok: true }),
+    restorePreviousVersion: async () => true,
+  });
+  assert.equal(deferredRes.ok, false);
+  assert.equal(deferredRes.slot.state, 'UPDATE_READY');
+  assert.equal(deferredRes.slot.activeVersion, '1.0.0');
+  assert.equal(deferredRes.slot.previousKnownGoodVersion, '1.0.0');
+
+  let activatedBeforePinRelease = false;
+  const stillPinnedRes = await deferredOrch.resumeStagedUpdate({
+    component: 'NATIVE_COMPANION',
+    activateArtifact: async () => {
+      activatedBeforePinRelease = true;
+      return { ok: true };
+    },
+    verifyPostActivationHealth: async () => ({ ok: true }),
+    restorePreviousVersion: async () => true,
+  });
+  assert.equal(stillPinnedRes.ok, false);
+  assert.equal(activatedBeforePinRelease, false);
+
+  deferredOrch.releasePinnedJob('render-1');
+  let resumedStagingPath: string | null = null;
+  const resumedRes = await deferredOrch.resumeStagedUpdate({
+    component: 'NATIVE_COMPANION',
+    activateArtifact: async (stagingDir) => {
+      resumedStagingPath = stagingDir;
+      return { ok: true };
+    },
+    verifyPostActivationHealth: async () => ({ ok: true }),
+    restorePreviousVersion: async () => true,
+  });
+  assert.equal(resumedRes.ok, true);
+  assert.equal(resumedStagingPath, '/tmp/deferred-stage-1.1.0');
+  assert.equal(resumedRes.slot.activeVersion, '1.1.0');
+  assert.equal(resumedRes.slot.state, 'UPDATE_VERIFIED');
+
+  // Restart recovery must clean up a staged UPDATE_READY state and preserve the active version.
+  const interruptedReadyOrch = new ComponentUpdateOrchestrator({
+    BROWSER_APP: '1.0.0',
+    NATIVE_COMPANION: '1.0.0',
+    AUDITION_CEP_EXTENSION: '1.0.0',
+    MODEL_ARTIFACT: '1.0.0',
+  }, trustedSigningKeys);
+  interruptedReadyOrch.pinActiveJob('render-2');
+  await interruptedReadyOrch.executeSafeUpdate({
+    manifest: signManifest({
+      component: 'NATIVE_COMPANION',
+      version: '1.1.0',
+      sha256Hex: goodHash,
+      sizeBytes: 10_000_000,
+    }),
+    availableDiskBytes: 50_000_000,
+    downloadAndVerifySha256: async () => ({ ok: true, actualSha256Hex: goodHash }),
+    stageArtifact: async () => ({ ok: true, stagingDir: '/tmp/interrupted-ready-stage' }),
+    activateArtifact: async () => ({ ok: true }),
+    verifyPostActivationHealth: async () => ({ ok: true }),
+    restorePreviousVersion: async () => true,
+  });
+  const recoveredReady = interruptedReadyOrch.recoverInterruptedUpdate('NATIVE_COMPANION');
+  assert.equal(recoveredReady.state, 'UPDATE_ROLLED_BACK');
+  assert.equal(recoveredReady.activeVersion, '1.0.0');
+  assert.equal(recoveredReady.candidateVersion, null);
+  assert.equal(recoveredReady.stagingDir, null);
+
   // SemVer prerelease ordering permits beta.2 after beta.1.
   const prereleaseOrch = new ComponentUpdateOrchestrator({
     BROWSER_APP: '1.0.0',
