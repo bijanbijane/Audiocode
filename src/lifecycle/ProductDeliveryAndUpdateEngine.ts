@@ -75,9 +75,9 @@ function parseSemver(v: string): [number, number, number] | null {
 function compareReleaseVersions(left: string, right: string): number | null {
   const parse = (value: string) => {
     const match = value.trim().match(
-      /^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(?:-([0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*))?(?:\\+[0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*)?$/,
+      /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/,
     );
-    if (!match) return null;
+    if (!match || ![match[1], match[2], match[3]].every((part) => Number.isSafeInteger(Number(part)))) return null;
     return {
       core: [Number(match[1]), Number(match[2]), Number(match[3])] as const,
       prerelease: match[4]?.split('.') ?? null,
@@ -103,8 +103,8 @@ function compareReleaseVersions(left: string, right: string): number | null {
       return ai === undefined ? -1 : 1;
     }
     if (ai === bi) continue;
-    const an = /^(0|[1-9]\\d*)$/.test(ai);
-    const bn = /^(0|[1-9]\\d*)$/.test(bi);
+    const an = /^(0|[1-9]\d*)$/.test(ai);
+    const bn = /^(0|[1-9]\d*)$/.test(bi);
     if (an && bn) {
       if (ai.length !== bi.length) return ai.length > bi.length ? 1 : -1;
       return ai > bi ? 1 : -1;
