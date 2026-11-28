@@ -374,6 +374,56 @@ export function sherpaLibraryPathEnvironmentVariable(platform = process.platform
   return 'LD_LIBRARY_PATH';
 }
 
+function verifyTargetRuntimeManifest(binaryPath: string, libDir: string, target: ReturnType<typeof resolveAvapardazReleaseTarget>): boolean {
+  try {
+    const runtimeRoot = path.dirname(path.dirname(binaryPath));
+    const manifestPath = path.join(runtimeRoot, 'runtime-manifest.json');
+    if (!fs.existsSync(manifestPath)) return false;
+    const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+    const hashFile = (filePath: string): string => {
+      const hash = crypto.createHash('sha256');
+      const fd = fs.openSync(filePath, 'r');
+      try {
+        const chunk = Buffer.allocUnsafe(1024 * 1024);
+        let bytesRead = 0;
+        while ((bytesRead = fs.readSync(fd, chunk, 0, chunk.length, null)) > 0) {
+          hash.update(chunk.subarray(0, bytesRead));
+        }
+      } finally {
+        fs.closeSync(fd);
+      }
+      return hash.digest('hex');
+    };
+    if (
+      manifest.schemaVersion !== 1
+      || manifest.targetId !== target.id
+      || manifest.archiveName !== target.runtimeArchive.fileName
+      || manifest.archiveSha256 !== target.runtimeArchive.sha256
+      || manifest.archiveBytes !== target.runtimeArchive.bytes
+      || manifest.binaryName !== target.sherpaBinaryName
+      || manifest.binaryBytes !== fs.statSync(binaryPath).size
+      || manifest.binarySha256 !== hashFile(binaryPath)
+    ) return false;
+    const libraries = fs.readdirSync(libDir)
+      .filter((name) => isSherpaRuntimeLibraryName(name, target.platform));
+    const expectedLibraries = new Map((manifest.sharedLibraries ?? []).map((library: { name: string; bytes: number; sha256: string }) => [library.name, library]));
+    if (libraries.length === 0 || libraries.length !== expectedLibraries.size) return false;
+    for (const name of libraries) {
+      const filePath = path.join(libDir, name);
+      const expected = expectedLibraries.get(name);
+      if (!expected || expected.bytes !== fs.statSync(filePath).size || expected.sha256 !== hashFile(filePath)) return false;
+    }
+    const onnxLibrary = libraries.find((name) => name === target.onnxRuntimeLibraryName)
+      ?? (target.platform === 'darwin' ? libraries.find((name) => /^libonnxruntime\\.\\d+(?:\\.\\d+)*\\.dylib$/.test(name)) : undefined);
+    if (!onnxLibrary || manifest.onnxRuntimeLibraryName !== onnxLibrary) return false;
+    const onnxPath = path.join(libDir, onnxLibrary);
+    return manifest.onnxRuntimeLibraryBytes === fs.statSync(onnxPath).size
+      && manifest.onnxRuntimeLibrarySha256 === hashFile(onnxPath);
+  } catch {
+    return false;
+  }
+}
+
 function detectSherpaBinary(): { binaryPath: string | null; libDir: string | null } {
   const executableName = process.platform === 'win32' ? 'sherpa-onnx-offline.exe' : 'sherpa-onnx-offline';
   const pathCandidates = (process.env.PATH ?? '')
@@ -407,9 +457,10 @@ function detectSherpaBinary(): { binaryPath: string | null; libDir: string | nul
           const target = resolveAvapardazReleaseTarget();
           assertNativeBinaryArchitecture({ filePath: candidate, platform: target.platform, arch: target.arch });
           for (const name of fs.readdirSync(libDir)) {
-            if (!isSherpaRuntimeLibraryName(name)) continue;
+            if (!isSherpaRuntimeLibraryName(name, target.platform)) continue;
             assertNativeBinaryArchitecture({ filePath: path.join(libDir, name), platform: target.platform, arch: target.arch });
           }
+          if (!verifyTargetRuntimeManifest(candidate, libDir, target)) continue;
         } catch {
           continue;
         }
