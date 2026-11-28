@@ -312,6 +312,23 @@ describe('Phase 1C-H & 1C-I: Installer, First-Run Health, Clean-Env Execution, A
       assert.strictEqual(updated.activeVersion, '1.1.0');
       assert.strictEqual(fs.existsSync(userProjectPath), true);
 
+      // Reject traversal-shaped backup IDs before reading any backup manifest or touching installed paths.
+      const outsideBackupDir = path.resolve(installed.layout.backupsDir, '..', 'outside-backup');
+      fs.mkdirSync(path.join(outsideBackupDir, 'component'), { recursive: true });
+      fs.copyFileSync(
+        path.join(installed.layout.configDir, 'installation-manifest.json'),
+        path.join(outsideBackupDir, 'manifest.backup.json'),
+      );
+      fs.writeFileSync(path.join(outsideBackupDir, 'component', 'attacker-marker.txt'), 'must-not-be-installed', 'utf8');
+      const appMarkerBeforeInvalidRollback = fs.existsSync(path.join(installed.layout.appDir, 'attacker-marker.txt'));
+      const invalidRollback = updater.rollbackToBackup('../outside-backup');
+      assert.strictEqual(invalidRollback.ok, false);
+      assert.strictEqual(
+        fs.existsSync(path.join(installed.layout.appDir, 'attacker-marker.txt')),
+        appMarkerBeforeInvalidRollback,
+      );
+      fs.rmSync(outsideBackupDir, { recursive: true, force: true });
+
       // 5. Explicit manual rollback to 1.0.0
       const manualRollback = updater.rollbackToBackup(updated.backupId!);
       assert.strictEqual(manualRollback.ok, true);
