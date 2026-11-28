@@ -61,7 +61,7 @@ The first three bullets below describe the original baseline inspected during th
 
 | Priority | Gap | Consequence |
 |---|---|---|
-| P0 | No verified Windows platform target in the release engine | Cannot claim approved dual-platform V1 support |
+| P0 | Windows 11 x64 target-specific packaging is implemented on PR #7, but physical Windows 11 + Audition 25.x install/lifecycle acceptance remains unverified | Cannot claim Windows 11 host acceptance or release readiness |
 | P0 | Full installer does not install/register the CEP extension or start Companion | A successful file copy does not yield a ready Audition workflow |
 | P0 | No end-to-end cryptographic package authenticity (orchestrator Ed25519 is implemented, package signing/installer verification remain open) | SHA-256 manifest alone does not protect against artifact + manifest replacement |
 | P1 | No signed/notarized CEP ZXP or signed OS installer | Gatekeeper, SmartScreen, and CEP trust friction; production signing not ready |
