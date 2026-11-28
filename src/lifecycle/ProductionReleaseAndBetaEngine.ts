@@ -1686,7 +1686,7 @@ export class AvapardazPackageUpdateManager {
     readonly ok: boolean;
     readonly restoredVersion?: string;
     readonly messageFa: string;
-  } 
+  } {
     let backupDir: string;
     try {
       backupDir = this.resolveBackupDir(backupId);
