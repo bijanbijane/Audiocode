@@ -1,20 +1,7 @@
 import { spawnSync as nodeSpawnSync } from 'node:child_process';
 
-export type CpuProbeSpawnResult = {
-  status: number | null;
-  stdout?: string | Buffer;
-  stderr?: string | Buffer;
-  error?: Error | null;
-};
-
-export type CpuProbeSpawnSync = (
-  command: string,
-  args: readonly string[],
-  options: { encoding: 'utf8'; timeout: number; windowsHide?: boolean },
-) => CpuProbeSpawnResult;
-
-const defaultSpawnSync: CpuProbeSpawnSync = (command, args, options) =>
-  nodeSpawnSync(command, [...args], options) as CpuProbeSpawnResult;
+const defaultSpawnSync = (command, args, options) =>
+  nodeSpawnSync(command, [...args], options);
 
 const WINDOWS_AVX2_PROBE = [
   "$source = 'using System; using System.Runtime.InteropServices; public static class AvaPardazCpuProbe { [DllImport(\"kernel32.dll\")] public static extern bool IsProcessorFeaturePresent(uint feature); }'",
@@ -33,10 +20,6 @@ export function verifyRequiredCpuFeatures(requiredCpuFeatures = [], {
   platform = process.platform,
   arch = process.arch,
   spawnSync = defaultSpawnSync,
-}: {
-  platform?: string;
-  arch?: string;
-  spawnSync?: CpuProbeSpawnSync;
 } = {}) {
   const required = [...new Set(requiredCpuFeatures.map((feature) => String(feature).toUpperCase()))];
   const checked = [];
