@@ -4,8 +4,8 @@ import * as path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { assertNativeBinaryArchitecture, inspectNativeBinaryArchitecture } from './verify-native-binary.mjs';
 
-const tempDirs = [];
-function fixture(name, bytes) {
+const tempDirs: string[] = [];
+function fixture(name: string, bytes: Buffer): string {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'avp-native-arch-'));
   tempDirs.push(dir);
   const filePath = path.join(dir, name);
@@ -16,13 +16,13 @@ afterEach(() => {
   for (const dir of tempDirs.splice(0)) fs.rmSync(dir, { recursive: true, force: true });
 });
 
-function thinMach(cpu) {
+function thinMach(cpu: number): Buffer {
   const buffer = Buffer.alloc(32);
   buffer.writeUInt32LE(0xfeedfacf, 0);
   buffer.writeUInt32LE(cpu, 4);
   return buffer;
 }
-function peX64() {
+function peX64(): Buffer {
   const buffer = Buffer.alloc(256);
   buffer.write('MZ', 0, 'ascii');
   buffer.writeUInt32LE(0x80, 0x3c);
