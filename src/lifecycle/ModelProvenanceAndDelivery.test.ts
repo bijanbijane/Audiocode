@@ -30,6 +30,9 @@ import {
   evaluateComponentCompatibility,
   evaluateFirstRunReadiness,
   ComponentUpdateOrchestrator,
+  canonicalizeUpdateManifest,
+  type UpdateManifest,
+  type UpdateManifestPayload,
   buildSafeUninstallPlan,
   validateDeploymentConfiguration,
 } from './ProductDeliveryAndUpdateEngine';
@@ -243,25 +246,36 @@ test('AVP-P0-007: independent component compatibility, first-run readiness, safe
   assert.ok(unsafeProd.errors.length >= 4);
 });
 
-test('AVP-P0-007: 17-state ComponentUpdateOrchestrator performs atomic update, rejects bad sig/hash/disk, and rolls back failed activation', async () => {
+test('AVP-P0-007: update orchestration requires real Ed25519 signatures, binds metadata and digest, and rolls back failed activation', async () => {
+  const keyPair = crypto.generateKeyPairSync('ed25519');
+  const publicKeyDer = keyPair.publicKey.export({ type: 'spki', format: 'der' }) as Buffer;
+  const trustedSigningKeys = {
+    'avp-test-release-key': new Uint8Array(publicKeyDer.subarray(-32)),
+  };
   const orch = new ComponentUpdateOrchestrator({
     BROWSER_APP: '1.0.0',
     NATIVE_COMPANION: '1.0.0',
     AUDITION_CEP_EXTENSION: '1.0.0',
     MODEL_ARTIFACT: '1.0.0',
-  });
+  }, trustedSigningKeys);
   const goodHash = 'a'.repeat(64);
+  const signManifest = (payload: UpdateManifestPayload): UpdateManifest => ({
+    ...payload,
+    signature: {
+      algorithm: 'Ed25519',
+      keyId: 'avp-test-release-key',
+      signatureBase64: crypto.sign(null, Buffer.from(canonicalizeUpdateManifest(payload)), keyPair.privateKey).toString('base64'),
+    },
+  });
 
-  // 1. Successful verified update
+  // 1. A real Ed25519 signature from the pinned test key permits the update.
   const okRes = await orch.executeSafeUpdate({
-    manifest: {
+    manifest: signManifest({
       component: 'NATIVE_COMPANION',
       version: '1.1.0',
       sha256Hex: goodHash,
       sizeBytes: 10_000_000,
-      signatureStatus: 'SIGNATURE_VERIFIED',
-    },
-    requireCryptographicSignature: true,
+    }),
     availableDiskBytes: 50_000_000,
     downloadAndVerifySha256: async () => ({ ok: true, actualSha256Hex: goodHash }),
     stageArtifact: async () => ({ ok: true, stagingDir: '/tmp/stage-1.1.0' }),
@@ -274,17 +288,15 @@ test('AVP-P0-007: 17-state ComponentUpdateOrchestrator performs atomic update, r
   assert.equal(okRes.slot.activeVersion, '1.1.0');
   assert.equal(okRes.slot.previousKnownGoodVersion, '1.0.0');
 
-  // 2. Post-activation health failure triggers automatic rollback to 1.1.0
+  // 2. Post-activation health failure triggers automatic rollback to 1.1.0.
   let restoredTo: string | null = null;
   const rollbackRes = await orch.executeSafeUpdate({
-    manifest: {
+    manifest: signManifest({
       component: 'NATIVE_COMPANION',
       version: '1.2.0',
       sha256Hex: goodHash,
       sizeBytes: 10_000_000,
-      signatureStatus: 'SIGNATURE_VERIFIED',
-    },
-    requireCryptographicSignature: true,
+    }),
     availableDiskBytes: 50_000_000,
     downloadAndVerifySha256: async () => ({ ok: true, actualSha256Hex: goodHash }),
     stageArtifact: async () => ({ ok: true, stagingDir: '/tmp/stage-1.2.0' }),
@@ -301,23 +313,78 @@ test('AVP-P0-007: 17-state ComponentUpdateOrchestrator performs atomic update, r
   assert.equal(rollbackRes.slot.activeVersion, '1.1.0');
   assert.equal(rollbackRes.slot.state, 'UPDATE_ROLLED_BACK');
 
-  // 3. Reject invalid cryptographic signature before download
-  let downloadedOnBadSig = false;
-  const badSigRes = await orch.executeSafeUpdate({
-    manifest: {
+  // 3. A tampered manifest digest is rejected before any download.
+  let downloadedOnTamperedManifest = false;
+  const validButAltered = signManifest({
+    component: 'NATIVE_COMPANION',
+    version: '1.3.0',
+    sha256Hex: goodHash,
+    sizeBytes: 10_000_000,
+  });
+  const tamperedRes = await orch.executeSafeUpdate({
+    manifest: { ...validButAltered, sha256Hex: 'b'.repeat(64) },
+    availableDiskBytes: 50_000_000,
+    downloadAndVerifySha256: async () => {
+      downloadedOnTamperedManifest = true;
+      return { ok: true, actualSha256Hex: 'b'.repeat(64) };
+    },
+    stageArtifact: async () => ({ ok: true, stagingDir: '/tmp/stage-1.3.0' }),
+    activateArtifact: async () => ({ ok: true }),
+    verifyPostActivationHealth: async () => ({ ok: true }),
+    restorePreviousVersion: async () => true,
+  });
+  assert.equal(tamperedRes.ok, false);
+  assert.equal(downloadedOnTamperedManifest, false);
+  assert.equal(tamperedRes.slot.lastError, 'UPDATE_AUTHENTICITY_FAILED');
+
+  // 4. A valid signature is still rejected if its key is not in the pinned trust store.
+  const noTrustRoot = new ComponentUpdateOrchestrator({
+    BROWSER_APP: '1.0.0',
+    NATIVE_COMPANION: '1.0.0',
+    AUDITION_CEP_EXTENSION: '1.0.0',
+    MODEL_ARTIFACT: '1.0.0',
+  });
+  let downloadedWithoutTrustRoot = false;
+  const noTrustRes = await noTrustRoot.executeSafeUpdate({
+    manifest: signManifest({
       component: 'NATIVE_COMPANION',
-      version: '1.3.0',
+      version: '1.1.0',
       sha256Hex: goodHash,
       sizeBytes: 10_000_000,
-      signatureStatus: 'SIGNATURE_INVALID',
+    }),
+    availableDiskBytes: 50_000_000,
+    downloadAndVerifySha256: async () => {
+      downloadedWithoutTrustRoot = true;
+      return { ok: true, actualSha256Hex: goodHash };
     },
-    requireCryptographicSignature: true,
+    stageArtifact: async () => ({ ok: true, stagingDir: '/tmp/stage-no-root' }),
+    activateArtifact: async () => ({ ok: true }),
+    verifyPostActivationHealth: async () => ({ ok: true }),
+    restorePreviousVersion: async () => true,
+  });
+  assert.equal(noTrustRes.ok, false);
+  assert.equal(downloadedWithoutTrustRoot, false);
+  assert.equal(noTrustRes.slot.lastError, 'UPDATE_AUTHENTICITY_FAILED');
+
+  // 5. A cryptographically malformed signature is rejected before download.
+  let downloadedOnBadSig = false;
+  const badSigManifest = signManifest({
+    component: 'NATIVE_COMPANION',
+    version: '1.4.0',
+    sha256Hex: goodHash,
+    sizeBytes: 10_000_000,
+  });
+  const badSigRes = await orch.executeSafeUpdate({
+    manifest: {
+      ...badSigManifest,
+      signature: { ...badSigManifest.signature, signatureBase64: 'A'.repeat(88) },
+    },
     availableDiskBytes: 50_000_000,
     downloadAndVerifySha256: async () => {
       downloadedOnBadSig = true;
       return { ok: true, actualSha256Hex: goodHash };
     },
-    stageArtifact: async () => ({ ok: true, stagingDir: '/tmp/stage-1.3.0' }),
+    stageArtifact: async () => ({ ok: true, stagingDir: '/tmp/stage-bad-signature' }),
     activateArtifact: async () => ({ ok: true }),
     verifyPostActivationHealth: async () => ({ ok: true }),
     restorePreviousVersion: async () => true,
