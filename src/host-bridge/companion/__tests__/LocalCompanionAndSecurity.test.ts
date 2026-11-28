@@ -435,6 +435,13 @@ test('Adobe Audition CEP plugin contains verified AUDT manifest, CSP-protected U
 
 test('Staged upload service APIs fail closed without the owning client identity', () => {
   const service = new LocalCompanionService();
+  const submitWithoutOwner = service.submitTranscriptionJob as unknown as (
+    params: Record<string, unknown>,
+  ) => { readonly ok: boolean; readonly statusCode: number; readonly code?: string };
+  const missingOwnerJob = submitWithoutOwner({});
+  assert.equal(missingOwnerJob.ok, false);
+  assert.equal(missingOwnerJob.statusCode, 403);
+  assert.equal(missingOwnerJob.code, 'JOB_OWNER_REQUIRED');
   const initWithoutOwner = service.initStagedUpload as unknown as (
     filename?: string,
     ownerId?: string,
