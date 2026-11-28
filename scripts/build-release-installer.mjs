@@ -254,6 +254,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as crypto from 'node:crypto';
 import * as os from 'node:os';
+import { fileURLToPath } from 'node:url';
 
 const args = process.argv.slice(2);
 if (args.includes('--help') || args.includes('-h')) {
@@ -269,7 +270,8 @@ if (fs.existsSync(targetRoot) && fs.readdirSync(targetRoot).length > 0) {
   console.error('Back up existing user data first, then use the dedicated update/rollback flow.');
   process.exit(2);
 }
-const payloadRoot = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..', 'payload');
+const installerDir = path.dirname(fileURLToPath(import.meta.url));
+const payloadRoot = path.resolve(installerDir, '..', 'payload');
 
 function copyRecursive(src, dst) {
   if (!fs.existsSync(src)) return;
