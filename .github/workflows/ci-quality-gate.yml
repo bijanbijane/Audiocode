@@ -4,7 +4,7 @@ on:
   push:
     branches: [main, release/*, codex/avapardaz-audio-engines]
   pull_request:
-    branches: [main]
+    branches: [main, docs/r0-baseline-audit-2026-11-27]
 
 permissions:
   contents: read
