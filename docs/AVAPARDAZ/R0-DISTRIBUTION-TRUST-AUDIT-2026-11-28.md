@@ -398,3 +398,31 @@ CI for the lock implementation is running on the branch; do not treat it as vali
 The lock is intentionally fail-closed for remote/unknown owners and malformed owner records. A crash during stale-lock recovery can leave the separate recovery mutex behind and require manual inspection/removal; automatic recovery of that second-level mutex is not implemented. The 30-second missing-owner grace period handles a crash between atomic directory creation and owner-file creation, but this is not a substitute for host-level process-kill testing.
 
 The lock serializes updater operations but does not yet establish power-loss durability. Explicit file and parent-directory fsync, production bootstrap ordering, and physical Windows/macOS process-kill validation remain open. PR #7 remains OPEN / DRAFT / NOT MERGED; `main` and Production are unchanged.
+
+
+## 2026-11-28 — Journal and activation filesystem durability
+
+### Finding
+
+The activation journal previously relied on ordinary file writes, directory creation, and rename operations without explicit flushes. A successful system call did not establish that journal metadata, backup contents, or directory-entry changes had reached stable storage before the next activation phase was recorded.
+
+### Implementation
+
+- Added synchronous file-descriptor `fsync` for copied backup/staging trees before they become recovery inputs or active payloads.
+- Added directory flushes after creating activation phase markers and after component-directory renames/removals.
+- Installation manifest and backup manifest writes now use a same-directory temporary file, fsync the temporary file, rename it into place, and fsync the containing directory.
+- Activation now flushes the prepared stage tree and target parent after each rename before advancing the journal phase.
+- Recovery and manual rollback flush restored trees before rename and flush target parents after transitions.
+- COMMITTED cleanup flushes the component parent and backup directory after removing displaced data and journal metadata.
+
+### Platform limitation
+
+On Windows, Node.js does not consistently permit opening directory handles for fsync. The helper explicitly tolerates known unsupported directory-open/fsync errors on Windows; regular files are still fsynced. Therefore, this change improves ordering and file-content durability but does **not** claim full directory-entry power-loss durability on Windows. Actual guarantees depend on filesystem, storage controller, OS, and host testing. No power-cut test has been performed.
+
+### Validation
+
+- Previous exact head `35ac6c068f32c155af26ec68a97543b33d573222`: both AVAPARDAZ Quality Gates and Architecture Governance completed SUCCESS.
+- Current source heads `a45e397baf0ab64504f91470b52cd67065b14560` and `46980ffee236481e09023862066d31dde10b38cd` have new CI runs in progress/queued; no validation is inferred from the previous head.
+- Local test execution is unavailable because no local repository checkout is mounted.
+
+PR #7 remains OPEN / DRAFT / NOT MERGED. Main and Production are unchanged.
