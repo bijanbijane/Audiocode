@@ -727,16 +727,44 @@ export class CompanionAudioTransferManager {
     }
   }
 
-  public getTransferLifecycleState(transferId: string): CompanionTransferLifecycleState | null {
+  public getTransferLifecycleState(
+    transferId: string,
+    ownerId: string,
+  ): CompanionTransferLifecycleState | null {
     const active = this.sessions.get(transferId);
-    if (active) return active.state;
-    return this.closedHistory.get(transferId)?.state ?? null;
+    if (active) {
+      return this.validateOwner(active, ownerId).ok ? active.state : null;
+    }
+    const closed = this.closedHistory.get(transferId);
+    if (
+      !closed ||
+      typeof ownerId !== 'string' ||
+      ownerId.trim().length === 0 ||
+      ownerId.trim() !== closed.ownerId
+    ) {
+      return null;
+    }
+    return closed.state;
   }
 
-  public getTransferStateHistory(transferId: string): readonly CompanionTransferLifecycleState[] {
+  public getTransferStateHistory(
+    transferId: string,
+    ownerId: string,
+  ): readonly CompanionTransferLifecycleState[] {
     const active = this.sessions.get(transferId);
-    if (active) return [...active.stateHistory];
-    return this.closedHistory.get(transferId)?.stateHistory ?? [];
+    if (active) {
+      return this.validateOwner(active, ownerId).ok ? [...active.stateHistory] : [];
+    }
+    const closed = this.closedHistory.get(transferId);
+    if (
+      !closed ||
+      typeof ownerId !== 'string' ||
+      ownerId.trim().length === 0 ||
+      ownerId.trim() !== closed.ownerId
+    ) {
+      return [];
+    }
+    return [...closed.stateHistory];
   }
 
   public sweepExpired(nowMs = Date.now()): number {
@@ -1540,8 +1568,8 @@ export class CompanionAudioTransferManager {
       sha256: finalSha256,
       tempFilePath: sess.tempPath,
 
-      getLifecycleState: () => this.getTransferLifecycleState(transferId) ?? 'CLEANED',
-      getStateHistory: () => this.getTransferStateHistory(transferId),
+      getLifecycleState: () => this.getTransferLifecycleState(transferId, sess.ownerId) ?? 'CLEANED',
+      getStateHistory: () => this.getTransferStateHistory(transferId, sess.ownerId),
 
       readRange: async (startSample: number, sampleCount: number, signal?: AbortSignal) => {
         return readFrameRangeInterleaved(startSample, sampleCount, signal);
