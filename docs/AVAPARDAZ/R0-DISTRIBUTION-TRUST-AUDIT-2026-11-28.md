@@ -118,11 +118,15 @@ This resolves the previous owner decision about platform/architecture selection.
 
 Branch: `feat/r6-target-specific-release-packaging`, based on the reviewed R0 documentation head.
 
-- Added `scripts/release-targets.mjs` as the single source of truth for the three approved native targets and target-specific Sherpa / ONNX Runtime filenames.
+- Added `src/asr-core/NativeReleaseTargets.mjs` as the shared source of truth for the three approved targets and pinned Sherpa runtime archive provenance; `scripts/release-targets.mjs` remains a compatibility re-export.
 - Added tests for the exact matrix, target artifact selection, unsupported target rejection, and runtime-target mismatch rejection.
 - Updated `scripts/build-release-installer.mjs` to select native runtime artifacts from the explicit release target rather than the packager host, require `AVAPARDAZ_SHERPA_RUNTIME_TARGET` to match, include target/build-host identity in the package manifest, and suffix package/update artifacts with the target ID.
 - Generated installers now reject a mismatched OS/CPU and Node.js versions below 20 before copying payload files.
 - Added a Windows PowerShell installer wrapper (`install-windows.ps1`) alongside the macOS wrapper.
+- Added `scripts/provision-release-native-runtime.ts` to download the exact pinned asset, verify byte count and SHA-256, safely extract it, validate all Mach-O/PE binaries and shared libraries, write a runtime manifest, and execute a real `--help` smoke test.
+- Updated `LocalSherpaNeuralEngine.installShenavaRizehRuntime()` to provision the approved macOS and Windows targets; Linux x64 retains its existing development/runtime path.
+- Fixed Companion discovery of Windows DLLs and `PATH` loading; macOS supports versioned dylibs and `DYLD_LIBRARY_PATH`.
+- The packager now copies all target shared libraries and prefers the verified target-specific runtime directory.
 - Updated `ProductionReleaseAndBetaEngine` release metadata to `darwin-arm64`, `darwin-x64`, and `win32-x64`.
 
 ### 8.3. Build invocation contract
@@ -138,11 +142,11 @@ The explicit runtime-target variable is a build provenance assertion, not crypto
 
 ### 8.4. Remaining blockers
 
-- Actual target-specific Sherpa runtime payloads have not been supplied or built for all three targets in this session.
-- The packager was not executed because the required production web build, model artifacts, and target-specific native runtime payloads were not available through this repository-only workflow.
-- The generated installer and PowerShell wrapper have not been executed on Windows 11; macOS 14/15 arm64 and Intel have not been executed on physical hosts.
-- Audition 25.x integration remains unverified on all three target IDs.
-- Internal signing/trust policy, pinned signature verification, Companion startup registration, CEP registration into the host's actual extension directory, and atomic update/rollback integration remain open.
+- Official Sherpa-ONNX v2.0.2 runtime archives are now pinned by byte count and SHA-256 and were downloaded, extracted, architecture-checked, and smoke-tested on hosted macOS 15 arm64, macOS 15 Intel, and Windows Server 2025 x64 runners.
+- The full release packager itself has not yet been executed end-to-end because the production web build and verified Persian model payloads were not available through this repository-only workflow.
+- Windows 11 physical-host installation is not yet tested; the Windows runtime smoke ran on Windows Server 2025 x64. macOS 14 is not available as a current GitHub-hosted runner; physical macOS 14/15 acceptance remains required.
+- Adobe Audition 25.x integration remains unverified on all three target IDs.
+- Internal signing/trust policy, pinned signature verification for the final product package, Companion startup registration, CEP registration into the host's actual extension directory, and atomic update/rollback integration remain open.
 
 The platform matrix is **APPROVED**, but platform support is still **NOT VERIFIED**. R0 distribution work remains IN PROGRESS.
 
@@ -181,7 +185,8 @@ Remaining gates are unchanged: real target runtime acquisition/build, artifact p
 A dedicated CI matrix was added to `.github/workflows/ci-quality-gate.yml` for the R6 qualification PR:
 
 - `ubuntu-latest`
-- `macos-latest`
+- `macos-15` (Apple Silicon)
+- `macos-15-intel`
 - `windows-latest`
 
 The matrix installs the frozen Bun dependencies and runs `bunx vitest run scripts/verify-native-binary.spec.ts`, recording each runner's `process.platform` and `process.arch`. It is scoped to PR head `feat/r6-target-specific-release-packaging` so the stacked R0 baseline PR does not run a test file that exists only in the follow-up branch.
@@ -189,12 +194,42 @@ The matrix installs the frozen Bun dependencies and runs `bunx vitest run script
 This matrix validates parser behavior and filesystem/test portability across hosted OS runners using synthetic Mach-O/PE fixtures. It does **not** build Sherpa native binaries, verify downloaded production payloads, or replace physical host installation tests. The first `macos-14` job was cancelled before steps started; after switching to `macos-latest`, all three matrix jobs completed successfully on the latest qualification run.
 
 
-**Successful cross-platform evidence on PR #7 head `52e4eda48e8bd9a37ec61ca24ec8e4e544d330ee`:**
+**Successful cross-platform evidence on PR #7 head `5d31165ee455f288c8de67baeb8b1c086fc21f62`:**
 
 | Hosted runner | Actual runtime | Result |
 |---|---|---|
-| macos-latest | `darwin-arm64` | 5/5 tests PASS |
+| macos-15 | `darwin-arm64` | 5/5 tests PASS |
+| macos-15-intel | `darwin-x64` | 5/5 tests PASS |
 | ubuntu-latest | `linux-x64` | 5/5 tests PASS |
 | windows-latest | `win32-x64` | 5/5 tests PASS |
 
 The macOS runner was Apple Silicon. The Windows runner was x64. This proves the parser tests execute successfully on those runner environments, not that the product's target-native Sherpa/ONNX payloads have been built or installed there.
+
+
+### 8.7. Official runtime assets — provenance and real host smoke tests
+
+The runtime source is the official [k2-fsa/sherpa-onnx v2.0.2 release](https://github.com/k2-fsa/sherpa-onnx/releases/tag/v2.0.2). The archive byte counts and SHA-256 values below are pinned in `src/asr-core/NativeReleaseTargets.mjs` and checked before extraction:
+
+| Target | Release asset | Bytes | SHA-256 |
+|---|---|---:|---|
+| `darwin-arm64` | `sherpa-onnx-v2.0.2-osx-arm64-shared-no-tts.tar.bz2` | 20,197,239 | `1a803809572335ef545978b62b0271ad119969fef6f9153a94c174c3adc95608` |
+| `darwin-x64` | `sherpa-onnx-v2.0.2-osx-x64-shared-no-tts.tar.bz2` | 22,763,064 | `c1f69c0752ec7deef44eb8662e4489330513e514c64db5251879950e77066eaf` |
+| `win32-x64` | `sherpa-onnx-v2.0.2-win-x64-shared-MT-Release-no-tts.tar.bz2` | 26,896,305 | `6a71d5ef016e544026d6505486d9fa42177ad989238adc6e4bd2eebfb6947416` |
+
+**Real runtime provisioning evidence on PR #7 head `5d31165ee455f288c8de67baeb8b1c086fc21f62`:**
+
+| Product target | Hosted runner / actual runtime | Binary and libraries | `--help` smoke |
+|---|---|---|---|
+| `darwin-arm64` | macOS 15 / `darwin-arm64` | Mach-O arm64; 3 dylibs | PASS |
+| `darwin-x64` | macOS 15 Intel / `darwin-x64` | Mach-O x64; 3 dylibs | PASS |
+| `win32-x64` | Windows Server 2025 / `win32-x64` | PE x64; 2 DLLs | PASS |
+
+For every target, the provisioning job verified the archive's exact byte count and SHA-256, safely extracted it, checked the executable and all shared-library architectures, and ran the actual Sherpa CLI `--help` command successfully. No binary payloads were committed to the repository.
+
+The safe extractor continues to reject symlinks by default. For these pinned native archives only, it accepts same-directory relative symlinks under a `lib` directory and materializes them as regular files; absolute links, parent traversal, link chains, hardlinks, and links outside `lib` remain forbidden.
+
+### 8.8. Current CI follow-up
+
+The first full Vitest run after the runtime packaging changes passed 28 files / 119 tests and failed one stale source assertion in `scripts/build-release-installer.spec.ts` that still expected the removed `!fs.existsSync(onnxRuntimeLibrarySource)` expression. That assertion was removed; latest head CI is rerunning. The native parser matrix and all three real runtime provisioning jobs passed on the prior head above.
+
+GitHub-hosted macOS 14 runners are retired; current CI validates macOS 15 arm64 and Intel. Windows hosted smoke is Windows Server 2025, not Windows 11. Physical-host and Audition acceptance remain separate gates.
