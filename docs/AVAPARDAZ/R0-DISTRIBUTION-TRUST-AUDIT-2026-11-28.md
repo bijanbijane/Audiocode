@@ -174,3 +174,16 @@ The follow-up implementation adds `scripts/verify-native-binary.mjs`:
 The first two CI attempts exposed a nested-template syntax error and then strict TypeScript fixture typing errors; both were corrected before the successful head above. These results validate the code paths and synthetic fixtures on GitHub's Linux runner. They do **not** prove that supplied native runtime payload bytes are valid for any of the three destination operating systems, nor do they replace execution on physical macOS/Windows hosts with Audition 25.x.
 
 Remaining gates are unchanged: real target runtime acquisition/build, artifact provenance/signing, physical-host installation and update/rollback tests, CEP host registration, and Companion startup/lifecycle validation.
+
+
+### 8.6. Cross-platform parser CI
+
+A dedicated CI matrix was added to `.github/workflows/ci-quality-gate.yml` for the R6 qualification PR:
+
+- `ubuntu-latest`
+- `macos-latest`
+- `windows-latest`
+
+The matrix installs the frozen Bun dependencies and runs `bunx vitest run scripts/verify-native-binary.spec.ts`, recording each runner's `process.platform` and `process.arch`. It is scoped to PR head `feat/r6-target-specific-release-packaging` so the stacked R0 baseline PR does not run a test file that exists only in the follow-up branch.
+
+This matrix validates parser behavior and filesystem/test portability across hosted OS runners using synthetic Mach-O/PE fixtures. It does **not** build Sherpa native binaries, verify downloaded production payloads, or replace physical host installation tests. The initial `macos-14` matrix job was cancelled before steps started; the runner label was changed to `macos-latest` and must be revalidated by the subsequent PR run.
