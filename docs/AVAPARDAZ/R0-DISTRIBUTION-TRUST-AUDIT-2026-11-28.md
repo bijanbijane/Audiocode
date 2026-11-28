@@ -16,8 +16,8 @@ Do not mark `R0-DIST-07`, `R0-PLATFORM-05`, or `R0-HOST-06` complete based on pa
 
 ### 1. Platform target mismatch
 
-- `src/lifecycle/ProductionReleaseAndBetaEngine.ts` declares `supportedPlatforms: ['darwin-arm64', 'linux-x64']`; Windows is absent, and macOS Intel is absent.
-- The approved V1 scope requires macOS + Windows. The prior R0 baseline audit lists candidate targets of Windows 11 x64, macOS 14/15 arm64 + Intel, and Audition 25.x; these are explicitly candidates, not approvals, and both live-host targets remain `NOT_TESTED`. Exact OS builds, Audition minor/build versions, minimum hardware, and supported audio formats are still not owner-approved.
+- At the time of the initial audit, `ProductionReleaseAndBetaEngine.ts` declared only `darwin-arm64` and `linux-x64`. The follow-up branch aligns it to the owner-approved `darwin-arm64`, `darwin-x64`, and `win32-x64` matrix; the target registry is in `scripts/release-targets.mjs`.
+- The owner approved Windows 11 x64, macOS 14/15 Apple Silicon, and macOS 14/15 Intel, all with Adobe Audition 25.x (ADR-027). These target selections are approved; physical-host validation, exact OS build coverage, minimum hardware, and supported audio formats remain unverified or open.
 - `packages/audition-cep-plugin/CSXS/manifest.xml` currently declares Audition host `AUDT [22.0,99.9]` and CSXS 11.0. This is a broad compatibility declaration, not a verified host matrix.
 
 ### 2. Two different installer paths
@@ -32,8 +32,8 @@ Do not mark `R0-DIST-07`, `R0-PLATFORM-05`, or `R0-HOST-06` complete based on pa
 
 **Full release package**
 
-- `scripts/build-release-installer.mjs` packages the web app, Companion bundle, Sherpa runtime, models, and CEP extension under a versioned package directory.
-- It generates `installer/install.mjs` and an `install-macos.sh` wrapper. It does not generate a Windows PowerShell wrapper or a Windows service/task registration path. The generic Node installer may be invoked manually on Windows when a compatible Node runtime is present, but that is not a verified Windows installer workflow.
+- `scripts/build-release-installer.mjs` packages the web app, Companion bundle, Sherpa runtime, models, and CEP extension under a versioned, target-specific package directory.
+- The follow-up branch generates `installer/install.mjs`, `install-macos.sh`, and `install-windows.ps1`; it rejects OS/architecture mismatches and Node.js below 20. This is still not a verified Windows installer workflow, and it does not register a Windows service/task for Companion.
 - The generated `install.mjs` requires Node.js. During this audit its header/help text was corrected to state `Node.js 20 or newer`; the package still does not bundle a Node runtime or a native launcher.
 - The generated installer copies the CEP extension into the package's `cep-extension/` directory under the install root; it does not copy it into the actual Adobe CEP extension directory. It also does not register or start the Companion daemon. The separate CEP installer is not invoked by this full installer.
 - The installer refuses to overwrite a non-empty target directory. The generated update tarball is a copy of the package with a changed version/build ID; this script does not apply it through `ComponentUpdateOrchestrator`, perform an in-place update, or execute rollback.
@@ -82,7 +82,7 @@ Do not mark `R0-DIST-07`, `R0-PLATFORM-05`, or `R0-HOST-06` complete based on pa
 
 | Decision | Options requiring owner selection | Engineering consequence |
 |---|---|---|
-| Exact platform matrix | macOS arm64 only vs arm64 + Intel; Windows x64 vs x64 + arm64; exact Audition versions | Determines native binaries, runtime packaging, and live acceptance matrix |
+| Exact platform matrix | **RESOLVED (ADR-027):** Windows 11 x64, macOS 14/15 arm64 + Intel, Adobe Audition 25.x | Determines native binaries, runtime packaging, and live acceptance matrix |
 | Internal signing policy | Controlled unsigned pilot with explicit risk acceptance vs obtain Apple Developer ID / Authenticode / ZXPSignCmd credentials | Determines installer formats, Gatekeeper/SmartScreen behavior, and release trust gate |
 | Companion startup | Manual user launch vs OS user-level background startup | Determines LaunchAgent / Task Scheduler integration and lifecycle ownership |
 | Update policy | Manual versioned install with backup vs signed atomic auto-update | Determines rollback, signing, and recovery implementation |
@@ -90,7 +90,7 @@ Do not mark `R0-DIST-07`, `R0-PLATFORM-05`, or `R0-HOST-06` complete based on pa
 
 ## Next engineering steps after decisions
 
-1. Freeze the approved platform matrix and produce a per-platform dependency manifest.
+1. Produce and qualify a per-platform dependency manifest and native runtime payload for each approved target.
 2. Implement a single install/uninstall orchestrator that registers the CEP extension, installs the Companion/runtime/models, and never deletes user data implicitly.
 3. Add Windows packaging and a Windows-native install/verification job; separately validate macOS arm64 and any approved Intel target.
 4. Add actual detached-signature verification with a pinned trust root; require it for updates.
