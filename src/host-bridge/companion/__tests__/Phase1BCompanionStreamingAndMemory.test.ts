@@ -141,7 +141,9 @@ test('Scenario 1 & 3: Short WAV file & Mono file exact sample fidelity, 10-state
     assert.equal(init.ok, true);
     const transferId = init.transferId!;
     assert.match(transferId, /^xfr_[a-f0-9]{32}$/);
-    assert.equal(mgr.getTransferLifecycleState(transferId), 'CREATED');
+    assert.equal(mgr.getTransferLifecycleState(transferId, 'cep-session-1'), 'CREATED');
+    assert.equal(mgr.getTransferLifecycleState(transferId, 'foreign-owner'), null);
+    assert.deepEqual(mgr.getTransferStateHistory(transferId, 'foreign-owner'), []);
 
     const mid = Math.floor(wavBuf.byteLength / 2);
     const c0 = mgr.appendChunk({
@@ -151,7 +153,7 @@ test('Scenario 1 & 3: Short WAV file & Mono file exact sample fidelity, 10-state
       ownerId: 'cep-session-1',
     });
     assert.equal(c0.ok, true);
-    assert.equal(mgr.getTransferLifecycleState(transferId), 'RECEIVING');
+    assert.equal(mgr.getTransferLifecycleState(transferId, 'cep-session-1'), 'RECEIVING');
 
     const c1 = mgr.appendChunk({
       transferId,
@@ -160,11 +162,11 @@ test('Scenario 1 & 3: Short WAV file & Mono file exact sample fidelity, 10-state
       ownerId: 'cep-session-1',
     });
     assert.equal(c1.ok, true);
-    assert.equal(mgr.getTransferLifecycleState(transferId), 'RECEIVED');
+    assert.equal(mgr.getTransferLifecycleState(transferId, 'cep-session-1'), 'RECEIVED');
 
     const fin = mgr.finalizeTransfer(transferId, { ownerId: 'cep-session-1' });
     assert.equal(fin.ok, true);
-    assert.equal(mgr.getTransferLifecycleState(transferId), 'READY');
+    assert.equal(mgr.getTransferLifecycleState(transferId, 'cep-session-1'), 'READY');
 
     const acq = mgr.acquireAudioSource(transferId, { ownerId: 'cep-session-1' });
     assert.equal(acq.ok, true);
@@ -325,7 +327,7 @@ test('Scenarios 6, 7, 8, 9, 10, 11, 12, 13, 14, 15: Error handling, chunk order,
     assert.equal(fin6.ok, false);
     assert.equal(fin6.statusCode, 422);
     assert.equal(fin6.code, 'TRANSFER_INCOMPLETE_CHUNKS');
-    assert.equal(mgr.getTransferLifecycleState(s6.transferId!), 'CLEANED');
+    assert.equal(mgr.getTransferLifecycleState(s6.transferId!, 'test-owner'), 'CLEANED');
 
     // Scenario 7 & 8: Duplicate chunk & Out-of-order chunk
     const s78 = mgr.initTransfer({
@@ -373,8 +375,10 @@ test('Scenarios 6, 7, 8, 9, 10, 11, 12, 13, 14, 15: Error handling, chunk order,
 
     // Scenario 9: Disconnect / abort during transfer -> CANCELLED -> CLEANED
     assert.equal(mgr.abortTransfer(tid78, { ownerId: 'test-owner' }), true);
-    assert.equal(mgr.getTransferLifecycleState(tid78), 'CLEANED');
-    assert.deepEqual(mgr.getTransferStateHistory(tid78), [
+    assert.equal(mgr.getTransferLifecycleState(tid78, 'test-owner'), 'CLEANED');
+    assert.equal(mgr.getTransferLifecycleState(tid78, 'foreign-owner'), null);
+    assert.deepEqual(mgr.getTransferStateHistory(tid78, 'foreign-owner'), []);
+    assert.deepEqual(mgr.getTransferStateHistory(tid78, 'test-owner'), [
       'CREATED',
       'RECEIVING',
       'CANCELLED',
@@ -451,8 +455,8 @@ test('Scenarios 6, 7, 8, 9, 10, 11, 12, 13, 14, 15: Error handling, chunk order,
     assert.equal(errChunk.ok, false);
     assert.equal(errChunk.statusCode, 500);
     assert.equal(errChunk.code, 'DISK_WRITE_ERROR');
-    assert.equal(mgr.getTransferLifecycleState(tid11), 'CLEANED');
-    assert.deepEqual(mgr.getTransferStateHistory(tid11), ['CREATED', 'RECEIVING', 'FAILED', 'CLEANED']);
+    assert.equal(mgr.getTransferLifecycleState(tid11, 'test-owner'), 'CLEANED');
+    assert.deepEqual(mgr.getTransferStateHistory(tid11, 'test-owner'), ['CREATED', 'RECEIVING', 'FAILED', 'CLEANED']);
 
     // Scenario 12: Corrupt WAV header -> detected during VALIDATING -> FAILED -> CLEANED
     const corruptWav = Buffer.alloc(128, 0x42); // Not RIFF/WAVE
@@ -477,8 +481,8 @@ test('Scenarios 6, 7, 8, 9, 10, 11, 12, 13, 14, 15: Error handling, chunk order,
     assert.equal(fin12.ok, false);
     assert.equal(fin12.statusCode, 422);
     assert.equal(fin12.code, 'INVALID_WAV_HEADER');
-    assert.equal(mgr.getTransferLifecycleState(tid12), 'CLEANED');
-    assert.deepEqual(mgr.getTransferStateHistory(tid12), [
+    assert.equal(mgr.getTransferLifecycleState(tid12, 'test-owner'), 'CLEANED');
+    assert.deepEqual(mgr.getTransferStateHistory(tid12, 'test-owner'), [
       'CREATED',
       'RECEIVING',
       'RECEIVED',
@@ -581,8 +585,8 @@ test('Scenarios 6, 7, 8, 9, 10, 11, 12, 13, 14, 15: Error handling, chunk order,
     const srcB = mgr.acquireAudioSource(s14B.transferId!, { ownerId: 'owner-B' }).source!;
     await srcB.close('COMPLETED');
 
-    assert.equal(mgr.getTransferLifecycleState(s14B.transferId!), 'CLEANED');
-    assert.equal(mgr.getTransferLifecycleState(s14A.transferId!), 'CREATED');
+    assert.equal(mgr.getTransferLifecycleState(s14B.transferId!, 'owner-B'), 'CLEANED');
+    assert.equal(mgr.getTransferLifecycleState(s14A.transferId!, 'owner-A'), 'CREATED');
     mgr.abortTransfer(s14A.transferId!, { ownerId: 'owner-A' });
     assert.equal(mgr.getTotalReservedStagingBytes(), 0);
   } finally {
@@ -830,7 +834,7 @@ test('Scenario 16: Real drain backpressure verification, RF64 (>4 GiB) header bu
       assert.ok(observedAudioFilePath, 'Expected on-disk prepared wavFilePath');
       assert.equal(fileExistedDuringTranscribe, true);
       assert.equal(fs.existsSync(observedAudioFilePath!), false, 'Prepared WAV must be deleted after job completes');
-      assert.equal(service.audioTransfers.getTransferLifecycleState(tid), 'CLEANED');
+      assert.equal(service.audioTransfers.getActiveSessionCount(), 0);
     } finally {
       await new Promise<void>((resolve) => server.close(() => resolve()));
     }
