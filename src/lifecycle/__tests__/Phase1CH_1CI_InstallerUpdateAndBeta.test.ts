@@ -221,6 +221,29 @@ describe('Phase 1C-H & 1C-I: Installer, First-Run Health, Clean-Env Execution, A
       );
       assert.strictEqual(fs.existsSync(path.join(recoveryBackupDir, 'activation-journal')), false);
 
+      // Recover the earlier crash window where the old target was moved aside but the new target was not renamed in.
+      const oldMovedBackupId = 'bkp_companion_1.0.0_old_moved_recovery';
+      const oldMovedBackupDir = path.join(installed.layout.backupsDir, oldMovedBackupId);
+      fs.mkdirSync(path.join(oldMovedBackupDir, 'component'), { recursive: true });
+      fs.cpSync(installed.layout.companionDir, path.join(oldMovedBackupDir, 'component'), { recursive: true });
+      fs.copyFileSync(
+        path.join(installed.layout.configDir, 'installation-manifest.json'),
+        path.join(oldMovedBackupDir, 'manifest.backup.json'),
+      );
+      fs.mkdirSync(path.join(oldMovedBackupDir, 'activation-journal', 'OLD_MOVED'), { recursive: true });
+      const displacedCompanion = path.join(
+        path.dirname(installed.layout.companionDir),
+        '.' + path.basename(installed.layout.companionDir) + '.' + oldMovedBackupId + '.displaced',
+      );
+      fs.renameSync(installed.layout.companionDir, displacedCompanion);
+      new AvapardazPackageUpdateManager(installed.layout);
+      assert.strictEqual(fs.existsSync(installed.layout.companionDir), true);
+      assert.strictEqual(
+        fs.readFileSync(path.join(installed.layout.companionDir, 'avapardaz-companion.mjs'), 'utf8'),
+        originalCompanionEntry,
+      );
+      assert.strictEqual(fs.existsSync(displacedCompanion), false);
+
       // 1. Defer update when an active editing session is running
       const deferred = updater.applyUpdate({
         pkg: {
