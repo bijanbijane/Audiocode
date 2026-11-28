@@ -180,7 +180,7 @@ test('AVP-P0-004: CompanionAudioTransferManager validates PCM metadata, enforces
     const tid = init.transferId!;
 
     // Out-of-order chunk 1 before chunk 0 rejected
-    const ooo = mgr.appendChunk({ transferId: tid, chunkIndex: 1, chunkBase64: c1.toString('base64'), chunkSha256: c1Sha 
+    const ooo = mgr.appendChunk({ transferId: tid, chunkIndex: 1, chunkBase64: c1.toString('base64'), chunkSha256: c1Sha,
       ownerId: 'test-owner',});
     assert.equal(ooo.ok, false);
     assert.equal(ooo.code, 'OUT_OF_ORDER_CHUNK_REJECTED');
@@ -192,17 +192,17 @@ test('AVP-P0-004: CompanionAudioTransferManager validates PCM metadata, enforces
     assert.equal(badHash.code, 'CHUNK_CHECKSUM_MISMATCH');
 
     // Valid chunk 0
-    assert.equal(mgr.appendChunk({ transferId: tid, chunkIndex: 0, chunkBase64: c0.toString('base64'), chunkSha256: c0Sha 
+    assert.equal(mgr.appendChunk({ transferId: tid, chunkIndex: 0, chunkBase64: c0.toString('base64'), chunkSha256: c0Sha,
       ownerId: 'test-owner',}).ok, true);
 
     // Duplicate chunk 0 rejected
-    const dup = mgr.appendChunk({ transferId: tid, chunkIndex: 0, chunkBase64: c0.toString('base64'), chunkSha256: c0Sha 
+    const dup = mgr.appendChunk({ transferId: tid, chunkIndex: 0, chunkBase64: c0.toString('base64'), chunkSha256: c0Sha,
       ownerId: 'test-owner',});
     assert.equal(dup.ok, false);
     assert.equal(dup.code, 'DUPLICATE_CHUNK_REJECTED');
 
     // Valid chunk 1 & finalize
-    assert.equal(mgr.appendChunk({ transferId: tid, chunkIndex: 1, chunkBase64: c1.toString('base64'), chunkSha256: c1Sha 
+    assert.equal(mgr.appendChunk({ transferId: tid, chunkIndex: 1, chunkBase64: c1.toString('base64'), chunkSha256: c1Sha,
       ownerId: 'test-owner',}).ok, true);
     const fin = mgr.finalizeTransfer(tid, { ownerId: 'test-owner' });
     assert.equal(fin.ok, true);
