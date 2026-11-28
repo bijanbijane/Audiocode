@@ -433,6 +433,55 @@ test('Adobe Audition CEP plugin contains verified AUDT manifest, CSP-protected U
   assert.ok(jsx.includes('avpGetActiveDocumentInfo'));
 });
 
+test('Staged upload service APIs fail closed without the owning client identity', () => {
+  const service = new LocalCompanionService();
+  const initWithoutOwner = service.initStagedUpload as unknown as (
+    filename?: string,
+    ownerId?: string,
+  ) => { readonly ok: boolean; readonly uploadId: string };
+  assert.throws(() => initWithoutOwner('missing-owner.wav'), /ownerId is required/);
+
+  const upload = service.initStagedUpload('owner-boundary.wav', 'owner-A');
+  assert.equal(upload.ok, true);
+
+  const appendWithoutOwner = service.appendStagedUploadChunk as unknown as (
+    uploadId: string,
+    chunkBase64: string,
+    ownerId?: string,
+  ) => { readonly ok: boolean; readonly statusCode: number; readonly code?: string };
+  const missingOwner = appendWithoutOwner(upload.uploadId, Buffer.from('x').toString('base64'));
+  assert.equal(missingOwner.ok, false);
+  assert.equal(missingOwner.statusCode, 403);
+  assert.equal(missingOwner.code, 'UPLOAD_OWNER_MISMATCH');
+
+  const foreignOwner = service.appendStagedUploadChunk(
+    upload.uploadId,
+    Buffer.from('foreign').toString('base64'),
+    'owner-B',
+  );
+  assert.equal(foreignOwner.ok, false);
+  assert.equal(foreignOwner.statusCode, 403);
+
+  // A missing/foreign owner cannot abort the upload; the real owner can still append and abort it.
+  const abortWithoutOwner = service.abortStagedUpload as unknown as (uploadId: string, ownerId?: string) => void;
+  abortWithoutOwner(upload.uploadId);
+  service.abortStagedUpload(upload.uploadId, 'owner-B');
+  const ownerAppend = service.appendStagedUploadChunk(
+    upload.uploadId,
+    Buffer.from('owner').toString('base64'),
+    'owner-A',
+  );
+  assert.equal(ownerAppend.ok, true);
+  service.abortStagedUpload(upload.uploadId, 'owner-A');
+  const afterAbort = service.appendStagedUploadChunk(
+    upload.uploadId,
+    Buffer.from('late').toString('base64'),
+    'owner-A',
+  );
+  assert.equal(afterAbort.ok, false);
+  assert.equal(afterAbort.statusCode, 404);
+});
+
 test('Chunked Companion upload and same-origin reverse-proxy guard work securely', async () => {
   const service = new LocalCompanionService();
   const app = express();
