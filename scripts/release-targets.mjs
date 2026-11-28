@@ -11,6 +11,12 @@ export const AVAPARDAZ_RELEASE_TARGETS = Object.freeze({
     architectureLabel: 'Apple Silicon',
     sherpaBinaryName: 'sherpa-onnx-offline',
     onnxRuntimeLibraryName: 'libonnxruntime.dylib',
+    runtimeArchive: Object.freeze({
+      fileName: 'sherpa-onnx-v2.0.2-osx-arm64-shared-no-tts.tar.bz2',
+      url: 'https://github.com/k2-fsa/sherpa-onnx/releases/download/v2.0.2/sherpa-onnx-v2.0.2-osx-arm64-shared-no-tts.tar.bz2',
+      bytes: 20_197_239,
+      sha256: '1a803809572335ef545978b62b0271ad119969fef6f9153a94c174c3adc95608',
+    }),
   }),
   'darwin-x64': Object.freeze({
     id: 'darwin-x64',
@@ -20,6 +26,12 @@ export const AVAPARDAZ_RELEASE_TARGETS = Object.freeze({
     architectureLabel: 'Intel',
     sherpaBinaryName: 'sherpa-onnx-offline',
     onnxRuntimeLibraryName: 'libonnxruntime.dylib',
+    runtimeArchive: Object.freeze({
+      fileName: 'sherpa-onnx-v2.0.2-osx-x64-shared-no-tts.tar.bz2',
+      url: 'https://github.com/k2-fsa/sherpa-onnx/releases/download/v2.0.2/sherpa-onnx-v2.0.2-osx-x64-shared-no-tts.tar.bz2',
+      bytes: 22_763_064,
+      sha256: 'c1f69c0752ec7deef44eb8662e4489330513e514c64db5251879950e77066eaf',
+    }),
   }),
   'win32-x64': Object.freeze({
     id: 'win32-x64',
@@ -29,6 +41,12 @@ export const AVAPARDAZ_RELEASE_TARGETS = Object.freeze({
     architectureLabel: 'x64',
     sherpaBinaryName: 'sherpa-onnx-offline.exe',
     onnxRuntimeLibraryName: 'onnxruntime.dll',
+    runtimeArchive: Object.freeze({
+      fileName: 'sherpa-onnx-v2.0.2-win-x64-shared-MT-Release-no-tts.tar.bz2',
+      url: 'https://github.com/k2-fsa/sherpa-onnx/releases/download/v2.0.2/sherpa-onnx-v2.0.2-win-x64-shared-MT-Release-no-tts.tar.bz2',
+      bytes: 26_896_305,
+      sha256: '6a71d5ef016e544026d6505486d9fa42177ad989238adc6e4bd2eebfb6947416',
+    }),
   }),
 });
 
