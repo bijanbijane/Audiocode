@@ -457,7 +457,17 @@ export function createAvapardazBackendRouter(options?: CreateAvapardazBackendRou
   const getRemoteAddr = (req: express.Request): string | undefined =>
     options?.resolveRemoteAddress ? options.resolveRemoteAddress(req) : req.socket.remoteAddress;
   const isAllowedCompanionRequest = (req: express.Request, res: express.Response): boolean => {
-    if (!isAllowedCompanionHostHeader(req.headers.host) || !isAllowedCompanionOrigin(req.headers.origin)) {
+    const secFetchSite = typeof req.headers['sec-fetch-site'] === 'string'
+      ? req.headers['sec-fetch-site'].trim().toLowerCase()
+      : undefined;
+    const origin = typeof req.headers.origin === 'string' ? req.headers.origin.trim().toLowerCase() : undefined;
+    const crossContextNullOrigin = origin === 'null' && secFetchSite !== undefined && secFetchSite !== 'none';
+    if (
+      secFetchSite === 'cross-site' ||
+      crossContextNullOrigin ||
+      !isAllowedCompanionHostHeader(req.headers.host) ||
+      !isAllowedCompanionOrigin(req.headers.origin)
+    ) {
       res.status(403).json({ error: 'COMPANION_ORIGIN_BLOCKED', message: 'Companion IPC requires an approved loopback Host and Origin.' });
       return false;
     }
@@ -537,7 +547,8 @@ export function createAvapardazBackendRouter(options?: CreateAvapardazBackendRou
           res.json({ jobs: jobManager.listJobs(200, sessionOwnerId) });
           return;
         }
-        case 'JOB_STATUS': {
+        case 'JOB_STATUS':
+        case 'JOB_RECONNECT': {
           const p = (auth.envelope.payload ?? {}) as { job_id?: unknown };
           if (typeof p.job_id !== 'string' || p.job_id.trim().length === 0) {
             res.status(400).json({
@@ -551,7 +562,7 @@ export function createAvapardazBackendRouter(options?: CreateAvapardazBackendRou
             res.status(404).json({ error: 'JOB_NOT_FOUND' });
             return;
           }
-          res.json({ job });
+          res.json({ job, ...(auth.envelope.command === 'JOB_RECONNECT' ? { reconnected: true } : {}) });
           return;
         }
         case 'JOB_CANCEL': {
