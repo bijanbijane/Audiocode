@@ -611,3 +611,30 @@ R0 همچنان **IN PROGRESS** است. دامنه و مسیر تحویل مصو
 هر runner از lockfile ثابت Bun استفاده کرد و پنج تست Mach-O / PE را اجرا کرد. این نتیجه، portability تست و parser را روی این محیط‌ها تأیید می‌کند؛ اثبات native runtime payloadهای محصول یا نصب واقعی روی سه target مصوب نیست.
 
 AVAPARDAZ Quality & Release Gates نیز روی همین head SUCCESS شده است. Architecture Governance workflow در آخرین checkpoint هنوز در حال اجرا بود؛ نتیجه نهایی آن باید جداگانه تأیید شود.
+
+
+### ۲۰.۸. تأمین و smoke test واقعی Sherpa Runtime برای سه پلتفرم
+
+در PR #7 head برابر با 5d31165ee455f288c8de67baeb8b1c086fc21f62، سه job مستقل Provisioning موفق شدند:
+
+| Target | Hosted runner | باینری/کتابخانه | نتیجه |
+|---|---|---|---|
+| darwin-arm64 | macOS 15 Apple Silicon | Mach-O arm64، سه dylib | SHA-256 + architecture + `--help`: PASS |
+| darwin-x64 | macOS 15 Intel | Mach-O x64، سه dylib | SHA-256 + architecture + `--help`: PASS |
+| win32-x64 | Windows Server 2025 x64 | PE x64، دو DLL | SHA-256 + architecture + `--help`: PASS |
+
+سه asset از release رسمی Sherpa-ONNX v2.0.2 دریافت می‌شوند؛ bytes و SHA-256 در NativeReleaseTargets ثبت شده‌اند. Provisioner با SafeModelSupplyChain دانلود و استخراج می‌کند، باینری و تمام shared libraryها را از نظر معماری بررسی می‌کند و سپس executable واقعی را با `--help` اجرا می‌کند. Runtime manifest در مسیر target-specific نوشته می‌شود؛ هیچ باینری به Git commit نشده است.
+
+SafeModelSupplyChain همچنان symlink را به‌صورت پیش‌فرض رد می‌کند. برای assetهای native پین‌شده فقط symlink نسبی در همان پوشه lib materialize می‌شود؛ target باید regular file در همان پوشه باشد. hardlink، path traversal، absolute link و symlink chain رد می‌شوند.
+
+LocalSherpaNeuralEngine نیز برای سه target پشتیبانی provisioning پیدا کرده است؛ Windows DLL discovery و PATH handling و macOS versioned dylib discovery اصلاح شده‌اند.
+
+### ۲۰.۹. محدودیت پذیرش باقی‌مانده
+
+- macOS 14 runnerهای GitHub Actions بازنشسته شده‌اند؛ CI فعلی macOS 15 arm64 و Intel را تست می‌کند.
+- Windows smoke روی Windows Server 2025 x64 است، نه Windows 11.
+- هنوز full installer packager با web build و مدل‌های تأییدشده end-to-end اجرا نشده است.
+- Windows 11 و macOS 14/15 روی میزبان فیزیکی، Adobe Audition 25.x، CEP registration، Companion startup، signing/trust، update و rollback هنوز ACCEPTED نیستند.
+- در Vitest یک assertion منسوخ از نسخه قدیمی packager شکست خورد؛ assertion حذف شد و latest CI برای head جدید مجدداً در حال اجراست.
+
+وضعیت: **Native runtime assets pinned + real-host smoke verified on all three hosted target architectures. Product installer and Audition acceptance remain IN PROGRESS.**
