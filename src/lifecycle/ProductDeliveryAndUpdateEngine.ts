@@ -721,8 +721,16 @@ export class ComponentUpdateOrchestrator {
     return { ok: true, slot: verified, rolledBack: false };
   }
 
-  /** Recovers safely from a power-loss / interrupted update found at next startup */
-  public recoverInterruptedUpdate(component: ReleaseComponentKind): ComponentSlotRecord {
+  /**
+   * Recovers an interrupted update after physically removing its staged artifact.
+   * The cleanup callback is mandatory whenever a staging directory is recorded. If
+   * cleanup fails, the state and staging reference remain intact so startup recovery
+   * can be retried without falsely reporting that disk cleanup succeeded.
+   */
+  public async recoverInterruptedUpdate(
+    component: ReleaseComponentKind,
+    cleanupStagingArtifact: (stagingDir: string) => Promise<void>,
+  ): Promise<ComponentSlotRecord> {
     const cur = this.getSlot(component);
     const interruptedStates: ComponentUpdateState[] = [
       'UPDATE_DOWNLOADING',
@@ -736,12 +744,23 @@ export class ComponentUpdateOrchestrator {
     if (!interruptedStates.includes(cur.state)) {
       return cur;
     }
+
+    if (cur.stagingDir) {
+      try {
+        await cleanupStagingArtifact(cur.stagingDir);
+      } catch (error) {
+        throw new Error(
+          `STAGING_CLEANUP_FAILED: could not remove interrupted artifact at ${cur.stagingDir}: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+    }
+
     const targetVersion = cur.previousKnownGoodVersion ?? cur.activeVersion;
     if (cur.state !== 'UPDATE_ROLLBACK_PENDING') {
       if (LEGAL_UPDATE_TRANSITIONS[cur.state].includes('UPDATE_ROLLBACK_PENDING')) {
-        this.transition(component, 'UPDATE_ROLLBACK_PENDING', 'Detected interrupted update on restart.');
+        this.transition(component, 'UPDATE_ROLLBACK_PENDING', 'Detected interrupted update on restart; staged artifact cleanup completed.');
       } else {
-        this.transition(component, 'UPDATE_FAILED', 'Detected interrupted pre-activation update on restart.');
+        this.transition(component, 'UPDATE_FAILED', 'Detected interrupted pre-activation update on restart; staged artifact cleanup completed.');
         this.transition(component, 'UPDATE_ROLLBACK_PENDING', 'Cleaning up interrupted staging state.');
       }
     }
