@@ -37,17 +37,17 @@ export function sha256File(filePath) {
 }
 
 export function validateKoochikModelLicense(readmeText, licenseText) {
-  const frontMatter = readmeText.match(/^---\\s*\\r?\\n([\\s\\S]*?)\\r?\\n---/);
+  const frontMatter = readmeText.match(/^---\s*\r?\n([\s\S]*?)\r?\n---/);
   if (!frontMatter) throw new Error('KOOCHIK_MODEL_README_FRONTMATTER_MISSING');
-  const licenseMatch = frontMatter[1].match(/^license:\\s*([^\\s#]+)/im);
+  const licenseMatch = frontMatter[1].match(/^license:\s*([^\s#]+)/im);
   const licenseId = licenseMatch?.[1]?.trim().toLowerCase();
   if (licenseId !== SHAHAB_KOOCHIK_MODEL_PROVENANCE.licenseId) {
-    throw new Error(`KOOCHIK_MODEL_LICENSE_METADATA_MISMATCH: expected apache-2.0, received ${licenseId ?? 'missing'}`);
+    throw new Error(\`KOOCHIK_MODEL_LICENSE_METADATA_MISMATCH: expected apache-2.0, received \${licenseId ?? 'missing'}\`);
   }
   if (
-    !/Apache License/i.test(licenseText)
-    || !/Version 2\\.0, January 2004/i.test(licenseText)
-    || !/www\\.apache\\.org\\/licenses\\//i.test(licenseText)
+    !licenseText.includes('Apache License')
+    || !licenseText.includes('Version 2.0, January 2004')
+    || !licenseText.includes('www.apache.org/licenses/')
   ) {
     throw new Error('KOOCHIK_MODEL_LICENSE_FILE_INVALID');
   }
