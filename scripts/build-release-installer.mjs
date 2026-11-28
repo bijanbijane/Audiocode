@@ -229,6 +229,37 @@ for (const libraryName of availableRuntimeLibraries) {
     arch: RELEASE_TARGET.arch,
   });
 }
+const runtimeManifestSource = path.join(SHERPA_RUNTIME_ROOT, 'runtime-manifest.json');
+if (!fs.existsSync(runtimeManifestSource)) {
+  throw new Error(`SHERPA_RUNTIME_MANIFEST_MISSING: ${runtimeManifestSource}; run scripts/provision-release-native-runtime.ts first.`);
+}
+const runtimeManifest = JSON.parse(fs.readFileSync(runtimeManifestSource, 'utf8'));
+if (
+  runtimeManifest.schemaVersion !== 1
+  || runtimeManifest.targetId !== RELEASE_TARGET.id
+  || runtimeManifest.archiveName !== RELEASE_TARGET.runtimeArchive.fileName
+  || runtimeManifest.archiveSha256 !== RELEASE_TARGET.runtimeArchive.sha256
+  || runtimeManifest.archiveBytes !== RELEASE_TARGET.runtimeArchive.bytes
+  || runtimeManifest.binaryName !== RELEASE_TARGET.sherpaBinaryName
+  || runtimeManifest.binarySha256 !== computeSha256(SHERPA_BINARY_SOURCE)
+  || runtimeManifest.onnxRuntimeLibraryName !== onnxRuntimeLibraryName
+  || runtimeManifest.onnxRuntimeLibrarySha256 !== computeSha256(onnxRuntimeLibrarySource)
+) {
+  throw new Error('SHERPA_RUNTIME_MANIFEST_PROVENANCE_MISMATCH');
+}
+const manifestLibraries = new Map((runtimeManifest.sharedLibraries ?? []).map((library) => [library.name, library]));
+if (manifestLibraries.size !== availableRuntimeLibraries.length) {
+  throw new Error('SHERPA_RUNTIME_MANIFEST_LIBRARY_SET_MISMATCH');
+}
+for (const libraryName of availableRuntimeLibraries) {
+  const entry = manifestLibraries.get(libraryName);
+  const libraryPath = path.join(SHERPA_ONNXRUNTIME_LIBRARY_SOURCE, libraryName);
+  if (!entry || entry.bytes !== fs.statSync(libraryPath).size || entry.sha256 !== computeSha256(libraryPath)) {
+    throw new Error(`SHERPA_RUNTIME_MANIFEST_LIBRARY_INTEGRITY_FAILED: ${libraryName}`);
+  }
+}
+const runtimeManifestPayload = path.join(payloadDir, 'runtime', 'sherpa-venv', 'runtime-manifest.json');
+fs.copyFileSync(runtimeManifestSource, runtimeManifestPayload);
 const sherpaLibraryOutput = path.join(
   payloadDir, 'runtime', 'sherpa-venv', 'lib', `python${SHERPA_PYTHON_VERSION}`, 'site-packages', 'sherpa_onnx', 'lib',
 );
@@ -444,6 +475,14 @@ const packageManifest = {
         path: `payload/runtime/sherpa-venv/bin/${path.basename(SHERPA_BINARY_SOURCE)}`,
         sha256: fs.existsSync(sherpaBinPath) ? computeSha256(sherpaBinPath) : null,
         sizeBytes: fs.existsSync(sherpaBinPath) ? fs.statSync(sherpaBinPath).size : 0,
+      },
+      sherpaRuntimeProvenance: {
+        path: 'payload/runtime/sherpa-venv/runtime-manifest.json',
+        sha256: computeSha256(runtimeManifestPayload),
+        sizeBytes: fs.statSync(runtimeManifestPayload).size,
+        archiveName: runtimeManifest.archiveName,
+        archiveSha256: runtimeManifest.archiveSha256,
+        archiveBytes: runtimeManifest.archiveBytes,
       },
       sherpaStreamingBridgeBinary: {
         path: 'payload/runtime/bin/sherpa-onnx-streaming-bridge',
