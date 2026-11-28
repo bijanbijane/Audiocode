@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
-import { verifyRequiredCpuFeatures, type CpuProbeSpawnSync } from './cpu-feature-preflight.mjs';
+import { verifyRequiredCpuFeatures } from './cpu-feature-preflight.mjs';
+type CpuProbeSpawnSync = (command: string, args: readonly string[], options: { encoding: 'utf8'; timeout: number; windowsHide?: boolean }) => { status: number | null; stdout?: string; stderr?: string; error?: Error | null };
 
 describe('installer CPU feature preflight', () => {
   it('accepts the required NEON baseline only for Apple Silicon', () => {
