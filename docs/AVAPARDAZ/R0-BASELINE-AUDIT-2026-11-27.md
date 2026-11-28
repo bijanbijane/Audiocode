@@ -9,7 +9,7 @@
 
 | Field | Observed value |
 |---|---|
-| Repository | `bijanbijane/Audiocode` (private) |
+| Repository | `bijanbijane/Audiocode` (public) |
 | Default branch | `main` |
 | Baseline commit | `e73394f8e00e477f1de0046e04fd233681610563` |
 | Baseline commit date | 2026-11-27 13:36:55 UTC |
@@ -698,3 +698,52 @@ The documentation commit `db12b30a5991b73aeed99e04959e46b08b262281` triggered al
 The raw run-attempt job payloads report `runner_id: 0`, empty `runner_name`, and `steps: []` for each failed primary job. AVAPARDAZ Levels 2–5 were skipped because Level 1 failed. This repeats the pre-runner failure on a new commit and confirms that the previous static-review documentation change did not alter the failure mode. No project command is evidenced as executed; exact cause remains unknown.
 
 R0 remains IN PROGRESS. No code, workflow, or gate changes were made in response to this failure.
+
+
+## 16. CI recovery and updated R0 disposition (2026-11-28)
+
+### 16.1. Repository and PR state
+
+- Repository visibility was rechecked through GitHub repository metadata: **PUBLIC**. The earlier Section 1 value "(private)" was incorrect and is corrected in the baseline table.
+- Default branch: `main`, baseline commit: `e73394f8e00e477f1de0046e04fd233681610563`.
+- PR #6 remains **OPEN / DRAFT / NOT MERGED** at head `0a4fde0022e93e3ceccad2ec45b006048305fafd`, based on the unchanged `main` baseline.
+- This execution environment exposes GitHub remote APIs, not a mounted local checkout. Local `.git`, working-tree changes, untracked files, and local branch state therefore remain **NOT AVAILABLE / NOT INSPECTED**; remote branch and commit state are the verified Git evidence.
+
+### 16.2. CI recovery evidence
+
+Four GitHub Actions workflows completed successfully on the exact PR head `0a4fde0022e93e3ceccad2ec45b006048305fafd` on 2026-11-28:
+
+- [Architecture Governance, Reliability & Release Quality Gate — run 46124103005](https://github.com/bijanbijane/Audiocode/actions/runs/46124103005): SUCCESS. Its job summary reports TypeScript compilation, Vitest, reliability tests, E2E, production build and release-manifest checks completed successfully.
+- [AVAPARDAZ Quality & Release Gates — run 46124102991](https://github.com/bijanbijane/Audiocode/actions/runs/46124102991): SUCCESS. Level 1, Levels 2–4, and Level 5 all completed successfully. The inspected steps include frozen Bun installation, focused regression suites, production build, TypeScript lint, real offline ORT/WASM inference, VAD and speaker-embedding inference, SHAHAB Zipformer inference/parity, canonical P0 verification, bundle hygiene, CEP manifest/CSP checks, and lockfile/dependency-audit availability.
+- [Separated Web and API Container Build — run 46124102988](https://github.com/bijanbijane/Audiocode/actions/runs/46124102988): SUCCESS.
+- [Standalone Platform API Readiness — run 46124102960](https://github.com/bijanbijane/Audiocode/actions/runs/46124102960): SUCCESS.
+
+The quality-gate job payload contains successful completed steps for Levels 1–5; this is stronger evidence than the earlier workflow-only failure summaries. The CI environment has recovered sufficiently to execute the listed jobs on this PR head.
+
+### 16.3. Correction to historical CI findings
+
+Sections 2 and 10–15 preserve the original baseline and historical pre-runner failures as time-bounded evidence. Those failures were real observations for their respective runs, but they are no longer an accurate description of the latest PR-head CI state.
+
+- Historical pre-runner failures: **CONFIRMED for the cited historical runs**.
+- Root cause of those historical failures: **UNKNOWN**; no retrospective cause is inferred.
+- Latest PR-head CI: **PASS for the four workflow runs listed above**.
+- Latest code validation: **PASS for the commands and test steps actually reported by those workflows**.
+- Physical macOS/Windows and live Adobe Audition validation: **NOT RUN / NOT AVAILABLE**; GitHub-hosted CI is not a substitute for those host tests.
+
+### 16.4. Updated R0 disposition
+
+R0 remains **IN PROGRESS**. The latest CI recovery closes the immediate "no runner / no executable CI evidence" blocker for the current PR head, but does not close the full R0 exit criteria.
+
+Still open:
+
+1. Owner approval of the exact macOS and Windows OS/build, CPU architecture, minimum hardware, Audition version/build, and supported audio-format matrix.
+2. Owner decision on internal signing/trust policy, Companion startup behavior, update policy, and Node runtime dependency.
+3. Authorized physical or remote macOS and Windows hosts with real Adobe Audition for host acceptance.
+4. Reconciliation of the R0 test inventory and CI evidence against the current implementation and exact acceptance criteria.
+5. Explicit disposition of each external prerequisite and risk; unresolved items remain OPEN or BLOCKED.
+
+The separate [R0 Distribution, Installation & Trust Audit](./R0-DISTRIBUTION-TRUST-AUDIT-2026-11-28.md) records the concrete installer, platform-target, and update-authenticity gaps. No product-scope or owner-only distribution decision is made by this audit.
+
+### 16.5. Next engineering action
+
+Proceed with the remaining evidence-backed R0 work that does not require owner decisions: review the current PR's ownership/IPC changes and CI coverage, reconcile all five prerequisite dispositions, and prepare the exact platform and distribution decision record for owner review. Do not claim R0 acceptance or begin irreversible/host-specific installation changes before the required decisions and test access exist.
