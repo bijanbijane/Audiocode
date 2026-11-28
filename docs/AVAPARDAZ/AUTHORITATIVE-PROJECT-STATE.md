@@ -633,11 +633,11 @@ LocalSherpaNeuralEngine نیز برای سه target پشتیبانی provisionin
 
 - macOS 14 runnerهای GitHub Actions بازنشسته شده‌اند؛ CI فعلی macOS 15 arm64 و Intel را تست می‌کند.
 - Windows smoke روی Windows Server 2025 x64 است، نه Windows 11.
-- هنوز full installer packager با web build و مدل‌های تأییدشده end-to-end اجرا نشده است.
+- Full cross-target unsigned Installer + Update package build با production web bundle و مدل Koochik تأییدشده برای هر سه target اجرا شد؛ شش tarball ساخته و SHA-256/byte-length و model/runtime provenance آن‌ها PASS شد. این artifactها منتشر یا امضا نشده‌اند.
 - Windows 11 و macOS 14/15 روی میزبان فیزیکی، Adobe Audition 25.x، CEP registration، Companion startup، signing/trust، update و rollback هنوز ACCEPTED نیستند.
-- در Vitest یک assertion منسوخ از نسخه قدیمی packager شکست خورد؛ assertion حذف شد و latest CI برای head جدید مجدداً در حال اجراست.
+- Assertion قدیمی Manifest که مدل را در ریشه packageManifest می‌خواند اصلاح شد تا از `components.primaryPersianAsrModel` استفاده کند. اجرای اصلاح‌شده full package gate را با PASS به پایان رساند.
 
-وضعیت: **Native runtime assets pinned + real-host smoke verified on all three hosted target architectures. Product installer and Audition acceptance remain IN PROGRESS.**
+وضعیت: **Native runtime qualification + hosted cross-target unsigned Installer/Update build and integrity gates PASS. Physical installation, Audition integration, signing/trust and update acceptance remain IN PROGRESS.**
 
 
 ### ۲۰.۱۰. Runtime provenance enforcement و CPU floor
@@ -648,4 +648,48 @@ LocalSherpaNeuralEngine نیز برای سه target پشتیبانی provisionin
 - `LocalSherpaNeuralEngine` نیز پس از smoke test همین manifest را ثبت و هنگام کشف runtime، hashها و target را بررسی می‌کند.
 - دو ایراد single-flight promise cleanup در نصب Runtime و دریافت مدل اصلاح شد؛ قبلاً callback مقدار promise wrapper را با task اصلی مقایسه می‌کرد و cache هرگز پاک نمی‌شد، بنابراین retry پس از settlement ممکن نبود.
 
-Latest fully validated feature head at this checkpoint: c800f3f218ce6973946b4bc4320ed3ead17bc911. Both applicable workflows completed SUCCESS: AVAPARDAZ Quality & Release Gates Levels 1–5; Architecture Governance with Vitest 29 files / 123 tests, Node reliability/fault-injection 32 tests, TypeScript compilation, zero-circular dependency check, SBOM, license audit, E2E quality gates, production build, release manifest verification, all four native parser runners, and all three native runtime provisioning targets. Documentation-only follow-up commits may advance the branch head and trigger CI again; this evidence is specifically for c800f3f.
+Latest fully validated full native/package CI head: `337844e6b0b00228dbd1d6781e3c331c4344c6ee`. Both applicable workflows completed SUCCESS: AVAPARDAZ Quality & Release Gates Levels 1–5; Architecture Governance with Vitest 30 files / 130 tests, Node reliability/fault-injection 32 tests, TypeScript compilation, zero-circular dependency check across 730 files, SBOM, license audit, E2E quality gates, production build, release manifest verification, all four native parser runners, all three native runtime provisioning targets, and the cross-target Installer/Update build with six tarball hash and provenance checks. Current branch head is `54a1da21778dc0dd852840c2b5662104a82c5664`; its AVAPARDAZ Levels 1–5 workflow passed. A subsequent architecture run hit a transient GitHub Artifact Service timeout on macOS arm64 upload after provisioning passed; the failed upload job was retried. This evidence remains specific to commit `337844e` for the full package gate.
+
+
+---
+
+## ۲۱. R6-WP02 — Native Runtime Qualification و Cross-target Package CI (2026-11-28)
+
+### ۲۱.۱. تغییرات Workflow
+
+- `.github/workflows/ci-quality-gate.yml` در PR #7 با نسخه کامل workflow شاخه پایه همگام شد؛ native binary parser، سه native runtime provisioning job، Koochik provenance و cross-target package build حفظ شدند.
+- PR branch filter شامل شاخه stacked پایه شد تا workflow برای PR #7 اجرا شود.
+- خطای assertion مربوط به package model provenance اصلاح شد: مدل اصلی زیر `packageManifest.components.primaryPersianAsrModel` قرار دارد، نه root object.
+- Job ماتریس تکراری در Workflow دیگر حذف شد تا provisioning مجدد و غیرضروری رخ ندهد.
+
+### ۲۱.۲. شواهد CI روی commit 337844e
+
+| Gate | نتیجه |
+|---|---|
+| AVAPARDAZ Levels 1–5 | PASS |
+| Architecture Governance / TypeScript / circular dependency / SBOM / license | PASS |
+| Vitest | 30 files / 130 tests PASS |
+| Node reliability / fault-injection | 32 tests PASS |
+| Native binary format parser | Ubuntu, macOS 15 arm64, macOS 15 Intel, Windows x64 — PASS |
+| Sherpa runtime provisioning | darwin-arm64, darwin-x64, win32-x64 — PASS |
+| Koochik immutable revision / SHA-256 / Apache license | PASS |
+| Cross-target unsigned Installer + Update build | PASS — شش tarball |
+| Tarball bytes + SHA-256 + embedded model/runtime provenance | PASS برای هر سه target |
+
+Artifactهای runtime برای هر سه هدف و artifact نهایی manifest-only با شناسه `15262947641` در GitHub Actions ذخیره شدند. بسته‌های unsigned در CI منتشر نشدند.
+
+### ۲۱.۳. محدودیت‌های باقی‌مانده
+
+- Hosted macOS 15 arm64 و Intel، جایگزین آزمون macOS 14 فیزیکی نیستند.
+- Windows Server 2025 x64، جایگزین آزمون Windows 11 فیزیکی نیست.
+- Adobe Audition 25.x، CEP registration و Companion lifecycle هنوز روی میزبان واقعی تست نشده‌اند.
+- Installer امضا نشده است؛ trust-root pinning، signature verification و update signature enforcement هنوز باز هستند.
+- نصب تمیز، repair، upgrade، rollback و uninstall روی میزبان‌های فیزیکی هنوز اجرا نشده‌اند.
+- CPUID enforcement برای AVX2 در Installer هنوز پیاده‌سازی نشده است؛ target metadata فقط حداقل CPU را اعلام می‌کند.
+
+### ۲۱.۴. وضعیت Git
+
+- PR #7: OPEN / DRAFT / NOT MERGED.
+- Latest branch head در زمان این ثبت: `54a1da21778dc0dd852840c2b5662104a82c5664`.
+- `main` بدون تغییر مانده است.
+- R6 hosted packaging/integrity gates: **PASS**؛ internal distribution trust و physical acceptance: **OPEN**.
