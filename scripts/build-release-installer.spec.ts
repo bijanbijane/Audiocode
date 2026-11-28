@@ -21,6 +21,7 @@ describe('full release installer path resolution', () => {
     expect(packagerSource).toContain("filePath: onnxRuntimeLibrarySource");
     expect(packagerSource).toContain("availableRuntimeLibraries");
     expect(packagerSource).toContain("AVAPARDAZ_SHERPA_RUNTIME_LIB_DIR");
+    expect(packagerSource).toContain("DIRECT_SHERPA_RUNTIME_HAS_LIBRARIES");
     expect(packagerSource).toContain("RELEASE_TARGET.platform !== 'win32'");
     expect(packagerSource).toContain("!fs.existsSync(onnxRuntimeLibrarySource)");
     expect(packagerSource).toContain("RELEASE_TARGET.onnxRuntimeLibraryName");
