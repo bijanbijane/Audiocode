@@ -261,12 +261,15 @@ jobs:
           build_target darwin-x64 darwin x64
           build_target win32-x64 win32 x64
 
-      - name: Verify installer/update tarball hashes and target manifests
+      - name: Verify installer/update hashes, embedded manifests and target installers
         run: |
           node --input-type=module <<'NODE'
           import fs from 'node:fs';
           import crypto from 'node:crypto';
           import path from 'node:path';
+          import os from 'node:os';
+          import assert from 'node:assert/strict';
+          import { execFileSync } from 'node:child_process';
           const root = path.join(process.env.RUNNER_TEMP, 'avapardaz-release-packages');
           for (const target of ['darwin-arm64', 'darwin-x64', 'win32-x64']) {
             const manifestPath = path.join(root, target, 'release-artifacts-manifest.json');
@@ -288,7 +291,33 @@ jobs:
               || product.target?.id !== target) {
               throw new Error('RELEASE_PACKAGE_PROVENANCE_MISMATCH: ' + target);
             }
-            process.stdout.write(target + ': installer/update hashes and model/runtime provenance PASS\n');
+
+            const extractRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'avp-release-package-'));
+            try {
+              execFileSync('tar', ['-xzf', manifest.installerTarball.path, '-C', extractRoot], { stdio: 'pipe' });
+              const packageRoot = path.join(extractRoot, 'avapardaz-v' + manifest.version + '-' + target);
+              const installerDir = path.join(packageRoot, 'installer');
+              const embeddedManifest = JSON.parse(fs.readFileSync(path.join(packageRoot, 'package-manifest.json'), 'utf8'));
+              assert.deepStrictEqual(embeddedManifest, product, 'EMBEDDED_PACKAGE_MANIFEST_MISMATCH: ' + target);
+              for (const script of ['install.mjs', 'uninstall.mjs']) {
+                const scriptPath = path.join(installerDir, script);
+                if (!fs.existsSync(scriptPath)) throw new Error('INSTALLER_SCRIPT_MISSING: ' + target + '/' + script);
+                execFileSync(process.execPath, ['--check', scriptPath], { stdio: 'pipe' });
+              }
+              if (target === 'win32-x64') {
+                const wrapper = path.join(installerDir, 'install-windows.ps1');
+                if (!fs.existsSync(wrapper) || !fs.readFileSync(wrapper, 'utf8').includes('install.mjs')) {
+                  throw new Error('WINDOWS_INSTALLER_WRAPPER_INVALID');
+                }
+              } else {
+                const wrapper = path.join(installerDir, 'install-macos.sh');
+                if (!fs.existsSync(wrapper)) throw new Error('MACOS_INSTALLER_WRAPPER_MISSING');
+                execFileSync('bash', ['-n', wrapper], { stdio: 'pipe' });
+              }
+              process.stdout.write(target + ': hashes, embedded manifest, installer syntax and provenance PASS\\n');
+            } finally {
+              fs.rmSync(extractRoot, { recursive: true, force: true });
+            }
           }
           NODE
 
