@@ -38,6 +38,8 @@ describe('full release installer path resolution', () => {
     expect(packagerSource).toContain("cpu-feature-preflight.mjs");
     expect(packagerSource).toContain("CPU requirement not met");
     expect(packagerSource).toContain("RELEASE_TARGET.requiredCpuFeatures");
+    expect(packagerSource).toContain("runtimeManifest.cpuFeatureProbe?.checked");
+    expect(packagerSource).toContain("cpuFeatureProbe: runtimeManifest.cpuFeatureProbe");
     expect(packagerSource).not.toContain('path.dirname(new URL(import.meta.url).pathname)');
   });
 });
