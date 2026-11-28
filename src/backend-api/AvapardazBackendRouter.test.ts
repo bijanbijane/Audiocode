@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { createServer, type Server } from 'node:http';
 import express from 'express';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -105,7 +106,7 @@ describe('AvapardazBackendRouter Companion IPC isolation', () => {
     return post('/companion/ipc', {
       ipc_protocol_version: COMPANION_IPC_PROTOCOL_VERSION,
       session_id: session.session_id,
-      nonce: crypto.randomUUID(),
+      nonce: randomUUID(),
       timestamp_ms: Date.now(),
       execution_mode: 'web-client',
       command,
