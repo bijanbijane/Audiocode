@@ -1214,7 +1214,11 @@ export class AvapardazPackageUpdateManager {
       try {
         const owner = JSON.parse(fs.readFileSync(ownerPath, 'utf8')) as { token?: string };
         if (owner.token === token) fs.rmSync(lockDir, { recursive: true, force: true });
-      } catch {
+      } catch (cleanupError) {
+        // If owner creation itself failed, this process still owns the empty directory.
+        if ((cleanupError as NodeJS.ErrnoException).code === 'ENOENT') {
+          fs.rmSync(lockDir, { recursive: true, force: true });
+        }
         // Preserve an unexpected/replaced lock rather than releasing another owner's lease.
       }
     }
