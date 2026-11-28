@@ -52,6 +52,17 @@ describe('native runtime binary architecture verification', () => {
     expect(assertNativeBinaryArchitecture({ filePath, platform: 'darwin', arch: 'arm64' })).toBe(true);
   });
 
+  it('accepts byte-swapped Universal Mach-O headers without misreading CPU types', () => {
+    const fat = Buffer.alloc(48);
+    fat.writeUInt32LE(0xcafebabe, 0);
+    fat.writeUInt32LE(2, 4);
+    fat.writeUInt32LE(0x01000007, 8);
+    fat.writeUInt32LE(0x0100000c, 28);
+    const filePath = fixture('universal-swapped.dylib', fat);
+    expect(inspectNativeBinaryArchitecture(filePath, 'darwin')).toEqual(['x64', 'arm64']);
+    expect(assertNativeBinaryArchitecture({ filePath, platform: 'darwin', arch: 'arm64' })).toBe(true);
+  });
+
   it('detects PE x64 and rejects a wrong platform architecture', () => {
     const filePath = fixture('sherpa.exe', peX64());
     expect(inspectNativeBinaryArchitecture(filePath, 'win32')).toBe('x64');
