@@ -353,3 +353,10 @@ A regression test simulates a crash after the new directory is visible but befor
 Follow-up hardening: the staging path is now deterministically derived from the backup ID, and the PREPARED journal marker is written before copying the activation-side staging directory. Startup recovery therefore also removes the original staged payload if the process stops during preparation. Manual rollback now uses the same journaled sibling-directory restoration protocol; a missing prior component is explicitly removed rather than left active. These paths are covered by the recovery regression fixture, with hosted CI still pending.
 
 The recovery regression now covers both critical rename windows: after the new directory has been moved into the target (NEW_MOVED) and after the old directory has been displaced but before the new one is installed (OLD_MOVED). Both are exercised by constructing a fresh manager and asserting the known-good companion payload is restored.
+## 2026-11-28 — Rollback backup-path confinement
+
+A security review found that public `rollbackToBackup(backupId)` joined the caller-provided backup ID to the backup root without validating path components. A traversal-shaped ID could therefore address a directory outside the managed backup root if it contained a compatible manifest and component snapshot.
+
+Rollback now validates the backup ID against the known component namespace and a restricted identifier alphabet, resolves it under the managed backup root, and rejects any path whose resolved parent is not exactly that root. Recovery scanning uses the same validated resolver; unknown component prefixes fail closed instead of defaulting to APPLICATION. A regression test creates an out-of-root backup-shaped directory and confirms that `../outside-backup` is rejected without copying its marker into the application directory.
+
+Commits: `4cd5e843f20126d48747ae3b88f8fdf9135eeb59` (path confinement) and `f23fd89748fb9b9868f35deea13dcb1d615f6f5b` (regression test).
