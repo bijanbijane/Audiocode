@@ -14,6 +14,12 @@ describe('full release installer path resolution', () => {
     expect(packagerSource).toContain("import { fileURLToPath } from 'node:url';");
     expect(packagerSource).toContain('const installerDir = path.dirname(fileURLToPath(import.meta.url));');
     expect(packagerSource).toContain("const payloadRoot = path.resolve(installerDir, '..', 'payload');");
+    expect(packagerSource).toContain("resolveAvapardazReleaseTarget");
+    expect(packagerSource).toContain("assertRuntimeTargetMatches");
+    expect(packagerSource).toContain("RELEASE_TARGET.onnxRuntimeLibraryName");
+    expect(packagerSource).toContain("install-windows.ps1");
+    expect(packagerSource).toContain("process.platform !== '${RELEASE_TARGET.platform}'");
+    expect(packagerSource).toContain("nodeMajorVersion < 20");
     expect(packagerSource).not.toContain('path.dirname(new URL(import.meta.url).pathname)');
   });
 });
