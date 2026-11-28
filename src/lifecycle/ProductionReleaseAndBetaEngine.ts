@@ -1156,7 +1156,7 @@ export class AvapardazPackageUpdateManager {
     if (!fs.existsSync(this.layout.backupsDir)) return;
     for (const entry of fs.readdirSync(this.layout.backupsDir, { withFileTypes: true })) {
       if (!entry.isDirectory() || !entry.name.startsWith('bkp_')) continue;
-      const backupDir = path.join(this.layout.backupsDir, entry.name);
+      const backupDir = this.resolveBackupDir(entry.name);
       const journalDir = this.journalPath(backupDir);
       if (!fs.existsSync(journalDir)) continue;
       const component = this.componentFromBackupId(entry.name);
@@ -1202,11 +1202,26 @@ export class AvapardazPackageUpdateManager {
   }
 
   private componentFromBackupId(backupId: string): UpdatablePackageComponent {
-    if (backupId.includes('_cep_plugin_')) return 'CEP_PLUGIN';
-    if (backupId.includes('_companion_')) return 'COMPANION';
-    if (backupId.includes('_native_runtime_')) return 'NATIVE_RUNTIME';
-    if (backupId.includes('_asr_model_')) return 'ASR_MODEL';
-    return 'APPLICATION';
+    const match = /^bkp_(application|cep_plugin|companion|native_runtime|asr_model)_[A-Za-z0-9.+_-]{1,180}$/.exec(backupId);
+    if (!match) throw new Error('INVALID_UPDATE_BACKUP_ID');
+    switch (match[1]) {
+      case 'application': return 'APPLICATION';
+      case 'cep_plugin': return 'CEP_PLUGIN';
+      case 'companion': return 'COMPANION';
+      case 'native_runtime': return 'NATIVE_RUNTIME';
+      case 'asr_model': return 'ASR_MODEL';
+      default: throw new Error('INVALID_UPDATE_BACKUP_COMPONENT');
+    }
+  }
+
+  private resolveBackupDir(backupId: string): string {
+    this.componentFromBackupId(backupId);
+    const root = path.resolve(this.layout.backupsDir);
+    const candidate = path.resolve(root, backupId);
+    if (path.dirname(candidate) !== root || path.basename(candidate) !== backupId) {
+      throw new Error('UPDATE_BACKUP_PATH_OUTSIDE_ROOT');
+    }
+    return candidate;
   }
 
   private resolveComponentTargetDir(component: UpdatablePackageComponent): string {
@@ -1546,7 +1561,12 @@ export class AvapardazPackageUpdateManager {
     readonly restoredVersion?: string;
     readonly messageFa: string;
   } {
-    const backupDir = path.join(this.layout.backupsDir, backupId);
+    let backupDir: string;
+    try {
+      backupDir = this.resolveBackupDir(backupId);
+    } catch {
+      return { ok: false, messageFa: 'شناسه نسخه پشتیبان نامعتبر است.' };
+    }
     const manifestBackupPath = path.join(backupDir, 'manifest.backup.json');
     const componentBackupDir = path.join(backupDir, 'component');
 
