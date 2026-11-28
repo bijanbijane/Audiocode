@@ -1210,7 +1210,45 @@ export class LocalSherpaNeuralEngine {
                   maxBuffer: 8 * 1024 * 1024,
                   windowsHide: true,
                 });
-                return !smoke.error && smoke.status === 0;
+                if (smoke.error || smoke.status !== 0) return false;
+                const hashFile = (filePath: string): string => {
+                  const hash = crypto.createHash('sha256');
+                  const fd = fs.openSync(filePath, 'r');
+                  try {
+                    const chunk = Buffer.allocUnsafe(1024 * 1024);
+                    let bytesRead = 0;
+                    while ((bytesRead = fs.readSync(fd, chunk, 0, chunk.length, null)) > 0) {
+                      hash.update(chunk.subarray(0, bytesRead));
+                    }
+                  } finally {
+                    fs.closeSync(fd);
+                  }
+                  return hash.digest('hex');
+                };
+                const runtimeManifest = {
+                  schemaVersion: 1,
+                  product: 'AVAPARDAZ',
+                  targetId: target.id,
+                  runtimeVersion: 'v2.0.2',
+                  archiveName: target.runtimeArchive.fileName,
+                  archiveBytes: target.runtimeArchive.bytes,
+                  archiveSha256: target.runtimeArchive.sha256,
+                  binaryName: target.sherpaBinaryName,
+                  binaryBytes: fs.statSync(stagedBin).size,
+                  binarySha256: hashFile(stagedBin),
+                  onnxRuntimeLibraryName: path.basename(onnxRuntimeLibrary),
+                  onnxRuntimeLibraryBytes: fs.statSync(onnxRuntimeLibrary).size,
+                  onnxRuntimeLibrarySha256: hashFile(onnxRuntimeLibrary),
+                  sharedLibraries: nativeLibraries.map((library) => ({
+                    name: path.basename(library),
+                    bytes: fs.statSync(library).size,
+                    sha256: hashFile(library),
+                  })),
+                  smokeTest: { command: '--help', exitCode: 0 },
+                  provisionedAt: new Date().toISOString(),
+                };
+                fs.writeFileSync(path.join(dir, 'runtime-manifest.json'), JSON.stringify(runtimeManifest, null, 2), 'utf8');
+                return true;
               }
               fs.chmodSync(stagedBin, 0o755);
               return fs.statSync(stagedBin).size > 0;
