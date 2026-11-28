@@ -1121,8 +1121,8 @@ export class LocalSherpaNeuralEngine {
       fs.mkdirSync(downloadsDir, { recursive: true });
       fs.mkdirSync(path.dirname(runtimeDir), { recursive: true });
 
-      const { binaryPath } = detectSherpaBinary();
-      if (!binaryPath) {
+      const { binaryPath, libDir } = detectSherpaBinary();
+      if (!binaryPath || (target !== null && !libDir)) {
         const rtArchive = path.join(downloadsDir, Date.now() + '_' + process.pid + '_' + runtimeArchiveName);
         const rtTempExtract = fs.mkdtempSync(path.join(downloadsDir, 'avp-rt-stage-'));
         try {
