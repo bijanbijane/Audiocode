@@ -1140,6 +1140,86 @@ export class AvapardazPackageUpdateManager {
     this.recoverInterruptedUpdates();
   }
 
+  /**
+   * Cross-process, installation-wide mutex. A directory creation is the atomic
+   * acquisition primitive on supported local filesystems. Unknown/remote owners
+   * fail closed; only a provably dead same-host PID may be reclaimed.
+   */
+  private withOperationLock<T>(operation: () => T): T {
+    fs.mkdirSync(this.layout.backupsDir, { recursive: true, mode: 0o700 });
+    const lockDir = path.join(this.layout.backupsDir, '.update-operation-lock');
+    const recoveryLockDir = lockDir + '.recovery';
+    const acquire = () => fs.mkdirSync(lockDir, { mode: 0o700 });
+    try {
+      acquire();
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+      try {
+        fs.mkdirSync(recoveryLockDir, { mode: 0o700 });
+      } catch (recoveryError) {
+        if ((recoveryError as NodeJS.ErrnoException).code === 'EEXIST') {
+          throw new Error('UPDATE_OPERATION_LOCKED');
+        }
+        throw recoveryError;
+      }
+      try {
+        const ownerPath = path.join(lockDir, 'owner.json');
+        let stale = false;
+        try {
+          const owner = JSON.parse(fs.readFileSync(ownerPath, 'utf8')) as {
+            pid?: number; hostname?: string; acquiredAt?: number;
+          };
+          if (owner.hostname === os.hostname() && Number.isSafeInteger(owner.pid) && (owner.pid as number) > 0) {
+            try {
+              process.kill(owner.pid as number, 0);
+            } catch (probeError) {
+              stale = (probeError as NodeJS.ErrnoException).code === 'ESRCH';
+            }
+          }
+        } catch (ownerError) {
+          if ((ownerError as NodeJS.ErrnoException).code === 'ENOENT') {
+            try {
+              stale = Date.now() - fs.statSync(lockDir).mtimeMs > 30_000;
+            } catch {
+              stale = false;
+            }
+          }
+        }
+        if (!stale) throw new Error('UPDATE_OPERATION_LOCKED');
+        const quarantine = lockDir + '.stale-' + process.pid + '-' + Date.now() + '-' + crypto.randomBytes(6).toString('hex');
+        try {
+          fs.renameSync(lockDir, quarantine);
+        } catch (renameError) {
+          if ((renameError as NodeJS.ErrnoException).code === 'ENOENT') throw new Error('UPDATE_OPERATION_LOCKED');
+          throw renameError;
+        }
+        fs.rmSync(quarantine, { recursive: true, force: true });
+        acquire();
+      } finally {
+        fs.rmSync(recoveryLockDir, { recursive: true, force: true });
+      }
+    }
+
+    const token = crypto.randomBytes(16).toString('hex');
+    const ownerPath = path.join(lockDir, 'owner.json');
+    try {
+      fs.writeFileSync(ownerPath, JSON.stringify({
+        pid: process.pid,
+        hostname: os.hostname(),
+        acquiredAt: Date.now(),
+        token,
+      }), { encoding: 'utf8', flag: 'wx', mode: 0o600 });
+      return operation();
+    } finally {
+      try {
+        const owner = JSON.parse(fs.readFileSync(ownerPath, 'utf8')) as { token?: string };
+        if (owner.token === token) fs.rmSync(lockDir, { recursive: true, force: true });
+      } catch {
+        // Preserve an unexpected/replaced lock rather than releasing another owner's lease.
+      }
+    }
+  }
+
   private journalPath(backupDir: string): string {
     return path.join(backupDir, 'activation-journal');
   }
@@ -1153,6 +1233,10 @@ export class AvapardazPackageUpdateManager {
 
   /** Restore any update whose activation did not reach its committed marker. */
   public recoverInterruptedUpdates(): void {
+    this.withOperationLock(() => this.recoverInterruptedUpdatesUnlocked());
+  }
+
+  private recoverInterruptedUpdatesUnlocked(): void {
     if (!fs.existsSync(this.layout.backupsDir)) return;
     for (const entry of fs.readdirSync(this.layout.backupsDir, { withFileTypes: true })) {
       if (!entry.isDirectory() || !entry.name.startsWith('bkp_')) continue;
@@ -1326,6 +1410,33 @@ export class AvapardazPackageUpdateManager {
   }
 
   public applyUpdate(params: {
+    readonly pkg: LocalUpdatePackageSpec;
+    readonly hasActiveProcessingSession?: boolean;
+    readonly simulatedAvailableDiskBytes?: number;
+    readonly customPostUpdateHealthCheck?: () => { readonly ok: boolean; readonly reason?: string };
+    readonly simulateInterruptDuringActivation?: boolean;
+  }): UpdateExecutionReport {
+    try {
+      return this.withOperationLock(() => this.applyUpdateUnlocked(params));
+    } catch (error) {
+      if (!(error instanceof Error) || error.message !== 'UPDATE_OPERATION_LOCKED') throw error;
+      const manifest = this.readManifest();
+      const previousVersion = this.getComponentVersion(manifest, params.pkg.component);
+      return {
+        ok: false,
+        rolledBack: false,
+        deferredDueToActiveSession: false,
+        component: params.pkg.component,
+        previousVersion,
+        activeVersion: previousVersion,
+        errorCode: 'UPDATE_OPERATION_LOCKED',
+        messageFa: 'عملیات نصب یا بازیابی دیگری در حال اجرا است؛ این درخواست بدون تغییر فایل‌ها متوقف شد.',
+        backupId: null,
+      };
+    }
+  }
+
+  private applyUpdateUnlocked(params: {
     readonly pkg: LocalUpdatePackageSpec;
     readonly hasActiveProcessingSession?: boolean;
     readonly simulatedAvailableDiskBytes?: number;
@@ -1535,7 +1646,7 @@ export class AvapardazPackageUpdateManager {
     } catch (err) {
       // Automatic Rollback to backupId
       const reason = err instanceof Error ? err.message : String(err);
-      const rb = this.rollbackToBackup(backupId);
+      const rb = this.rollbackToBackupUnlocked(backupId);
       return {
         ok: false,
         rolledBack: rb.ok,
@@ -1561,6 +1672,21 @@ export class AvapardazPackageUpdateManager {
     readonly restoredVersion?: string;
     readonly messageFa: string;
   } {
+    try {
+      return this.withOperationLock(() => this.rollbackToBackupUnlocked(backupId));
+    } catch (error) {
+      if (error instanceof Error && error.message === 'UPDATE_OPERATION_LOCKED') {
+        return { ok: false, messageFa: 'عملیات نصب یا بازیابی دیگری در حال اجرا است؛ بازگردانی انجام نشد.' };
+      }
+      throw error;
+    }
+  }
+
+  private rollbackToBackupUnlocked(backupId: string): {
+    readonly ok: boolean;
+    readonly restoredVersion?: string;
+    readonly messageFa: string;
+  } 
     let backupDir: string;
     try {
       backupDir = this.resolveBackupDir(backupId);
