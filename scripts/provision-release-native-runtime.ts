@@ -170,6 +170,7 @@ async function main(): Promise<void> {
       schemaVersion: 1,
       product: 'AVAPARDAZ',
       targetId: target.id,
+      requiredCpuFeatures: target.requiredCpuFeatures,
       runtimeVersion: 'v2.0.2',
       archiveName: archive.fileName,
       archiveBytes: archive.bytes,
