@@ -71,8 +71,8 @@ export const AVAPARDAZ_BETA_RELEASE_IDENTITY = Object.freeze({
   modelVersion: '1.0.0',
   ipcProtocolVersion: '1.0.0',
   extensionBundleId: 'ir.avapardaz.audition.cep',
-  primaryTargetPlatform: 'darwin-arm64 (macOS Apple Silicon M2 / 8 GB Unified Memory)',
-  supportedPlatforms: ['darwin-arm64', 'linux-x64'] as const,
+  primaryTargetPlatform: 'darwin-arm64 (macOS 14/15 Apple Silicon)',
+  supportedPlatforms: ['darwin-arm64', 'darwin-x64', 'win32-x64'] as const,
   buildDateIso: new Date().toISOString(),
 });
 
