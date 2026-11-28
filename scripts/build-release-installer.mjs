@@ -48,7 +48,9 @@ const DOCS_OUT_DIR = path.join(DIST_RELEASE, 'docs');
 
 const SHERPA_PYTHON_VERSION = process.env.AVAPARDAZ_SHERPA_PYTHON_VERSION?.trim() || '3.11';
 const AVAPARDAZ_USER_MODEL_ROOT = process.env.AVAPARDAZ_MODELS_DIR?.trim() || path.join(os.homedir(), '.avapardaz', 'models');
-const SHERPA_RUNTIME_ROOT = process.env.AVAPARDAZ_SHERPA_RUNTIME_DIR?.trim() || path.join(os.homedir(), '.avapardaz', 'runtime', 'sherpa-venv');
+const TARGET_SHERPA_RUNTIME_ROOT = path.join(os.homedir(), '.avapardaz', 'runtime', 'targets', RELEASE_TARGET.id);
+const LEGACY_SHERPA_RUNTIME_ROOT = path.join(os.homedir(), '.avapardaz', 'runtime', 'sherpa-venv');
+const SHERPA_RUNTIME_ROOT = process.env.AVAPARDAZ_SHERPA_RUNTIME_DIR?.trim() || (fs.existsSync(TARGET_SHERPA_RUNTIME_ROOT) ? TARGET_SHERPA_RUNTIME_ROOT : LEGACY_SHERPA_RUNTIME_ROOT);
 const SHERPA_RIZEH_MODEL_DIR = process.env.AVAPARDAZ_SHERPA_RIZEH_MODEL_DIR?.trim() || path.join(AVAPARDAZ_USER_MODEL_ROOT, 'sherpa-onnx-nemo-ctc-fa-shenava-rizeh-v1.0-non-streaming-int8-2026-06-26');
 const SHAHAB_KOOCHIK_MODEL_DIR = process.env.AVAPARDAZ_SHERPA_KOOCHIK_MODEL_DIR?.trim() || path.join(AVAPARDAZ_USER_MODEL_ROOT, 'shahab-koochik-v1.0-sherpa-onnx');
 const SHERPA_BINARY_SOURCE = path.join(SHERPA_RUNTIME_ROOT, 'bin', RELEASE_TARGET.sherpaBinaryName);
