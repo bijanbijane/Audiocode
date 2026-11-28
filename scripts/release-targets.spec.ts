@@ -15,6 +15,9 @@ describe('AVAPARDAZ internal release target matrix', () => {
     expect(AVAPARDAZ_RELEASE_TARGETS['darwin-arm64'].osLabel).toBe('macOS 14/15');
     expect(AVAPARDAZ_RELEASE_TARGETS['darwin-x64'].architectureLabel).toBe('Intel');
     expect(AVAPARDAZ_RELEASE_TARGETS['win32-x64'].osLabel).toBe('Windows 11');
+    expect(AVAPARDAZ_RELEASE_TARGETS['darwin-arm64'].requiredCpuFeatures).toEqual(['NEON']);
+    expect(AVAPARDAZ_RELEASE_TARGETS['darwin-x64'].requiredCpuFeatures).toEqual(['AVX2']);
+    expect(AVAPARDAZ_RELEASE_TARGETS['win32-x64'].requiredCpuFeatures).toEqual(['AVX2']);
     for (const target of Object.values(AVAPARDAZ_RELEASE_TARGETS)) {
       expect(target.runtimeArchive.fileName).toContain('sherpa-onnx-v2.0.2-');
       expect(target.runtimeArchive.bytes).toBeGreaterThan(1_000_000);
