@@ -233,14 +233,15 @@ The safe extractor continues to reject symlinks by default. For these pinned nat
 
 ### 8.8. Latest CI checkpoint — PASS
 
-Latest fully validated PR #7 head: `c800f3f218ce6973946b4bc4320ed3ead17bc911`.
+Latest fully validated PR #7 CI head for the full native + package matrix: `337844e6b0b00228dbd1d6781e3c331c4344c6ee`.
 
 Both applicable GitHub Actions workflows completed with `SUCCESS`:
 
 - **AVAPARDAZ Quality & Release Gates:** Levels 1–5 all PASS, including production web build, ORT/ASR/DSP, IPC/security, CEP packaging and supply-chain gates.
-- **Architecture Governance, Reliability & Release Quality Gate:** Vitest 29 files / 123 tests PASS; Node unit/reliability/fault-injection suite 32 tests PASS; TypeScript compilation, zero-circular dependency check, SBOM generation, license audit, production build, E2E quality gates and release-manifest verification PASS.
+- **Architecture Governance, Reliability & Release Quality Gate:** Vitest 30 files / 130 tests PASS; Node unit/reliability/fault-injection suite 32 tests PASS; TypeScript compilation, zero-circular dependency check (730 files), SBOM generation, license audit, production build, E2E quality gates and release-manifest verification PASS.
 - The same Architecture workflow's native binary parser matrix passed on Ubuntu, macOS 15 arm64, macOS 15 Intel, and Windows x64.
 - Its three real native runtime provisioning jobs passed on macOS 15 arm64, macOS 15 Intel, and Windows Server 2025 x64, including pinned archive SHA-256/byte verification, binary/library architecture validation and actual CLI `--help` smoke tests.
+- **Cross-target Internal Installer Package Build:** PASS. Built unsigned Installer and Update tarballs for all three targets (six packages total); verified every tarball byte length/SHA-256 and the embedded target/model provenance. All three targets printed `installer/update hashes and model/runtime provenance PASS`; the manifest-only CI artifact was uploaded (artifact ID `15262947641`).
 
 The earlier stale source assertion and malformed symlink test fixture were corrected; the latest full run is green. This does **not** mean the full release installer or physical Adobe hosts are accepted.
 
@@ -264,4 +265,21 @@ The new provisioner pins this exact revision and verifies:
 - LICENSE contains the Apache License 2.0 text,
 - model manifest records repository, immutable revision, license and hashes.
 
-The package builder now refuses an unmanifested model directory and embeds README, LICENSE and `model-manifest.json` in the release payload. CI has a cached Koochik provisioning/license-validation job; its first run is pending after the workflow update. Details: `MODEL-LICENSE-AUDIT-2026-11-28.md`.
+The package builder now refuses an unmanifested model directory and embeds README, LICENSE and `model-manifest.json` in the release payload. CI has a cached Koochik provisioning/license-validation job; its first run is pending after the workflow update. The CI provenance/license job passed on run `46143509617`. Details: `MODEL-LICENSE-AUDIT-2026-11-28.md`.
+
+
+### 8.11. Cross-target package build and manifest integrity — PASS
+
+On PR #7 head `337844e6b0b00228dbd1d6781e3c331c4344c6ee`, the `Cross-target Internal Installer Package Build` job completed successfully after the three verified runtime artifacts and pinned Koochik model were downloaded.
+
+| Target | Installer tarball | Update tarball | Integrity / provenance |
+|---|---:|---:|---|
+| darwin-arm64 | 444.50 MiB | 444.50 MiB | PASS |
+| darwin-x64 | 446.04 MiB | 446.04 MiB | PASS |
+| win32-x64 | 442.00 MiB | 442.00 MiB | PASS |
+
+For all six packages, CI recomputed the tarball byte length and SHA-256, checked target ID, immutable Koochik revision and Apache-2.0 license metadata, and emitted a PASS line for each target. The `avapardaz-target-release-manifests` artifact was uploaded (artifact ID `15262947641`). The unsigned tarballs remained in the ephemeral runner workspace and were not published.
+
+The corrected schema assertion reads `packageManifest.components.primaryPersianAsrModel`; the earlier root-level assertion was incorrect. This closes the hosted CI package-build and integrity gate, not signing, installation, update activation, or physical-host acceptance.
+
+Latest feature head after removing a duplicate runtime matrix job: `54a1da21778dc0dd852840c2b5662104a82c5664`. Its AVAPARDAZ Levels 1–5 workflow passed. The architecture workflow rerun is separately validating the same native/package matrix; a transient Artifact Service timeout occurred during macOS arm64 artifact upload, while provisioning itself passed, and that job was retried.
