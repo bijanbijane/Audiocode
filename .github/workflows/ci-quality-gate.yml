@@ -138,6 +138,14 @@ jobs:
           AVAPARDAZ_RUNTIME_OUTPUT_DIR: ${{ runner.temp }}/avapardaz-native-runtime
         run: bunx tsx scripts/provision-release-native-runtime.ts
 
+      - name: Upload verified target-native runtime payload
+        uses: actions/upload-artifact@v4
+        with:
+          name: sherpa-runtime-${{ matrix.target }}
+          path: ${{ runner.temp }}/avapardaz-native-runtime/
+          if-no-files-found: error
+          retention-days: 1
+
 
   koochik-model-provenance:
     if: github.event_name == 'pull_request' && github.head_ref == 'feat/r6-target-specific-release-packaging'
@@ -170,3 +178,120 @@ jobs:
 
       - name: Run model provenance/license regression tests
         run: bunx vitest run scripts/koochik-model-provenance.spec.ts
+
+      - name: Upload verified Koochik model payload
+        uses: actions/upload-artifact@v4
+        with:
+          name: koochik-model-pinned
+          path: ${{ runner.temp }}/avapardaz-koochik-model/
+          compression-level: 0
+          if-no-files-found: error
+          retention-days: 1
+
+
+  target-specific-release-package-build:
+    if: github.event_name == 'pull_request' && github.head_ref == 'feat/r6-target-specific-release-packaging'
+    name: Cross-target Internal Installer Package Build
+    needs:
+      - native-runtime-provisioning
+      - koochik-model-provenance
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Install Dependencies from Frozen Bun Lockfile
+        run: bun install --frozen-lockfile
+
+      - name: Download verified macOS arm64 runtime
+        uses: actions/download-artifact@v4
+        with:
+          name: sherpa-runtime-darwin-arm64
+          path: ${{ runner.temp }}/native-runtime/darwin-arm64
+
+      - name: Download verified macOS Intel runtime
+        uses: actions/download-artifact@v4
+        with:
+          name: sherpa-runtime-darwin-x64
+          path: ${{ runner.temp }}/native-runtime/darwin-x64
+
+      - name: Download verified Windows x64 runtime
+        uses: actions/download-artifact@v4
+        with:
+          name: sherpa-runtime-win32-x64
+          path: ${{ runner.temp }}/native-runtime/win32-x64
+
+      - name: Download pinned Apache Koochik model
+        uses: actions/download-artifact@v4
+        with:
+          name: koochik-model-pinned
+          path: ${{ runner.temp }}/koochik-model
+
+      - name: Build production web application
+        run: bun run build
+
+      - name: Build unsigned target-specific installer and update packages
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "${RUNNER_TEMP}/avapardaz-release-packages"
+          build_target() {
+            local target_id="$1"
+            local target_platform="$2"
+            local target_arch="$3"
+            env \
+              AVAPARDAZ_TARGET_PLATFORM="$target_platform" \
+              AVAPARDAZ_TARGET_ARCH="$target_arch" \
+              AVAPARDAZ_SHERPA_RUNTIME_TARGET="$target_id" \
+              AVAPARDAZ_SHERPA_RUNTIME_DIR="${RUNNER_TEMP}/native-runtime/$target_id" \
+              AVAPARDAZ_SHERPA_KOOCHIK_MODEL_DIR="${RUNNER_TEMP}/koochik-model" \
+              node scripts/build-release-installer.mjs \
+                --outdir="${RUNNER_TEMP}/avapardaz-release-packages/$target_id"
+          }
+          build_target darwin-arm64 darwin arm64
+          build_target darwin-x64 darwin x64
+          build_target win32-x64 win32 x64
+
+      - name: Verify installer/update tarball hashes and target manifests
+        run: |
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          import crypto from 'node:crypto';
+          import path from 'node:path';
+          const root = path.join(process.env.RUNNER_TEMP, 'avapardaz-release-packages');
+          for (const target of ['darwin-arm64', 'darwin-x64', 'win32-x64']) {
+            const manifestPath = path.join(root, target, 'release-artifacts-manifest.json');
+            const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+            for (const artifact of [manifest.installerTarball, manifest.updateTarball]) {
+              const stat = fs.statSync(artifact.path);
+              const hash = crypto.createHash('sha256').update(fs.readFileSync(artifact.path)).digest('hex');
+              if (stat.size !== artifact.sizeBytes || hash !== artifact.sha256) {
+                throw new Error('RELEASE_ARTIFACT_INTEGRITY_FAILED: ' + artifact.path);
+              }
+            }
+            const product = manifest.packageManifest;
+            if (product.primaryPersianAsrModel.revision !== '158e40e9ccf166c3655b7f4cd2abbfc7bbc87f7a'
+              || product.primaryPersianAsrModel.licenseSpdx !== 'Apache-2.0'
+              || product.target.id !== target) {
+              throw new Error('RELEASE_PACKAGE_PROVENANCE_MISMATCH: ' + target);
+            }
+            process.stdout.write(target + ': installer/update hashes and model/runtime provenance PASS\n');
+          }
+          NODE
+
+      - name: Upload target package manifests (unsigned artifacts remain in the runner workspace)
+        uses: actions/upload-artifact@v4
+        with:
+          name: avapardaz-target-release-manifests
+          path: ${{ runner.temp }}/avapardaz-release-packages/**/release-artifacts-manifest.json
+          if-no-files-found: error
+          retention-days: 3
