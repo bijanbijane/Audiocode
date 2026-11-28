@@ -402,6 +402,18 @@ function detectSherpaBinary(): { binaryPath: string | null; libDir: string | nul
           return false;
         }
       }) ?? null;
+      if (libDir && (process.platform === 'darwin' || process.platform === 'win32')) {
+        try {
+          const target = resolveAvapardazReleaseTarget();
+          assertNativeBinaryArchitecture({ filePath: candidate, platform: target.platform, arch: target.arch });
+          for (const name of fs.readdirSync(libDir)) {
+            if (!isSherpaRuntimeLibraryName(name)) continue;
+            assertNativeBinaryArchitecture({ filePath: path.join(libDir, name), platform: target.platform, arch: target.arch });
+          }
+        } catch {
+          continue;
+        }
+      }
       return { binaryPath: candidate, libDir };
     } catch {
       // continue searching
