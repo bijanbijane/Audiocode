@@ -309,7 +309,7 @@ export class LocalCompanionService {
       }
     }
     for (const uploadId of Array.from(this.stagedUploads.keys())) {
-      this.abortStagedUpload(uploadId);
+      this.removeStagedUpload(uploadId);
     }
     this.audioTransfers.cleanupAll();
     this.neuralEngine.unloadActiveModel();
@@ -390,9 +390,13 @@ export class LocalCompanionService {
   }
 
   public initStagedUpload(
-    filename?: string,
-    ownerId = 'local-default',
+    filename: string | undefined,
+    ownerId: string,
   ): { readonly ok: boolean; readonly uploadId: string; readonly filename: string } {
+    if (typeof ownerId !== 'string' || ownerId.trim().length === 0) {
+      throw new TypeError('A non-empty ownerId is required to initialize a staged upload.');
+    }
+    ownerId = ownerId.trim();
     this.sweepExpiredUploads();
     const uploadId = `up_${crypto.randomBytes(16).toString('hex')}`;
     const safeName =
@@ -417,7 +421,7 @@ export class LocalCompanionService {
   public appendStagedUploadChunk(
     uploadId: string,
     chunkBase64: string,
-    ownerId?: string,
+    ownerId: string,
   ): {
     readonly ok: boolean;
     readonly statusCode: number;
@@ -430,7 +434,7 @@ export class LocalCompanionService {
     if (!entry) {
       return { ok: false, statusCode: 404, code: 'UPLOAD_NOT_FOUND', message: 'Unknown or expired uploadId.' };
     }
-    if (ownerId && ownerId !== entry.ownerId) {
+    if (typeof ownerId !== 'string' || ownerId.trim().length === 0 || ownerId.trim() !== entry.ownerId) {
       return {
         ok: false,
         statusCode: 403,
@@ -453,7 +457,7 @@ export class LocalCompanionService {
       };
     }
     if (entry.receivedBytes + bytes.byteLength > MAX_STAGED_UPLOAD_BYTES) {
-      this.abortStagedUpload(uploadId);
+      this.removeStagedUpload(uploadId);
       return {
         ok: false,
         statusCode: 413,
@@ -469,10 +473,16 @@ export class LocalCompanionService {
     return { ok: true, statusCode: 200, receivedBytes: entry.receivedBytes };
   }
 
-  public abortStagedUpload(uploadId: string, ownerId?: string): void {
+  public abortStagedUpload(uploadId: string, ownerId: string): void {
     const entry = this.stagedUploads.get(uploadId);
     if (!entry) return;
-    if (ownerId && ownerId !== entry.ownerId) return;
+    if (typeof ownerId !== 'string' || ownerId.trim().length === 0 || ownerId.trim() !== entry.ownerId) return;
+    this.removeStagedUpload(uploadId);
+  }
+
+  private removeStagedUpload(uploadId: string): void {
+    const entry = this.stagedUploads.get(uploadId);
+    if (!entry) return;
     this.stagedUploads.delete(uploadId);
     this.closeUploadFd(entry);
     try {
@@ -571,8 +581,11 @@ export class LocalCompanionService {
       resolvedPath = pathCheck.resolvedPath;
       sourceName = path.basename(resolvedPath);
     } else if (typeof params.transferId === 'string' && params.transferId.trim().length > 0) {
+      if (typeof params.ownerId !== 'string' || params.ownerId.trim().length === 0) {
+        return { ok: false, statusCode: 403, code: 'TRANSFER_OWNER_REQUIRED', message: 'An authenticated ownerId is required to access this transfer.' };
+      }
       const acquired = this.audioTransfers.acquireAudioSource(params.transferId.trim(), {
-        ownerId: params.ownerId,
+        ownerId: params.ownerId.trim(),
       });
       if (!acquired.ok || !acquired.source) {
         return {
@@ -599,7 +612,7 @@ export class LocalCompanionService {
           message: 'Staged uploadId not found or expired.',
         };
       }
-      if (params.ownerId && params.ownerId !== staged.ownerId) {
+      if (typeof params.ownerId !== 'string' || params.ownerId.trim().length === 0 || params.ownerId.trim() !== staged.ownerId) {
         return {
           ok: false,
           statusCode: 403,
