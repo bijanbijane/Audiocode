@@ -49,23 +49,38 @@ export interface CreateAvapardazBackendRouterOptions {
 
 function isAllowedCompanionHostHeader(hostHeader: string | undefined): boolean {
   if (!hostHeader || typeof hostHeader !== 'string') return false;
-  const host = hostHeader.trim().toLowerCase();
-  return (
-    /^localhost(?::\\d{1,5})?$/.test(host) ||
-    /^127\\.0\\.0\\.1(?::\\d{1,5})?$/.test(host) ||
-    /^\\[::1\\](?::\\d{1,5})?$/.test(host)
-  );
+  try {
+    const parsed = new URL(`http://${hostHeader.trim()}`);
+    return (
+      parsed.username.length === 0 &&
+      parsed.password.length === 0 &&
+      parsed.pathname === '/' &&
+      parsed.search.length === 0 &&
+      parsed.hash.length === 0 &&
+      ['localhost', '127.0.0.1', '[::1]'].includes(parsed.hostname)
+    );
+  } catch {
+    return false;
+  }
 }
 
 function isAllowedCompanionOrigin(originHeader: string | undefined): boolean {
   if (originHeader === undefined || originHeader === '' || originHeader === 'null') return true;
-  const origin = originHeader.trim().toLowerCase();
-  if (origin.startsWith('file://')) return true;
-  return (
-    /^https?:\\/\\/localhost(?::\\d{1,5})?$/.test(origin) ||
-    /^https?:\\/\\/127\\.0\\.0\\.1(?::\\d{1,5})?$/.test(origin) ||
-    /^https?:\\/\\/\\[::1\\](?::\\d{1,5})?$/.test(origin)
-  );
+  if (originHeader.trim().toLowerCase().startsWith('file://')) return true;
+  try {
+    const parsed = new URL(originHeader);
+    return (
+      (parsed.protocol === 'http:' || parsed.protocol === 'https:') &&
+      parsed.username.length === 0 &&
+      parsed.password.length === 0 &&
+      parsed.pathname === '/' &&
+      parsed.search.length === 0 &&
+      parsed.hash.length === 0 &&
+      ['localhost', '127.0.0.1', '[::1]'].includes(parsed.hostname)
+    );
+  } catch {
+    return false;
+  }
 }
 
 function mapUnifiedErrorStatus(err: UnifiedProcessingError): number {
