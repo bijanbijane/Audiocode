@@ -72,6 +72,10 @@ function smokeTest(binaryPath: string, libraryDir: string, platform: string): vo
 async function main(): Promise<void> {
   // This provisioner executes the native binary; cross-target provisioning is forbidden.
   const target = resolveAvapardazReleaseTarget();
+  const expectedTarget = process.env.AVAPARDAZ_EXPECTED_TARGET?.trim();
+  if (expectedTarget && expectedTarget !== target.id) {
+    throw new Error(`RUNTIME_HOST_TARGET_MISMATCH: expected ${expectedTarget}, actual runner is ${target.id}`);
+  }
   const archive = target.runtimeArchive;
   const outputRoot = path.resolve(
     process.env.AVAPARDAZ_RUNTIME_OUTPUT_DIR?.trim()
