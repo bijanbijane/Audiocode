@@ -186,4 +186,15 @@ A dedicated CI matrix was added to `.github/workflows/ci-quality-gate.yml` for t
 
 The matrix installs the frozen Bun dependencies and runs `bunx vitest run scripts/verify-native-binary.spec.ts`, recording each runner's `process.platform` and `process.arch`. It is scoped to PR head `feat/r6-target-specific-release-packaging` so the stacked R0 baseline PR does not run a test file that exists only in the follow-up branch.
 
-This matrix validates parser behavior and filesystem/test portability across hosted OS runners using synthetic Mach-O/PE fixtures. It does **not** build Sherpa native binaries, verify downloaded production payloads, or replace physical host installation tests. The initial `macos-14` matrix job was cancelled before steps started; the runner label was changed to `macos-latest` and must be revalidated by the subsequent PR run.
+This matrix validates parser behavior and filesystem/test portability across hosted OS runners using synthetic Mach-O/PE fixtures. It does **not** build Sherpa native binaries, verify downloaded production payloads, or replace physical host installation tests. The first `macos-14` job was cancelled before steps started; after switching to `macos-latest`, all three matrix jobs completed successfully on the latest qualification run.
+
+
+**Successful cross-platform evidence on PR #7 head `52e4eda48e8bd9a37ec61ca24ec8e4e544d330ee`:**
+
+| Hosted runner | Actual runtime | Result |
+|---|---|---|
+| macos-latest | `darwin-arm64` | 5/5 tests PASS |
+| ubuntu-latest | `linux-x64` | 5/5 tests PASS |
+| windows-latest | `win32-x64` | 5/5 tests PASS |
+
+The macOS runner was Apple Silicon. The Windows runner was x64. This proves the parser tests execute successfully on those runner environments, not that the product's target-native Sherpa/ONNX payloads have been built or installed there.
