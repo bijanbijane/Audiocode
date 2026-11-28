@@ -570,6 +570,7 @@ const docsMap = {
    - **macOS**: اجرای \`./installer/install-macos.sh\`
    - **Windows 11**: اجرای \`powershell -ExecutionPolicy Bypass -File .\\installer\\install-windows.ps1\`
 3. بسته فقط روی ${RELEASE_TARGET.osLabel} / ${RELEASE_TARGET.architectureLabel} اجرا می‌شود و در صورت عدم تطابق OS/CPU یا Node.js کمتر از نسخه 20، پیش از کپی فایل‌ها متوقف خواهد شد.
+4. برای Adobe Audition 25.x، پردازنده‌های Intel/AMD روی Windows و Intel Mac باید AVX2 داشته باشند؛ حداقل مدل‌های اعلام‌شده توسط Adobe، Intel نسل ۶ یا AMD Ryzen 1000 هستند.
 `,
   'QUICK-START-GUIDE.md': `# راهنمای شروع سریع آواپرداز (Quick-Start Guide)
 
@@ -583,12 +584,13 @@ const docsMap = {
 
 | مشخصه | حداقل سیستم مورد نیاز | سیستم پیشنهادی |
 |---|---|---|
-| **سیستم‌عامل** | macOS 13+ (Apple Silicon / Intel) یا Ubuntu 22.04+ / Debian 12+ (x86_64) | macOS 14+ (Apple M2/M3) یا Linux x86_64 مدرن |
-| **پردازنده (CPU)** | ۴ هسته پردازشی ۶۴ بیتی | ۸ هسته پردازشی یا بالاتر |
-| **حافظه رم (RAM)** | حداقل ۴ گیگابایت فضای قابل استفاده برای برنامه و موتور ASR | ۸ تا ۱۶ گیگابایت |
-| **فضای دیسک** | ۵۰۰ مگابایت برای نصب + ۲ گیگابایت فضای موقت پردازش صوت | ۵ گیگابایت SSD آزاد |
-| **میزبان تدوین** | Adobe Audition 2023/2024/2025 (نسخه ۲۳.۰ به بالا) یا اجرای مستقل وب/Companion | Adobe Audition 24.x |
-| **اتصال اینترنت** | **نیاز ندارد** (کاملاً آفلاین پس از نصب) | نیاز ندارد |
+| **سیستم‌عامل** | Windows 11 x64 یا macOS 14/15 (Apple Silicon یا Intel) | Windows 11 x64 یا macOS 15 |
+| **پردازنده (CPU)** | Windows و Intel Mac: پشتیبانی AVX2؛ حداقل Intel نسل ۶ یا AMD Ryzen 1000؛ Apple Silicon: M1 یا جدیدتر | Intel نسل ۱۱+ / Ryzen 3000+ یا Apple Silicon Pro |
+| **حافظه رم (RAM)** | حداقل ۸ گیگابایت | ۱۶ گیگابایت یا بیشتر |
+| **فضای دیسک** | حداقل ۸ گیگابایت برای نصب + فضای موقت پردازش صوت | SSD پرسرعت با حداقل ۵ گیگابایت فضای آزاد اضافی |
+| **میزبان تدوین** | Adobe Audition 25.x | Adobe Audition 25.x |
+| **نصاب** | Node.js 20 یا جدیدتر | Node.js 22 یا جدیدتر |
+| **اتصال اینترنت** | برای دریافت بسته و فعال‌سازی Adobe لازم است؛ پردازش ASR پس از نصب آفلاین است | اتصال برای فعال‌سازی Adobe لازم است |
 `,
   'RELEASE-NOTES.md': `# یادداشت‌های انتشار آواپرداز (Release Notes — v${RELEASE_VERSION})
 
