@@ -40,6 +40,8 @@ export interface ProcessingJobRecord {
 interface InternalJobState {
   record: ProcessingJobRecord;
   envelope: CanonicalOperationEnvelope;
+  ownerId: string | null;
+  idempotencyIndexKey: string;
   abortController: AbortController;
   executionPromise: Promise<ProcessingJobRecord> | null;
 }
@@ -77,7 +79,7 @@ export class ProcessingJobManager {
 
   public submitJob(
     envelope: CanonicalOperationEnvelope,
-    options?: { readonly deferExecutionMs?: number },
+    options?: { readonly deferExecutionMs?: number; readonly ownerId?: string },
   ): {
     readonly job: ProcessingJobRecord;
     readonly deduplicated: boolean;
@@ -92,10 +94,19 @@ export class ProcessingJobManager {
       });
     }
 
+    const ownerId = options?.ownerId === undefined ? null : options.ownerId.trim();
+    if (options?.ownerId !== undefined && !ownerId) {
+      throw new UnifiedProcessingError({
+        code: 'INVALID_PROCESSING_REQUEST',
+        executionMode: 'LOCAL',
+        detailEn: 'A non-empty ownerId is required for owner-scoped jobs.',
+      });
+    }
+    const idempotencyIndexKey = JSON.stringify([ownerId, envelope.idempotency_key]);
     this.sweepExpiredJobs();
 
-    // Idempotency deduplication (Section 7.5)
-    const existingJobId = this.idempotencyIndex.get(envelope.idempotency_key);
+    // Idempotency is isolated by owner so one client cannot retrieve another client's job.
+    const existingJobId = this.idempotencyIndex.get(idempotencyIndexKey);
     if (existingJobId) {
       const existing = this.jobs.get(existingJobId);
       if (existing && existing.record.state !== 'EXPIRED') {
@@ -136,12 +147,14 @@ export class ProcessingJobManager {
     const entry: InternalJobState = {
       record: initialRecord,
       envelope,
+      ownerId,
+      idempotencyIndexKey,
       abortController: new AbortController(),
       executionPromise: null,
     };
 
     this.jobs.set(jobId, entry);
-    this.idempotencyIndex.set(envelope.idempotency_key, jobId);
+    this.idempotencyIndex.set(idempotencyIndexKey, jobId);
     this.enforceRetentionBound();
 
     const deferMs =
@@ -248,26 +261,45 @@ export class ProcessingJobManager {
     }
   }
 
-  public getJob(jobId: string): ProcessingJobRecord | null {
-    this.sweepExpiredJobs();
-    return this.jobs.get(jobId)?.record ?? null;
+  private resolveRequestedOwner(ownerId?: string): string | null | undefined {
+    if (ownerId === undefined) return null;
+    const normalized = typeof ownerId === 'string' ? ownerId.trim() : '';
+    return normalized.length > 0 ? normalized : undefined;
   }
 
-  public listJobs(limit = 50): readonly ProcessingJobRecord[] {
+  public getJob(jobId: string, ownerId?: string): ProcessingJobRecord | null {
     this.sweepExpiredJobs();
+    const requestedOwner = this.resolveRequestedOwner(ownerId);
+    if (requestedOwner === undefined) return null;
+    const entry = this.jobs.get(jobId);
+    return entry && entry.ownerId === requestedOwner ? entry.record : null;
+  }
+
+  public listJobs(limit = 50, ownerId?: string): readonly ProcessingJobRecord[] {
+    this.sweepExpiredJobs();
+    const requestedOwner = this.resolveRequestedOwner(ownerId);
+    if (requestedOwner === undefined) return Object.freeze([]);
     const safeLimit = Math.max(1, Math.min(200, Math.floor(limit) || 50));
     return Object.freeze(
       Array.from(this.jobs.values())
+        .filter((entry) => entry.ownerId === requestedOwner)
         .map((j) => j.record)
         .slice(-safeLimit)
         .reverse(),
     );
   }
 
-  public cancelJob(jobId: string): ProcessingJobRecord | null {
+  public getTrackedJobCount(): number {
     this.sweepExpiredJobs();
+    return this.jobs.size;
+  }
+
+  public cancelJob(jobId: string, ownerId?: string): ProcessingJobRecord | null {
+    this.sweepExpiredJobs();
+    const requestedOwner = this.resolveRequestedOwner(ownerId);
+    if (requestedOwner === undefined) return null;
     const entry = this.jobs.get(jobId);
-    if (!entry) return null;
+    if (!entry || entry.ownerId !== requestedOwner) return null;
 
     if (
       entry.record.state === 'COMPLETED' ||
@@ -325,8 +357,8 @@ export class ProcessingJobManager {
       }
       if (!evictKey) break;
       const oldest = this.jobs.get(evictKey);
-      if (oldest && this.idempotencyIndex.get(oldest.record.idempotency_key) === evictKey) {
-        this.idempotencyIndex.delete(oldest.record.idempotency_key);
+      if (oldest && this.idempotencyIndex.get(oldest.idempotencyIndexKey) === evictKey) {
+        this.idempotencyIndex.delete(oldest.idempotencyIndexKey);
       }
       this.jobs.delete(evictKey);
     }
