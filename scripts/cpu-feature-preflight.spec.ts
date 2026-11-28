@@ -18,7 +18,7 @@ describe('installer CPU feature preflight', () => {
   });
 
   it('requires the Intel macOS AVX2 sysctl to return exactly 1', () => {
-    const spawnSync = vi.fn(() => ({ status: 0, stdout: '1\\n', stderr: '' }));
+    const spawnSync = vi.fn(() => ({ status: 0, stdout: '1\n', stderr: '' }));
     expect(verifyRequiredCpuFeatures(['AVX2'], {
       platform: 'darwin',
       arch: 'x64',
@@ -32,7 +32,7 @@ describe('installer CPU feature preflight', () => {
     const missing = verifyRequiredCpuFeatures(['AVX2'], {
       platform: 'darwin',
       arch: 'x64',
-      spawnSync: vi.fn(() => ({ status: 0, stdout: '0\\n', stderr: '' })),
+      spawnSync: vi.fn(() => ({ status: 0, stdout: '0\n', stderr: '' })),
     });
     expect(missing.supported).toBe(false);
     expect(missing.reason).toContain('CPU_FEATURE_UNAVAILABLE');
