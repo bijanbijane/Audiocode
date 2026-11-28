@@ -9,6 +9,7 @@ export const AVAPARDAZ_RELEASE_TARGETS = Object.freeze({
     arch: 'arm64',
     osLabel: 'macOS 14/15',
     architectureLabel: 'Apple Silicon',
+    requiredCpuFeatures: Object.freeze(['NEON']),
     sherpaBinaryName: 'sherpa-onnx-offline',
     onnxRuntimeLibraryName: 'libonnxruntime.dylib',
     runtimeArchive: Object.freeze({
@@ -24,6 +25,7 @@ export const AVAPARDAZ_RELEASE_TARGETS = Object.freeze({
     arch: 'x64',
     osLabel: 'macOS 14/15',
     architectureLabel: 'Intel',
+    requiredCpuFeatures: Object.freeze(['AVX2']),
     sherpaBinaryName: 'sherpa-onnx-offline',
     onnxRuntimeLibraryName: 'libonnxruntime.dylib',
     runtimeArchive: Object.freeze({
@@ -39,6 +41,7 @@ export const AVAPARDAZ_RELEASE_TARGETS = Object.freeze({
     arch: 'x64',
     osLabel: 'Windows 11',
     architectureLabel: 'x64',
+    requiredCpuFeatures: Object.freeze(['AVX2']),
     sherpaBinaryName: 'sherpa-onnx-offline.exe',
     onnxRuntimeLibraryName: 'onnxruntime.dll',
     runtimeArchive: Object.freeze({
