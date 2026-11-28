@@ -580,7 +580,9 @@ export class ComponentUpdateOrchestrator {
 
     // Defer activation if active inference/render job is pinned
     if (this.activePinnedJobs.size > 0) {
-      const ready = this.transition(comp, 'UPDATE_READY', 'Update staged & ready; waiting for active jobs to complete.');
+      const ready = this.transition(comp, 'UPDATE_READY', 'Update staged & ready; waiting for active jobs to complete.', {
+        previousKnownGoodVersion: initial.activeVersion,
+      });
       return { ok: false, slot: ready, rolledBack: false };
     }
     this.transition(comp, 'UPDATE_READY', 'Ready for atomic activation.');
@@ -619,6 +621,70 @@ export class ComponentUpdateOrchestrator {
     return { ok: true, slot: verified, rolledBack: false };
   }
 
+  /**
+   * Resumes a verified, staged update after active inference/render jobs have released their pins.
+   * The staged bytes are reused; this path never downloads or re-stages the artifact.
+   */
+  public async resumeStagedUpdate(params: {
+    readonly component: ReleaseComponentKind;
+    readonly activateArtifact: (stagingDir: string) => Promise<{ readonly ok: boolean; readonly error?: string }>;
+    readonly verifyPostActivationHealth: () => Promise<{ readonly ok: boolean; readonly error?: string }>;
+    readonly restorePreviousVersion: (prevVersion: string) => Promise<boolean>;
+  }): Promise<{ readonly ok: boolean; readonly slot: ComponentSlotRecord; readonly rolledBack: boolean }> {
+    const current = this.getSlot(params.component);
+    if (current.state !== 'UPDATE_READY') {
+      return { ok: false, slot: current, rolledBack: false };
+    }
+    if (this.activePinnedJobs.size > 0) {
+      return { ok: false, slot: current, rolledBack: false };
+    }
+
+    const candidateVersion = current.candidateVersion;
+    const stagingDir = current.stagingDir;
+    const previousVersion = current.previousKnownGoodVersion;
+    const versionOrder = candidateVersion
+      ? compareReleaseVersions(candidateVersion, current.activeVersion)
+      : null;
+    if (!candidateVersion || !stagingDir || !previousVersion || versionOrder === null || versionOrder <= 0) {
+      const failed = this.transition(params.component, 'UPDATE_FAILED', 'Staged update metadata is incomplete or no longer newer than the active release.', {
+        lastError: 'INVALID_STAGED_UPDATE',
+      });
+      return { ok: false, slot: failed, rolledBack: false };
+    }
+
+    this.transition(params.component, 'UPDATE_ACTIVATING', `Resuming staged update ${candidateVersion} after active jobs completed.`);
+    const activation = await params.activateArtifact(stagingDir);
+    if (!activation.ok) {
+      return this.performRollback(
+        params.component,
+        previousVersion,
+        activation.error ?? 'Deferred activation failed.',
+        params.restorePreviousVersion,
+      );
+    }
+
+    this.transition(params.component, 'UPDATE_ACTIVATED', 'Activated deferred staged update.', {
+      activeVersion: candidateVersion,
+    });
+    this.transition(params.component, 'UPDATE_VERIFICATION_PENDING', 'Running post-update health verification.');
+    const health = await params.verifyPostActivationHealth();
+    if (!health.ok) {
+      return this.performRollback(
+        params.component,
+        previousVersion,
+        health.error ?? 'Deferred update health check failed.',
+        params.restorePreviousVersion,
+      );
+    }
+
+    const verified = this.transition(params.component, 'UPDATE_VERIFIED', 'Deferred update passed post-activation health verification.', {
+      candidateVersion: null,
+      stagingDir: null,
+      lastError: null,
+    });
+    return { ok: true, slot: verified, rolledBack: false };
+  }
+
   /** Recovers safely from a power-loss / interrupted update found at next startup */
   public recoverInterruptedUpdate(component: ReleaseComponentKind): ComponentSlotRecord {
     const cur = this.getSlot(component);
@@ -626,6 +692,7 @@ export class ComponentUpdateOrchestrator {
       'UPDATE_DOWNLOADING',
       'UPDATE_DOWNLOADED',
       'UPDATE_STAGED',
+      'UPDATE_READY',
       'UPDATE_ACTIVATING',
       'UPDATE_VERIFICATION_PENDING',
       'UPDATE_ROLLBACK_PENDING',
