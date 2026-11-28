@@ -36,6 +36,37 @@ function createTarWithLibrarySymlink(linkName: string): string {
   return archivePath;
 }
 
+function createTarWithSymlinkChain(): string {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'avp-safe-tar-chain-'));
+  tempDirs.push(dir);
+  const archivePath = path.join(dir, 'runtime-chain.tar.bz2');
+  const script = [
+    'import io, sys, tarfile',
+    'archive = sys.argv[1]',
+    "data = b'validated-native-library-fixture'",
+    "with tarfile.open(archive, 'w:bz2') as tf:",
+    "  actual = tarfile.TarInfo('runtime/lib/libonnxruntime.actual.dylib')",
+    '  actual.size = len(data)',
+    '  tf.addfile(actual, io.BytesIO(data))',
+    "  versioned = tarfile.TarInfo('runtime/lib/libonnxruntime.1.28.2.dylib')",
+    '  versioned.type = tarfile.SYMTYPE',
+    "  versioned.linkname = 'libonnxruntime.actual.dylib'",
+    '  tf.addfile(versioned)',
+    "  alias = tarfile.TarInfo('runtime/lib/libonnxruntime.dylib')",
+    '  alias.type = tarfile.SYMTYPE',
+    "  alias.linkname = 'libonnxruntime.1.28.2.dylib'",
+    '  tf.addfile(alias)',
+  ].join('\\n');
+  const result = spawnSync(pythonBin, ['-c', script, archivePath], {
+    encoding: 'utf8',
+    timeout: 15_000,
+  });
+  if (result.error || result.status !== 0) {
+    throw new Error('Unable to create chained tar fixture: ' + (result.stderr || result.error?.message || result.status));
+  }
+  return archivePath;
+}
+
 afterEach(() => {
   for (const dir of tempDirs.splice(0)) fs.rmSync(dir, { recursive: true, force: true });
 });
@@ -56,6 +87,16 @@ describe('safe native runtime archive symlink materialization', () => {
     expect(fs.lstatSync(alias).isFile()).toBe(true);
     expect(fs.lstatSync(alias).isSymbolicLink()).toBe(false);
     expect(fs.readFileSync(alias, 'utf8')).toBe('validated-native-library-fixture');
+  });
+
+  it('rejects chains of library symlinks', async () => {
+    const archive = createTarWithSymlinkChain();
+    const output = fs.mkdtempSync(path.join(os.tmpdir(), 'avp-safe-tar-output-'));
+    tempDirs.push(output);
+    await expect(extractTarBz2Safe(archive, output, {
+      allowRelativeLibrarySymlinks: true,
+      pythonBin,
+    })).rejects.toThrow(/TAR_SYMLINK_FORBIDDEN/);
   });
 
   it('continues to reject symlinks by default', async () => {
