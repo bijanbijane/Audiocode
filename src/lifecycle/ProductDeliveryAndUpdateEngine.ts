@@ -282,9 +282,11 @@ export interface UpdateManifest extends UpdateManifestPayload {
 }
 
 /** Stable, versioned field order: the signature binds update identity and artifact digest. */
-export function canonicalizeUpdateManifest(manifest: UpdateManifestPayload): string {
+export function canonicalizeUpdateManifest(manifest: UpdateManifestPayload, keyId: string): string {
   return JSON.stringify({
     schemaVersion: '1.0.0',
+    signatureAlgorithm: 'Ed25519',
+    keyId,
     component: manifest.component,
     version: manifest.version,
     minCompatibleIpcProtocol: manifest.minCompatibleIpcProtocol ?? null,
@@ -292,6 +294,12 @@ export function canonicalizeUpdateManifest(manifest: UpdateManifestPayload): str
     sizeBytes: manifest.sizeBytes,
     releaseNotes: manifest.releaseNotes ?? null,
   });
+}
+
+function toOwnedArrayBuffer(bytes: Uint8Array): ArrayBuffer {
+  const buffer = new ArrayBuffer(bytes.byteLength);
+  new Uint8Array(buffer).set(bytes);
+  return buffer;
 }
 
 function decodeUpdateSignatureBase64(value: string): Uint8Array | null {
@@ -308,22 +316,32 @@ async function verifyUpdateManifestSignature(
   manifest: UpdateManifest,
   trustedSigningKeys: ReadonlyMap<string, Uint8Array>,
 ): Promise<boolean> {
+  const signature = manifest?.signature;
   if (
-    manifest.signature.algorithm !== 'Ed25519' ||
-    !/^[A-Za-z0-9._-]{1,64}$/.test(manifest.signature.keyId)
+    !signature ||
+    typeof signature !== 'object' ||
+    signature.algorithm !== 'Ed25519' ||
+    typeof signature.keyId !== 'string' ||
+    !/^[A-Za-z0-9._-]{1,64}$/.test(signature.keyId) ||
+    typeof signature.signatureBase64 !== 'string'
   ) return false;
 
-  const publicKeyBytes = trustedSigningKeys.get(manifest.signature.keyId);
-  const signatureBytes = decodeUpdateSignatureBase64(manifest.signature.signatureBase64);
+  const publicKeyBytes = trustedSigningKeys.get(signature.keyId);
+  const signatureBytes = decodeUpdateSignatureBase64(signature.signatureBase64);
   const subtle = globalThis.crypto?.subtle;
   if (!publicKeyBytes || publicKeyBytes.length !== 32 || !signatureBytes || signatureBytes.length !== 64 || !subtle) {
     return false;
   }
 
   try {
-    const publicKey = await subtle.importKey('raw', publicKeyBytes, { name: 'Ed25519' }, false, ['verify']);
-    const payload = new TextEncoder().encode(canonicalizeUpdateManifest(manifest));
-    return await subtle.verify({ name: 'Ed25519' }, publicKey, signatureBytes, payload);
+    const publicKey = await subtle.importKey('raw', toOwnedArrayBuffer(publicKeyBytes), { name: 'Ed25519' }, false, ['verify']);
+    const payload = new TextEncoder().encode(canonicalizeUpdateManifest(manifest, signature.keyId));
+    return await subtle.verify(
+      { name: 'Ed25519' },
+      publicKey,
+      toOwnedArrayBuffer(signatureBytes),
+      toOwnedArrayBuffer(payload),
+    );
   } catch {
     return false;
   }
