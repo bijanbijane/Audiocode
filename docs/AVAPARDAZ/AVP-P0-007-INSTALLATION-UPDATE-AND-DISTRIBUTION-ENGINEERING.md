@@ -66,17 +66,32 @@ Remaining release acceptance:
 - Adobe Audition 25.x CEP installation/registration and Companion startup/reconnect/cancel workflows.
 - Final package signing, pinned trust-root verification, and update signature enforcement.
 
-Latest fully validated full native/package CI head `337844e6b0b00228dbd1d6781e3c331c4344c6ee` completed the Architecture Governance workflow successfully: AVAPARDAZ Quality Gates Levels 1–5; Architecture Governance with Vitest 30 files / 130 tests, 32 Node reliability/fault-injection tests, TypeScript compilation, zero-circular dependency check, SBOM, license audit, E2E quality gates, production build and release-manifest verification. Native binary parser tests passed on four runners; pinned native runtime provisioning + CLI smoke tests passed on all three approved target architectures; all six unsigned target-specific Installer/Update tarballs passed SHA-256/byte-length checks and embedded model/runtime provenance validation. The earlier obsolete manifest assertion and malformed symlink fixture were corrected. The current branch head is `54a1da21778dc0dd852840c2b5662104a82c5664`; its AVAPARDAZ Levels 1–5 workflow passed.
+Latest fully validated full native/package CI head `b60afa999b7a0892c81742ac8710b893cdbac4ba` completed Architecture Governance run `46144552901` successfully: AVAPARDAZ Quality Gates Levels 1–5; Vitest 31 files / 134 tests, 32 Node reliability/fault-injection tests, TypeScript compilation, zero-circular dependency check, SBOM, license audit, E2E quality gates, production build and release-manifest verification. Native binary parser tests passed on four runners; pinned native runtime provisioning + CPU probes + CLI smoke tests passed on all three approved target architectures; all six unsigned target-specific Installer/Update tarballs passed SHA-256/byte-length, embedded manifest, installer syntax and model/runtime/CPU provenance validation. The earlier obsolete manifest assertion and malformed symlink fixture were corrected.
 
 
 ## 12. Cross-target package build evidence (2026-11-28)
 
-GitHub Actions run `46143509617` completed successfully on PR #7 commit `337844e6b0b00228dbd1d6781e3c331c4344c6ee`:
+GitHub Actions run `46144552901` completed successfully on PR #7 commit `b60afa999b7a0892c81742ac8710b893cdbac4ba`:
 
 - Production web bundle and pinned Koochik model provisioning: PASS.
-- Native runtime artifacts for darwin-arm64, darwin-x64, win32-x64: PASS.
+- Native runtime artifacts and actual CPU probes for darwin-arm64 (NEON), darwin-x64 (AVX2), win32-x64 (AVX2): PASS.
 - Six unsigned artifacts were built: Installer + Update for each approved target.
-- CI recomputed byte length and SHA-256 for each tarball and checked target ID, immutable model revision and Apache-2.0 license metadata: PASS for all three targets.
-- Manifest-only artifact `avapardaz-target-release-manifests` uploaded; unsigned tarballs were not published.
+- CI recomputed byte length and SHA-256 for each tarball, compared embedded package manifests, syntax-checked generated install/uninstall/CPU-preflight scripts, checked macOS shell wrapper syntax, and verified target ID, CPU feature probe, immutable model revision and Apache-2.0 license metadata: PASS for all three targets.
+- Manifest-only artifact `avapardaz-target-release-manifests` uploaded (artifact ID `15263232073`); unsigned tarballs were not published.
 
 This is hosted build/integrity evidence. It does not certify physical Windows 11/macOS 14 acceptance, Adobe Audition 25.x integration, signature/trust-root verification, or update activation/rollback.
+
+
+## 13. Installer CPU feature preflight (2026-11-28)
+
+The V1 target CPU floor is now enforced at install time and qualified during runtime provisioning:
+
+- `scripts/cpu-feature-preflight.mjs` probes Intel macOS AVX2 with `sysctl -n hw.optional.avx2_0`.
+- Windows x64 probes `IsProcessorFeaturePresent(PF_AVX2_INSTRUCTIONS_AVAILABLE=40)` through PowerShell.
+- Apple Silicon validates the `NEON` AArch64 baseline for `darwin-arm64`.
+- The installer executes the CPU preflight before any installation directory creation or payload copy; unsupported/unknown feature combinations fail closed.
+- The native runtime provisioner performs the same check on the actual target host and records `cpuFeatureProbe.required/checked` in its runtime manifest.
+- The cross-target packager requires the recorded CPU evidence to match the approved target and embeds it into the package manifest.
+- Vitest CPU probe regression tests passed as part of the 31-file / 134-test suite. Real hosted Windows x64, macOS 15 Intel and macOS 15 Apple Silicon probes all passed in run `46144552901`.
+
+Physical Windows 11 and macOS 14/15 host acceptance remains open. Signing, trust-root pinning, signature enforcement and real Adobe Audition 25.x integration remain separate acceptance gates.
