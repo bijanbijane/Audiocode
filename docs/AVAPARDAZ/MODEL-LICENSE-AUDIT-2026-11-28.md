@@ -1,6 +1,6 @@
 # Koochik Model Provenance and License Audit — 2026-11-28
 
-**Status:** `PINNED TO VERIFIED APACHE-2.0 REVISION; PROVISIONER AND PACKAGER GATES IMPLEMENTED; CI VALIDATION PENDING`
+**Status:** `PINNED TO VERIFIED APACHE-2.0 REVISION; MODEL PROVISIONER CI PASS; CROSS-TARGET PACKAGE BUILD PENDING`
 
 ## 1. Model identity
 
@@ -34,7 +34,20 @@ The release pipeline therefore pins the exact license-corrected revision, not th
 - `scripts/build-release-installer.mjs` now requires and revalidates the model manifest and embeds README, LICENSE and model-manifest in the release payload; the package manifest records repository, revision, license and manifest hash.
 - The CI workflow includes a cached model-provisioning/license-verification job for PR #7.
 
-## 4. Remaining limitations
+## 4. CI evidence
+
+On feature head `f474e49f161e0996b15b1824df061d55b4546bb6`, the Koochik Model Provenance & Apache License Verification job completed successfully:
+
+- Provisioner status: `provisioned`
+- Repository/revision: `Reza2kn/Shenava-Koochik-v1.0-sherpa-onnx@158e40e9ccf166c3655b7f4cd2abbfc7bbc87f7a`
+- License ID: `apache-2.0`
+- Model: 458,819,249 bytes; SHA-256 `6a564b5541920ce1c37bbc91d22e4b3a6838648b9b327eb88997e8db1f90950d`
+- Tokens: 12,236 bytes; SHA-256 `8e192963f6e666dfa5721e5cbd4710bc1ef592460a45f08cefc94b2db16a6954`
+- Model manifest SHA-256: `6993e323d39f2f6344bc1f7724f4427d93619d2139e6f98f665254f4e11b0db5`
+
+The workflow now uploads this verified model directory and all three verified native runtime directories to a dependent cross-target package-build job. That full unsigned package build has not yet completed.
+
+## 5. Remaining limitations
 
 - The new Hugging Face download path and CI model-provisioning job have not yet completed on the latest PR head.
 - The model's license is Apache-2.0 at the pinned revision; downstream obligations (retain license and notices) are carried into the package. This is an engineering provenance record, not legal advice.
