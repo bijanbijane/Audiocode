@@ -52,7 +52,7 @@ const SHERPA_RUNTIME_ROOT = process.env.AVAPARDAZ_SHERPA_RUNTIME_DIR?.trim() || 
 const SHERPA_RIZEH_MODEL_DIR = process.env.AVAPARDAZ_SHERPA_RIZEH_MODEL_DIR?.trim() || path.join(AVAPARDAZ_USER_MODEL_ROOT, 'sherpa-onnx-nemo-ctc-fa-shenava-rizeh-v1.0-non-streaming-int8-2026-06-26');
 const SHAHAB_KOOCHIK_MODEL_DIR = process.env.AVAPARDAZ_SHERPA_KOOCHIK_MODEL_DIR?.trim() || path.join(AVAPARDAZ_USER_MODEL_ROOT, 'shahab-koochik-v1.0-sherpa-onnx');
 const SHERPA_BINARY_SOURCE = path.join(SHERPA_RUNTIME_ROOT, 'bin', RELEASE_TARGET.sherpaBinaryName);
-const SHERPA_ONNXRUNTIME_LIBRARY_SOURCE = path.join(SHERPA_RUNTIME_ROOT, 'lib', `python${SHERPA_PYTHON_VERSION}`, 'site-packages', 'sherpa_onnx', 'lib');
+const SHERPA_ONNXRUNTIME_LIBRARY_SOURCE = process.env.AVAPARDAZ_SHERPA_RUNTIME_LIB_DIR?.trim() || (fs.existsSync(path.join(SHERPA_RUNTIME_ROOT, 'lib')) ? path.join(SHERPA_RUNTIME_ROOT, 'lib') : path.join(SHERPA_RUNTIME_ROOT, 'lib', `python${SHERPA_PYTHON_VERSION}`, 'site-packages', 'sherpa_onnx', 'lib'));
 const SHAHAB_KOOCHIK_MODEL_BYTES = 458_819_249;
 const SHAHAB_KOOCHIK_MODEL_SHA256 = '6a564b5541920ce1c37bbc91d22e4b3a6838648b9b327eb88997e8db1f90950d';
 const SHAHAB_KOOCHIK_TOKENS_BYTES = 12_236;
@@ -198,23 +198,45 @@ const sherpaStandaloneBinary = path.join(payloadDir, 'runtime', 'sherpa-venv', '
 fs.copyFileSync(SHERPA_BINARY_SOURCE, sherpaStandaloneBinary);
 fs.chmodSync(sherpaStandaloneBinary, 0o755);
 
-const onnxRuntimeLibrarySource = path.join(SHERPA_ONNXRUNTIME_LIBRARY_SOURCE, RELEASE_TARGET.onnxRuntimeLibraryName);
-if (!fs.existsSync(onnxRuntimeLibrarySource) || !fs.statSync(onnxRuntimeLibrarySource).isFile()) {
-  throw new Error(`SHERPA_ONNXRUNTIME_LIBRARY_MISSING: ${onnxRuntimeLibrarySource}`);
+const availableRuntimeLibraries = fs.readdirSync(SHERPA_ONNXRUNTIME_LIBRARY_SOURCE, { withFileTypes: true })
+  .filter((entry) => entry.isFile() && /\\.(?:dll|dylib|so(?:\\.\\d+)*)$/i.test(entry.name))
+  .map((entry) => entry.name);
+const onnxRuntimeLibraryName = availableRuntimeLibraries.includes(RELEASE_TARGET.onnxRuntimeLibraryName)
+  ? RELEASE_TARGET.onnxRuntimeLibraryName
+  : RELEASE_TARGET.platform === 'darwin'
+    ? availableRuntimeLibraries.find((name) => /^libonnxruntime\\.\\d+(?:\\.\\d+)*\\.dylib$/.test(name))
+    : undefined;
+if (!onnxRuntimeLibraryName) {
+  throw new Error(`SHERPA_ONNXRUNTIME_LIBRARY_MISSING: expected ${RELEASE_TARGET.onnxRuntimeLibraryName} in ${SHERPA_ONNXRUNTIME_LIBRARY_SOURCE}`);
 }
+const onnxRuntimeLibrarySource = path.join(SHERPA_ONNXRUNTIME_LIBRARY_SOURCE, onnxRuntimeLibraryName);
 assertNativeBinaryArchitecture({
   filePath: onnxRuntimeLibrarySource,
   platform: RELEASE_TARGET.platform,
   arch: RELEASE_TARGET.arch,
 });
+if (availableRuntimeLibraries.length === 0) {
+  throw new Error(`SHERPA_RUNTIME_SHARED_LIBRARIES_MISSING: ${SHERPA_ONNXRUNTIME_LIBRARY_SOURCE}`);
+}
+for (const libraryName of availableRuntimeLibraries) {
+  assertNativeBinaryArchitecture({
+    filePath: path.join(SHERPA_ONNXRUNTIME_LIBRARY_SOURCE, libraryName),
+    platform: RELEASE_TARGET.platform,
+    arch: RELEASE_TARGET.arch,
+  });
+}
 const sherpaLibraryOutput = path.join(
   payloadDir, 'runtime', 'sherpa-venv', 'lib', `python${SHERPA_PYTHON_VERSION}`, 'site-packages', 'sherpa_onnx', 'lib',
 );
 fs.mkdirSync(sherpaLibraryOutput, { recursive: true });
-// The tested native CLI has one non-system dependency: libonnxruntime.
-// Copy only that library; Python extension modules and C API libraries are not runtime dependencies of this CLI.
-fs.copyFileSync(onnxRuntimeLibrarySource, path.join(sherpaLibraryOutput, path.basename(onnxRuntimeLibrarySource)));
-fs.chmodSync(path.join(sherpaLibraryOutput, path.basename(onnxRuntimeLibrarySource)), 0o755);
+// Preserve every shared library shipped beside the CLI; Windows and macOS can have
+// additional runtime dependencies beyond the ONNX Runtime library itself.
+for (const libraryName of availableRuntimeLibraries) {
+  const source = path.join(SHERPA_ONNXRUNTIME_LIBRARY_SOURCE, libraryName);
+  const destination = path.join(sherpaLibraryOutput, libraryName);
+  fs.copyFileSync(source, destination);
+  if (RELEASE_TARGET.platform !== 'win32') fs.chmodSync(destination, 0o755);
+}
 
 // 6. Copy the primary Persian Koochik model, and keep Rizeh as a lightweight fallback.
 const koochikSourceModel = path.join(SHAHAB_KOOCHIK_MODEL_DIR, 'model.onnx');
