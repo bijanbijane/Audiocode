@@ -578,3 +578,21 @@ R0 همچنان **IN PROGRESS** است. دامنه و مسیر تحویل مصو
 - HARDWARE-COMPATIBILITY-MATRIX.md — Section 3
 - R0-DISTRIBUTION-TRUST-AUDIT-2026-11-28.md — Section 8
 - PR #7 — target-specific packaging
+
+
+### ۲۰.۶. به‌روزرسانی پس از Native Runtime Qualification CI
+
+در commit برابر با 4959fdddb3f3a7205a800e80562de76b282aa2ec:
+
+- ماژول scripts/verify-native-binary.mjs معماری Mach-O و PE را از header واقعی می‌خواند؛ متغیر target به‌تنهایی مبنای اعتماد نیست.
+- بسته‌ساز هر دو باینری Sherpa و ONNX Runtime را پیش از کپی بررسی می‌کند و فایل ONNX مفقود را fail-closed رد می‌کند.
+- تست synthetic معماری در scripts/verify-native-binary.spec.ts قرار گرفته و در Vitest کشف می‌شود.
+- AVAPARDAZ Quality & Release Gates: SUCCESS.
+- Architecture Governance, Reliability & Release Quality Gate: SUCCESS.
+- Vitest: 26 فایل و 109 تست PASS؛ تست verifier چهار مورد PASS.
+- Unit/reliability/fault-injection، End-to-End Quality Gates، Production Build و Release Manifest Verification: PASS.
+- CI ابتدا دو ایراد را کشف کرد (nested template literal و type annotation) که پیش از این head اصلاح شدند.
+
+این شواهد، کد parser و تست‌های synthetic را روی runner لینوکس تأیید می‌کند؛ به معنی اجرای Runtimeهای واقعی macOS/Windows یا پذیرش Audition نیست. سه runtime واقعی هنوز تهیه/ساخته و روی میزبان مقصد تأیید نشده‌اند.
+
+وضعیت جاری: **CI PASS ON PR #7 HEAD 4959fdd؛ NATIVE PAYLOAD / PHYSICAL HOST ACCEPTANCE STILL OPEN.**
