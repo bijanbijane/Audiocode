@@ -1327,6 +1327,7 @@ export class AvapardazPackageUpdateManager {
           syncPathToDiskSync(path.dirname(targetDir), true);
         } else {
           fs.rmSync(targetDir, { recursive: true, force: true });
+          syncPathToDiskSync(path.dirname(targetDir), true);
         }
         const manifestBackupPath = path.join(backupDir, 'manifest.backup.json');
         if (fs.existsSync(manifestBackupPath)) {
@@ -1337,7 +1338,9 @@ export class AvapardazPackageUpdateManager {
         fs.rmSync(path.join(this.layout.tempDir, 'stage_' + entry.name), { recursive: true, force: true });
         fs.rmSync(displacedDir, { recursive: true, force: true });
         fs.rmSync(restoreDir, { recursive: true, force: true });
+        syncPathToDiskSync(path.dirname(targetDir), true);
         fs.rmSync(journalDir, { recursive: true, force: true });
+        syncPathToDiskSync(backupDir, true);
       } catch (error) {
         throw new Error('INTERRUPTED_UPDATE_RECOVERY_FAILED: ' + entry.name + ': ' + (error instanceof Error ? error.message : String(error)));
       }
@@ -1789,12 +1792,18 @@ export class AvapardazPackageUpdateManager {
     if (fs.existsSync(componentBackupDir)) {
       fs.rmSync(restoreDir, { recursive: true, force: true });
       copyDirectoryRecursiveSync(componentBackupDir, restoreDir);
+      syncDirectoryTreeToDiskSync(restoreDir);
       fs.rmSync(displacedDir, { recursive: true, force: true });
-      if (fs.existsSync(targetDir)) fs.renameSync(targetDir, displacedDir);
+      if (fs.existsSync(targetDir)) {
+        fs.renameSync(targetDir, displacedDir);
+        syncPathToDiskSync(path.dirname(targetDir), true);
+      }
       this.markActivationPhase(backupDir, 'OLD_MOVED');
       fs.renameSync(restoreDir, targetDir);
+      syncPathToDiskSync(path.dirname(targetDir), true);
     } else {
       fs.rmSync(targetDir, { recursive: true, force: true });
+      syncPathToDiskSync(path.dirname(targetDir), true);
       this.markActivationPhase(backupDir, 'OLD_MOVED');
     }
     this.markActivationPhase(backupDir, 'NEW_MOVED');
@@ -1802,7 +1811,9 @@ export class AvapardazPackageUpdateManager {
     this.markActivationPhase(backupDir, 'COMMITTED');
     fs.rmSync(displacedDir, { recursive: true, force: true });
     fs.rmSync(restoreDir, { recursive: true, force: true });
+    syncPathToDiskSync(path.dirname(targetDir), true);
     fs.rmSync(this.journalPath(backupDir), { recursive: true, force: true });
+    syncPathToDiskSync(backupDir, true);
     const restoredVersion = this.getComponentVersion(backedUpManifest, component);
     return {
       ok: true,
