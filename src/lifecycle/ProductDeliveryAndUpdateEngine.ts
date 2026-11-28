@@ -549,7 +549,12 @@ export class ComponentUpdateOrchestrator {
     this.transition(comp, 'UPDATE_DOWNLOADING', 'Downloading artifact.');
 
     // 5. Download & SHA-256 verification
-    const dl = await params.downloadAndVerifySha256();
+    let dl: { readonly ok: boolean; readonly actualSha256Hex?: string; readonly error?: string };
+    try {
+      dl = await params.downloadAndVerifySha256();
+    } catch (error) {
+      dl = { ok: false, error: `Download callback threw: ${error instanceof Error ? error.message : String(error)}` };
+    }
     if (!dl.ok) {
       const failed = this.transition(comp, 'UPDATE_FAILED', dl.error ?? 'Download failed.', {
         lastError: 'UPDATE_DOWNLOAD_FAILED',
@@ -567,7 +572,12 @@ export class ComponentUpdateOrchestrator {
     this.transition(comp, 'UPDATE_INTEGRITY_VERIFIED', 'SHA-256 checksum matched manifest.');
 
     // 6. Staging
-    const staged = await params.stageArtifact();
+    let staged: { readonly ok: boolean; readonly stagingDir?: string; readonly error?: string };
+    try {
+      staged = await params.stageArtifact();
+    } catch (error) {
+      staged = { ok: false, error: `Staging callback threw: ${error instanceof Error ? error.message : String(error)}` };
+    }
     if (!staged.ok || !staged.stagingDir) {
       const failed = this.transition(comp, 'UPDATE_FAILED', staged.error ?? 'Staging failed.', {
         lastError: 'UPDATE_STAGING_FAILED',
@@ -593,7 +603,12 @@ export class ComponentUpdateOrchestrator {
       previousKnownGoodVersion: prevKnownGood,
     });
 
-    const act = await params.activateArtifact(staged.stagingDir);
+    let act: { readonly ok: boolean; readonly error?: string };
+    try {
+      act = await params.activateArtifact(staged.stagingDir);
+    } catch (error) {
+      act = { ok: false, error: `Activation callback threw: ${error instanceof Error ? error.message : String(error)}` };
+    }
     if (!act.ok) {
       return this.performRollback(comp, prevKnownGood, act.error ?? 'Activation failed.', params.restorePreviousVersion);
     }
@@ -603,7 +618,12 @@ export class ComponentUpdateOrchestrator {
     });
     this.transition(comp, 'UPDATE_VERIFICATION_PENDING', 'Running post-update health verification.');
 
-    const health = await params.verifyPostActivationHealth();
+    let health: { readonly ok: boolean; readonly error?: string };
+    try {
+      health = await params.verifyPostActivationHealth();
+    } catch (error) {
+      health = { ok: false, error: `Post-activation health callback threw: ${error instanceof Error ? error.message : String(error)}` };
+    }
     if (!health.ok) {
       return this.performRollback(
         comp,
