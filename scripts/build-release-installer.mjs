@@ -20,6 +20,7 @@ import * as os from 'node:os';
 import { execSync } from 'node:child_process';
 import { assertRuntimeTargetMatches, resolveAvapardazReleaseTarget } from './release-targets.mjs';
 import { assertNativeBinaryArchitecture } from './verify-native-binary.mjs';
+import { SHAHAB_KOOCHIK_MODEL_PROVENANCE, verifyKoochikModelDirectory } from '../src/asr-core/KoochikModelProvenance.mjs';
 
 const REPO_ROOT = process.cwd();
 const RELEASE_TARGET = resolveAvapardazReleaseTarget({
@@ -57,10 +58,10 @@ const SHERPA_BINARY_SOURCE = path.join(SHERPA_RUNTIME_ROOT, 'bin', RELEASE_TARGE
 const DIRECT_SHERPA_RUNTIME_LIB_DIR = path.join(SHERPA_RUNTIME_ROOT, 'lib');
 const DIRECT_SHERPA_RUNTIME_HAS_LIBRARIES = fs.existsSync(DIRECT_SHERPA_RUNTIME_LIB_DIR) && fs.readdirSync(DIRECT_SHERPA_RUNTIME_LIB_DIR).some((name) => /\\.(?:dll|dylib|so(?:\\.\\d+)*)$/i.test(name));
 const SHERPA_ONNXRUNTIME_LIBRARY_SOURCE = process.env.AVAPARDAZ_SHERPA_RUNTIME_LIB_DIR?.trim() || (DIRECT_SHERPA_RUNTIME_HAS_LIBRARIES ? DIRECT_SHERPA_RUNTIME_LIB_DIR : path.join(SHERPA_RUNTIME_ROOT, 'lib', `python${SHERPA_PYTHON_VERSION}`, 'site-packages', 'sherpa_onnx', 'lib'));
-const SHAHAB_KOOCHIK_MODEL_BYTES = 458_819_249;
-const SHAHAB_KOOCHIK_MODEL_SHA256 = '6a564b5541920ce1c37bbc91d22e4b3a6838648b9b327eb88997e8db1f90950d';
-const SHAHAB_KOOCHIK_TOKENS_BYTES = 12_236;
-const SHAHAB_KOOCHIK_TOKENS_SHA256 = '8e192963f6e666dfa5721e5cbd4710bc1ef592460a45f08cefc94b2db16a6954';
+const SHAHAB_KOOCHIK_MODEL_BYTES = SHAHAB_KOOCHIK_MODEL_PROVENANCE.model.bytes;
+const SHAHAB_KOOCHIK_MODEL_SHA256 = SHAHAB_KOOCHIK_MODEL_PROVENANCE.model.sha256;
+const SHAHAB_KOOCHIK_TOKENS_BYTES = SHAHAB_KOOCHIK_MODEL_PROVENANCE.tokens.bytes;
+const SHAHAB_KOOCHIK_TOKENS_SHA256 = SHAHAB_KOOCHIK_MODEL_PROVENANCE.tokens.sha256;
 
 function computeSha256(filePath) {
   const hash = crypto.createHash('sha256');
@@ -274,24 +275,17 @@ for (const libraryName of availableRuntimeLibraries) {
   if (RELEASE_TARGET.platform !== 'win32') fs.chmodSync(destination, 0o755);
 }
 
-// 6. Copy the primary Persian Koochik model, and keep Rizeh as a lightweight fallback.
-const koochikSourceModel = path.join(SHAHAB_KOOCHIK_MODEL_DIR, 'model.onnx');
-const koochikSourceTokens = path.join(SHAHAB_KOOCHIK_MODEL_DIR, 'tokens.txt');
-const koochikSourceLicense = path.join(SHAHAB_KOOCHIK_MODEL_DIR, 'LICENSE');
-const koochikSourceReadme = path.join(SHAHAB_KOOCHIK_MODEL_DIR, 'README.md');
-for (const [source, expectedBytes, expectedHash, label] of [
-  [koochikSourceModel, SHAHAB_KOOCHIK_MODEL_BYTES, SHAHAB_KOOCHIK_MODEL_SHA256, 'KOOCHIK_ONNX'],
-  [koochikSourceTokens, SHAHAB_KOOCHIK_TOKENS_BYTES, SHAHAB_KOOCHIK_TOKENS_SHA256, 'KOOCHIK_TOKENS'],
-]) {
-  if (!fs.existsSync(source)) throw new Error(`${label}_MISSING: ${source}`);
-  const stat = fs.statSync(source);
-  if (!stat.isFile() || stat.size !== expectedBytes || computeSha256(source) !== expectedHash) {
-    throw new Error(`${label}_INTEGRITY_FAILED: ${source}`);
-  }
-}
+// 6. Copy the primary Persian Koochik model only from the pinned, Apache-licensed revision.
+const koochikProvenance = verifyKoochikModelDirectory(SHAHAB_KOOCHIK_MODEL_DIR);
+const koochikSourceModel = path.join(SHAHAB_KOOCHIK_MODEL_DIR, SHAHAB_KOOCHIK_MODEL_PROVENANCE.model.fileName);
+const koochikSourceTokens = path.join(SHAHAB_KOOCHIK_MODEL_DIR, SHAHAB_KOOCHIK_MODEL_PROVENANCE.tokens.fileName);
+const koochikSourceLicense = path.join(SHAHAB_KOOCHIK_MODEL_DIR, SHAHAB_KOOCHIK_MODEL_PROVENANCE.licenseFileName);
+const koochikSourceReadme = path.join(SHAHAB_KOOCHIK_MODEL_DIR, SHAHAB_KOOCHIK_MODEL_PROVENANCE.readmeFileName);
+const koochikSourceManifest = koochikProvenance.manifestPath;
 const koochikPayloadDir = path.join(payloadDir, 'models', 'shahab-koochik-v1.0-sherpa-onnx');
-for (const source of [koochikSourceModel, koochikSourceTokens, koochikSourceLicense, koochikSourceReadme]) {
-  if (fs.existsSync(source)) fs.copyFileSync(source, path.join(koochikPayloadDir, path.basename(source)));
+fs.mkdirSync(koochikPayloadDir, { recursive: true });
+for (const source of [koochikSourceModel, koochikSourceTokens, koochikSourceLicense, koochikSourceReadme, koochikSourceManifest]) {
+  fs.copyFileSync(source, path.join(koochikPayloadDir, path.basename(source)));
 }
 
 // Optional smaller Shenava-Rizeh fallback model; never block a Koochik-only release.
@@ -494,10 +488,21 @@ const packageManifest = {
     },
     primaryPersianAsrModel: {
       modelId: 'Reza2kn/Shenava-Koochik-v1.0-sherpa-onnx',
+      repository: SHAHAB_KOOCHIK_MODEL_PROVENANCE.repository,
+      revision: SHAHAB_KOOCHIK_MODEL_PROVENANCE.revision,
       architecture: 'NeMo FastConformer-CTC',
       quantization: 'FP32',
       language: 'fa',
       licenseSpdx: 'Apache-2.0',
+      licenseFile: {
+        path: 'payload/models/shahab-koochik-v1.0-sherpa-onnx/LICENSE',
+        sha256: computeSha256(koochikSourceLicense),
+      },
+      modelManifest: {
+        path: 'payload/models/shahab-koochik-v1.0-sherpa-onnx/model-manifest.json',
+        sha256: computeSha256(koochikSourceManifest),
+        sizeBytes: fs.statSync(koochikSourceManifest).size,
+      },
       modelOnnx: {
         path: 'payload/models/shahab-koochik-v1.0-sherpa-onnx/model.onnx',
         sha256: fs.existsSync(koochikModelPath) ? computeSha256(koochikModelPath) : null,
