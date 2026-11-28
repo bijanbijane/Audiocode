@@ -569,6 +569,15 @@ test('Scenarios 6, 7, 8, 9, 10, 11, 12, 13, 14, 15: Error handling, chunk order,
     assert.equal(missingOwnerFinalize.statusCode, 403);
     assert.equal(missingOwnerFinalize.code, 'TRANSFER_OWNER_MISMATCH');
     mgr.finalizeTransfer(s14B.transferId!, { ownerId: 'owner-B' });
+    const missingOwnerAcquire = mgr.acquireAudioSource(s14B.transferId!, { ownerId: '' });
+    assert.equal(missingOwnerAcquire.ok, false);
+    assert.equal(missingOwnerAcquire.statusCode, 403);
+    assert.equal(missingOwnerAcquire.code, 'TRANSFER_OWNER_MISMATCH');
+    const missingOwnerConsume = mgr.consumeFinalizedTransferAsWav(s14B.transferId!, { ownerId: '' });
+    assert.equal(missingOwnerConsume.ok, false);
+    assert.equal(missingOwnerConsume.statusCode, 403);
+    assert.equal(missingOwnerConsume.code, 'TRANSFER_OWNER_MISMATCH');
+    assert.equal(mgr.abortTransfer(s14B.transferId!, { ownerId: '' }), false);
     const srcB = mgr.acquireAudioSource(s14B.transferId!, { ownerId: 'owner-B' }).source!;
     await srcB.close('COMPLETED');
 
