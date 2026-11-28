@@ -336,3 +336,16 @@ Implementation commits:
 Validation on exact head `e53d2936b324ce1e83c2c6792075fa9ab0b8608b`: Architecture Governance run `46161082812` was queued at the time of this update. Do not treat this change as validated until the workflow completes successfully. The prior head `0bb931cf8b265a0dbfa7af41d69826c34c2c0321` passed AVAPARDAZ Levels 1–5 and all 10 Architecture Governance jobs, including all six unsigned package integrity checks.
 
 The adapter is the runtime/filesystem boundary: production startup wiring must supply an implementation that safely restores the previous active pointer when activation may have started, validates all paths against application-owned roots, and removes only abandoned artifacts. This code change does not itself prove physical-host startup wiring or production filesystem behavior.
+
+## 2026-11-28 — Journaled component activation (implementation, pending CI)
+
+AvapardazPackageUpdateManager no longer removes the active component directory before copying the staged payload. It prepares an activation directory beside the target (same parent/filesystem), records phase markers under the immutable backup slot, moves the previous target aside, and renames the prepared directory into place. A manager constructed during startup scans unfinished activation journals and restores the backed-up component plus installation manifest before proceeding. A committed marker prevents recovery from rolling back a completed update.
+
+A regression test simulates a crash after the new directory is visible but before the activation is committed, then constructs a fresh manager and verifies restoration of the previous companion payload and removal of the journal.
+
+**Limitations / acceptance criteria still open**
+- The two directory renames are not a single atomic exchange: there can be a short missing-target interval. Recovery is fail-closed on the next manager construction, not zero-downtime.
+- Journal phase markers are filesystem directory entries; explicit file/directory fsync durability is not implemented, so sudden power-loss durability is not yet established.
+- Startup recovery is currently wired to AvapardazPackageUpdateManager construction. Production bootstrap must instantiate it before any component consumer opens the installed paths; that wiring still needs an end-to-end host test.
+- Native filesystem semantics, permissions, antivirus/file-lock behavior (especially Windows), and actual process-kill recovery require platform-native validation.
+- CI for the new commit is pending; do not treat the regression test as passed until the relevant workflow reports success.
