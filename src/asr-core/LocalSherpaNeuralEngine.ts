@@ -172,10 +172,10 @@ const DEFAULT_MODEL_SEARCH_DIRS = [
 const DEFAULT_BINARY_CANDIDATES = [
   process.env.AVAPARDAZ_SHERPA_BIN,
   // Per-user isolated Python wheel installation (macOS Apple Silicon / Linux / Windows).
-  path.join(os.homedir(), '.avapardaz', 'runtime', 'sherpa-venv', 'bin', 'sherpa-onnx-offline'),
+  path.join(os.homedir(), '.avapardaz', 'runtime', 'sherpa-venv', 'bin', process.platform === 'win32' ? 'sherpa-onnx-offline.exe' : 'sherpa-onnx-offline'),
   path.join(os.homedir(), '.avapardaz', 'runtime', 'targets', `${process.platform}-${process.arch}`, 'bin', process.platform === 'win32' ? 'sherpa-onnx-offline.exe' : 'sherpa-onnx-offline'),
   path.join(AVAPARDAZ_HOME, 'runtime', 'targets', `${process.platform}-${process.arch}`, 'bin', process.platform === 'win32' ? 'sherpa-onnx-offline.exe' : 'sherpa-onnx-offline'),
-  path.join(AVAPARDAZ_HOME, 'runtime', 'sherpa-venv', 'bin', 'sherpa-onnx-offline'),
+  path.join(AVAPARDAZ_HOME, 'runtime', 'sherpa-venv', 'bin', process.platform === 'win32' ? 'sherpa-onnx-offline.exe' : 'sherpa-onnx-offline'),
   path.join(os.homedir(), '.avapardaz', 'runtime', 'sherpa-venv', 'Scripts', 'sherpa-onnx-offline.exe'),
   path.join(os.homedir(), '.avapardaz', 'runtime', 'bin', 'sherpa-onnx-offline'),
   path.join(AVAPARDAZ_HOME, 'runtime', 'bin', process.platform === 'win32' ? 'sherpa-onnx-offline.exe' : 'sherpa-onnx-offline'),
