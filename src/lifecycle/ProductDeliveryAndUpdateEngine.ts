@@ -262,14 +262,71 @@ const LEGAL_UPDATE_TRANSITIONS: Readonly<Record<ComponentUpdateState, readonly C
   UPDATE_ROLLED_BACK: ['UPDATE_DISCOVERED'],
 };
 
-export interface UpdateManifest {
+export interface UpdateManifestPayload {
   readonly component: ReleaseComponentKind;
   readonly version: string;
   readonly minCompatibleIpcProtocol?: string;
   readonly sha256Hex: string;
   readonly sizeBytes: number;
-  readonly signatureStatus: 'SIGNATURE_VERIFIED' | 'UNSIGNED_CHECKSUM_ONLY' | 'SIGNATURE_INVALID';
   readonly releaseNotes?: string;
+}
+
+export interface UpdateManifestSignature {
+  readonly algorithm: 'Ed25519';
+  readonly keyId: string;
+  readonly signatureBase64: string;
+}
+
+export interface UpdateManifest extends UpdateManifestPayload {
+  readonly signature: UpdateManifestSignature;
+}
+
+/** Stable, versioned field order: the signature binds update identity and artifact digest. */
+export function canonicalizeUpdateManifest(manifest: UpdateManifestPayload): string {
+  return JSON.stringify({
+    schemaVersion: '1.0.0',
+    component: manifest.component,
+    version: manifest.version,
+    minCompatibleIpcProtocol: manifest.minCompatibleIpcProtocol ?? null,
+    sha256Hex: manifest.sha256Hex.toLowerCase(),
+    sizeBytes: manifest.sizeBytes,
+    releaseNotes: manifest.releaseNotes ?? null,
+  });
+}
+
+function decodeUpdateSignatureBase64(value: string): Uint8Array | null {
+  if (!/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(value)) return null;
+  try {
+    const decoded = atob(value);
+    return Uint8Array.from(decoded, (character) => character.charCodeAt(0));
+  } catch {
+    return null;
+  }
+}
+
+async function verifyUpdateManifestSignature(
+  manifest: UpdateManifest,
+  trustedSigningKeys: ReadonlyMap<string, Uint8Array>,
+): Promise<boolean> {
+  if (
+    manifest.signature.algorithm !== 'Ed25519' ||
+    !/^[A-Za-z0-9._-]{1,64}$/.test(manifest.signature.keyId)
+  ) return false;
+
+  const publicKeyBytes = trustedSigningKeys.get(manifest.signature.keyId);
+  const signatureBytes = decodeUpdateSignatureBase64(manifest.signature.signatureBase64);
+  const subtle = globalThis.crypto?.subtle;
+  if (!publicKeyBytes || publicKeyBytes.length !== 32 || !signatureBytes || signatureBytes.length !== 64 || !subtle) {
+    return false;
+  }
+
+  try {
+    const publicKey = await subtle.importKey('raw', publicKeyBytes, { name: 'Ed25519' }, false, ['verify']);
+    const payload = new TextEncoder().encode(canonicalizeUpdateManifest(manifest));
+    return await subtle.verify({ name: 'Ed25519' }, publicKey, signatureBytes, payload);
+  } catch {
+    return false;
+  }
 }
 
 export interface ComponentSlotRecord {
@@ -286,8 +343,20 @@ export interface ComponentSlotRecord {
 export class ComponentUpdateOrchestrator {
   private readonly slots = new Map<ReleaseComponentKind, ComponentSlotRecord>();
   private readonly activePinnedJobs = new Set<string>();
+  private readonly trustedSigningKeys: ReadonlyMap<string, Uint8Array>;
 
-  constructor(initialVersions: Readonly<Record<ReleaseComponentKind, string>>) {
+  constructor(
+    initialVersions: Readonly<Record<ReleaseComponentKind, string>>,
+    trustedSigningKeys: Readonly<Record<string, Uint8Array>> = {},
+  ) {
+    const pinnedKeys = new Map<string, Uint8Array>();
+    for (const [keyId, publicKeyBytes] of Object.entries(trustedSigningKeys)) {
+      if (!/^[A-Za-z0-9._-]{1,64}$/.test(keyId) || publicKeyBytes.length !== 32) {
+        throw new Error('INVALID_RELEASE_TRUST_ROOT');
+      }
+      pinnedKeys.set(keyId, new Uint8Array(publicKeyBytes));
+    }
+    this.trustedSigningKeys = pinnedKeys;
     for (const [comp, ver] of Object.entries(initialVersions) as [ReleaseComponentKind, string][]) {
       this.slots.set(comp, {
         component: comp,
@@ -343,7 +412,6 @@ export class ComponentUpdateOrchestrator {
    */
   public async executeSafeUpdate(params: {
     readonly manifest: UpdateManifest;
-    readonly requireCryptographicSignature?: boolean;
     readonly availableDiskBytes: number;
     readonly downloadAndVerifySha256: () => Promise<{ readonly ok: boolean; readonly actualSha256Hex?: string; readonly error?: string }>;
     readonly stageArtifact: () => Promise<{ readonly ok: boolean; readonly stagingDir?: string; readonly error?: string }>;
@@ -361,7 +429,7 @@ export class ComponentUpdateOrchestrator {
     });
 
     // 1. Metadata validation
-    if (!parseSemver(manifest.version) || !/^[a-f0-9]{64}$/i.test(manifest.sha256Hex) || manifest.sizeBytes <= 0) {
+    if (!parseSemver(manifest.version) || !/^[a-f0-9]{64}$/i.test(manifest.sha256Hex) || !Number.isSafeInteger(manifest.sizeBytes) || manifest.sizeBytes <= 0) {
       const failed = this.transition(comp, 'UPDATE_FAILED', 'Invalid update manifest metadata.', {
         lastError: 'INVALID_UPDATE_MANIFEST',
       });
@@ -384,17 +452,16 @@ export class ComponentUpdateOrchestrator {
     }
     this.transition(comp, 'UPDATE_COMPATIBILITY_CHECKED', 'Component compatibility verified.');
 
-    // 3. Authenticity check (NEVER accept INVALID signature; enforce signature when required)
-    if (
-      manifest.signatureStatus === 'SIGNATURE_INVALID' ||
-      (params.requireCryptographicSignature && manifest.signatureStatus !== 'SIGNATURE_VERIFIED')
-    ) {
-      const failed = this.transition(comp, 'UPDATE_FAILED', `Authenticity rejected (${manifest.signatureStatus}).`, {
+    // 3. Authenticity check: cryptographic Ed25519 verification against constructor-pinned keys is mandatory.
+    // Caller-supplied status strings are deliberately not part of the manifest contract.
+    const signatureVerified = await verifyUpdateManifestSignature(manifest, this.trustedSigningKeys);
+    if (!signatureVerified) {
+      const failed = this.transition(comp, 'UPDATE_FAILED', 'Release manifest signature is missing, untrusted, malformed, or invalid.', {
         lastError: 'UPDATE_AUTHENTICITY_FAILED',
       });
       return { ok: false, slot: failed, rolledBack: false };
     }
-    this.transition(comp, 'UPDATE_AUTHENTICITY_VERIFIED', `Authenticity checked (${manifest.signatureStatus}).`);
+    this.transition(comp, 'UPDATE_AUTHENTICITY_VERIFIED', `Ed25519 signature verified with trusted key ${manifest.signature.keyId}.`);
 
     // 4. Storage preflight (require 2x size headroom for staging + active preservation)
     if (params.availableDiskBytes < manifest.sizeBytes * 2) {
