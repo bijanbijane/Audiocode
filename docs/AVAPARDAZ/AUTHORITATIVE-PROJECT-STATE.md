@@ -662,21 +662,21 @@ Latest fully validated full native/package CI head: `337844e6b0b00228dbd1d6781e3
 - خطای assertion مربوط به package model provenance اصلاح شد: مدل اصلی زیر `packageManifest.components.primaryPersianAsrModel` قرار دارد، نه root object.
 - Job ماتریس تکراری در Workflow دیگر حذف شد تا provisioning مجدد و غیرضروری رخ ندهد.
 
-### ۲۱.۲. شواهد CI روی commit 337844e
+### ۲۱.۲. شواهد CI روی commit b60afa9
 
 | Gate | نتیجه |
 |---|---|
 | AVAPARDAZ Levels 1–5 | PASS |
 | Architecture Governance / TypeScript / circular dependency / SBOM / license | PASS |
-| Vitest | 30 files / 130 tests PASS |
+| Vitest | 31 files / 134 tests PASS (شامل CPU preflight regression tests) |
 | Node reliability / fault-injection | 32 tests PASS |
 | Native binary format parser | Ubuntu, macOS 15 arm64, macOS 15 Intel, Windows x64 — PASS |
-| Sherpa runtime provisioning | darwin-arm64, darwin-x64, win32-x64 — PASS |
+| Sherpa runtime provisioning + CPU probes | darwin-arm64 (NEON), darwin-x64 (AVX2), win32-x64 (AVX2) — PASS |
 | Koochik immutable revision / SHA-256 / Apache license | PASS |
 | Cross-target unsigned Installer + Update build | PASS — شش tarball |
-| Tarball bytes + SHA-256 + embedded model/runtime provenance | PASS برای هر سه target |
+| Six tarball bytes/SHA-256 + embedded manifest + installer syntax + model/runtime/CPU provenance | PASS برای هر سه target |
 
-Artifactهای runtime برای هر سه هدف و artifact نهایی manifest-only با شناسه `15262947641` در GitHub Actions ذخیره شدند. بسته‌های unsigned در CI منتشر نشدند.
+Artifactهای runtime برای هر سه هدف و artifact نهایی manifest-only با شناسه `15263232073` در GitHub Actions ذخیره شدند. Generated `install.mjs`, `uninstall.mjs`, و `cpu-feature-preflight.mjs` با `node --check` بررسی شدند؛ macOS shell wrapper نیز `bash -n` را گذراند. بسته‌های unsigned در CI منتشر نشدند.
 
 ### ۲۱.۳. محدودیت‌های باقی‌مانده
 
@@ -685,11 +685,48 @@ Artifactهای runtime برای هر سه هدف و artifact نهایی manifest
 - Adobe Audition 25.x، CEP registration و Companion lifecycle هنوز روی میزبان واقعی تست نشده‌اند.
 - Installer امضا نشده است؛ trust-root pinning، signature verification و update signature enforcement هنوز باز هستند.
 - نصب تمیز، repair، upgrade، rollback و uninstall روی میزبان‌های فیزیکی هنوز اجرا نشده‌اند.
-- CPUID enforcement برای AVX2 در Installer هنوز پیاده‌سازی نشده است؛ target metadata فقط حداقل CPU را اعلام می‌کند.
+- CPU feature preflight اکنون در Installer اجرا می‌شود: Intel macOS از `sysctl hw.optional.avx2_0`، Windows x64 از `IsProcessorFeaturePresent(40)` و Apple Silicon از NEON baseline استفاده می‌کند. Runtime provisioner نتیجه واقعی host را در manifest ثبت می‌کند و packager آن را الزام می‌کند.
 
 ### ۲۱.۴. وضعیت Git
 
 - PR #7: OPEN / DRAFT / NOT MERGED.
-- Latest branch head در زمان این ثبت: `54a1da21778dc0dd852840c2b5662104a82c5664`.
+- Latest fully validated branch head در زمان این ثبت: `b60afa999b7a0892c81742ac8710b893cdbac4ba`.
 - `main` بدون تغییر مانده است.
 - R6 hosted packaging/integrity gates: **PASS**؛ internal distribution trust و physical acceptance: **OPEN**.
+
+
+---
+
+## ۲۲. R6-WP03 — CPU Feature Floor Enforcement و Installer Artifact Smoke (2026-11-28)
+
+### ۲۲.۱. Implementation
+
+- `scripts/cpu-feature-preflight.mjs` یک helper مستقل و fail-closed برای CPU requirement است.
+- Generated installer این helper را همراه خود بسته‌بندی می‌کند و پیش از ساخت مسیر نصب یا کپی payload، target CPU feature را بررسی می‌کند.
+- Runtime provisioner فقط روی host هم‌معماری اجرا می‌شود، CPU feature را probe می‌کند و `cpuFeatureProbe.required/checked` را در `runtime-manifest.json` ثبت می‌کند.
+- Packager runtime manifest را رد می‌کند اگر CPU probe مفقود یا با target registry نامنطبق باشد؛ package manifest نیز نتیجه probe را نگه می‌دارد.
+- Regression tests برای NEON baseline، macOS Intel AVX2، Windows AVX2، feature ناشناخته و target نامعتبر اضافه شدند.
+
+### ۲۲.۲. CI Evidence
+
+Architecture Governance run `46144552901` روی commit `b60afa999b7a0892c81742ac8710b893cdbac4ba` با نتیجه SUCCESS پایان یافت:
+
+- TypeScript compilation: PASS.
+- Vitest: 31 files / 134 tests PASS.
+- Node reliability/fault-injection: 32 tests PASS.
+- Native parser tests: Ubuntu، macOS 15 arm64، macOS 15 Intel، Windows x64 — PASS.
+- Actual host CPU probes: Windows AVX2، macOS Intel AVX2، Apple Silicon NEON — PASS.
+- Runtime provisioning، archive hashes، binary/library architecture و Sherpa `--help` smoke: هر سه target PASS.
+- Cross-target Installer + Update build: شش unsigned tarball PASS.
+- Embedded package manifest، installer/uninstaller/CPU helper syntax، macOS shell wrapper syntax، tarball byte length/SHA-256 و model/runtime/CPU provenance: PASS.
+
+Artifact manifest ID: `15263232073`. هیچ tarball امضاشده یا production release منتشر نشد.
+
+### ۲۲.۳. Remaining Acceptance
+
+- Physical Windows 11 و macOS 14/15 acceptance.
+- Adobe Audition 25.x CEP/Companion integration.
+- Code signing، pinned trust root و signed update enforcement.
+- Clean install، repair، upgrade، rollback و uninstall روی میزبان واقعی.
+
+R0/R6 hosted packaging و CPU gates: **PASS**؛ release trust و physical acceptance: **OPEN**.
