@@ -1136,7 +1136,73 @@ export interface UpdateExecutionReport {
  * Never uses a cloud update server; operates deterministically on local signed/checksummed update packages.
  */
 export class AvapardazPackageUpdateManager {
-  constructor(private readonly layout: InstalledDirectoryLayout) {}
+  constructor(private readonly layout: InstalledDirectoryLayout) {
+    this.recoverInterruptedUpdates();
+  }
+
+  private journalPath(backupDir: string): string {
+    return path.join(backupDir, 'activation-journal');
+  }
+
+  private markActivationPhase(backupDir: string, phase: 'PREPARED' | 'OLD_MOVED' | 'NEW_MOVED' | 'COMMITTED'): void {
+    const journalDir = this.journalPath(backupDir);
+    fs.mkdirSync(journalDir, { recursive: true, mode: 0o700 });
+    const marker = path.join(journalDir, phase);
+    if (!fs.existsSync(marker)) fs.mkdirSync(marker, { mode: 0o700 });
+  }
+
+  /** Restore any update whose activation did not reach its committed marker. */
+  public recoverInterruptedUpdates(): void {
+    if (!fs.existsSync(this.layout.backupsDir)) return;
+    for (const entry of fs.readdirSync(this.layout.backupsDir, { withFileTypes: true })) {
+      if (!entry.isDirectory() || !entry.name.startsWith('bkp_')) continue;
+      const backupDir = path.join(this.layout.backupsDir, entry.name);
+      const journalDir = this.journalPath(backupDir);
+      if (!fs.existsSync(journalDir)) continue;
+      if (fs.existsSync(path.join(journalDir, 'COMMITTED'))) {
+        fs.rmSync(journalDir, { recursive: true, force: true });
+        continue;
+      }
+      const component = this.componentFromBackupId(entry.name);
+      const targetDir = this.resolveComponentTargetDir(component);
+      const componentBackupDir = path.join(backupDir, 'component');
+      const token = entry.name.replace(/[^a-zA-Z0-9_-]/g, '_');
+      const sibling = (suffix: string) => path.join(path.dirname(targetDir), '.' + path.basename(targetDir) + '.' + token + suffix);
+      const stageDir = sibling('.stage');
+      const displacedDir = sibling('.displaced');
+      const restoreDir = sibling('.restore');
+      try {
+        if (fs.existsSync(componentBackupDir)) {
+          fs.rmSync(restoreDir, { recursive: true, force: true });
+          copyDirectoryRecursiveSync(componentBackupDir, restoreDir);
+          fs.rmSync(displacedDir, { recursive: true, force: true });
+          if (fs.existsSync(targetDir)) fs.renameSync(targetDir, displacedDir);
+          fs.renameSync(restoreDir, targetDir);
+        } else {
+          fs.rmSync(targetDir, { recursive: true, force: true });
+        }
+        const manifestBackupPath = path.join(backupDir, 'manifest.backup.json');
+        if (fs.existsSync(manifestBackupPath)) {
+          const priorManifest = JSON.parse(fs.readFileSync(manifestBackupPath, 'utf8')) as InstallationConfigManifest;
+          this.writeManifest(priorManifest);
+        }
+        fs.rmSync(stageDir, { recursive: true, force: true });
+        fs.rmSync(displacedDir, { recursive: true, force: true });
+        fs.rmSync(restoreDir, { recursive: true, force: true });
+        fs.rmSync(journalDir, { recursive: true, force: true });
+      } catch (error) {
+        throw new Error('INTERRUPTED_UPDATE_RECOVERY_FAILED: ' + entry.name + ': ' + (error instanceof Error ? error.message : String(error)));
+      }
+    }
+  }
+
+  private componentFromBackupId(backupId: string): UpdatablePackageComponent {
+    if (backupId.includes('_cep_plugin_')) return 'CEP_PLUGIN';
+    if (backupId.includes('_companion_')) return 'COMPANION';
+    if (backupId.includes('_native_runtime_')) return 'NATIVE_RUNTIME';
+    if (backupId.includes('_asr_model_')) return 'ASR_MODEL';
+    return 'APPLICATION';
+  }
 
   private resolveComponentTargetDir(component: UpdatablePackageComponent): string {
     switch (component) {
@@ -1385,14 +1451,22 @@ export class AvapardazPackageUpdateManager {
         'utf8',
       );
 
-      // 7. Atomic Installation
+      // 7. Journaled activation: prepare beside target to keep rename operations on one volume.
+      const siblingToken = backupId.replace(/[^a-zA-Z0-9_-]/g, '_');
+      const activationStageDir = path.join(path.dirname(targetDir), '.' + path.basename(targetDir) + '.' + siblingToken + '.stage');
+      const displacedDir = path.join(path.dirname(targetDir), '.' + path.basename(targetDir) + '.' + siblingToken + '.displaced');
+      fs.mkdirSync(path.dirname(targetDir), { recursive: true, mode: 0o755 });
+      fs.rmSync(activationStageDir, { recursive: true, force: true });
+      copyDirectoryRecursiveSync(stageDir, activationStageDir);
+      this.markActivationPhase(backupDir, 'PREPARED');
       if (params.simulateInterruptDuringActivation) {
         throw new Error('SIMULATED_INTERRUPTION_DURING_UPDATE_ACTIVATION');
       }
-
-      fs.rmSync(targetDir, { recursive: true, force: true });
-      fs.mkdirSync(path.dirname(targetDir), { recursive: true, mode: 0o755 });
-      copyDirectoryRecursiveSync(stageDir, targetDir);
+      fs.rmSync(displacedDir, { recursive: true, force: true });
+      if (fs.existsSync(targetDir)) fs.renameSync(targetDir, displacedDir);
+      this.markActivationPhase(backupDir, 'OLD_MOVED');
+      fs.renameSync(activationStageDir, targetDir);
+      this.markActivationPhase(backupDir, 'NEW_MOVED');
 
       // Ensure executable bits on binaries after update
       if (pkg.component === 'NATIVE_RUNTIME') {
@@ -1425,6 +1499,9 @@ export class AvapardazPackageUpdateManager {
         );
       }
 
+      this.markActivationPhase(backupDir, 'COMMITTED');
+      fs.rmSync(this.journalPath(backupDir), { recursive: true, force: true });
+      fs.rmSync(displacedDir, { recursive: true, force: true });
       return {
         ok: true,
         rolledBack: false,
@@ -1479,11 +1556,7 @@ export class AvapardazPackageUpdateManager {
       fs.readFileSync(manifestBackupPath, 'utf8'),
     ) as InstallationConfigManifest;
 
-    let component: UpdatablePackageComponent = 'APPLICATION';
-    if (backupId.includes('_cep_plugin_')) component = 'CEP_PLUGIN';
-    else if (backupId.includes('_companion_')) component = 'COMPANION';
-    else if (backupId.includes('_native_runtime_')) component = 'NATIVE_RUNTIME';
-    else if (backupId.includes('_asr_model_')) component = 'ASR_MODEL';
+    const component = this.componentFromBackupId(backupId);
 
     const targetDir = this.resolveComponentTargetDir(component);
     if (fs.existsSync(componentBackupDir)) {
