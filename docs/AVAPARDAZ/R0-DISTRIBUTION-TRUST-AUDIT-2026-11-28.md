@@ -360,3 +360,41 @@ A security review found that public `rollbackToBackup(backupId)` joined the call
 Rollback now validates the backup ID against the known component namespace and a restricted identifier alphabet, resolves it under the managed backup root, and rejects any path whose resolved parent is not exactly that root. Recovery scanning uses the same validated resolver; unknown component prefixes fail closed instead of defaulting to APPLICATION. A regression test creates an out-of-root backup-shaped directory and confirms that `../outside-backup` is rejected without copying its marker into the application directory.
 
 Commits: `4cd5e843f20126d48747ae3b88f8fdf9135eeb59` (path confinement) and `f23fd89748fb9b9868f35deea13dcb1d615f6f5b` (regression test).
+
+## 2026-11-28 — Serialized update, rollback, and startup recovery
+
+### Finding
+
+The update manager previously allowed independent manager instances to run update, rollback, and startup journal recovery concurrently. Those operations share component directories, backup slots, and the installation manifest, so overlapping operations could produce mixed component/manifest state or interfere with activation staging.
+
+### Implementation
+
+- Added an installation-wide cross-process mutex backed by atomic lock-directory creation under the managed backup root.
+- Recorded PID, hostname, acquisition time, and a random ownership token in the lock lease.
+- A contender fails closed while a same-host owner PID is alive, while an owner is remote/unknown, or while stale-lock recovery is already in progress.
+- A provably dead same-host PID can be reclaimed under a separate recovery mutex; an owner file that has not yet appeared is only considered stale after a 30-second creation window.
+- Lock release verifies the random ownership token, so one manager does not remove another manager's lease.
+- Wrapped update, manual rollback, and interrupted-update recovery in the same lock.
+- Automatic rollback inside an update calls the lock-held internal rollback path, avoiding recursive lock acquisition.
+- Lock contention returns `UPDATE_OPERATION_LOCKED` for update and a non-mutating failure for manual rollback.
+
+### Regression coverage
+
+- A live same-host PID lease blocks manager startup/recovery.
+- A dead same-host PID lease is reclaimed before recovery proceeds.
+- A competing manager's update attempt from inside the active update health-check callback is rejected with `UPDATE_OPERATION_LOCKED`; the outer update can then perform its normal automatic rollback.
+
+### Commits
+
+- `c48ac63a875f0e54b359f99a6e5af7c04e5f7395` — cross-process operation mutex and operation serialization.
+- `c3b2aeb2613c04ea919b1e3eee6fd7caa413466` — rollback method syntax correction.
+- `ca5b1b6c49426a6b32b34acb40f727e5a8dc56e6` — live/stale lock and competing-manager regression tests.
+- `6f4e02cc3ff0067cb01538a603f053a7216e03f0` — cleanup if lock-owner lease creation fails.
+
+### Validation and limitations
+
+CI for the lock implementation is running on the branch; do not treat it as validated until both required workflows complete successfully on the exact latest head. Local tests were not run because this execution environment has no mounted repository checkout.
+
+The lock is intentionally fail-closed for remote/unknown owners and malformed owner records. A crash during stale-lock recovery can leave the separate recovery mutex behind and require manual inspection/removal; automatic recovery of that second-level mutex is not implemented. The 30-second missing-owner grace period handles a crash between atomic directory creation and owner-file creation, but this is not a substitute for host-level process-kill testing.
+
+The lock serializes updater operations but does not yet establish power-loss durability. Explicit file and parent-directory fsync, production bootstrap ordering, and physical Windows/macOS process-kill validation remain open. PR #7 remains OPEN / DRAFT / NOT MERGED; `main` and Production are unchanged.
