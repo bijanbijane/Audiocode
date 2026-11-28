@@ -747,3 +747,64 @@ The separate [R0 Distribution, Installation & Trust Audit](./R0-DISTRIBUTION-TRU
 ### 16.5. Next engineering action
 
 Proceed with the remaining evidence-backed R0 work that does not require owner decisions: review the current PR's ownership/IPC changes and CI coverage, reconcile all five prerequisite dispositions, and prepare the exact platform and distribution decision record for owner review. Do not claim R0 acceptance or begin irreversible/host-specific installation changes before the required decisions and test access exist.
+
+
+## 17. PR security review, scope check, and final CI evidence (2026-11-28)
+
+### 17.1. CI on the R0 audit update commit
+
+All four workflows completed with **SUCCESS** on the documentation update commit `3818431e5b18169a335eed5b54ab56e2e7f9b916`:
+
+- [AVAPARDAZ Quality & Release Gates — run 46131619651](https://github.com/bijanbijane/Audiocode/actions/runs/46131619651): SUCCESS; Level 1, Levels 2–4, and Level 5 jobs all succeeded.
+- [Architecture Governance, Reliability & Release Quality Gate — run 46131619653](https://github.com/bijanbijane/Audiocode/actions/runs/46131619653): SUCCESS.
+- [Separated Web and API Container Build — run 46131619661](https://github.com/bijanbijane/Audiocode/actions/runs/46131619661): SUCCESS.
+- [Standalone Platform API Readiness — run 46131619670](https://github.com/bijanbijane/Audiocode/actions/runs/46131619670): SUCCESS.
+
+This supersedes the "queued at last check" status in Section 16.5. The successful runs validate the exact commit and the commands/jobs reported by those workflows; they do not establish live macOS, Windows, or Adobe Audition host acceptance.
+
+### 17.2. Targeted static review of owner-scoped Companion IPC
+
+The following production paths were inspected on PR #6 head:
+
+- `CompanionIpcBridge.ts`: validates the handshake identity format, binds the IPC session to a host-scoped owner identifier, authenticates each request with the per-process HMAC token, checks replay/expiry, and constrains execution mode against the host identity.
+- `LocalCompanionService.ts`: derives owner identity from the authenticated IPC session and propagates it to transcription submission, job status/list/reconnect/cancel, staged upload, and audio transfer operations.
+- `CompanionAudioTransfer.ts`: requires owner identity for transfer initialization, chunk append, finalize, acquire, consume, abort, and lifecycle/history inspection; closed transfer history retains owner association.
+- `ProcessingJobManager.ts`: namespaces idempotency by owner and filters job lookup/list/cancel by the requested owner.
+- `AvapardazBackendRouter.ts`: validates the Companion request boundary and propagates authenticated owner identity to job submission and accessors.
+
+The PR adds regression coverage for cross-session job status/reconnect/cancel denial, same-installation CEP reconnect, Web-vs-CEP result DTO separation, transfer lifecycle/history isolation, staged-upload owner checks, and owner-namespaced idempotency. The current PR-head CI runs listed in Sections 16–17 pass these included suites.
+
+**Review limitation:** this was a targeted source review of the owner/IPC paths and the changed-file inventory, not an exhaustive security audit of all 541+ repository consumers or a live multi-process host test.
+
+### 17.3. Owner identity threat-model question
+
+CEP creates a 256-bit random `client_instance_id` and persists it in extension `localStorage`; the value is supplied during handshake and becomes the stable owner identity for reconnecting across IPC sessions. The service validates its 64-hex format and separately authenticates subsequent IPC requests with a session HMAC token.
+
+The stable identifier is therefore a bearer-style reattachment identity, not an independently verified public-key identity. The reviewed code does not demonstrate a separate proof-of-possession challenge for the persisted identifier. Browser-origin/Host protections mitigate cross-origin web attacks, but the threat model must explicitly state whether a malicious process running as the same OS user and able to read the CEP profile/localStorage is in scope.
+
+Disposition: **THREAT-MODEL QUESTION / NOT A CONFIRMED REMOTE EXPLOIT**. Do not describe the client identifier alone as cryptographic authentication. If same-user local-process compromise is in scope, design a protected per-install credential/proof mechanism and add adversarial tests before claiming that boundary closed.
+
+### 17.4. PR scope and reviewability
+
+PR #6 currently changes **45 files** with **3,183 additions and 251 deletions**. Alongside the R0 Audition/Companion/Core work, its changed-file inventory includes Platform API/backend concerns such as billing/invoice ownership, device-seat enforcement, live-ASR gateway, database migration, cache, and backend container services.
+
+Some changes are security hardening, but the approved delivery roadmap is Audition + Native Companion + shared Core for an internal release; payment/commercial delivery is outside the current scope. This creates a **PR scope/reviewability risk**, not a claim that those security fixes are incorrect.
+
+Before merge, each backend/platform change should be tied to a required shared-core security boundary or moved to a separately reviewable PR. Do not discard or rewrite existing branch work automatically. PR #6 remains OPEN / DRAFT / NOT MERGED.
+
+### 17.5. Updated R0 status
+
+- Remote CI execution: **PASS on PR head `3818431e...`** (four workflows).
+- Targeted owner-scoped IPC source review: **REVIEWED; no direct cross-owner access path identified in the inspected routes**.
+- Same-user local-process identity threat: **OPEN / THREAT-MODEL DECISION REQUIRED**.
+- PR scope alignment: **OPEN / REVIEW REQUIRED**.
+- Platform matrix and internal install/trust decisions: **OPEN / OWNER DECISION REQUIRED**.
+- Physical macOS + Windows + live Audition acceptance: **NOT AVAILABLE / NOT RUN**.
+- R0 overall: **IN PROGRESS — NOT ACCEPTED**.
+
+### 17.6. Next action
+
+1. Prepare owner decisions for exact platform matrix and internal installation/trust behavior.
+2. Reconcile PR #6's backend/platform changes against the approved Audition-only internal scope before merge.
+3. Decide whether same-user local processes are inside the Companion threat model; if yes, design and test stronger per-install proof of possession.
+4. Obtain authorized macOS and Windows hosts with real Adobe Audition for live acceptance.
