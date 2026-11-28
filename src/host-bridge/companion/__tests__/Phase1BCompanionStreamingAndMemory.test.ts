@@ -234,7 +234,8 @@ test('Scenario 2: 48 kHz Stereo file — 100% channel separation (L vs R) and ze
       expectedBytes: rawBuf.byteLength,
       expectedFrames: frameCount,
       totalChunks: 1,
-    });
+    
+      ownerId: 'test-owner',});
     assert.equal(init.ok, true);
     const transferId = init.transferId!;
 
@@ -242,11 +243,12 @@ test('Scenario 2: 48 kHz Stereo file — 100% channel separation (L vs R) and ze
       transferId,
       chunkIndex: 0,
       chunkBase64: rawBuf.toString('base64'),
-    });
+    
+      ownerId: 'test-owner',});
     assert.equal(app.ok, true);
-    assert.equal(mgr.finalizeTransfer(transferId).ok, true);
+    assert.equal(mgr.finalizeTransfer(transferId, { ownerId: 'test-owner' }).ok, true);
 
-    const source = mgr.acquireAudioSource(transferId).source!;
+    const source = mgr.acquireAudioSource(transferId, { ownerId: 'test-owner' }).source!;
     assert.equal(source.sampleRate, 48000);
     assert.equal(source.channelCount, 2);
     assert.equal(source.exactSampleCount, frameCount);
@@ -310,14 +312,16 @@ test('Scenarios 6, 7, 8, 9, 10, 11, 12, 13, 14, 15: Error handling, chunk order,
       expectedBytes: 400,
       expectedFrames: 200,
       totalChunks: 2,
-    });
+    
+      ownerId: 'test-owner',});
     assert.equal(s6.ok, true);
     mgr.appendChunk({
       transferId: s6.transferId!,
       chunkIndex: 0,
       chunkBase64: Buffer.alloc(200).toString('base64'),
-    });
-    const fin6 = mgr.finalizeTransfer(s6.transferId!);
+    
+      ownerId: 'test-owner',});
+    const fin6 = mgr.finalizeTransfer(s6.transferId!, { ownerId: 'test-owner' });
     assert.equal(fin6.ok, false);
     assert.equal(fin6.statusCode, 422);
     assert.equal(fin6.code, 'TRANSFER_INCOMPLETE_CHUNKS');
@@ -332,14 +336,16 @@ test('Scenarios 6, 7, 8, 9, 10, 11, 12, 13, 14, 15: Error handling, chunk order,
       expectedBytes: 600,
       expectedFrames: 300,
       totalChunks: 3,
-    });
+    
+      ownerId: 'test-owner',});
     const tid78 = s78.transferId!;
     // Out-of-order chunk 1 before 0
     const ooo = mgr.appendChunk({
       transferId: tid78,
       chunkIndex: 1,
       chunkBase64: Buffer.alloc(200).toString('base64'),
-    });
+    
+      ownerId: 'test-owner',});
     assert.equal(ooo.ok, false);
     assert.equal(ooo.statusCode, 409);
     assert.equal(ooo.code, 'OUT_OF_ORDER_CHUNK_REJECTED');
@@ -350,7 +356,8 @@ test('Scenarios 6, 7, 8, 9, 10, 11, 12, 13, 14, 15: Error handling, chunk order,
         transferId: tid78,
         chunkIndex: 0,
         chunkBase64: Buffer.alloc(200).toString('base64'),
-      }).ok,
+      
+      ownerId: 'test-owner',}).ok,
       true,
     );
     // Duplicate chunk 0
@@ -358,13 +365,14 @@ test('Scenarios 6, 7, 8, 9, 10, 11, 12, 13, 14, 15: Error handling, chunk order,
       transferId: tid78,
       chunkIndex: 0,
       chunkBase64: Buffer.alloc(200).toString('base64'),
-    });
+    
+      ownerId: 'test-owner',});
     assert.equal(dup.ok, false);
     assert.equal(dup.statusCode, 409);
     assert.equal(dup.code, 'DUPLICATE_CHUNK_REJECTED');
 
     // Scenario 9: Disconnect / abort during transfer -> CANCELLED -> CLEANED
-    assert.equal(mgr.abortTransfer(tid78), true);
+    assert.equal(mgr.abortTransfer(tid78, { ownerId: 'test-owner' }), true);
     assert.equal(mgr.getTransferLifecycleState(tid78), 'CLEANED');
     assert.deepEqual(mgr.getTransferStateHistory(tid78), [
       'CREATED',
@@ -382,15 +390,17 @@ test('Scenarios 6, 7, 8, 9, 10, 11, 12, 13, 14, 15: Error handling, chunk order,
       expectedBytes: 1600,
       expectedFrames: 400,
       totalChunks: 1,
-    });
+    
+      ownerId: 'test-owner',});
     const tid10 = s10.transferId!;
     mgr.appendChunk({
       transferId: tid10,
       chunkIndex: 0,
       chunkBase64: Buffer.alloc(1600).toString('base64'),
-    });
-    mgr.finalizeTransfer(tid10);
-    const src10 = mgr.acquireAudioSource(tid10).source!;
+    
+      ownerId: 'test-owner',});
+    mgr.finalizeTransfer(tid10, { ownerId: 'test-owner' });
+    const src10 = mgr.acquireAudioSource(tid10, { ownerId: 'test-owner' }).source!;
     const abortCtrl10 = new AbortController();
     await assert.rejects(
       async () => {
@@ -425,7 +435,8 @@ test('Scenarios 6, 7, 8, 9, 10, 11, 12, 13, 14, 15: Error handling, chunk order,
       expectedBytes: 400,
       expectedFrames: 200,
       totalChunks: 2,
-    });
+    
+      ownerId: 'test-owner',});
     const tid11 = s11.transferId!;
     // Simulate unexpected closed/corrupted fd by closing the internal writeFd
     const internalSessions = (mgr as unknown as { sessions: Map<string, { writeFd: number }> }).sessions;
@@ -435,7 +446,8 @@ test('Scenarios 6, 7, 8, 9, 10, 11, 12, 13, 14, 15: Error handling, chunk order,
       transferId: tid11,
       chunkIndex: 0,
       chunkBase64: Buffer.alloc(200).toString('base64'),
-    });
+    
+      ownerId: 'test-owner',});
     assert.equal(errChunk.ok, false);
     assert.equal(errChunk.statusCode, 500);
     assert.equal(errChunk.code, 'DISK_WRITE_ERROR');
@@ -452,14 +464,16 @@ test('Scenarios 6, 7, 8, 9, 10, 11, 12, 13, 14, 15: Error handling, chunk order,
       expectedBytes: corruptWav.byteLength,
       expectedFrames: 40,
       totalChunks: 1,
-    });
+    
+      ownerId: 'test-owner',});
     const tid12 = s12.transferId!;
     mgr.appendChunk({
       transferId: tid12,
       chunkIndex: 0,
       chunkBase64: corruptWav.toString('base64'),
-    });
-    const fin12 = mgr.finalizeTransfer(tid12);
+    
+      ownerId: 'test-owner',});
+    const fin12 = mgr.finalizeTransfer(tid12, { ownerId: 'test-owner' });
     assert.equal(fin12.ok, false);
     assert.equal(fin12.statusCode, 422);
     assert.equal(fin12.code, 'INVALID_WAV_HEADER');
@@ -575,7 +589,8 @@ test('Scenario 16: Real drain backpressure verification, RF64 (>4 GiB) header bu
       expectedBytes: totalBytes,
       expectedFrames: totalBytes / 4,
       totalChunks: 4,
-    });
+    
+      ownerId: 'test-owner',});
     const chunkBuf = Buffer.alloc(chunkSize);
     for (let i = 0; i < 4; i++) {
       assert.equal(
@@ -583,12 +598,13 @@ test('Scenario 16: Real drain backpressure verification, RF64 (>4 GiB) header bu
           transferId: init.transferId!,
           chunkIndex: i,
           chunkBytes: chunkBuf,
-        }).ok,
+        
+      ownerId: 'test-owner',}).ok,
         true,
       );
     }
-    assert.equal(mgr.finalizeTransfer(init.transferId!).ok, true);
-    const src = mgr.acquireAudioSource(init.transferId!).source!;
+    assert.equal(mgr.finalizeTransfer(init.transferId!, { ownerId: 'test-owner' }).ok, true);
+    const src = mgr.acquireAudioSource(init.transferId!, { ownerId: 'test-owner' }).source!;
     const prep = await src.prepareWavFileStreaming({
       writeHighWaterMarkBytes: 4096, // Force frequent stream saturation & drain waits
     });
