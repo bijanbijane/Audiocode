@@ -449,7 +449,7 @@ test('Staged upload service APIs fail closed without the owning client identity'
     chunkBase64: string,
     ownerId?: string,
   ) => { readonly ok: boolean; readonly statusCode: number; readonly code?: string };
-  const missingOwner = appendWithoutOwner(upload.uploadId, Buffer.from('x').toString('base64'));
+  const missingOwner = appendWithoutOwner.call(service, upload.uploadId, Buffer.from('x').toString('base64'));
   assert.equal(missingOwner.ok, false);
   assert.equal(missingOwner.statusCode, 403);
   assert.equal(missingOwner.code, 'UPLOAD_OWNER_MISMATCH');
@@ -464,7 +464,7 @@ test('Staged upload service APIs fail closed without the owning client identity'
 
   // A missing/foreign owner cannot abort the upload; the real owner can still append and abort it.
   const abortWithoutOwner = service.abortStagedUpload as unknown as (uploadId: string, ownerId?: string) => void;
-  abortWithoutOwner(upload.uploadId);
+  abortWithoutOwner.call(service, upload.uploadId);
   service.abortStagedUpload(upload.uploadId, 'owner-B');
   const ownerAppend = service.appendStagedUploadChunk(
     upload.uploadId,
