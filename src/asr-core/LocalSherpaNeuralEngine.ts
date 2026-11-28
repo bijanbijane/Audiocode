@@ -406,7 +406,7 @@ function verifyTargetRuntimeManifest(binaryPath: string, libDir: string, target:
     ) return false;
     const libraries = fs.readdirSync(libDir)
       .filter((name) => isSherpaRuntimeLibraryName(name, target.platform));
-    const expectedLibraries = new Map((manifest.sharedLibraries ?? []).map((library: { name: string; bytes: number; sha256: string }) => [library.name, library]));
+    const expectedLibraries = new Map<string, { name: string; bytes: number; sha256: string }>((manifest.sharedLibraries ?? []).map((library: { name: string; bytes: number; sha256: string }) => [library.name, library] as const));
     if (libraries.length === 0 || libraries.length !== expectedLibraries.size) return false;
     for (const name of libraries) {
       const filePath = path.join(libDir, name);
