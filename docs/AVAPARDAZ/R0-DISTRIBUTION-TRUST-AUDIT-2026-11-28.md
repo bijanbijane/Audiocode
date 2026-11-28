@@ -136,7 +136,10 @@ For each package, set all of the following explicitly:
 - `AVAPARDAZ_TARGET_PLATFORM`: `darwin` or `win32`
 - `AVAPARDAZ_TARGET_ARCH`: `arm64` or `x64`
 - `AVAPARDAZ_SHERPA_RUNTIME_TARGET`: exact target ID, such as `win32-x64`
-- `AVAPARDAZ_SHERPA_RUNTIME_DIR`: runtime directory containing the matching target's native binary and ONNX Runtime library
+- `AVAPARDAZ_SHERPA_RUNTIME_DIR`: target-specific runtime root containing `bin/`, `lib/`, and a verified `runtime-manifest.json`.
+- Optional `AVAPARDAZ_SHERPA_RUNTIME_LIB_DIR`: explicit shared-library directory override.
+
+Before packaging, run `bunx tsx scripts/provision-release-native-runtime.ts` on a native host matching the requested target. The provisioner verifies the pinned upstream archive's exact byte count and SHA-256, checks all native binary/library architectures, writes the runtime manifest, and executes the real Sherpa CLI `--help` smoke test. The package builder rechecks the manifest and every binary/library hash, then embeds the manifest in the final payload. The manifest is a local provenance record; final release signing and trust-root verification remain separate mandatory gates.
 
 The explicit runtime-target variable is a build provenance assertion, not cryptographic proof that the binary bytes truly match the target. The package still needs artifact-level inspection/signing and execution on the destination OS. Cross-target packaging must never reuse the host's native runtime merely because a filename happens to exist.
 
@@ -157,7 +160,7 @@ The follow-up implementation adds `scripts/verify-native-binary.mjs`:
 
 - macOS: parses thin Mach-O CPU type and Universal/Fat Mach-O architecture slices; accepts only the requested `arm64` or `x64` slice.
 - Windows: validates the DOS header, PE signature, and PE Machine field; the current approved Windows target is `x64`.
-- The packager validates both the Sherpa executable and the selected ONNX Runtime shared library before copying either into the release payload.
+- The packager validates the Sherpa executable and every shared library, requires the target-specific runtime manifest, rechecks all recorded hashes against the pinned release asset, and embeds that manifest in the release payload.
 - A missing ONNX Runtime library now fails explicitly. The prior check tested only whether a non-empty path string existed, which could never detect a missing file.
 - Synthetic regression coverage includes Mach-O arm64, Mach-O x64, Universal Mach-O, PE x64, missing/malformed binaries, and architecture mismatch.
 
