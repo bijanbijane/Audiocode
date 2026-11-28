@@ -786,7 +786,7 @@ Disposition: **THREAT-MODEL QUESTION / NOT A CONFIRMED REMOTE EXPLOIT**. Do not 
 
 ### 17.4. PR scope and reviewability
 
-PR #6 currently changes **45 files** with **3,183 additions and 251 deletions**. Alongside the R0 Audition/Companion/Core work, its changed-file inventory includes Platform API/backend concerns such as billing/invoice ownership, device-seat enforcement, live-ASR gateway, database migration, cache, and backend container services.
+PR #6 currently changes **45 files** with **3,244 additions and 251 deletions**. Alongside the R0 Audition/Companion/Core work, its changed-file inventory includes Platform API/backend concerns such as billing/invoice ownership, device-seat enforcement, live-ASR gateway, database migration, cache, and backend container services.
 
 Some changes are security hardening, but the approved delivery roadmap is Audition + Native Companion + shared Core for an internal release; payment/commercial delivery is outside the current scope. This creates a **PR scope/reviewability risk**, not a claim that those security fixes are incorrect.
 
