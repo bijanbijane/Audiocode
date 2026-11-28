@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { ALLOWED_MODEL_DOWNLOAD_HOSTS } from '../src/asr-core/SafeModelSupplyChain';
 import {
   SHAHAB_KOOCHIK_MODEL_PROVENANCE,
   validateKoochikModelLicense,
@@ -24,6 +25,23 @@ describe('pinned Koochik model provenance', () => {
     expect(SHAHAB_KOOCHIK_MODEL_PROVENANCE.licenseId).toBe('apache-2.0');
     expect(SHAHAB_KOOCHIK_MODEL_PROVENANCE.model.sha256)
       .toBe('6a564b5541920ce1c37bbc91d22e4b3a6838648b9b327eb88997e8db1f90950d');
+  });
+
+  it('uses only explicit official Hugging Face delivery hostnames', () => {
+    for (const host of [
+      'huggingface.co',
+      'cas-server.xethub.hf.co',
+      'cas-server.xethub-eu.hf.co',
+      'transfer.xethub.hf.co',
+      'transfer.xethub-eu.hf.co',
+      'us.aws.cdn.hf.co',
+      'us.gcp.cdn.hf.co',
+      'cdn-lfs-us-1.hf.co',
+      'cdn-lfs-eu-1.hf.co',
+      'cas-bridge.xethub.hf.co',
+    ]) {
+      expect(ALLOWED_MODEL_DOWNLOAD_HOSTS).toContain(host);
+    }
   });
 
   it('accepts matching Apache-2.0 model card metadata and license text', () => {
