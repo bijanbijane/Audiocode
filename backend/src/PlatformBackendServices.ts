@@ -64,6 +64,28 @@ export type BackendModelTier = 'GROUP_A' | 'GROUP_B';
 export type BackendModelLifecycleStatus = 'ACTIVE' | 'SUPPORTED' | 'DEPRECATED' | 'REVOKED';
 
 const MAX_MODEL_CHUNK_BYTES = 16 * 1024 * 1024;
+
+/**
+ * Constant-time comparison for configured API secrets. Rejects weak/empty secrets
+ * and unequal byte lengths before the timing-safe byte comparison.
+ */
+export function verifySecretKeyConstantTime(candidate: unknown, expected: unknown): boolean {
+  if (
+    typeof candidate !== 'string' ||
+    typeof expected !== 'string' ||
+    candidate.length < 16 ||
+    expected.length < 16
+  ) {
+    return false;
+  }
+
+  const candidateBytes = Buffer.from(candidate, 'utf8');
+  const expectedBytes = Buffer.from(expected, 'utf8');
+  return (
+    candidateBytes.byteLength === expectedBytes.byteLength &&
+    crypto.timingSafeEqual(candidateBytes, expectedBytes)
+  );
+}
 const PUBLIC_MODEL_RELEASE_STATUSES = new Set([
   'ACTIVE',
   'SUPPORTED',
@@ -246,7 +268,7 @@ export class PlatformBackendServices {
       if (body.userId !== undefined) {
         if (typeof body.userId !== 'string' || body.userId !== authenticatedUserId) {
           return reply.status(403).send({
-            error: 'FORBIDDEN_USER_MISMATCH',
+            error: 'FORBIDDEN_USER_IDOR_MISMATCH',
             messageFa: 'شناسه کاربر درخواست با هویت احراز‌شده مطابقت ندارد.',
           });
         }
@@ -677,6 +699,32 @@ export class PlatformBackendServices {
       };
     }>('/api/v1/telemetry/model-delivery', async (request, reply) => {
       const b = request.body;
+      const allowedEventTypes = new Set([
+        'CHUNK_DOWNLOAD_OK',
+        'CHUNK_FAILURE',
+        'RESUME_SUCCESS',
+        'CACHE_HIT',
+      ]);
+      if (
+        !b ||
+        typeof b !== 'object' ||
+        typeof b.modelId !== 'string' ||
+        !/^[a-zA-Z0-9_-]{1,64}$/.test(b.modelId) ||
+        typeof b.version !== 'string' ||
+        !/^[a-zA-Z0-9.+_-]{1,64}$/.test(b.version) ||
+        typeof b.eventType !== 'string' ||
+        !allowedEventTypes.has(b.eventType) ||
+        typeof b.bytesTransferred !== 'number' ||
+        !Number.isSafeInteger(b.bytesTransferred) ||
+        b.bytesTransferred < 0 ||
+        (b.chunkIndex !== undefined &&
+          (!Number.isSafeInteger(b.chunkIndex) || b.chunkIndex < 0)) ||
+        (b.deviceTier !== undefined &&
+          (typeof b.deviceTier !== 'string' || b.deviceTier.length > 32))
+      ) {
+        return reply.status(400).send({ error: 'INVALID_MODEL_DELIVERY_TELEMETRY' });
+      }
+
       await this.db.query(
         `INSERT INTO model_delivery_telemetry
          (model_id, version, event_type, chunk_index, bytes_transferred, device_tier)

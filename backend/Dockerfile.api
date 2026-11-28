@@ -8,6 +8,7 @@ RUN bun install --frozen-lockfile
 
 COPY tsconfig.json vite.config.ts server.ts ./
 COPY src ./src
+COPY public ./public
 COPY packages ./packages
 COPY backend ./backend
 COPY platform/migrations ./platform/migrations

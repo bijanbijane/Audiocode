@@ -364,7 +364,7 @@ test('AVP-P0-002: 11-step ModelQualificationPipeline passes on real ONNX artifac
   assert.equal(tamperedReport.checksumsVerified, false);
 });
 
-test('AVP-P0-001 + AVP-P0-005: Browser capability negotiation, independent Browser adapter (zero Companion dependency), and Browser vs Native canonical parity', async () => {
+test('AVP-P0-001 + AVP-P0-005: Browser capability negotiation, independent Browser adapter isolation, and Native canonical mapping', async () => {
   // 1. Browser capability negotiation
   const caps = negotiateBrowserAsrCapabilities({
     capabilityOverrides: {
@@ -407,7 +407,7 @@ test('AVP-P0-001 + AVP-P0-005: Browser capability negotiation, independent Brows
     (err: unknown) => err instanceof AsrRuntimeError && err.code === 'MODEL_NOT_INSTALLED',
   );
 
-  // 4. Cross-runtime canonical schema parity (Browser vs Native normalization)
+  // 4. Native-to-canonical mapping contract (does not execute the Browser adapter)
   const nativeRaw = {
     modelId: 'fa-fastconformer-ctc-int8',
     architecture: 'FASTCONFORMER_CTC',

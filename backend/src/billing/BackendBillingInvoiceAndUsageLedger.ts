@@ -179,7 +179,7 @@ export class BackendBillingInvoiceAndUsageLedger {
           return reply.status(401).send({ error: 'UNAUTHORIZED' });
         }
         if (request.authenticatedUserId !== targetUserId) {
-          return reply.status(403).send({ error: 'FORBIDDEN_USER_MISMATCH' });
+          return reply.status(403).send({ error: 'FORBIDDEN_INVOICE_IDOR_MISMATCH' });
         }
 
         const res = await this.db.query(

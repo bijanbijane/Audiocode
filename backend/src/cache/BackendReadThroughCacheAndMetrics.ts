@@ -18,6 +18,10 @@ export class SingleFlightReadThroughCache {
   public missesCount = 0;
   public coalescedRequestsSaved = 0;
 
+  public get currentSize(): number {
+    return this.cache.size;
+  }
+
   constructor(maxEntries: number = 10_000) {
     this.maxEntries =
       Number.isFinite(maxEntries) && maxEntries >= 1 ? Math.floor(maxEntries) : 10_000;

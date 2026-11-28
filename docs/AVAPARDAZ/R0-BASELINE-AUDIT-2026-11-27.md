@@ -1,0 +1,810 @@
+# R0 — Baseline Audit (Initial Snapshot)
+
+**Date:** 2026-11-27  
+**Roadmap:** AVP-DELIVERY-ROADMAP-1.1  
+**Scope:** Audition / Internal / macOS + Windows  
+**Audit status:** IN PROGRESS — read-only repository and evidence review; not an acceptance decision.
+
+## 1. Repository baseline
+
+| Field | Observed value |
+|---|---|
+| Repository | `bijanbijane/Audiocode` (public) |
+| Default branch | `main` |
+| Baseline commit | `e73394f8e00e477f1de0046e04fd233681610563` |
+| Baseline commit date | 2026-11-27 13:36:55 UTC |
+| Roadmap document | `docs/AVAPARDAZ/DELIVERY-ROADMAP-INTERNAL-2026-11-27.md` |
+| Package manager lockfile | `bun.lock` present |
+| npm lockfile | `package-lock.json` absent |
+| Local checkout / working tree | NOT INSPECTED — this execution environment has no mounted repository checkout; GitHub API access only |
+
+The baseline commit is the exact `main` head observed during this audit. No source code or product files were modified during the read-only inspection.
+
+## 2. CI baseline
+
+Two workflows ran on the baseline commit and both concluded `failure`:
+
+- [Architecture Governance, Reliability & Release Quality Gate](https://github.com/bijanbijane/Audiocode/actions/runs/46008647628)
+- [AVAPARDAZ Quality & Release Gates](https://github.com/bijanbijane/Audiocode/actions/runs/46008647708)
+
+In the second workflow, Level 1 failed and dependent Levels 2–5 were skipped. The connector did not provide step-level summaries or downloadable logs for these runs; the root cause is therefore **UNKNOWN**, not inferred.
+
+Relevant configured commands in `package.json` include:
+
+- `npm run lint` — `tsc --noEmit`
+- `npm run build` — `vite build`
+- `npm run test:unit`
+- `npm run test:quality-gates`
+- `npm run test:e2e`
+- `npm run test:stress`
+- `npm run verify:foundation`
+- `npm run audit:runtime-deps`
+- `npm run audit:express-routes`
+
+The workflows install dependencies with `bun install --frozen-lockfile`. One workflow warns that npm audit cannot consume the absent `package-lock.json`; another workflow generates a CycloneDX SBOM from `bun.lock`. No test command was executed by this audit session.
+
+## 3. External prerequisites reconciled to the approved internal scope
+
+The previous `MASTER-ROADMAP.md` and ADR-026 list five external prerequisites for the former public/commercial roadmap. They must not be carried forward without scope analysis.
+
+| Legacy prerequisite | Internal Audition disposition | Evidence / next action | Initial status |
+|---|---|---|---|
+| Physical macOS + Windows + live Adobe Audition host | Mandatory. Both operating systems are explicit release targets. | Obtain/identify physical or authorized remote test hosts; verify live panel, Companion, markers, playback/seek, lifecycle and long-file behavior. | BLOCKED — host access/evidence not available in this audit |
+| Signed standalone packaging (.dmg notarization, .msi Authenticode, signed .zxp) | Re-scope. Public distribution signing is not automatically an internal-release requirement; security and OS installation constraints still apply. | Decide internal trust/distribution model and document whether signing is mandatory for the internal cohort. | OPEN — decision required in R0 |
+| Supply-chain audit and stale-test hygiene | Mandatory in proportion to internal distribution risk. | Establish Bun-lockfile-compatible vulnerability scanning, triage reachable Critical/High issues, diagnose current Level-1 CI failure, and repair/retire stale tests with evidence. | OPEN — CI failure confirmed; root cause unknown |
+| GPU bilingual fine-tuning and 50–200h corpus | Not a gate for the current Audition internal release unless product requirements explicitly depend on improved code-switching. | Preserve current ASR limitations; do not claim general conversational/code-switching accuracy. Revisit only through scope/ADR change. | DEFERRED — outside current critical path |
+| Live payment and model CDN infrastructure | Out of scope for internal local-first delivery. | No work unless the product/release scope changes. | DEFERRED — outside current critical path |
+
+This table is a scope reconciliation, not a claim that any external dependency has been provisioned.
+
+## 4. macOS / Windows / Audition evidence
+
+Existing repository documents provide the following candidate compatibility baseline:
+
+- `docs/shahab/SHAHAB_ADOBE_HOST_VERSION_MATRIX.md`: Adobe Audition 25.x on Windows 11 x64 and macOS 14/15 (arm64/x86_64); both live-host tests are `NOT_TESTED`.
+- `docs/AVAPARDAZ/HARDWARE-COMPATIBILITY-MATRIX.md`: older broader matrix mentions Windows 10/11 and macOS Intel/Apple Silicon, but labels desktop Audition host capabilities `Unverified`.
+- `docs/AVAPARDAZ/PHASE-09-TEST-REPORT.md`: Linux x86_64 only; live Audition GUI and physical consumer hardware are explicitly blocked.
+- `docs/shahab/SHAHAB_ADOBE_INTEGRATION_TEST_REPORT.md`: SDK offset mapping, interchange generation, authenticated bridge and privacy/recovery checks are reported as passing; installed live Audition GUI remains not tested.
+
+**Provisional test matrix (not yet approved):**
+
+| Dimension | Candidate | Evidence status |
+|---|---|---|
+| Windows | Windows 11 x64 | Candidate from SHAHAB-024 matrix; live host NOT_TESTED |
+| macOS | macOS 14/15, Apple Silicon and Intel | Candidate from SHAHAB-024 matrix; live host NOT_TESTED |
+| Adobe Audition | 25.x | Candidate from SHAHAB-024 matrix; exact supported build/minor version not pinned |
+| Windows minimum hardware | TBD | Not established for the internal release |
+| macOS minimum hardware | TBD | Not established for the internal release |
+| Audio input/output formats | TBD against current Audition workflow and renderer contract | Not frozen by this audit |
+
+R0 must freeze exact OS builds, Audition builds, CPU architectures, minimum RAM/CPU, and supported audio formats before platform acceptance testing.
+
+## 5. Core, ASR and alignment evidence
+
+### Long-file processing
+
+`docs/AVAPARDAZ/LONG-FILE-STRESS-REPORT.md` records Linux x86_64 synthetic streaming stress tests through 120-minute mono/stereo cases, with zero reported leaked bytes and peak RSS of approximately 507 MiB in the 120-minute 48 kHz stereo case. This is useful Linux harness evidence only; it is not physical macOS/Windows Native Companion verification.
+
+The 2026-11-26 SHAHAB audit separately states that 60–120 minute continuous Native Companion stress on Mac, including peak RSS, staging disk, cancellation and recovery, is **NOT YET VERIFIED**.
+
+### ASR
+
+`docs/shahab/SHAHAB_ENGINE01_AUDIT_AND_FLEURS_EVALUATION_2026-11-26.md` reports a full Google FLEURS `fa_ir/test` evaluation (871 utterances, WER 9.9232%, CER 3.6439%, RTF 0.02308) on the reported Mac environment. The report explicitly limits this evidence to read speech in that corpus; it is not evidence of general conversational, noisy, dialectal or code-switched accuracy.
+
+### Alignment
+
+The current files are `docs/shahab/SHAHAB_ALIGNMENT_ARCHITECTURE.md`, `SHAHAB_ALIGNMENT_TEST_REPORT.md` and `SHAHAB_ALIGNMENT_STATE.json` (the prior audit's guessed `SHAHAB-025-FARSI-FORCED-ALIGNMENT.md` path does not exist on current `main`).
+
+The state JSON reports:
+
+- `ALIGNMENT_PARTIALLY_SUPPORTED`
+- no dedicated Persian CTC aligner weights bundled
+- no verified human-annotated Persian word-boundary gold corpus
+- real-world word-boundary MAE/P95 `NOT_MEASURED`
+- segment-anchored output may leave internal words `TIMING_UNAVAILABLE`
+
+Therefore, word-level timing is not accepted as a safe input to automatic edits. Segment-level timing and explicit uncertainty remain the safe product boundary until independent gold validation passes.
+
+## 6. Initial risk register
+
+| ID | Priority | Finding | Required action |
+|---|---|---|---|
+| R0-P0-01 | P0 | Both principal CI workflows fail on the exact baseline commit; failure reason unavailable. | Reproduce Level-1 failure in a real checkout and record exact command, environment, exit code and logs. |
+| R0-P0-02 | P0 | Live Audition host tests on both target operating systems remain NOT_TESTED. | Secure physical/authorized test hosts and execute host acceptance matrix. |
+| R0-P1-01 | P1 | Internal signing/distribution policy is not settled by the previous commercial prerequisite list. | Record internal trust model and packaging acceptance. |
+| R0-P1-02 | P1 | Current ASR evidence does not establish natural speech or code-switching performance. | Preserve explicit limitations; define whether internal cohort use cases require additional corpus. |
+| R0-P1-03 | P1 | Persian word-boundary accuracy has no human-gold MAE/P95 evidence. | Keep word-level automatic edits gated; acquire consented gold alignment corpus only if required. |
+| R0-P1-04 | P1 | Exact minimum hardware and supported audio format matrix is not frozen. | Approve reproducible macOS/Windows test configurations and formats. |
+
+## 7. R0 completion status
+
+**R0 is NOT COMPLETE.** This initial snapshot establishes the remote repository baseline and reconciles key evidence, but the following exit criteria remain open:
+
+1. Local Git branch and working-tree status must be inspected in a real checkout.
+2. Root cause of both current CI failures must be reproduced and diagnosed.
+3. The five legacy prerequisites must be formally accepted as required, deferred or out of scope for the internal release.
+4. Exact Audition, macOS, Windows and minimum hardware versions must be approved.
+5. Supported input/output formats must be frozen.
+6. Physical/authorized macOS and Windows test-host access must be established.
+7. The test inventory must be reconciled against actual execution results, not workflow configuration alone.
+
+**No R0 gate is passed by this document.** No capability is promoted to VERIFIED or ACCEPTED by the existence of code, documentation or historical test reports.
+
+## 8. Next action
+
+The next engineering action is to obtain a runnable checkout at baseline commit `e73394f8e00e477f1de0046e04fd233681610563`, reproduce the two failing Level-1 CI workflows, and capture the first failing command and complete logs. Do not start feature implementation until this blocker is understood.
+
+## 9. Follow-up evidence collected after the initial snapshot
+
+### Pull request validation
+
+The documentation-only R0 pull request (#6) is still **OPEN / DRAFT / NOT MERGED**. Its head commit is `afb0cf8b8bdf8068019c89b30912182a184742aa`.
+
+GitHub Actions also ran against the PR head and reproduced the same two workflow-level failures:
+
+- [AVAPARDAZ Quality & Release Gates — PR validation](https://github.com/bijanbijane/Audiocode/actions/runs/46009771297): Level 1 failed; Levels 2–5 skipped.
+- [Architecture Governance, Reliability & Release Quality Gate — PR validation](https://github.com/bijanbijane/Audiocode/actions/runs/46009771370): failed.
+
+Each failed check reports one annotation, but the GitHub connector returned no step list or log URL for the jobs. The job-log download endpoint returned `BlobNotFound`; the annotation endpoint is not exposed through the current GitHub connector. Consequently the failing command and root cause remain **UNKNOWN**. The failure is reproducible at workflow level, not yet reproducible locally.
+
+### Static validation of the Level-1 test paths
+
+The five files invoked by the AVAPARDAZ Level-1 focused regression command were individually fetched from `main` and all exist:
+
+- `src/ai-engine/asr/SileroVadOnnxRunner.test.ts`
+- `src/ai-engine/asr/SpeakerEmbeddingOnnxRunner.test.ts`
+- `src/ai-engine/asr/WespeakerKaldiFbank80.test.ts`
+- `src/ai-engine/asr/LocalWeSpeakerDiarizationService.test.ts`
+- `src/ai-engine/MultiSpeakerDiarizationAndCrosstalkEngine.test.ts`
+
+The configured Vitest file `src/quality-gate/__tests__/full-pipeline.spec.ts` also exists. This rules out missing test-file paths as the obvious static explanation, but does not establish that the tests pass or that imports resolve at runtime.
+
+### Execution environment availability
+
+The only registered Desktop Commander device, `MacBook-Air.local`, is currently **OFFLINE** (last seen approximately 23 hours before this check). No local checkout, branch state, working tree, package install, test execution, or physical macOS/Windows host test could be inspected from this session.
+
+### Revised next action
+
+1. Restore an authorized online development host or provide another runnable checkout environment.
+2. At the baseline commit, inspect `git status --short --branch` before changing files.
+3. Run the exact failing workflow commands in sequence and capture stdout/stderr, exit codes and environment versions; identify the first failure before modifying code.
+4. Fix only the demonstrated root cause on a focused branch, then rerun the affected test and complete Level-1 gate.
+
+No source code was changed, no CI workflow was edited, and no R0 gate is passed by this follow-up.
+
+
+## 10. GitHub-only execution constraint and CI retry (2026-11-27)
+
+The execution method is now explicitly constrained to the official GitHub repository and GitHub-hosted automation. No Mac/Desktop Commander session or local checkout is to be used as the development or test environment. Repository inspection and edits are performed through GitHub; executable validation must run in GitHub Actions. Accordingly, the earlier references in Sections 7–9 to restoring a local checkout or inspecting a local working tree are superseded. The remote branch, commit and PR state are the authoritative state available to this workflow.
+
+### Additional workflow evidence
+
+The exact Level-1 workflow definitions were inspected on `main`:
+
+- `.github/workflows/avapardaz-quality-gates.yml` runs `bun install --frozen-lockfile`, five focused Node test files, then (with `if: always()`) the production Vite build, the self-hosted ORT WASM asset check, and `npm run lint`.
+- `.github/workflows/ci-quality-gate.yml` runs Bun install, cargo-deny, Madge, CycloneDX SBOM generation, TypeScript lint, Vitest, Node reliability tests, quality-gate tests and production build.
+
+The `package.json` scripts and `bun.lock` are present. The five focused AVAPARDAZ Level-1 test paths and the configured Vitest quality-gate spec path were confirmed to exist. This is static inspection only; no command has yet been executed successfully in a GitHub runner during this audit.
+
+The failed workflow jobs were retried through GitHub Actions (failed-jobs-only) for runs:
+
+- [AVAPARDAZ Quality & Release Gates, attempt 2](https://github.com/bijanbijane/Audiocode/actions/runs/46010718548)
+- [Architecture Governance, Reliability & Release Quality Gate, attempt 2](https://github.com/bijanbijane/Audiocode/actions/runs/46010718553)
+
+Both retries again concluded `failure`. The job summaries returned no step records, and job-log retrieval again returned `BlobNotFound`. The original baseline jobs exposed `runner_id: 0`, empty step arrays and effectively immediate completion; this suggests a runner/job-initialization or Actions observability issue, but it does **not** prove the root cause. No specific source-code defect has been established.
+
+### Updated disposition
+
+- CI status: **FAILURE — cause still UNKNOWN**. Re-run did not provide executable logs or step evidence.
+- Source-code fix: **NOT MADE**. Changing application code or weakening gates without a demonstrated failure would be speculative.
+- R0: **IN PROGRESS**. No gate is passed.
+- Next action: obtain usable GitHub Actions step/job diagnostics (including runner assignment and first failing step) for these existing workflows, then reproduce and fix only a demonstrated defect. Keep all edits on a dedicated GitHub branch and validate them with Actions; do not use a local Mac checkout.
+
+
+## 11. Runner allocation diagnosis (2026-11-27)
+
+A fresh PR-triggered validation occurred after the report update:
+
+- [AVAPARDAZ Quality & Release Gates](https://github.com/bijanbijane/Audiocode/actions/runs/46013373171)
+- [Architecture Governance, Reliability & Release Quality Gate](https://github.com/bijanbijane/Audiocode/actions/runs/46013373182)
+
+The AVAPARDAZ Level-1 job payload was inspected directly through the Actions jobs endpoint. It reports:
+
+- `runner_id: 0`
+- `runner_name: ""`
+- `steps: []`
+- job started at 14:09:33 UTC and completed at 14:09:35 UTC
+- conclusion: `failure`
+
+The Architecture Governance job shows the same failure pattern in the run summary: it completed in approximately two seconds, with no step summaries or downloadable logs. Dependent AVAPARDAZ jobs were skipped because Level 1 failed.
+
+**Finding:** these observed runs do not demonstrate a TypeScript, test, build, or application-code failure. The failing job did not report assignment to a GitHub-hosted runner and no workflow step was recorded. The most precise current classification is **pre-runner / Actions execution-layer failure**. The exact underlying reason (for example account billing/spending limits, repository Actions policy, or GitHub runner-service failure) is still unverified because repository Actions settings and check annotations are not readable through the available connector.
+
+A temporary runner-diagnostics workflow was briefly added to the PR branch, but GitHub did not schedule it because a newly introduced workflow file on a PR branch is not eligible to trigger from that same PR when it is absent from the base branch. It was removed immediately; no diagnostic workflow remains in the branch.
+
+### Required next action
+
+Do not change source code or relax CI checks based on these results. The repository owner must inspect GitHub **Settings → Actions → General** and account **Billing / Actions usage** for this private repository, confirm Actions are enabled and spending limits/available minutes permit hosted runners, then rerun the existing workflows. Once a job is assigned a runner and produces steps, continue with the first actual failing command. This settings/billing verification is outside the read/write capabilities of the current repository connector.
+
+### Current R0 CI disposition
+
+- Runner allocation: **NOT OBSERVED** for the latest failed Level-1 jobs (`runner_id=0`).
+- Application-level CI failure: **NOT ESTABLISHED**.
+- Exact Actions execution-layer cause: **UNKNOWN / OWNER SETTINGS CHECK REQUIRED**.
+- Source changes for CI: **NONE**.
+- R0: **IN PROGRESS; no gate passed**.
+
+
+## 12. Cross-run confirmation of the pre-runner pattern (2026-11-27)
+
+To distinguish a one-off failure from a persistent runner-allocation issue, job payloads were also inspected for earlier runs on the repository:
+
+- [AVAPARDAZ PR run 46005452215](https://github.com/bijanbijane/Audiocode/actions/runs/46005452215)
+- [Architecture Governance PR run 46005452116](https://github.com/bijanbijane/Audiocode/actions/runs/46005452116)
+- [AVAPARDAZ main run 46005599076](https://github.com/bijanbijane/Audiocode/actions/runs/46005599076)
+- [Architecture Governance main run 46005599082](https://github.com/bijanbijane/Audiocode/actions/runs/46005599082)
+
+All four failed jobs independently show the same pattern: `runner_id=0`, empty `runner_name`, zero recorded steps, and completion in approximately two seconds. The latest pair of PR runs (46013373171 / 46013373182) show the same pattern.
+
+This repeated pattern across different commits, both workflows, main pushes and PR events makes a repository-wide Actions execution/configuration or account-level runner availability issue substantially more likely than a source-code regression. It still does not identify the exact setting or service-side cause; billing, spending limits and repository Actions policy remain owner-side checks.
+
+**Engineering decision:** pause application-code changes intended to fix CI. Keep CI gates intact. Resume code-level diagnosis only after a GitHub Actions job is actually assigned a runner and records its first step.
+
+## 13. Correction: temporary runner-diagnostics workflow did trigger (2026-11-27)
+
+The earlier wording in Section 11 that the temporary diagnostic workflow "was not scheduled" was inaccurate and is corrected here.
+
+GitHub Actions did create a PR-triggered run for the temporary workflow:
+
+- [Temporary GitHub Runner Diagnostics — run 46013656016](https://github.com/bijanbijane/Audiocode/actions/runs/46013656016)
+
+Its job payload was inspected directly. It shows `runner_id=0`, empty `runner_name`, zero recorded steps, and failure after approximately two seconds. Therefore, the diagnostic workflow **was triggered but failed before runner allocation**, exactly like the two product workflows. It did not reach checkout, Node/Bun setup, or the shell smoke-test commands, so it provides no toolchain or runner-environment result.
+
+The temporary workflow file was subsequently deleted from the PR branch and its absence was verified with a GitHub 404 response. No diagnostic workflow remains in the branch.
+
+### Latest CI observation
+
+The newest product-workflow runs on the current PR head `493ba25961be08472b1cc5842f1a71fabd1d7118` are:
+
+- [AVAPARDAZ Quality & Release Gates — 46014006026](https://github.com/bijanbijane/Audiocode/actions/runs/46014006026)
+- [Architecture Governance — 46014005836](https://github.com/bijanbijane/Audiocode/actions/runs/46014005836)
+
+Their failed jobs again show `runner_id=0`, no runner name and no recorded steps. AVAPARDAZ Level 2–5 jobs were skipped after Level 1 failed.
+
+### Corrected disposition
+
+- Diagnostic workflow: **TRIGGERED; PRE-RUNNER FAILURE** (not "not scheduled").
+- Product workflows: **PRE-RUNNER FAILURE pattern persists**.
+- Application commands: **NOT EXECUTED / NO EVIDENCE**.
+- Root cause within GitHub account/repository Actions configuration or GitHub service: **NOT YET IDENTIFIED**.
+- Temporary workflow: **REMOVED; absence verified**.
+- Source-code changes and gate relaxations: **NONE**.
+
+
+## 14. Validation after authoritative-state alignment commit
+
+The latest PR-head workflows were also inspected after commit `771b009e1a4a1b2730cdf84d0fc5493a887eed91`:
+
+- [Architecture Governance — run 46014422935](https://github.com/bijanbijane/Audiocode/actions/runs/46014422935)
+- [AVAPARDAZ Quality & Release Gates — run 46014422928](https://github.com/bijanbijane/Audiocode/actions/runs/46014422928)
+
+The job payloads again show `runner_id=0`, empty `runner_name`, zero steps and failure in approximately two seconds. AVAPARDAZ Levels 2–5 were skipped. This confirms the same pre-runner failure on the latest PR head; it does not test or validate the document changes or application code.
+
+The authoritative-state and R0 report files were fetched back from the PR branch after the writes. Their updated content hashes were confirmed. PR #6 remains OPEN / DRAFT / NOT MERGED; base is `main`; the main branch was not modified.
+
+**No executable validation passed.** The only completed verification in this update is GitHub read-back of the two documentation files and PR metadata.
+
+
+
+## 15. Latest PR-head CI recheck and R0 decision inventory (2026-11-27)
+
+### 15.1. Remote state revalidated
+
+- PR #6 remains **OPEN / DRAFT / NOT MERGED**.
+- PR head at the start of this recheck: `7c19e312d2dcbc907fdc44f6696b498bc07aacde`.
+- PR base remains `main` at `e73394f8e00e477f1de0046e04fd233681610563`.
+- No changes were made to `main`.
+
+### 15.2. New Actions evidence on the current PR head
+
+Two additional workflow runs were discovered for the current PR head:
+
+- [Architecture Governance — run 46014529274](https://github.com/bijanbijane/Audiocode/actions/runs/46014529274)
+- [AVAPARDAZ Quality & Release Gates — run 46014529304](https://github.com/bijanbijane/Audiocode/actions/runs/46014529304)
+
+The GitHub job summaries report both primary jobs as failed. The available job-step endpoint returns an empty step array for both jobs. The AVAPARDAZ dependent Level 2–4 and Level 5 jobs are skipped. The job summaries do not expose a log URL. This is consistent with the previously observed pre-step failure pattern, but this connector response alone does not expose the runner assignment fields for these two latest jobs.
+
+**Disposition:** the latest runs still provide no evidence that lint, typecheck, tests, build, packaging, or security-audit commands executed. CI remains blocked at workflow/job initialization or an earlier unobservable stage; the exact cause remains **UNKNOWN**. Do not treat these runs as application test failures, and do not weaken or bypass any gate.
+
+### 15.3. Correction of superseded execution instructions
+
+Sections 7–9 contain historical wording that requests a local checkout, local working-tree inspection, or a restored local development host. Those instructions are superseded by Section 10 and the explicit GitHub-only execution constraint. For this project workflow:
+
+- Repository state is inspected remotely through the official GitHub repository.
+- File edits are made through GitHub on the existing audit branch.
+- Executable validation is performed only through GitHub Actions.
+- No Mac/Desktop Commander or local checkout is requested or used.
+
+The historical text is retained for audit traceability; it is not an active prerequisite for this workflow.
+
+### 15.4. Platform-matrix reconciliation
+
+A fresh read of the two source matrices confirms that the candidate platform scope is not yet a single approved compatibility contract:
+
+- `docs/shahab/SHAHAB_ADOBE_HOST_VERSION_MATRIX.md` lists Audition 25.x on Windows 11 x86_64 and macOS 14/15 arm64/x86_64; both live-host tests are `NOT_TESTED`.
+- `docs/AVAPARDAZ/HARDWARE-COMPATIBILITY-MATRIX.md` lists a broader desktop-plugin candidate range: Windows 10/11 x86_64, Windows 11 ARM64 (conditional on Audition support), macOS Apple Silicon, and macOS Intel. Every Audition desktop row remains `Unverified`.
+
+These documents are not evidence that any listed combination is supported. In particular, they differ on Windows 10, Windows ARM64, and whether Intel macOS is part of the required compatibility set. The current roadmap requires both macOS and Windows, but does not itself freeze these architecture/version sub-targets.
+
+**R0 action:** preserve these combinations as candidates only. Do not mark them Supported or Verified until the product owner freezes the internal support matrix and live host acceptance evidence is collected. The exact Audition build, minimum OS builds, CPU architectures, minimum hardware, and input/output formats remain open.
+
+### 15.5. R0 decision and blocker inventory
+
+| Item | Current classification | Next required action |
+|---|---|---|
+| GitHub Actions runner/job initialization | BLOCKED / cause UNKNOWN | Repository owner checks Actions policy and account usage/spending limits; rerun the existing workflows and capture the first actual step |
+| Audition × OS × CPU support matrix | OPEN / candidate evidence only | Freeze exact target combinations; then run live host acceptance on both operating systems |
+| Internal package trust and distribution | OPEN / owner decision | Decide internal cohort installation/update trust model and whether signing/notarization is required for that model |
+| Minimum hardware and supported audio formats | OPEN / not established | Define reproducible minimum configurations and format acceptance against the current renderer/host workflow |
+| Physical macOS and Windows host evidence | BLOCKED / NOT_TESTED | Obtain authorized host access and execute the same acceptance protocol on each platform |
+
+No product scope change is proposed by this audit. These are unresolved acceptance inputs, not decisions made by engineering.
+
+### 15.6. Current status
+
+- R0: **IN PROGRESS**.
+- CI application commands: **NO EXECUTION EVIDENCE** from the latest runs.
+- Live Audition GUI acceptance: **NOT_TESTED** on both target operating systems.
+- Candidate platform combinations: **NOT APPROVED / NOT VERIFIED**.
+- Product source and CI gate definitions: **UNCHANGED** by this update.
+- No R0 gate is passed.
+
+
+## 16. اصلاح انتساب اجرای CI به commit و تأیید runner_id (2026-11-27)
+
+بازخوانی مستقیم REST endpointهای GitHub Actions جزئیات دقیق‌تری از دو اجرای بخش ۱۵ فراهم کرد و لازم است عبارت «روی HEAD جاری PR» دقیق‌تر شود:
+
+- commit فعلی PR هنگام این اصلاح: `0c5e260894646f2bde5501ea2af526e2a1ea2aea` (ثبت‌شده در 14:25:20 UTC).
+- دو اجرای `46014529274` و `46014529304` در 14:17:07 UTC ایجاد شده‌اند و هر دو Job، صریحاً `head_sha=7c19e312d2dcbc907fdc44f6696b498bc07aacde` دارند.
+- بنابراین این دو اجرا مربوط به commit قبلی PR هستند، نه commit فعلی `0c5e260`. گزارش بخش ۱۵ نباید به‌عنوان CI اجراشده روی commit جدید تفسیر شود.
+- REST Job payload برای اجرای Architecture Governance نشان می‌دهد: `runner_id=0`، `runner_name=""` و `steps=[]`.
+- REST Job payload برای AVAPARDAZ Level 1 نیز همین مقادیر را نشان می‌دهد. دو Job وابسته Level 2–4 و Level 5 با conclusion برابر `skipped` ثبت شده‌اند.
+- هر دو Job اصلی حدود دو ثانیه پس از ایجاد خاتمه یافته‌اند.
+
+**نتیجه اصلاح‌شده:** شواهد مستقیم، شکست پیش از تخصیص Runner را برای commit `7c19e312` تأیید می‌کند. برای commit فعلی `0c5e260` هنوز اجرای CI مشاهده نشده است؛ پس نباید ادعا کرد که commit فعلی CI را اجرا کرده یا در آن شکست خورده است. پس از رفع مانع Actions، اجرای جدید روی HEAD فعلی لازم است.
+
+### وضعیت lockfile و ممیزی زنجیره تأمین — نکته تکمیلی
+
+بازخوانی فایل‌های واقعی روی `main` تأیید کرد:
+
+- `package.json` دارای scriptهای lint، build، unit، quality-gate، stress و e2e است.
+- CI اصلی نصب را با `bun install --frozen-lockfile` انجام می‌دهد و SBOM را از Bun تولید می‌کند.
+- Workflow مربوط به AVAPARDAZ در Level 5 فقط در صورت وجود `package-lock.json`، `npm audit` را اجرا می‌کند؛ در غیر این صورت صرفاً warning می‌دهد که npm audit قادر به ممیزی `bun.lock` نیست.
+- بنابراین وجود SBOM به‌تنهایی اثبات نمی‌کند که advisory/vulnerability scan برای dependency graph قفل‌شده انجام شده است. یک اسکن آسیب‌پذیری سازگار با lockfile واقعی هنوز باید به‌عنوان نیاز R0/R6 تعیین‌تکلیف شود.
+- هیچ lockfile موازی یا صوری ایجاد نشد و هیچ dependency یا workflow در این مرحله تغییر نکرد.
+
+### Traceability
+
+این اصلاح صرفاً مستنداتی است. PR #6 باز و Draft باقی می‌ماند؛ `main`، کد محصول و CI gateها بدون تغییرند. R0 همچنان IN PROGRESS است و هیچ تست اجرایی PASS نشده است.
+
+
+## 17. CI result on the current PR HEAD (2026-11-27)
+
+پس از commit `0c5e260894646f2bde5501ea2af526e2a1ea2aea`، دو workflow اصلی روی همین SHA اجرا شدند:
+
+- [AVAPARDAZ Quality & Release Gates — run 46015793367](https://github.com/bijanbijane/Audiocode/actions/runs/46015793367)
+- [Architecture Governance — run 46015793347](https://github.com/bijanbijane/Audiocode/actions/runs/46015793347)
+
+GitHub REST Job payload برای هر دو Job اصلی، `head_sha=0c5e260894646f2bde5501ea2af526e2a1ea2aea` را تأیید می‌کند و جزئیات زیر را ثبت کرده است:
+
+- AVAPARDAZ Level 1: `runner_id=0`، `runner_name=""`، `steps=[]`؛ شکست در حدود یک ثانیه.
+- Architecture Governance: `runner_id=0`، `runner_name=""`، `steps=[]`؛ شکست در حدود دو ثانیه.
+- AVAPARDAZ Level 2–4 و Level 5: `skipped`.
+
+**نتیجه:** این بار همان شکست پیش از تخصیص Runner مستقیماً روی HEAD فعلی PR نیز تأیید شد. هیچ command پروژه اجرا نشده است؛ پس هنوز هیچ نتیجه‌ای درباره سلامت یا نقص lint، تست، build، بسته‌بندی یا کد محصول نداریم. علت نهایی همچنان UNKNOWN است.
+
+تلاش برای خواندن Repository Actions permissions از GitHub connector با محدودیت endpoint مجاز متوقف شد؛ تنظیمات Billing و spending limit نیز از دسترس این اتصال خارج است. بنابراین رفع مانع نیازمند بررسی تنظیمات از سوی مالک مخزن/حساب است.
+
+### وضعیت
+
+- PR #6: OPEN / DRAFT / NOT MERGED.
+- main: بدون تغییر.
+- source code و CI workflow definitions: بدون تغییر.
+- R0: IN PROGRESS؛ هیچ Gate عبور نکرده است.
+- تست اجرایی PASS: صفر.
+
+
+## 18. تکرار شکست پیش از تخصیص Runner روی commit گزارش تکمیلی (2026-11-27)
+
+پس از ثبت commit `9d9ee5a22bdd5b5d7d0a697fcdfcff12c95eb1de`، دو Workflow اصلی دوباره اجرا شدند:
+
+- [AVAPARDAZ Quality & Release Gates — run 46016368048](https://github.com/bijanbijane/Audiocode/actions/runs/46016368048)
+- [Architecture Governance — run 46016367978](https://github.com/bijanbijane/Audiocode/actions/runs/46016367978)
+
+هر دو Job اصلی با `head_sha=9d9ee5a22bdd5b5d7d0a697fcdfcff12c95eb1de` ثبت شده‌اند. REST payload نشان می‌دهد:
+
+- AVAPARDAZ Level 1: `runner_id=0`، `runner_name="")، `steps=[])، پایان حدود ۷ ثانیه پس از شروع.
+- Architecture Governance: `runner_id=0`، `runner_name="")، `steps=[])، پایان حدود ۲ ثانیه پس از شروع.
+- AVAPARDAZ Level 2–4 و Level 5: `skipped`.
+
+این شواهد تکرار همان شکست پیش از تخصیص Runner روی commit گزارش تکمیلی را تأیید می‌کنند. هیچ command مربوط به برنامه اجرا نشده است.
+
+**تفسیر:** مشکل در مرحله تخصیص/آغاز Job در GitHub Actions یا دسترسی Runner باقی است؛ علت دقیق هنوز UNKNOWN است. Repository Actions permissions و Billing از طریق اتصال فعلی قابل بررسی نبودند. تغییر کد یا تضعیف Gateها توجیه ندارد تا مالک تنظیمات را بررسی و تخصیص Runner ممکن شود.
+
+این بخش آخرین اجرای قابل مشاهده در این بازبینی را ثبت می‌کند. هر commit مستنداتی جدید خود می‌تواند Workflow تازه‌ای ایجاد کند؛ نتیجه آن اجرا باید مستقل از نتایج این بخش بررسی شود.
+
+
+## 19. Latest PR-head CI recheck and log retrieval outcome (2026-11-27)
+
+### 19.1. Repository and PR state
+
+- Repository: `bijanbijane/Audiocode` (private); default branch: `main`.
+- PR #6: **OPEN / DRAFT / NOT MERGED**; base `main`; mergeable reported true.
+- PR head at this recheck: `548e3f2a445d5dcd4e56e9cd73d2fb4999c2bf08`.
+- The `main` base SHA remains `e73394f8e00e477f1de0046e04fd233681610563`.
+
+### 19.2. Workflow runs associated with this PR head
+
+- [Architecture Governance — run 46016441665](https://github.com/bijanbijane/Audiocode/actions/runs/46016441665)
+- [AVAPARDAZ Quality & Release Gates — run 46016441656](https://github.com/bijanbijane/Audiocode/actions/runs/46016441656)
+
+The commit-to-runs endpoint associates both runs with the PR head above. Job summaries report:
+
+- Architecture Governance primary job: `failure`.
+- AVAPARDAZ Level 1: `failure`.
+- AVAPARDAZ Level 2–4 and Level 5: `skipped`.
+- The job-step endpoint returned an empty array for both primary jobs.
+- Job-log retrieval returned GitHub `404 BlobNotFound`; no decoded job log was available.
+
+The connector's normalized job summaries for these runs do not expose `runner_id` or `runner_name`. Therefore this section does **not** claim direct runner-allocation evidence for these specific run IDs. The evidence establishes only that the primary jobs failed without retrievable step summaries/logs and that dependent levels were skipped. Earlier runs documented in Sections 16–18 separately contain explicit `runner_id=0` observations.
+
+### 19.3. Workflow definition and dependency-audit review
+
+The current PR-branch workflow files were read back:
+
+- `.github/workflows/avapardaz-quality-gates.yml` installs with `bun install --frozen-lockfile`, runs five focused Node test files, builds, checks the ORT WASM asset and runs TypeScript lint in Level 1. Its Level 5 audit runs `npm audit --audit-level=high` only when `package-lock.json` exists; otherwise it emits a warning that npm audit cannot audit `bun.lock`.
+- `.github/workflows/ci-quality-gate.yml` generates a CycloneDX SBOM from the Bun lockfile and runs typecheck, Vitest, Node tests, quality gates and build.
+- `package.json` confirms the relevant script definitions. The repository uses `bun.lock`; `package-lock.json` is absent.
+
+SBOM generation is inventory/provenance evidence, not a vulnerability-advisory scan. The current AVAPARDAZ Level 5 fallback is warning-only when the npm lockfile is absent. A Bun-lockfile-compatible vulnerability scan remains an open supply-chain requirement. No workflow, lockfile, dependency, source code or gate was changed in this review.
+
+### 19.4. Disposition
+
+- Latest PR-head workflow results: **FAILURE**, with no step summaries or retrievable logs.
+- Exact cause of these two latest job failures: **UNKNOWN**; direct runner fields unavailable in the normalized response.
+- Application commands: **NO EXECUTION EVIDENCE** from these two runs.
+- Dependency advisory scan against the authoritative Bun lockfile: **OPEN / NOT ESTABLISHED**.
+- PR #6 remains open and Draft; `main` and product code remain unchanged.
+- R0: **IN PROGRESS**; no gate is passed and no executable test PASS is established.
+
+Next action remains owner-side GitHub Actions settings/billing verification, followed by rerunning the workflows and examining the first actual step/log once available. Keep all repository work on GitHub; do not use a local Mac checkout.
+
+
+## 20. Reconciliation of Adobe Audition host compatibility evidence (2026-11-27)
+
+A focused comparison of the four compatibility/integration documents on `main` confirms that the current internal platform support contract is not yet frozen.
+
+### 20.1. Source-document findings
+
+- `docs/shahab/SHAHAB_ADOBE_HOST_VERSION_MATRIX.md` identifies Audition 25.x on Windows 11 x86_64 and macOS 14/15 arm64/x86_64. Both live-host rows are `NOT_TESTED`.
+- `docs/AVAPARDAZ/HARDWARE-COMPATIBILITY-MATRIX.md` describes a broader candidate set: Windows 10/11 x86_64, Windows 11 ARM64 (conditional on Audition host support), macOS Apple Silicon and macOS Intel. All Audition desktop rows are `Unverified`.
+- `docs/AVAPARDAZ/PHASE-09-TEST-REPORT.md` records Linux x86_64 execution only and explicitly blocks live Audition GUI and physical consumer-hardware acceptance.
+- `docs/shahab/SHAHAB_ADOBE_INTEGRATION_TEST_REPORT.md` reports passing SDK offset mapping, interchange generation, authenticated local bridge and privacy/recovery checks, while the installed live Audition GUI remains `NOT_TESTED`.
+
+### 20.2. Reconciled interpretation
+
+These documents describe different evidence levels and must not be merged into one claim of support:
+
+| Combination | Candidate evidence | Current acceptance status |
+|---|---|---|
+| Windows 11 x86_64 + Audition 25.x | Explicit in SHAHAB host matrix | NOT_TESTED |
+| macOS 14/15 arm64 + Audition 25.x | Explicit in SHAHAB host matrix | NOT_TESTED |
+| macOS 14/15 x86_64 + Audition 25.x | Explicit in SHAHAB host matrix | NOT_TESTED |
+| Windows 10 x86_64 + Audition >=24.0 | Broader hardware matrix only | UNVERIFIED; not yet approved for internal v1 |
+| Windows 11 ARM64 | Conditional row in broader matrix | UNVERIFIED; Adobe host support not established here |
+
+The approved roadmap's requirement is **both macOS and Windows**. It does not itself approve every architecture or OS version listed in the broader historical matrix. The narrower SHAHAB matrix is a candidate baseline, not proof of compatibility or a product-owner approval.
+
+### 20.3. Required R0 closure inputs
+
+Before platform acceptance can begin, the internal support contract must specify:
+
+1. Exact Audition major/minor/build version(s).
+2. Minimum Windows version/build and CPU architecture.
+3. Minimum macOS version/build and whether Intel is in or out of internal v1.
+4. Whether Windows ARM64 is explicitly excluded, evaluated, or supported.
+5. Minimum RAM/CPU and supported audio formats.
+6. A repeatable live-host test protocol executed on both operating systems.
+
+Engineering has not silently selected or removed any of these targets. This section records the discrepancy and the decision required; it does not change approved product scope.
+
+### 20.4. Status
+
+- Platform scope: both macOS and Windows remain required.
+- Exact OS/Audition/architecture matrix: OPEN / NOT FROZEN.
+- Live Audition host acceptance: NOT_TESTED.
+- No compatibility row is promoted to Supported, Verified or Accepted by this reconciliation.
+- No runtime code, packaging, CI gate or product behavior changed.
+
+## 21. CEP host declaration and ASR contract drift review (2026-11-27)
+
+A read-only comparison of the frozen Engine Interface Specification, current runtime TypeScript contract, Companion IPC bridge and CEP manifest found two actionable contract-governance gaps.
+
+### 21.1. CEP manifest range is broader than the tested host matrix
+
+- `packages/audition-cep-plugin/CSXS/manifest.xml` declares host `AUDT` with version range `[22.0,99.9]` and CSXS runtime `11.0`.
+- `docs/shahab/SHAHAB_ADOBE_HOST_VERSION_MATRIX.md` lists Audition 25.x only, with all live-host tests `NOT_TESTED`.
+- The manifest range is a loader declaration, not a compatibility guarantee. It advertises a broad host-version interval for which this audit found no corresponding acceptance evidence.
+
+### 21.2. Frozen ASR specification and implementation contract differ structurally
+
+The frozen `docs/AVAPARDAZ/ENGINE-INTERFACE-SPEC.md` (v2.0) defines `AsrRuntimeAdapter` with `warmup()`, `transcribeBatch()`, `transcribeStream()` and `unloadModel()`, and a transcript schema containing `status`, `modelSha256`, `isGenuineNeuralModel`, `executedOffline`, `audioSha256` and per-segment `confidenceStatus`.
+
+The current `src/asr-core/UnifiedLocalAsrRuntime.ts` instead exports `LocalAsrRuntimeAdapter` with `initializeRuntime()`, `validateModel()`, `transcribe()`, `cancel()`, `getHealth()`, `getResourceUsage()` and `dispose()`. Its `AvapardazTranscriptResult` uses `runtimeName`, `executionProvider`, `modelSha256Hex`, `architecture`, `offlineVerified`, `sampleRateHz`, `durationSec` and `peakMemoryBytes`; segment/word shapes also differ.
+
+These are materially different public TypeScript contracts, not merely naming variations. **Correction from the deeper consumer audit in Section 22:** both current ASR adapters do implement the same `LocalAsrRuntimeAdapter` and return the same `AvapardazTranscriptResult` at the adapter boundary. The remaining issue is not adapter symmetry; it is whether downstream product consumers (especially the CEP panel's direct IPC path) consume that same canonical transcript DTO. Companion IPC is separately versioned as `1.0.0`; its handshake carries `CANONICAL_CONTRACT_VERSION`, not an explicit ASR transcript-schema version.
+
+### 21.3. Risk and recommended disposition
+
+- Risk: teams and consumers may rely on a stale frozen document, producing incompatible adapters, transcript serialization or test fixtures.
+- Do not blindly rename fields or force the implementation back to the older spec. Inventory runtime adapters, serialization boundaries, IPC payloads and consumers; then decide whether the implementation is the intended canonical v2 contract or a versioned migration is required.
+- Add compile-time conformance tests for Browser and Native adapters and round-trip serialization tests at the Companion IPC boundary after selecting the canonical schema.
+- Narrow the CEP host range only after product-owner target selection and live host tests, not as an unreviewed change in this audit.
+
+### 21.4. Status
+
+- CEP manifest host range: declared `22.0–99.9`; tested support NOT_ESTABLISHED.
+- Frozen Engine Interface Specification ↔ current TypeScript runtime contract: DRIFT CONFIRMED / reconciliation required.
+- Companion IPC protocol: `1.0.0`; unchanged.
+- No source code, manifest, runtime API, test, CI gate or product scope changed.
+- R0 remains IN PROGRESS; no gate passed by this documentation-only comparison.
+
+## 22. ASR consumer-boundary, version negotiation and confidence semantics audit (2026-11-27)
+
+Deeper source inspection refines Section 21: the two ASR runtime adapters are structurally symmetric at their internal adapter boundary, but the Adobe Audition CEP product path bypasses that canonical adapter DTO and consumes the Companion service DTO directly.
+
+### 22.1. Adapter boundary is shared; CEP IPC consumer is not
+
+- `src/asr-core/UnifiedLocalAsrRuntime.ts` exports `LocalAsrRuntimeAdapter` and `AvapardazTranscriptResult` with `AVAPARDAZ_ASR_CONTRACT_VERSION = 2.0.0`.
+- `src/asr-core/BrowserOnnxAsrRuntimeAdapter.ts` and `src/asr-core/NativeCompanionAsrRuntimeAdapter.ts` both explicitly `implements LocalAsrRuntimeAdapter`; Native converts `LocalNeuralTranscriptionResult` through `normalizeNativeResultToCanonical()`.
+- However, `packages/audition-cep-plugin/client/app.js` sends `JOB_STATUS`, then maps `job.result.segments` using `s.text`. `src/host-bridge/companion/LocalCompanionService.ts` stores/returns `LocalNeuralTranscriptionResult`, whose segment DTO uses `text` and `normalizedByProfile`. The Browser adapter's canonical segment uses `rawText` and `normalizedText` instead.
+- Therefore the internal adapter contract is shared, but the CEP panel's direct Companion IPC path is a separate DTO boundary and does not consume `AvapardazTranscriptResult` as specified in the frozen Engine Interface document. This may be an intentional compatibility layer, but it is not documented as such and no explicit versioned mapper at the CEP boundary was found in the inspected path.
+
+### 22.2. Version identifiers are separate namespaces
+
+- ASR adapter schema: `AVAPARDAZ_ASR_CONTRACT_VERSION = 2.0.0`.
+- Canonical capability envelope: `CANONICAL_CONTRACT_VERSION = 2.0.0`.
+- Companion IPC envelope: `COMPANION_IPC_PROTOCOL_VERSION = 1.0.0`.
+- Unified Processing API: `UNIFIED_PROCESSING_CONTRACT_VERSION = 1.0.0`.
+- The IPC handshake validates `expected_contract_version` against `CANONICAL_CONTRACT_VERSION`; CEP currently hardcodes `2.0.0`. Equal string values do not establish a compile-time dependency between the ASR transcript schema and the capability contract. A transcript-only breaking change could therefore evade the handshake unless an explicit ASR schema version is included in the negotiation or DTO envelope.
+
+### 22.3. Existing cross-runtime test does not prove runtime parity
+
+`src/asr-core/RealOnnxAndCrossRuntimeConformance.test.ts` contains a test named “Browser vs Native canonical parity”. The inspected assertions verify Browser capability negotiation and a Browser missing-model error, then call `normalizeNativeResultToCanonical()` on a synthetic Native result and validate its timestamps. They do not run both concrete adapters on the same fixture/model/audio and compare their serialized canonical outputs. The test is useful for Native normalization and Browser isolation, but its title overstates end-to-end cross-runtime conformance coverage.
+
+### 22.4. Confidence availability is collapsed into a numeric zero
+
+- `src/asr-core/CoreAsrContracts.ts` defines `ConfidenceStatus` as `CALIBRATED | UNAVAILABLE_UNCALIBRATED`.
+- `src/processing-engine/UnifiedProcessingContract.ts` preserves `confidenceStatus` and nullable `calibratedConfidence` on `UnifiedTranscriptSegment`.
+- The lower-level `AvapardazWordSpan` in `UnifiedLocalAsrRuntime.ts` requires a numeric `confidence` and has no confidence-status field. Browser mapping converts non-finite confidence to `0`; Native mapping converts absent/non-finite confidence to `0`, then derives segment confidence by averaging words (or `0` for an empty segment).
+- This loses the distinction between a measured/calibrated zero and unavailable/un-calibrated confidence. It can mislead downstream ranking or editing logic if numeric confidence is treated as a probability. Preserve explicit availability/calibration metadata or use nullable confidence before exposing this as a canonical public result.
+
+### 22.5. Required follow-up and disposition
+
+1. Document the intended boundary architecture: either have CEP consume a versioned canonical transcript DTO, or explicitly define and version the legacy Companion IPC job-result DTO plus its mapper to the canonical ASR result.
+2. Give ASR transcript schema its own explicit negotiated version (or bind it by type/reference to the capability contract version) instead of relying on equal literal `2.0.0` values.
+3. Add a real cross-runtime conformance test that runs Browser and Native adapters against equivalent deterministic fixtures and compares normalized schema invariants; retain the existing focused tests.
+4. Preserve confidence availability/calibration semantics end-to-end; do not silently encode unavailable confidence as `0`.
+5. Run the tests only after GitHub Actions runner allocation is restored; current Actions failures still expose no executed test steps.
+
+### 22.6. Status
+
+- Shared adapter interface: CONFIRMED at TypeScript declaration level; runtime parity NOT_VERIFIED.
+- CEP direct IPC result DTO versus canonical adapter DTO: DIFFERENT / undocumented compatibility boundary.
+- Version negotiation: IPC and capability versions are checked; ASR schema version is not independently negotiated.
+- Confidence availability semantics: information loss CONFIRMED in Browser and Native adapter mapping.
+- At the time of this audit, no source code, tests, manifest, IPC behavior, CI gate or product scope had changed.
+- R0 remains IN PROGRESS; no gate passed.
+
+## 23. ASR / CEP contract-boundary implementation progress (2026-11-27)
+
+This section records implementation work performed on the PR #6 branch after the read-only findings in Sections 21–22. It does not promote any R0 gate.
+
+### 23.1. Implemented
+
+- Added `src/asr-core/AsrContractVersion.ts` as the single source of the canonical ASR contract version. `UnifiedLocalAsrRuntime.ts` re-exports the same constant to preserve existing imports; the IPC bridge now imports the lightweight version module rather than loading the ASR runtime module.
+- Added `src/host-bridge/companion/CepTranscriptDto.ts` with versioned `CepTranscriptResultV1` / `CepTranscriptSegmentV1` and a single mapper from `LocalNeuralTranscriptionResult`; normalized profile selection follows detected language.
+- Added `src/host-bridge/companion/CompanionJobResultMapper.ts` to centralize host-specific result serialization with narrow TypeScript overloads.
+- The DTO retains the CEP editor's `text` field as a compatibility alias, while exposing `rawText` and `normalizedText` separately. Existing word timings and timestamp granularity are preserved; no synthetic timing is introduced.
+- Native inference output currently has no calibrated confidence value. The CEP DTO explicitly emits `confidence: null` and `confidenceStatus: UNAVAILABLE_UNCALIBRATED`; it does not coerce unavailable confidence to zero.
+- The Companion handshake independently checks `expected_asr_contract_version` and `expected_cep_transcript_schema_version` for Adobe Audition clients and returns the served versions. The IPC protocol and generic capability contract remain separate.
+- `JOB_STATUS`, `JOB_RECONNECT`, and `JOB_LIST` map completed job results only for `execution_mode: audition-cep`. Other execution modes retain the existing `LocalNeuralTranscriptionResult` payload. `CompanionWebClient` now explicitly marks both normal and retry IPC requests as `web-client`.
+- The CEP panel sends both expected versions, validates the handshake response, and rejects a completed result with an unexpected DTO schema version.
+
+### 23.2. Tests added (execution not yet verified)
+
+- `src/host-bridge/companion/__tests__/CepTranscriptDto.test.ts`: DTO version, language-specific normalized text, raw/normalized text, timestamp/word preservation, unavailable-confidence semantics, and CEP-vs-Web serialization isolation.
+- `src/host-bridge/companion/__tests__/CompanionProductionIpcAndCep.test.ts`: missing and unsupported schema rejection, successful independent version negotiation, returned version fields, backward-compatible Web handshake, and CEP static contract checks.
+- Updated the CEP reconnect fixture in `Phase1BCompanionStreamingAndMemory.test.ts` to send the required schema versions. Reclassified the generic offline-ASR/security test in `LocalCompanionAndSecurity.test.ts` as `cli-test`, so it continues to exercise the non-CEP compatibility handshake.
+- These tests are committed but have not been confirmed as executed. Latest Actions runs remain pre-step failures; see Section 23.3.
+
+### 23.3. Validation status
+
+- GitHub Actions on PR #6 head `71b5d9fa11c67907d11a4f3c7db145f9f858d19b`: AVAPARDAZ Quality & Release Gates (`46020174488`), Architecture Governance (`46020174379`), and Separated Web/API Container Build (`46020174384`) all concluded failure.
+- The exposed job payloads contain `steps: null`; no test, typecheck, lint, or build result is available. Do not interpret these as application failures or successes.
+- A subsequent documentation-only PR-head update (`29fcb5410d2e9f19da2d13adbc65ab104c360583`) also triggered AVAPARDAZ Quality & Release Gates (`46020228226`), Architecture Governance (`46020228186`), and Separated Web/API Container Build (`46020228206`); all failed with `steps: null`. No source-code change occurred after the code head listed above.
+- No local or Mac execution was used. All source changes were made directly through the official GitHub repository interface.
+- No production deployment, merge, or live service operation occurred.
+
+### 23.4. Remaining work
+
+1. Obtain an Actions run with an allocated runner, then run typecheck/build and the focused Companion tests; investigate the first actual application-level failure.
+2. Add service-level integration coverage proving that a completed job is mapped for CEP and remains unchanged for Web Companion consumers.
+3. Complete a repository-wide consumer inventory for `JOB_STATUS`, `JOB_RECONNECT`, and `JOB_LIST`. A targeted scan of 19 companion/Audition-related files found CEP `JOB_STATUS`/`JOB_RECONNECT` use and Web `JOB_STATUS` use; `JOB_LIST` is currently exposed by the service and exercised by tests.
+4. Add concrete Browser-versus-Native adapter conformance using equivalent deterministic model/audio fixtures when the test harness permits.
+5. Validate the CEP/Companion pair in live Adobe Audition on both approved platform families; R0 and platform acceptance remain IN PROGRESS.
+
+
+## 20. CI recheck — PR #6 head 5a94dd1 (2026-11-27)
+
+A fresh recheck of the current PR head confirms that the execution-layer failure persists across all three configured workflows:
+
+| Workflow run | Workflow | Job result | Step evidence |
+|---|---|---|---|
+| [46020314768](https://github.com/bijanbijane/Audiocode/actions/runs/46020314768) | Architecture Governance, Reliability & Release Quality Gate | failure | Job 140577949529; `steps: null`, `logs_url: null` |
+| [46020314616](https://github.com/bijanbijane/Audiocode/actions/runs/46020314616) | AVAPARDAZ Quality & Release Gates | Level 1 failure; Levels 2–5 skipped | Job 140577948653; `steps: null`, `logs_url: null` |
+| [46020314640](https://github.com/bijanbijane/Audiocode/actions/runs/46020314640) | Separated Web and API Container Build | failure | Job 140577948821; `steps: null`, `logs_url: null` |
+
+The three workflow runs are associated with the same PR head SHA `5a94dd1b12600dc738387d1182be988df3ac7972`. No step-level logs or command results were exposed. This recheck therefore does not establish a TypeScript, test, build, packaging, or application-code failure; it also provides no passing validation evidence. The exact Actions execution-layer cause remains UNKNOWN.
+
+A static review of the current CEP DTO and response mapper found the native result's `offlineVerified: true` contract consistent with the DTO type, and the mapper is scoped to `audition-cep` for `JOB_STATUS`, `JOB_RECONNECT`, and `JOB_LIST`. This is source inspection only, not runtime validation. The repository-wide consumer inventory remains incomplete because GitHub code search returned no indexed matches; do not treat the targeted scan as exhaustive.
+
+**Required unblock:** repository owner to inspect GitHub Repository Settings → Actions → General and account Billing / Actions usage, then rerun the workflows after runner allocation is restored. No workflow gates were weakened and no source-code changes were made to disguise the pre-step failure.
+
+
+## 21. CI retry metadata and static boundary review — 2026-11-27
+
+The three failed workflow runs from section 20 were retried using GitHub's failed-job rerun operation. Attempt 2 reproduced the same pre-runner failure:
+
+| Workflow run | Attempt 2 Job | Runner ID | Runner name | Steps | Conclusion |
+|---|---:|---:|---|---:|---|
+| [46021339127](https://github.com/bijanbijane/Audiocode/actions/runs/46021339127) | 140582225775 | 0 | empty | 0 | failure |
+| [46021338875](https://github.com/bijanbijane/Audiocode/actions/runs/46021338875) | 140582247718 | 0 | empty | 0 | failure |
+| [46021338916](https://github.com/bijanbijane/Audiocode/actions/runs/46021338916) | 140582264860 | 0 | empty | 0 | failure |
+
+For all three failed jobs, the run-attempt jobs endpoint explicitly returned `runner_id: 0`, empty `runner_name`, and `steps: []`. Downloading each job log returned HTTP 404 / `BlobNotFound`; no executable log exists to inspect. This is direct evidence that the jobs failed before a runner was allocated. It still does not identify whether the underlying cause is repository Actions policy, account usage/billing, or a GitHub-side service issue.
+
+### Static review notes
+
+- The CEP client sends `execution_mode: audition-cep` on IPC requests, negotiates ASR and CEP schema versions at handshake, and rejects completed job results whose `schemaVersion` differs. The Web client explicitly sends `execution_mode: web-client` on both normal and retry requests.
+- Native result segments are assembled from raw Sherpa chunk text and receive per-segment normalization profiles. The CEP DTO's use of `segment.text` as the legacy `text` alias and its profile-based `normalizedText` mapping is consistent with that source contract.
+- `CompanionJobResultMapper` is imported by `LocalCompanionService` with the reverse type dependency erased by TypeScript's `import type`; static inspection shows no runtime circular import introduced by this helper.
+- Remaining coverage gap: tests cover the pure mapper and handshake/IPC compatibility, but do not yet drive a completed job through the actual service HTTP route and assert the CEP-vs-Web response payloads end-to-end.
+- Boundary-hardening follow-up: `execution_mode` is currently read from each authenticated IPC envelope, while the session also stores the handshake `hostId`. The mode affects response serialization, not job authorization, but the service does not bind the requested mode to the session's handshake identity. Consider validating allowed mode values and enforcing a consistent mode per session in a separately tested change.
+
+No code changes were made during this static review. All source-level conclusions remain unverified by compiler, test runner, build, or live Audition execution. R0 remains IN PROGRESS; no Gate is promoted.
+
+
+## 22. CI verification on the updated audit commit — 2026-11-27
+
+The documentation commit `db12b30a5991b73aeed99e04959e46b08b262281` triggered all three pull-request workflows. The initial attempts again failed before runner allocation:
+
+| Workflow run | Failed job | Runner ID | Steps | Conclusion |
+|---|---:|---:|---:|---|
+| [46021859347](https://github.com/bijanbijane/Audiocode/actions/runs/46021859347) | 140583223425 (Level 1) | 0 | 0 | failure |
+| [46021859500](https://github.com/bijanbijane/Audiocode/actions/runs/46021859500) | 140583224553 | 0 | 0 | failure |
+| [46021859268](https://github.com/bijanbijane/Audiocode/actions/runs/46021859268) | 140583223669 | 0 | 0 | failure |
+
+The raw run-attempt job payloads report `runner_id: 0`, empty `runner_name`, and `steps: []` for each failed primary job. AVAPARDAZ Levels 2–5 were skipped because Level 1 failed. This repeats the pre-runner failure on a new commit and confirms that the previous static-review documentation change did not alter the failure mode. No project command is evidenced as executed; exact cause remains unknown.
+
+R0 remains IN PROGRESS. No code, workflow, or gate changes were made in response to this failure.
+
+
+## 16. CI recovery and updated R0 disposition (2026-11-28)
+
+### 16.1. Repository and PR state
+
+- Repository visibility was rechecked through GitHub repository metadata: **PUBLIC**. The earlier Section 1 value "(private)" was incorrect and is corrected in the baseline table.
+- Default branch: `main`, baseline commit: `e73394f8e00e477f1de0046e04fd233681610563`.
+- PR #6 remains **OPEN / DRAFT / NOT MERGED** at head `0a4fde0022e93e3ceccad2ec45b006048305fafd`, based on the unchanged `main` baseline.
+- This execution environment exposes GitHub remote APIs, not a mounted local checkout. Local `.git`, working-tree changes, untracked files, and local branch state therefore remain **NOT AVAILABLE / NOT INSPECTED**; remote branch and commit state are the verified Git evidence.
+
+### 16.2. CI recovery evidence
+
+Four GitHub Actions workflows completed successfully on the exact PR head `0a4fde0022e93e3ceccad2ec45b006048305fafd` on 2026-11-28:
+
+- [Architecture Governance, Reliability & Release Quality Gate — run 46124103005](https://github.com/bijanbijane/Audiocode/actions/runs/46124103005): SUCCESS. Its job summary reports TypeScript compilation, Vitest, reliability tests, E2E, production build and release-manifest checks completed successfully.
+- [AVAPARDAZ Quality & Release Gates — run 46124102991](https://github.com/bijanbijane/Audiocode/actions/runs/46124102991): SUCCESS. Level 1, Levels 2–4, and Level 5 all completed successfully. The inspected steps include frozen Bun installation, focused regression suites, production build, TypeScript lint, real offline ORT/WASM inference, VAD and speaker-embedding inference, SHAHAB Zipformer inference/parity, canonical P0 verification, bundle hygiene, CEP manifest/CSP checks, and lockfile/dependency-audit availability.
+- [Separated Web and API Container Build — run 46124102988](https://github.com/bijanbijane/Audiocode/actions/runs/46124102988): SUCCESS.
+- [Standalone Platform API Readiness — run 46124102960](https://github.com/bijanbijane/Audiocode/actions/runs/46124102960): SUCCESS.
+
+The quality-gate job payload contains successful completed steps for Levels 1–5; this is stronger evidence than the earlier workflow-only failure summaries. The CI environment has recovered sufficiently to execute the listed jobs on this PR head.
+
+### 16.3. Correction to historical CI findings
+
+Sections 2 and 10–15 preserve the original baseline and historical pre-runner failures as time-bounded evidence. Those failures were real observations for their respective runs, but they are no longer an accurate description of the latest PR-head CI state.
+
+- Historical pre-runner failures: **CONFIRMED for the cited historical runs**.
+- Root cause of those historical failures: **UNKNOWN**; no retrospective cause is inferred.
+- Latest PR-head CI: **PASS for the four workflow runs listed above**.
+- Latest code validation: **PASS for the commands and test steps actually reported by those workflows**.
+- Physical macOS/Windows and live Adobe Audition validation: **NOT RUN / NOT AVAILABLE**; GitHub-hosted CI is not a substitute for those host tests.
+
+### 16.4. Updated R0 disposition
+
+R0 remains **IN PROGRESS**. The latest CI recovery closes the immediate "no runner / no executable CI evidence" blocker for the current PR head, but does not close the full R0 exit criteria.
+
+Still open:
+
+1. Owner approval of the exact macOS and Windows OS/build, CPU architecture, minimum hardware, Audition version/build, and supported audio-format matrix.
+2. Owner decision on internal signing/trust policy, Companion startup behavior, update policy, and Node runtime dependency.
+3. Authorized physical or remote macOS and Windows hosts with real Adobe Audition for host acceptance.
+4. Reconciliation of the R0 test inventory and CI evidence against the current implementation and exact acceptance criteria.
+5. Explicit disposition of each external prerequisite and risk; unresolved items remain OPEN or BLOCKED.
+
+The separate [R0 Distribution, Installation & Trust Audit](./R0-DISTRIBUTION-TRUST-AUDIT-2026-11-28.md) records the concrete installer, platform-target, and update-authenticity gaps. No product-scope or owner-only distribution decision is made by this audit.
+
+### 16.5. Next engineering action
+
+Proceed with the remaining evidence-backed R0 work that does not require owner decisions: review the current PR's ownership/IPC changes and CI coverage, reconcile all five prerequisite dispositions, and prepare the exact platform and distribution decision record for owner review. Do not claim R0 acceptance or begin irreversible/host-specific installation changes before the required decisions and test access exist.
+
+
+## 17. PR security review, scope check, and final CI evidence (2026-11-28)
+
+### 17.1. CI on the R0 audit update commit
+
+All four workflows completed with **SUCCESS** on the documentation update commit `3818431e5b18169a335eed5b54ab56e2e7f9b916`:
+
+- [AVAPARDAZ Quality & Release Gates — run 46131619651](https://github.com/bijanbijane/Audiocode/actions/runs/46131619651): SUCCESS; Level 1, Levels 2–4, and Level 5 jobs all succeeded.
+- [Architecture Governance, Reliability & Release Quality Gate — run 46131619653](https://github.com/bijanbijane/Audiocode/actions/runs/46131619653): SUCCESS.
+- [Separated Web and API Container Build — run 46131619661](https://github.com/bijanbijane/Audiocode/actions/runs/46131619661): SUCCESS.
+- [Standalone Platform API Readiness — run 46131619670](https://github.com/bijanbijane/Audiocode/actions/runs/46131619670): SUCCESS.
+
+This supersedes the "queued at last check" status in Section 16.5. The successful runs validate the exact commit and the commands/jobs reported by those workflows; they do not establish live macOS, Windows, or Adobe Audition host acceptance.
+
+### 17.2. Targeted static review of owner-scoped Companion IPC
+
+The following production paths were inspected on PR #6 head:
+
+- `CompanionIpcBridge.ts`: validates the handshake identity format, binds the IPC session to a host-scoped owner identifier, authenticates each request with the per-process HMAC token, checks replay/expiry, and constrains execution mode against the host identity.
+- `LocalCompanionService.ts`: derives owner identity from the authenticated IPC session and propagates it to transcription submission, job status/list/reconnect/cancel, staged upload, and audio transfer operations.
+- `CompanionAudioTransfer.ts`: requires owner identity for transfer initialization, chunk append, finalize, acquire, consume, abort, and lifecycle/history inspection; closed transfer history retains owner association.
+- `ProcessingJobManager.ts`: namespaces idempotency by owner and filters job lookup/list/cancel by the requested owner.
+- `AvapardazBackendRouter.ts`: validates the Companion request boundary and propagates authenticated owner identity to job submission and accessors.
+
+The PR adds regression coverage for cross-session job status/reconnect/cancel denial, same-installation CEP reconnect, Web-vs-CEP result DTO separation, transfer lifecycle/history isolation, staged-upload owner checks, and owner-namespaced idempotency. The current PR-head CI runs listed in Sections 16–17 pass these included suites.
+
+**Review limitation:** this was a targeted source review of the owner/IPC paths and the changed-file inventory, not an exhaustive security audit of all 541+ repository consumers or a live multi-process host test.
+
+### 17.3. Owner identity threat-model question
+
+CEP creates a 256-bit random `client_instance_id` and persists it in extension `localStorage`; the value is supplied during handshake and becomes the stable owner identity for reconnecting across IPC sessions. The service validates its 64-hex format and separately authenticates subsequent IPC requests with a session HMAC token.
+
+The stable identifier is therefore a bearer-style reattachment identity, not an independently verified public-key identity. The reviewed code does not demonstrate a separate proof-of-possession challenge for the persisted identifier. Browser-origin/Host protections mitigate cross-origin web attacks, but the threat model must explicitly state whether a malicious process running as the same OS user and able to read the CEP profile/localStorage is in scope.
+
+Disposition: **THREAT-MODEL QUESTION / NOT A CONFIRMED REMOTE EXPLOIT**. Do not describe the client identifier alone as cryptographic authentication. If same-user local-process compromise is in scope, design a protected per-install credential/proof mechanism and add adversarial tests before claiming that boundary closed.
+
+### 17.4. PR scope and reviewability
+
+PR #6 currently changes **45 files** with **3,244 additions and 251 deletions**. Alongside the R0 Audition/Companion/Core work, its changed-file inventory includes Platform API/backend concerns such as billing/invoice ownership, device-seat enforcement, live-ASR gateway, database migration, cache, and backend container services.
+
+Some changes are security hardening, but the approved delivery roadmap is Audition + Native Companion + shared Core for an internal release; payment/commercial delivery is outside the current scope. This creates a **PR scope/reviewability risk**, not a claim that those security fixes are incorrect.
+
+Before merge, each backend/platform change should be tied to a required shared-core security boundary or moved to a separately reviewable PR. Do not discard or rewrite existing branch work automatically. PR #6 remains OPEN / DRAFT / NOT MERGED.
+
+### 17.5. Updated R0 status
+
+- Remote CI execution: **PASS on PR head `3818431e...`** (four workflows).
+- Targeted owner-scoped IPC source review: **REVIEWED; no direct cross-owner access path identified in the inspected routes**.
+- Same-user local-process identity threat: **OPEN / THREAT-MODEL DECISION REQUIRED**.
+- PR scope alignment: **OPEN / REVIEW REQUIRED**.
+- Platform matrix and internal install/trust decisions: **OPEN / OWNER DECISION REQUIRED**.
+- Physical macOS + Windows + live Audition acceptance: **NOT AVAILABLE / NOT RUN**.
+- R0 overall: **IN PROGRESS — NOT ACCEPTED**.
+
+### 17.6. Next action
+
+1. Prepare owner decisions for exact platform matrix and internal installation/trust behavior.
+2. Reconcile PR #6's backend/platform changes against the approved Audition-only internal scope before merge.
+3. Decide whether same-user local processes are inside the Companion threat model; if yes, design and test stronger per-install proof of possession.
+4. Obtain authorized macOS and Windows hosts with real Adobe Audition for live acceptance.

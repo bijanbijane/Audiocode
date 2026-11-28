@@ -242,8 +242,8 @@ test('Red-Team: Live Companion HTTP server enforces HMAC auth, nonce replay, Ori
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         ipc_protocol_version: '1.0.0',
-        host_id: 'adobe-audition',
-        host_version: '24.0',
+        host_id: 'cli-test',
+        host_version: 'test-1.0.0',
         panel_version: '1.0.0',
         host_adapter_version: '1.0.0',
         expected_contract_version: '2.0.0',
@@ -433,6 +433,99 @@ test('Adobe Audition CEP plugin contains verified AUDT manifest, CSP-protected U
   assert.ok(jsx.includes('avpGetActiveDocumentInfo'));
 });
 
+test('Companion transfer lifecycle metadata is isolated by owner while active and after cleanup', () => {
+  const stagingDir = fs.mkdtempSync(path.join(os.tmpdir(), 'avp-transfer-owner-boundary-'));
+  const service = new LocalCompanionService({ transferStagingDir: stagingDir });
+  try {
+    const initialized = service.audioTransfers.initTransfer({
+      filename: 'owner-boundary.pcm',
+      format: 'pcm_s16le',
+      sampleRateHz: 16_000,
+      channels: 1,
+      endianness: 'little',
+      expectedBytes: 2,
+      expectedFrames: 1,
+      totalChunks: 1,
+      ownerId: 'owner-A',
+    });
+    assert.equal(initialized.ok, true);
+    const transferId = initialized.transferId!;
+
+    assert.equal(service.audioTransfers.getTransferLifecycleState(transferId, 'owner-A'), 'CREATED');
+    assert.equal(service.audioTransfers.getTransferLifecycleState(transferId, 'owner-B'), null);
+    assert.deepEqual(service.audioTransfers.getTransferStateHistory(transferId, 'owner-B'), []);
+
+    assert.equal(service.audioTransfers.abortTransfer(transferId, { ownerId: 'owner-A' }), true);
+    assert.equal(service.audioTransfers.getTransferLifecycleState(transferId, 'owner-A'), 'CLEANED');
+    assert.deepEqual(service.audioTransfers.getTransferStateHistory(transferId, 'owner-A'), [
+      'CREATED',
+      'CANCELLED',
+      'CLEANED',
+    ]);
+    assert.equal(service.audioTransfers.getTransferLifecycleState(transferId, 'owner-B'), null);
+    assert.deepEqual(service.audioTransfers.getTransferStateHistory(transferId, 'owner-B'), []);
+  } finally {
+    service.audioTransfers.cleanupAll();
+    fs.rmSync(stagingDir, { recursive: true, force: true });
+  }
+});
+
+test('Staged upload service APIs fail closed without the owning client identity', () => {
+  const service = new LocalCompanionService();
+  const submitWithoutOwner = service.submitTranscriptionJob as unknown as (
+    params: Record<string, unknown>,
+  ) => { readonly ok: boolean; readonly statusCode: number; readonly code?: string };
+  const missingOwnerJob = submitWithoutOwner({});
+  assert.equal(missingOwnerJob.ok, false);
+  assert.equal(missingOwnerJob.statusCode, 403);
+  assert.equal(missingOwnerJob.code, 'JOB_OWNER_REQUIRED');
+  const initWithoutOwner = service.initStagedUpload as unknown as (
+    filename?: string,
+    ownerId?: string,
+  ) => { readonly ok: boolean; readonly uploadId: string };
+  assert.throws(() => initWithoutOwner('missing-owner.wav'), /ownerId is required/);
+
+  const upload = service.initStagedUpload('owner-boundary.wav', 'owner-A');
+  assert.equal(upload.ok, true);
+
+  const appendWithoutOwner = service.appendStagedUploadChunk as unknown as (
+    uploadId: string,
+    chunkBase64: string,
+    ownerId?: string,
+  ) => { readonly ok: boolean; readonly statusCode: number; readonly code?: string };
+  const missingOwner = appendWithoutOwner.call(service, upload.uploadId, Buffer.from('x').toString('base64'));
+  assert.equal(missingOwner.ok, false);
+  assert.equal(missingOwner.statusCode, 403);
+  assert.equal(missingOwner.code, 'UPLOAD_OWNER_MISMATCH');
+
+  const foreignOwner = service.appendStagedUploadChunk(
+    upload.uploadId,
+    Buffer.from('foreign').toString('base64'),
+    'owner-B',
+  );
+  assert.equal(foreignOwner.ok, false);
+  assert.equal(foreignOwner.statusCode, 403);
+
+  // A missing/foreign owner cannot abort the upload; the real owner can still append and abort it.
+  const abortWithoutOwner = service.abortStagedUpload as unknown as (uploadId: string, ownerId?: string) => void;
+  abortWithoutOwner.call(service, upload.uploadId);
+  service.abortStagedUpload(upload.uploadId, 'owner-B');
+  const ownerAppend = service.appendStagedUploadChunk(
+    upload.uploadId,
+    Buffer.from('owner').toString('base64'),
+    'owner-A',
+  );
+  assert.equal(ownerAppend.ok, true);
+  service.abortStagedUpload(upload.uploadId, 'owner-A');
+  const afterAbort = service.appendStagedUploadChunk(
+    upload.uploadId,
+    Buffer.from('late').toString('base64'),
+    'owner-A',
+  );
+  assert.equal(afterAbort.ok, false);
+  assert.equal(afterAbort.statusCode, 404);
+});
+
 test('Chunked Companion upload and same-origin reverse-proxy guard work securely', async () => {
   const service = new LocalCompanionService();
   const app = express();
@@ -464,6 +557,102 @@ test('Chunked Companion upload and same-origin reverse-proxy guard work securely
     assert.equal(previewHs.status, 200);
     const hs = (await previewHs.json()) as { compatible: boolean; session_id: string; session_token: string };
     assert.equal(hs.compatible, true);
+
+    // Session B must not append to or abort a staged upload owned by session A.
+    const secondHsResp = await fetch(`${baseUrl}/handshake`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        ipc_protocol_version: '1.0.0',
+        host_id: 'cli-test',
+        host_version: 'web-1.0.0',
+        panel_version: '1.0.0',
+        host_adapter_version: '1.0.0',
+        expected_contract_version: '2.0.0',
+      }),
+    });
+    assert.equal(secondHsResp.status, 200);
+    const secondHs = (await secondHsResp.json()) as { compatible: boolean; session_id: string; session_token: string };
+    assert.equal(secondHs.compatible, true);
+
+    const uploadInitResp = await fetch(`${baseUrl}/ipc`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${hs.session_token}` },
+      body: JSON.stringify({
+        ipc_protocol_version: '1.0.0',
+        session_id: hs.session_id,
+        nonce: 'owner-upload-init',
+        timestamp_ms: Date.now(),
+        command: 'CAPABILITY_EXECUTE',
+        payload: { action: 'AUDIO_UPLOAD_INIT', filename: 'owner-isolation.wav' },
+      }),
+    });
+    assert.equal(uploadInitResp.status, 200);
+    const ownerUpload = (await uploadInitResp.json()) as { ok: boolean; uploadId: string };
+    assert.equal(ownerUpload.ok, true);
+
+    const foreignAppendResp = await fetch(`${baseUrl}/ipc`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${secondHs.session_token}` },
+      body: JSON.stringify({
+        ipc_protocol_version: '1.0.0',
+        session_id: secondHs.session_id,
+        nonce: 'owner-upload-foreign-append',
+        timestamp_ms: Date.now(),
+        command: 'CAPABILITY_EXECUTE',
+        payload: {
+          action: 'AUDIO_UPLOAD_CHUNK',
+          uploadId: ownerUpload.uploadId,
+          chunkBase64: Buffer.from('foreign').toString('base64'),
+        },
+      }),
+    });
+    assert.equal(foreignAppendResp.status, 403);
+    assert.equal((await foreignAppendResp.json()).error, 'UPLOAD_OWNER_MISMATCH');
+
+    const foreignAbortResp = await fetch(`${baseUrl}/ipc`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${secondHs.session_token}` },
+      body: JSON.stringify({
+        ipc_protocol_version: '1.0.0',
+        session_id: secondHs.session_id,
+        nonce: 'owner-upload-foreign-abort',
+        timestamp_ms: Date.now(),
+        command: 'CAPABILITY_EXECUTE',
+        payload: { action: 'AUDIO_UPLOAD_ABORT', uploadId: ownerUpload.uploadId },
+      }),
+    });
+    assert.equal(foreignAbortResp.status, 200);
+
+    const ownerAppendResp = await fetch(`${baseUrl}/ipc`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${hs.session_token}` },
+      body: JSON.stringify({
+        ipc_protocol_version: '1.0.0',
+        session_id: hs.session_id,
+        nonce: 'owner-upload-owner-append',
+        timestamp_ms: Date.now(),
+        command: 'CAPABILITY_EXECUTE',
+        payload: {
+          action: 'AUDIO_UPLOAD_CHUNK',
+          uploadId: ownerUpload.uploadId,
+          chunkBase64: Buffer.from('owner').toString('base64'),
+        },
+      }),
+    });
+    assert.equal(ownerAppendResp.status, 200);
+    await fetch(`${baseUrl}/ipc`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${hs.session_token}` },
+      body: JSON.stringify({
+        ipc_protocol_version: '1.0.0',
+        session_id: hs.session_id,
+        nonce: 'owner-upload-owner-abort',
+        timestamp_ms: Date.now(),
+        command: 'CAPABILITY_EXECUTE',
+        payload: { action: 'AUDIO_UPLOAD_ABORT', uploadId: ownerUpload.uploadId },
+      }),
+    });
 
     // 2. Foreign cross-origin CSRF Origin is STILL blocked with 403!
     const foreignCsrf = await fetch(`${baseUrl}/handshake`, {

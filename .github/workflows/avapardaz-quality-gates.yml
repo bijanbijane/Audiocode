@@ -4,7 +4,7 @@ on:
   push:
     branches: [main, master, codex/avapardaz-audio-engines]
   pull_request:
-    branches: [main, master]
+    branches: [main, master, docs/r0-baseline-audit-2026-11-27]
   workflow_dispatch:
 
 permissions:
@@ -79,6 +79,7 @@ jobs:
             src/workflow/CanonicalProjectWorkflowAndDsp.test.ts \
             src/asr-core/PersianLinguisticCorrectionAndLexical.test.ts \
             src/host-bridge/companion/__tests__/CompanionProductionIpcAndCep.test.ts \
+            src/host-bridge/companion/__tests__/CompanionJobResultHttpIntegration.test.ts \
             src/security/ArchitectureAndSecurityGuardrails.test.ts \
             src/host-bridge/companion/__tests__/LocalCompanionAndSecurity.test.ts \
             src/workflow/StudioWorkflowController.pass4.test.ts

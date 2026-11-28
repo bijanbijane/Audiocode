@@ -61,8 +61,17 @@ export function extractUrlPathname(rawUrl: string): string {
   return pathname.length > 1 && pathname.endsWith('/') ? pathname.slice(0, -1) : pathname;
 }
 
+export function isProtectedAuthenticatedUserRoute(rawUrl: string): boolean {
+  const pathname = extractUrlPathname(rawUrl);
+  return (
+    PROTECTED_LICENSE_ROUTE_PATHS.has(pathname) ||
+    /^\/api\/v1\/billing\/users\/[^/]+\/invoices$/.test(pathname)
+  );
+}
+
+/** Backward-compatible name retained for existing license-route callers. */
 export function isProtectedLicenseRoute(rawUrl: string): boolean {
-  return PROTECTED_LICENSE_ROUTE_PATHS.has(extractUrlPathname(rawUrl));
+  return isProtectedAuthenticatedUserRoute(rawUrl);
 }
 
 export class InvalidUserIdentityError extends Error {

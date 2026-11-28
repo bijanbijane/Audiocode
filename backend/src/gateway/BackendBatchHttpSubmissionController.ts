@@ -151,8 +151,9 @@ export class BackendBatchHttpSubmissionController {
       if (!artifact) {
         return reply.status(404).send({ error: 'JOB_ARTIFACT_NOT_FOUND' });
       }
-      if (artifact.organizationId && artifact.organizationId !== keyCtx.organizationId) {
-        return reply.status(403).send({ error: 'FORBIDDEN_TENANT_MISMATCH' });
+      // Missing tenant provenance is not proof of ownership: fail closed against IDOR.
+      if (artifact.organizationId !== keyCtx.organizationId) {
+        return reply.status(403).send({ error: 'FORBIDDEN_CROSS_TENANT_JOB_ACCESS' });
       }
 
       if (fmt === 'srt') {

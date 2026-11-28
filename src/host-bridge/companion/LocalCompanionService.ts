@@ -45,47 +45,16 @@ import {
   type TranscriptExportFormat,
 } from '../../utils/subtitleExporter';
 import { sanitizeDiagnosticString } from '../../security/SecurityTrustBoundaryGuards';
+import { mapCompanionJobResultForExecutionMode } from './CompanionJobResultMapper';
+import type { CompanionJobRecord, CompanionJobState, CompanionSourceIdentity } from './CompanionJobContracts';
+export type { CompanionJobRecord, CompanionJobState, CompanionSourceIdentity } from './CompanionJobContracts';
 
 export const COMPANION_SERVICE_VERSION = '1.0.0' as const;
-
-export type CompanionJobState =
-  | 'QUEUED'
-  | 'RUNNING'
-  | 'COMPLETED'
-  | 'CANCELLED'
-  | 'FAILED';
-
-export interface CompanionSourceIdentity {
-  readonly documentId?: string;
-  readonly displayName?: string;
-  readonly filePath?: string;
-  readonly fileSizeBytes?: number;
-  readonly fileModifiedMs?: number;
-  readonly audioSha256?: string;
-}
-
-export interface CompanionJobRecord {
-  readonly jobId: string;
-  readonly status: CompanionJobState;
-  readonly modelId: string | null;
-  readonly languageHint: 'fa' | 'en' | 'fa-en' | 'auto';
-  readonly sourceName: string;
-  readonly sourceIdentity?: CompanionSourceIdentity;
-  readonly progressPct: number;
-  readonly currentChunk: number;
-  readonly totalChunks: number;
-  readonly createdAtIso: string;
-  readonly updatedAtIso: string;
-  readonly elapsedMs: number;
-  readonly partialText: string;
-  readonly result: LocalNeuralTranscriptionResult | null;
-  readonly errorCode: string | null;
-  readonly errorMessage: string | null;
-}
 
 interface InternalJobEntry {
   record: CompanionJobRecord;
   abortController: AbortController;
+  readonly ownerId: string;
 }
 
 const ALLOWED_AUDIO_EXTENSIONS = new Set([
@@ -340,7 +309,7 @@ export class LocalCompanionService {
       }
     }
     for (const uploadId of Array.from(this.stagedUploads.keys())) {
-      this.abortStagedUpload(uploadId);
+      this.removeStagedUpload(uploadId);
     }
     this.audioTransfers.cleanupAll();
     this.neuralEngine.unloadActiveModel();
@@ -421,9 +390,13 @@ export class LocalCompanionService {
   }
 
   public initStagedUpload(
-    filename?: string,
-    ownerId = 'local-default',
+    filename: string | undefined,
+    ownerId: string,
   ): { readonly ok: boolean; readonly uploadId: string; readonly filename: string } {
+    if (typeof ownerId !== 'string' || ownerId.trim().length === 0) {
+      throw new TypeError('A non-empty ownerId is required to initialize a staged upload.');
+    }
+    ownerId = ownerId.trim();
     this.sweepExpiredUploads();
     const uploadId = `up_${crypto.randomBytes(16).toString('hex')}`;
     const safeName =
@@ -448,7 +421,7 @@ export class LocalCompanionService {
   public appendStagedUploadChunk(
     uploadId: string,
     chunkBase64: string,
-    ownerId?: string,
+    ownerId: string,
   ): {
     readonly ok: boolean;
     readonly statusCode: number;
@@ -461,7 +434,7 @@ export class LocalCompanionService {
     if (!entry) {
       return { ok: false, statusCode: 404, code: 'UPLOAD_NOT_FOUND', message: 'Unknown or expired uploadId.' };
     }
-    if (ownerId && ownerId !== entry.ownerId) {
+    if (typeof ownerId !== 'string' || ownerId.trim().length === 0 || ownerId.trim() !== entry.ownerId) {
       return {
         ok: false,
         statusCode: 403,
@@ -484,7 +457,7 @@ export class LocalCompanionService {
       };
     }
     if (entry.receivedBytes + bytes.byteLength > MAX_STAGED_UPLOAD_BYTES) {
-      this.abortStagedUpload(uploadId);
+      this.removeStagedUpload(uploadId);
       return {
         ok: false,
         statusCode: 413,
@@ -500,10 +473,16 @@ export class LocalCompanionService {
     return { ok: true, statusCode: 200, receivedBytes: entry.receivedBytes };
   }
 
-  public abortStagedUpload(uploadId: string, ownerId?: string): void {
+  public abortStagedUpload(uploadId: string, ownerId: string): void {
     const entry = this.stagedUploads.get(uploadId);
     if (!entry) return;
-    if (ownerId && ownerId !== entry.ownerId) return;
+    if (typeof ownerId !== 'string' || ownerId.trim().length === 0 || ownerId.trim() !== entry.ownerId) return;
+    this.removeStagedUpload(uploadId);
+  }
+
+  private removeStagedUpload(uploadId: string): void {
+    const entry = this.stagedUploads.get(uploadId);
+    if (!entry) return;
     this.stagedUploads.delete(uploadId);
     this.closeUploadFd(entry);
     try {
@@ -520,7 +499,7 @@ export class LocalCompanionService {
     readonly audioBase64?: string;
     readonly uploadId?: string;
     readonly transferId?: string;
-    readonly ownerId?: string;
+    readonly ownerId: string;
     readonly filename?: string;
     readonly sourceIdentity?: CompanionSourceIdentity;
     readonly maxChunkDurationSec?: number;
@@ -533,6 +512,15 @@ export class LocalCompanionService {
     readonly code?: string;
     readonly message?: string;
   } {
+    if (typeof params.ownerId !== 'string' || params.ownerId.trim().length === 0) {
+      return {
+        ok: false,
+        statusCode: 403,
+        code: 'JOB_OWNER_REQUIRED',
+        message: 'An authenticated ownerId is required to submit a Companion job.',
+      };
+    }
+
     if (this.lifecycleManager.getState() === 'SHUTTING_DOWN') {
       return {
         ok: false,
@@ -602,8 +590,11 @@ export class LocalCompanionService {
       resolvedPath = pathCheck.resolvedPath;
       sourceName = path.basename(resolvedPath);
     } else if (typeof params.transferId === 'string' && params.transferId.trim().length > 0) {
+      if (typeof params.ownerId !== 'string' || params.ownerId.trim().length === 0) {
+        return { ok: false, statusCode: 403, code: 'TRANSFER_OWNER_REQUIRED', message: 'An authenticated ownerId is required to access this transfer.' };
+      }
       const acquired = this.audioTransfers.acquireAudioSource(params.transferId.trim(), {
-        ownerId: params.ownerId,
+        ownerId: params.ownerId.trim(),
       });
       if (!acquired.ok || !acquired.source) {
         return {
@@ -630,7 +621,7 @@ export class LocalCompanionService {
           message: 'Staged uploadId not found or expired.',
         };
       }
-      if (params.ownerId && params.ownerId !== staged.ownerId) {
+      if (typeof params.ownerId !== 'string' || params.ownerId.trim().length === 0 || params.ownerId.trim() !== staged.ownerId) {
         return {
           ok: false,
           statusCode: 403,
@@ -701,7 +692,11 @@ export class LocalCompanionService {
       errorMessage: null,
     };
 
-    const entry: InternalJobEntry = { record: initialRecord, abortController };
+    const entry: InternalJobEntry = {
+      record: initialRecord,
+      abortController,
+      ownerId: params.ownerId.trim(),
+    };
     this.jobs.set(jobId, entry);
     this.trimOldJobs();
     this.syncLifecycleState();
@@ -805,17 +800,21 @@ export class LocalCompanionService {
     return { ok: true, statusCode: 202, job: initialRecord };
   }
 
-  public getJob(jobId: string): CompanionJobRecord | null {
-    return this.jobs.get(jobId)?.record ?? null;
-  }
-
-  public listJobs(): readonly CompanionJobRecord[] {
-    return Array.from(this.jobs.values()).map((j) => j.record);
-  }
-
-  public cancelJob(jobId: string): { readonly ok: boolean; readonly job?: CompanionJobRecord } {
+  public getJob(jobId: string, ownerId: string): CompanionJobRecord | null {
     const entry = this.jobs.get(jobId);
-    if (!entry) return { ok: false };
+    if (!entry || entry.ownerId !== ownerId) return null;
+    return entry.record;
+  }
+
+  public listJobs(ownerId: string): readonly CompanionJobRecord[] {
+    return Array.from(this.jobs.values())
+      .filter((entry) => entry.ownerId === ownerId)
+      .map((entry) => entry.record);
+  }
+
+  public cancelJob(jobId: string, ownerId: string): { readonly ok: boolean; readonly job?: CompanionJobRecord } {
+    const entry = this.jobs.get(jobId);
+    if (!entry || entry.ownerId !== ownerId) return { ok: false };
     if (entry.record.status === 'RUNNING' || entry.record.status === 'QUEUED') {
       entry.abortController.abort();
       entry.record = {
@@ -995,7 +994,9 @@ export class LocalCompanionService {
         return;
       }
 
-      const { command, payload } = auth.envelope;
+      const envelope = auth.envelope;
+      const sessionOwnerId = auth.ownerId ?? `session:${envelope.session_id}`;
+      const { command, payload } = envelope;
       const p = (payload && typeof payload === 'object' ? payload : {}) as Record<string, unknown>;
 
       switch (command) {
@@ -1061,7 +1062,7 @@ export class LocalCompanionService {
             audioBase64: typeof p.audioBase64 === 'string' ? p.audioBase64 : undefined,
             uploadId: typeof p.uploadId === 'string' ? p.uploadId : undefined,
             transferId: typeof p.transferId === 'string' ? p.transferId : undefined,
-            ownerId: auth.envelope.session_id,
+            ownerId: sessionOwnerId,
             filename: typeof p.filename === 'string' ? p.filename : undefined,
             sourceIdentity,
             maxChunkDurationSec: typeof p.maxChunkDurationSec === 'number' ? p.maxChunkDurationSec : undefined,
@@ -1073,45 +1074,51 @@ export class LocalCompanionService {
               ok: false,
               error: submitted.code,
               message: submitted.message,
-              request_id: auth.envelope.request_id,
+              request_id: envelope.request_id,
             });
             return;
           }
-          res.status(202).json({ ok: true, job: submitted.job, request_id: auth.envelope.request_id });
+          res.status(202).json({ ok: true, job: submitted.job, request_id: envelope.request_id });
           return;
         }
 
         case 'JOB_STATUS':
         case 'JOB_RECONNECT': {
           const jobId = typeof p.jobId === 'string' ? p.jobId : '';
-          const job = this.getJob(jobId);
+          const job = this.getJob(jobId, sessionOwnerId);
           if (!job) {
-            res.status(404).json({ ok: false, error: 'JOB_NOT_FOUND', message: 'Unknown jobId.', request_id: auth.envelope.request_id });
+            res.status(404).json({ ok: false, error: 'JOB_NOT_FOUND', message: 'Unknown jobId.', request_id: envelope.request_id });
             return;
           }
-          res.json({ ok: true, job, reconnected: command === 'JOB_RECONNECT', request_id: auth.envelope.request_id });
+          const responseJob = mapCompanionJobResultForExecutionMode(job, envelope.execution_mode);
+          res.json({ ok: true, job: responseJob, reconnected: command === 'JOB_RECONNECT', request_id: envelope.request_id });
           return;
         }
 
         case 'JOB_LIST': {
-          res.json({ ok: true, jobs: this.listJobs(), request_id: auth.envelope.request_id });
+          const jobs = this.listJobs(sessionOwnerId).map((job) =>
+            mapCompanionJobResultForExecutionMode(job, envelope.execution_mode),
+          );
+          res.json({ ok: true, jobs, request_id: envelope.request_id });
           return;
         }
 
         case 'JOB_CANCEL': {
           const jobId = typeof p.jobId === 'string' ? p.jobId : '';
-          const cancelled = this.cancelJob(jobId);
+          const cancelled = this.cancelJob(jobId, sessionOwnerId);
           if (!cancelled.ok) {
-            res.status(404).json({ ok: false, error: 'JOB_NOT_FOUND', message: 'Unknown jobId.', request_id: auth.envelope.request_id });
+            res.status(404).json({ ok: false, error: 'JOB_NOT_FOUND', message: 'Unknown jobId.', request_id: envelope.request_id });
             return;
           }
-          res.json({ ok: true, job: cancelled.job, request_id: auth.envelope.request_id });
+          const responseJob = cancelled.job
+            ? mapCompanionJobResultForExecutionMode(cancelled.job, envelope.execution_mode)
+            : undefined;
+          res.json({ ok: true, job: responseJob, request_id: envelope.request_id });
           return;
         }
 
         case 'CAPABILITY_EXECUTE': {
           const action = typeof p.action === 'string' ? p.action : '';
-          const sessionOwnerId = auth.envelope.session_id;
           if (action === 'AUDIO_TRANSFER_INIT') {
             const initRes = this.audioTransfers.initTransfer({
               filename: typeof p.filename === 'string' ? p.filename : undefined,

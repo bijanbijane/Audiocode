@@ -51,6 +51,9 @@ describe('Backend Security & Reliability Audit Remediation Suite (P0 #1–12 & P
     let insertedLeaseId = '';
     const mockDb: PgPoolLike = {
       async query<TRow>(sql: string, params: unknown[] = []) {
+        if (sql.includes('FROM users WHERE id')) {
+          return { rows: [{ id: String(params[0]), status: 'ACTIVE' }] as unknown as TRow[], rowCount: 1 };
+        }
         if (sql.includes('FROM subscriptions')) {
           return {
             rows: [
@@ -75,6 +78,15 @@ describe('Backend Security & Reliability Audit Remediation Suite (P0 #1–12 & P
           };
         }
         return { rows: [] as unknown as TRow[], rowCount: 1 };
+      },
+      async connect() {
+        const pool = this;
+        return {
+          query<TRow>(sql: string, params: unknown[] = []) {
+            return pool.query<TRow>(sql, params);
+          },
+          release() {},
+        };
       },
     };
 
@@ -124,11 +136,15 @@ describe('Backend Security & Reliability Audit Remediation Suite (P0 #1–12 & P
     expect(idorInvRes.json().error).toBe('FORBIDDEN_INVOICE_IDOR_MISMATCH');
 
     // C) P0 #4 & #10: Legitimate lease issuance uses pure UUID v4 and is verifiable by client OfflineCryptoVerifier
+    const legitDeviceFingerprintHash = crypto
+      .createHash('sha256')
+      .update('fp_legit_1', 'utf8')
+      .digest('hex');
     const validLeaseRes = await app.fastify.inject({
       method: 'POST',
       url: '/api/v1/license/lease',
       headers: { authorization: `Bearer ${user1Jwt}` },
-      payload: { deviceFingerprintHash: 'fp_legit_1' },
+      payload: { deviceFingerprintHash: legitDeviceFingerprintHash },
     });
     expect(validLeaseRes.statusCode).toBe(200);
     expect(insertedLeaseId).toMatch(
@@ -205,14 +221,25 @@ describe('Backend Security & Reliability Audit Remediation Suite (P0 #1–12 & P
 
     const executedOrder: string[] = [];
     const migDb: PgPoolLike = {
-      async query<TRow>(sql: string, params: unknown[] = []) {
-        if (sql.includes('pg_try_advisory_lock')) {
-          return { rows: [{ acquired: true }] as unknown as TRow[], rowCount: 1 };
-        }
-        if (sql.includes('INSERT INTO schema_migrations')) {
-          executedOrder.push(String(params[0]));
-        }
-        return { rows: [] as unknown as TRow[], rowCount: 1 };
+      async query<TRow>() {
+        throw new Error('Migration runner must use its pinned PostgreSQL client.');
+      },
+      async connect(): Promise<PgPoolClientLike> {
+        return {
+          async query<TRow>(sql: string, params: unknown[] = []) {
+            if (sql.includes('pg_try_advisory_lock')) {
+              return { rows: [{ acquired: true }] as unknown as TRow[], rowCount: 1 };
+            }
+            if (sql.includes('pg_advisory_unlock')) {
+              return { rows: [{ unlocked: true }] as unknown as TRow[], rowCount: 1 };
+            }
+            if (sql.includes('INSERT INTO schema_migrations')) {
+              executedOrder.push(String(params[0]));
+            }
+            return { rows: [] as unknown as TRow[], rowCount: 1 };
+          },
+          release() {},
+        };
       },
     };
 
@@ -296,10 +323,15 @@ describe('Backend Security & Reliability Audit Remediation Suite (P0 #1–12 & P
       cdnBaseUrl: 'https://cdn.local',
       enableServerSideAsrInference: true,
       artifactStore: {
-        getCompletedTokensForJob: async (jobId) =>
-          jobId === 'job_org1_secret'
-            ? { audioDurationSec: 1.0, tokens: sampleTokens, organizationId: 'org_1_owner' }
-            : null,
+        getCompletedTokensForJob: async (jobId) => {
+          if (jobId === 'job_org1_secret') {
+            return { audioDurationSec: 1.0, tokens: sampleTokens, organizationId: 'org_1_owner' };
+          }
+          if (jobId === 'job_org1_unowned') {
+            return { audioDurationSec: 1.0, tokens: sampleTokens };
+          }
+          return null;
+        },
       },
     });
 
@@ -341,24 +373,68 @@ describe('Backend Security & Reliability Audit Remediation Suite (P0 #1–12 & P
     });
     expect(crossTenantExport.statusCode).toBe(403);
     expect(crossTenantExport.json().error).toBe('FORBIDDEN_CROSS_TENANT_JOB_ACCESS');
+
+    // Missing tenant provenance must also fail closed; it cannot grant cross-tenant export.
+    const unownedArtifactExport = await app.fastify.inject({
+      method: 'GET',
+      url: '/api/v1/enterprise/asr/jobs/job_org1_unowned/export?format=json',
+      headers: { 'x-enterprise-api-key': 'paudio_live_org2_key' },
+    });
+    expect(unownedArtifactExport.statusCode).toBe(403);
+    expect(unownedArtifactExport.json().error).toBe('FORBIDDEN_CROSS_TENANT_JOB_ACCESS');
   });
 
-  it('4. [P0 #9, P0 #11, P1 #2, P1 #7, P1 #11, P1 #12] Enforces FFmpeg SSRF/option guard, WebSocket parallel session cap, bounded caches, pre-await session pool memory reservation, and cron canary evaluation', async () => {
+  it('4. [P0 #9, P0 #11, P1 #2, P1 #7, P1 #11] Enforces FFmpeg protocol guard, WebSocket quota reservation, bounded caches, pre-await session memory reservation, and lock-protected cron sweeps', async () => {
     // A) P0 #9: FFmpeg input path validator blocks CLI flags, SSRF URLs, and path traversal
     expect(() =>
       NodeStreamingAudioIngestTranscoder.validateSafeLocalAudioPath('-f lavfi')
     ).toThrow('SECURITY_FFMPEG_OPTION_INJECTION');
-    expect(() =>
-      NodeStreamingAudioIngestTranscoder.validateSafeLocalAudioPath(
-        'http://169.254.169.254/latest/meta-data/'
-      )
-    ).toThrow('SECURITY_SSRF_PROTOCOL_FORBIDDEN');
+    for (const protocolInput of [
+      'http://169.254.169.254/latest/meta-data/',
+      'cache:http://127.0.0.1/private',
+      'lavfi:movie=/etc/passwd',
+      'smb://127.0.0.1/share/audio.wav',
+      'concat:https://example.invalid/audio',
+    ]) {
+      expect(() =>
+        NodeStreamingAudioIngestTranscoder.validateSafeLocalAudioPath(protocolInput)
+      ).toThrow('SECURITY_SSRF_PROTOCOL_FORBIDDEN');
+    }
     expect(() =>
       NodeStreamingAudioIngestTranscoder.validateSafeLocalAudioPath(
         '/etc/passwd',
         '/var/lib/paudio/audio'
       )
     ).toThrow('SECURITY_PATH_TRAVERSAL_FORBIDDEN');
+
+    const pathFixtureRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'paudio-ffmpeg-path-'));
+    try {
+      const allowedAudioRoot = path.join(pathFixtureRoot, 'allowed');
+      fs.mkdirSync(allowedAudioRoot);
+      const canonicalAudioPath = path.join(allowedAudioRoot, 'actual.wav');
+      const symlinkAudioPath = path.join(allowedAudioRoot, 'linked.wav');
+      const outsideAudioPath = path.join(pathFixtureRoot, 'outside.wav');
+      fs.writeFileSync(canonicalAudioPath, 'audio');
+      fs.writeFileSync(outsideAudioPath, 'audio');
+      fs.symlinkSync(canonicalAudioPath, symlinkAudioPath);
+      expect(
+        NodeStreamingAudioIngestTranscoder.validateSafeLocalAudioPath(
+          symlinkAudioPath,
+          allowedAudioRoot
+        )
+      ).toBe(fs.realpathSync.native(canonicalAudioPath));
+
+      const outsideSymlinkPath = path.join(allowedAudioRoot, 'outside-link.wav');
+      fs.symlinkSync(outsideAudioPath, outsideSymlinkPath);
+      expect(() =>
+        NodeStreamingAudioIngestTranscoder.validateSafeLocalAudioPath(
+          outsideSymlinkPath,
+          allowedAudioRoot
+        )
+      ).toThrow('SECURITY_PATH_TRAVERSAL_FORBIDDEN');
+    } finally {
+      fs.rmSync(pathFixtureRoot, { recursive: true, force: true });
+    }
 
     // B) P0 #11: WebSocket gateway blocks opening parallel sessions when remaining quota < 5s per active socket
     const mockDb: PgPoolLike = {
@@ -403,6 +479,32 @@ describe('Backend Security & Reliability Audit Remediation Suite (P0 #1–12 & P
     expect(s2).toBeNull();
     await s1!.finalizeAndClose();
 
+    // Closing the first session releases its local reservation for a later connection.
+    const s3 = await wsGateway.openAuthenticatedSession({
+      enterpriseApiKey: 'paudio_live_ws',
+      socket: noopSocket,
+      transcribeWindowFn: async () => [],
+    });
+    expect(s3).not.toBeNull();
+    await s3!.finalizeAndClose();
+
+    // Concurrent opens must not both observe the same unreserved five-second balance.
+    const concurrentSessions = await Promise.all([
+      wsGateway.openAuthenticatedSession({
+        enterpriseApiKey: 'paudio_live_ws',
+        socket: noopSocket,
+        transcribeWindowFn: async () => [],
+      }),
+      wsGateway.openAuthenticatedSession({
+        enterpriseApiKey: 'paudio_live_ws',
+        socket: noopSocket,
+        transcribeWindowFn: async () => [],
+      }),
+    ]);
+    expect(concurrentSessions.filter((session) => session !== null)).toHaveLength(1);
+    const remainingSession = concurrentSessions.find((session) => session !== null);
+    await remainingSession!.finalizeAndClose();
+
     // C) P1 #11: NodeAsrModelSessionPool prevents concurrent loadAndWarmupModel from exceeding memory budget
     const slowOrt: OrtRuntimeProvider = {
       createTensor: (type, data, dims) => ({ type, data, dims } as OrtTensorLike),
@@ -437,7 +539,11 @@ describe('Backend Security & Reliability Audit Remediation Suite (P0 #1–12 & P
     for (let i = 0; i < 20; i++) {
       limiter.isAllowed(`ip_${i}`, 10, 60_000);
     }
-    expect(limiter.trackedBucketsCount).toBeLessThanOrEqual(5);
+    expect(limiter.trackedBucketsCount).toBe(5);
+    // A full limiter must not evict active buckets and silently reset prior clients' limits.
+    expect(limiter.isAllowed('ip_0', 10, 60_000)).toBe(true);
+    expect(limiter.isAllowed('ip_overflow', 10, 60_000)).toBe(false);
+    expect(limiter.trackedBucketsCount).toBe(5);
 
     const boundedCache = new SingleFlightReadThroughCache(3);
     for (let i = 0; i < 10; i++) {
@@ -466,22 +572,33 @@ describe('Backend Security & Reliability Audit Remediation Suite (P0 #1–12 & P
     ).rejects.toThrow('WATCHDOG_MEMORY_LIMIT_EXCEEDED');
     expect(terminatedReason).toBe('MEMORY_LIMIT');
 
-    // F) P1 #12: BackendBackgroundCronDaemon invokes canaryEvaluatorFn during sweep tick
+    // F) BackendBackgroundCronDaemon runs its maintenance sweep under a pinned advisory lock.
     const cronDb: PgPoolLike = {
       async query<TRow>(sql: string) {
         if (sql.includes('pg_try_advisory_lock')) {
           return { rows: [{ acquired: true }] as unknown as TRow[], rowCount: 1 };
         }
+        if (sql.includes('pg_advisory_unlock')) {
+          return { rows: [{ unlocked: true }] as unknown as TRow[], rowCount: 1 };
+        }
         return { rows: [] as unknown as TRow[], rowCount: 0 };
       },
+      async connect() {
+        const pool = this;
+        return {
+          query<TRow>(sql: string, params: unknown[] = []) {
+            return pool.query<TRow>(sql, params);
+          },
+          release() {},
+        };
+      },
     };
-    const cron = new BackendBackgroundCronDaemon(
-      cronDb,
-      async () => {},
-      false,
-      async () => 2
-    );
+    const cron = new BackendBackgroundCronDaemon(cronDb, async () => {}, false);
     const tick = await cron.runSingleSweepTick();
-    expect(tick.canariesEvaluated).toBe(2);
+    expect(tick).toEqual({
+      executed: true,
+      outboxDispatched: 0,
+      staleJobsRequeued: 0,
+    });
   });
 });

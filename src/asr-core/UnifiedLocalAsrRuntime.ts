@@ -31,7 +31,8 @@ import {
   LocalAsrPolicyError,
 } from '../runtime/LocalExecutionPolicy';
 
-export const AVAPARDAZ_ASR_CONTRACT_VERSION = '2.0.0' as const;
+import { AVAPARDAZ_ASR_CONTRACT_VERSION } from './AsrContractVersion';
+export { AVAPARDAZ_ASR_CONTRACT_VERSION } from './AsrContractVersion';
 
 export type LocalAsrRuntimeTarget =
   | 'BROWSER_WASM_CPU'

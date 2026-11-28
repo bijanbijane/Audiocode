@@ -40,17 +40,39 @@ function assertMatchingEd25519KeyPair(privateKeyPem: string, publicKeyPem: strin
 export class SlidingWindowRateLimiter {
   private readonly buckets = new Map<string, { count: number; resetAtMs: number }>();
 
+  constructor(private readonly maxTrackedBuckets = 10_000) {
+    if (!Number.isSafeInteger(maxTrackedBuckets) || maxTrackedBuckets < 1) {
+      throw new Error('INVALID_RATE_LIMITER_BUCKET_CAPACITY');
+    }
+  }
+
+  public get trackedBucketsCount(): number {
+    return this.buckets.size;
+  }
+
   public isAllowed(key: string, maxRequests: number, windowMs: number): boolean {
     const now = Date.now();
     const existing = this.buckets.get(key);
-    if (!existing || now > existing.resetAtMs) {
-      this.buckets.set(key, { count: 1, resetAtMs: now + windowMs });
+    if (existing && now <= existing.resetAtMs) {
+      // Refresh insertion order so the least-recently-used bucket is evicted first.
+      this.buckets.delete(key);
+      this.buckets.set(key, existing);
+      if (existing.count >= maxRequests) return false;
+      existing.count++;
       return true;
     }
-    if (existing.count >= maxRequests) {
-      return false;
+
+    if (existing) this.buckets.delete(key);
+    if (this.buckets.size >= this.maxTrackedBuckets) {
+      for (const [bucketKey, bucket] of this.buckets) {
+        if (now > bucket.resetAtMs) this.buckets.delete(bucketKey);
+      }
+      // Never evict a live bucket: doing so would let an attacker rotate source keys
+      // to reset their rate limit. Fail closed until an existing window expires.
+      if (this.buckets.size >= this.maxTrackedBuckets) return false;
     }
-    existing.count++;
+
+    this.buckets.set(key, { count: 1, resetAtMs: now + windowMs });
     return true;
   }
 }

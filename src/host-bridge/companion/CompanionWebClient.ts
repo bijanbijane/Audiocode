@@ -86,11 +86,25 @@ export interface CompanionJobStatus {
   readonly errorMessage: string | null;
 }
 
+function generateClientInstanceId(): string {
+  if (typeof crypto === 'undefined' || typeof crypto.getRandomValues !== 'function') {
+    throw new Error('Secure random generator is required for Companion client identity.');
+  }
+  const bytes = new Uint8Array(32);
+  crypto.getRandomValues(bytes);
+  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
+}
+
 function generateNonce(): string {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
     return crypto.randomUUID();
   }
-  return `n_${Date.now()}_${Math.random().toString(36).slice(2, 12)}`;
+  if (typeof crypto !== 'undefined' && typeof crypto.getRandomValues === 'function') {
+    const bytes = new Uint8Array(16);
+    crypto.getRandomValues(bytes);
+    return `n_${Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('')}`;
+  }
+  throw new Error('Secure random generator is required for IPC nonce generation.');
 }
 
 function bytesToBase64(bytes: Uint8Array): string {
@@ -192,11 +206,13 @@ const UPLOAD_CHUNK_BYTES = 256 * 1024;
 
 export class CompanionWebClient {
   private readonly baseUrl: string;
+  private readonly clientInstanceId: string;
   private sessionId: string | null = null;
   private sessionToken: string | null = null;
 
   constructor(baseUrl = '/api/v2/companion') {
     this.baseUrl = baseUrl.replace(/\/+$/, '');
+    this.clientInstanceId = generateClientInstanceId();
   }
 
   public async getHealth(signal?: AbortSignal): Promise<CompanionHealthResponse | null> {
@@ -221,6 +237,7 @@ export class CompanionWebClient {
       body: JSON.stringify({
         ipc_protocol_version: '1.0.0',
         host_id: 'cli-test',
+        client_instance_id: this.clientInstanceId,
         host_version: 'web-1.0.0',
         panel_version: '1.0.0',
         host_adapter_version: '1.0.0',
@@ -263,6 +280,7 @@ export class CompanionWebClient {
       body: JSON.stringify({
         ipc_protocol_version: '1.0.0',
         session_id: this.sessionId,
+        execution_mode: 'web-client',
         nonce: generateNonce(),
         timestamp_ms: Date.now(),
         command,
@@ -285,6 +303,7 @@ export class CompanionWebClient {
         body: JSON.stringify({
           ipc_protocol_version: '1.0.0',
           session_id: this.sessionId,
+          execution_mode: 'web-client',
           nonce: generateNonce(),
           timestamp_ms: Date.now(),
           command,

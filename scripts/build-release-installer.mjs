@@ -247,19 +247,20 @@ if (fs.existsSync(cepSrcDir)) {
 // 8. Write executable Installer & Uninstaller scripts
 const installMjsContent = `#!/usr/bin/env node
 /**
- * AvaPardaz Zero-Terminal / Self-Contained Production Installer
+ * AvaPardaz user-space installer (requires Node.js 20 or newer)
  * Version: ${RELEASE_VERSION} (${BUILD_ID})
  */
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as crypto from 'node:crypto';
 import * as os from 'node:os';
+import { fileURLToPath } from 'node:url';
 
 const args = process.argv.slice(2);
 if (args.includes('--help') || args.includes('-h')) {
   console.log('AvaPardaz Installer ${RELEASE_VERSION}');
   console.log('Usage: node ./installer/install.mjs [--target=<empty-directory>]');
-  console.log('The installer refuses to overwrite an existing non-empty target.');
+  console.log('Requires Node.js 20 or newer. The installer refuses to overwrite an existing non-empty target.');
   process.exit(0);
 }
 const targetArg = args.find((a) => a.startsWith('--target='));
@@ -269,7 +270,8 @@ if (fs.existsSync(targetRoot) && fs.readdirSync(targetRoot).length > 0) {
   console.error('Back up existing user data first, then use the dedicated update/rollback flow.');
   process.exit(2);
 }
-const payloadRoot = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..', 'payload');
+const installerDir = path.dirname(fileURLToPath(import.meta.url));
+const payloadRoot = path.resolve(installerDir, '..', 'payload');
 
 function copyRecursive(src, dst) {
   if (!fs.existsSync(src)) return;

@@ -159,7 +159,8 @@ test('AVP-P0-004: CompanionAudioTransferManager validates PCM metadata, enforces
       expectedBytes: 999,
       expectedFrames: 100,
       totalChunks: 2,
-    });
+    
+      ownerId: 'test-owner',});
     assert.equal(badInit.ok, false);
     assert.equal(badInit.code, 'AUDIO_METADATA_MISMATCH');
 
@@ -173,36 +174,42 @@ test('AVP-P0-004: CompanionAudioTransferManager validates PCM metadata, enforces
       expectedFrames: 100,
       totalChunks: 2,
       expectedSha256: fullSha,
-    });
+    
+      ownerId: 'test-owner',});
     assert.equal(init.ok, true);
     const tid = init.transferId!;
 
     // Out-of-order chunk 1 before chunk 0 rejected
-    const ooo = mgr.appendChunk({ transferId: tid, chunkIndex: 1, chunkBase64: c1.toString('base64'), chunkSha256: c1Sha });
+    const ooo = mgr.appendChunk({ transferId: tid, chunkIndex: 1, chunkBase64: c1.toString('base64'), chunkSha256: c1Sha,
+      ownerId: 'test-owner',});
     assert.equal(ooo.ok, false);
     assert.equal(ooo.code, 'OUT_OF_ORDER_CHUNK_REJECTED');
 
     // Corrupted chunk checksum rejected
-    const badHash = mgr.appendChunk({ transferId: tid, chunkIndex: 0, chunkBase64: c0.toString('base64'), chunkSha256: '0'.repeat(64) });
+    const badHash = mgr.appendChunk({ transferId: tid, chunkIndex: 0, chunkBase64: c0.toString('base64'), chunkSha256: '0'.repeat(64),
+      ownerId: 'test-owner',});
     assert.equal(badHash.ok, false);
     assert.equal(badHash.code, 'CHUNK_CHECKSUM_MISMATCH');
 
     // Valid chunk 0
-    assert.equal(mgr.appendChunk({ transferId: tid, chunkIndex: 0, chunkBase64: c0.toString('base64'), chunkSha256: c0Sha }).ok, true);
+    assert.equal(mgr.appendChunk({ transferId: tid, chunkIndex: 0, chunkBase64: c0.toString('base64'), chunkSha256: c0Sha,
+      ownerId: 'test-owner',}).ok, true);
 
     // Duplicate chunk 0 rejected
-    const dup = mgr.appendChunk({ transferId: tid, chunkIndex: 0, chunkBase64: c0.toString('base64'), chunkSha256: c0Sha });
+    const dup = mgr.appendChunk({ transferId: tid, chunkIndex: 0, chunkBase64: c0.toString('base64'), chunkSha256: c0Sha,
+      ownerId: 'test-owner',});
     assert.equal(dup.ok, false);
     assert.equal(dup.code, 'DUPLICATE_CHUNK_REJECTED');
 
     // Valid chunk 1 & finalize
-    assert.equal(mgr.appendChunk({ transferId: tid, chunkIndex: 1, chunkBase64: c1.toString('base64'), chunkSha256: c1Sha }).ok, true);
-    const fin = mgr.finalizeTransfer(tid);
+    assert.equal(mgr.appendChunk({ transferId: tid, chunkIndex: 1, chunkBase64: c1.toString('base64'), chunkSha256: c1Sha,
+      ownerId: 'test-owner',}).ok, true);
+    const fin = mgr.finalizeTransfer(tid, { ownerId: 'test-owner' });
     assert.equal(fin.ok, true);
     assert.equal(fin.sha256, fullSha);
 
     // Consume converts to valid RIFF/WAVE and cleans up staging temp file
-    const consumed = mgr.consumeFinalizedTransferAsWav(tid);
+    const consumed = mgr.consumeFinalizedTransferAsWav(tid, { ownerId: 'test-owner' });
     assert.equal(consumed.ok, true);
     assert.equal(consumed.wavBytes!.subarray(0, 4).toString('ascii'), 'RIFF');
     assert.equal(mgr.getActiveSessionCount(), 0);
@@ -234,7 +241,33 @@ test('AVP-P0-004 + AVP-P0-006: Hardened loopback HTTP Companion IPC enforces req
     assert.equal(evilOrigin.status, 403);
     assert.equal(evilOrigin.json.error, 'UNTRUSTED_ORIGIN_BLOCKED');
 
-    // Handshake succeeds over loopback
+    // Audition handshake rejects missing ASR and CEP DTO versions independently of IPC.
+    const missingAsrVersion = await httpJson(port, 'POST', '/api/v2/companion/handshake', {
+      ipc_protocol_version: COMPANION_IPC_PROTOCOL_VERSION,
+      host_id: 'adobe-audition',
+      host_version: '24.0',
+      panel_version: '1.0.0',
+      host_adapter_version: '1.0.0',
+      expected_contract_version: CANONICAL_CONTRACT_VERSION,
+      expected_cep_transcript_schema_version: '1.0.0',
+    });
+    assert.equal(missingAsrVersion.status, 409);
+    assert.ok(missingAsrVersion.json.incompatibility_reasons.some((reason: string) => reason.includes('ASR contract mismatch')));
+
+    const unsupportedCepSchema = await httpJson(port, 'POST', '/api/v2/companion/handshake', {
+      ipc_protocol_version: COMPANION_IPC_PROTOCOL_VERSION,
+      host_id: 'adobe-audition',
+      host_version: '24.0',
+      panel_version: '1.0.0',
+      host_adapter_version: '1.0.0',
+      expected_contract_version: CANONICAL_CONTRACT_VERSION,
+      expected_asr_contract_version: '2.0.0',
+      expected_cep_transcript_schema_version: '9.0.0',
+    });
+    assert.equal(unsupportedCepSchema.status, 409);
+    assert.ok(unsupportedCepSchema.json.incompatibility_reasons.some((reason: string) => reason.includes('CEP transcript schema mismatch')));
+
+    // Handshake succeeds only when IPC, canonical capability, ASR and CEP DTO versions agree.
     const hs = await httpJson(port, 'POST', '/api/v2/companion/handshake', {
       ipc_protocol_version: COMPANION_IPC_PROTOCOL_VERSION,
       host_id: 'adobe-audition',
@@ -242,9 +275,120 @@ test('AVP-P0-004 + AVP-P0-006: Hardened loopback HTTP Companion IPC enforces req
       panel_version: '1.0.0',
       host_adapter_version: '1.0.0',
       expected_contract_version: CANONICAL_CONTRACT_VERSION,
+      expected_asr_contract_version: '2.0.0',
+      expected_cep_transcript_schema_version: '1.0.0',
     });
     assert.equal(hs.status, 200);
     assert.equal(hs.json.compatible, true);
+    assert.equal(hs.json.asr_contract_version, '2.0.0');
+    assert.equal(hs.json.cep_transcript_schema_version, '1.0.0');
+
+    // Existing Web Companion / CLI clients remain compatible without CEP-only request fields.
+    const webHandshake = await httpJson(port, 'POST', '/api/v2/companion/handshake', {
+      ipc_protocol_version: COMPANION_IPC_PROTOCOL_VERSION,
+      host_id: 'cli-test',
+      host_version: 'web-1.0.0',
+      panel_version: '1.0.0',
+      host_adapter_version: '1.0.0',
+      expected_contract_version: CANONICAL_CONTRACT_VERSION,
+    });
+    assert.equal(webHandshake.status, 200);
+    assert.equal(webHandshake.json.compatible, true);
+
+    // A non-Audition session cannot opt into the CEP result DTO at request time.
+    const wrongHostMode = await httpJson(
+      port,
+      'POST',
+      '/api/v2/companion/ipc',
+      {
+        ipc_protocol_version: COMPANION_IPC_PROTOCOL_VERSION,
+        session_id: webHandshake.json.session_id,
+        nonce: 'n-wrong-host-mode',
+        timestamp_ms: Date.now(),
+        execution_mode: 'audition-cep',
+        command: 'JOB_LIST',
+        payload: {},
+      },
+      { Authorization: `Bearer ${webHandshake.json.session_token}` },
+    );
+    assert.equal(wrongHostMode.status, 409);
+    assert.equal(wrongHostMode.json.error, 'IPC_VERSION_MISMATCH');
+
+    // A known session ID without its bearer token must not reveal host/mode policy.
+    const unauthenticatedModeProbe = await httpJson(
+      port,
+      'POST',
+      '/api/v2/companion/ipc',
+      {
+        ipc_protocol_version: COMPANION_IPC_PROTOCOL_VERSION,
+        session_id: webHandshake.json.session_id,
+        nonce: 'n-unauthenticated-mode-probe',
+        timestamp_ms: Date.now(),
+        execution_mode: 'unknown-client',
+        command: 'JOB_LIST',
+        payload: {},
+      },
+      { Authorization: 'Bearer invalid-session-token' },
+    );
+    assert.equal(unauthenticatedModeProbe.status, 401);
+    assert.equal(unauthenticatedModeProbe.json.error, 'IPC_TOKEN_INVALID');
+
+    // Unknown execution modes are rejected before command dispatch.
+    const invalidMode = await httpJson(
+      port,
+      'POST',
+      '/api/v2/companion/ipc',
+      {
+        ipc_protocol_version: COMPANION_IPC_PROTOCOL_VERSION,
+        session_id: webHandshake.json.session_id,
+        nonce: 'n-invalid-mode',
+        timestamp_ms: Date.now(),
+        execution_mode: 'unknown-client',
+        command: 'JOB_LIST',
+        payload: {},
+      },
+      { Authorization: `Bearer ${webHandshake.json.session_token}` },
+    );
+    assert.equal(invalidMode.status, 400);
+    assert.equal(invalidMode.json.error, 'IPC_INVALID_ENVELOPE');
+
+    // Audition sessions must explicitly use the negotiated CEP DTO mode.
+    const missingAuditionMode = await httpJson(
+      port,
+      'POST',
+      '/api/v2/companion/ipc',
+      {
+        ipc_protocol_version: COMPANION_IPC_PROTOCOL_VERSION,
+        session_id: hs.json.session_id,
+        nonce: 'n-missing-audition-mode',
+        timestamp_ms: Date.now(),
+        command: 'JOB_LIST',
+        payload: {},
+      },
+      { Authorization: `Bearer ${hs.json.session_token}` },
+    );
+    assert.equal(missingAuditionMode.status, 409);
+    assert.equal(missingAuditionMode.json.error, 'IPC_VERSION_MISMATCH');
+
+    // Audition sessions cannot downgrade to a non-CEP serialization mode.
+    const wrongAuditionMode = await httpJson(
+      port,
+      'POST',
+      '/api/v2/companion/ipc',
+      {
+        ipc_protocol_version: COMPANION_IPC_PROTOCOL_VERSION,
+        session_id: hs.json.session_id,
+        nonce: 'n-wrong-audition-mode',
+        timestamp_ms: Date.now(),
+        execution_mode: 'web-client',
+        command: 'JOB_LIST',
+        payload: {},
+      },
+      { Authorization: `Bearer ${hs.json.session_token}` },
+    );
+    assert.equal(wrongAuditionMode.status, 409);
+    assert.equal(wrongAuditionMode.json.error, 'IPC_VERSION_MISMATCH');
+
     const { session_id, session_token } = hs.json;
 
     // Expired request_id envelope rejected with IPC_REQUEST_EXPIRED
@@ -259,6 +403,7 @@ test('AVP-P0-004 + AVP-P0-006: Hardened loopback HTTP Companion IPC enforces req
         request_id: 'req-exp-1',
         timestamp_ms: Date.now(),
         expires_at_ms: Date.now() - 1000,
+        execution_mode: 'audition-cep',
         command: 'JOB_LIST',
         payload: {},
       },
@@ -279,6 +424,7 @@ test('AVP-P0-004 + AVP-P0-006: Hardened loopback HTTP Companion IPC enforces req
         request_id: 'req-list-1',
         timestamp_ms: Date.now(),
         expires_at_ms: Date.now() + 60_000,
+        execution_mode: 'audition-cep',
         command: 'JOB_LIST',
         payload: {},
       },
@@ -300,6 +446,7 @@ test('AVP-P0-004 + AVP-P0-006: Hardened loopback HTTP Companion IPC enforces req
         request_id: 'req-list-1',
         timestamp_ms: Date.now(),
         expires_at_ms: Date.now() + 60_000,
+        execution_mode: 'audition-cep',
         command: 'JOB_LIST',
         payload: {},
       },
@@ -311,8 +458,13 @@ test('AVP-P0-004 + AVP-P0-006: Hardened loopback HTTP Companion IPC enforces req
     // Verify CEP client & host scripts contain sourceIdentity + SOURCE_CHANGED guard & zero innerHTML XSS
     const cepApp = fs.readFileSync(path.resolve(process.cwd(), 'packages/audition-cep-plugin/client/app.js'), 'utf8');
     const cepJsx = fs.readFileSync(path.resolve(process.cwd(), 'packages/audition-cep-plugin/jsx/auditionHost.jsx'), 'utf8');
+    const webClient = fs.readFileSync(path.resolve(process.cwd(), 'src/host-bridge/companion/CompanionWebClient.ts'), 'utf8');
+    assert.equal((webClient.match(/execution_mode: 'web-client'/g) || []).length, 2);
     assert.equal(cepApp.includes('SOURCE_CHANGED'), true);
     assert.equal(cepApp.includes('JOB_RECONNECT'), true);
+    assert.equal(cepApp.includes('expected_asr_contract_version'), true);
+    assert.equal(cepApp.includes('expected_cep_transcript_schema_version'), true);
+    assert.equal(cepApp.includes('job.result.schemaVersion'), true);
     assert.equal(/\.innerHTML\s*=/.test(cepApp), false);
     assert.equal(cepJsx.includes('fileSizeBytes'), true);
     assert.equal(cepJsx.includes('fileModifiedMs'), true);
