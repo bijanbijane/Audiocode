@@ -488,6 +488,15 @@ test('Scenarios 6, 7, 8, 9, 10, 11, 12, 13, 14, 15: Error handling, chunk order,
     ]);
 
     // Scenario 14 & 15: Two concurrent transfers (Owner isolation + Temp Storage Quota)
+    // Missing owner identity must fail closed before a transfer is allocated.
+    const missingOwnerInit = mgr.initTransfer({
+      format: 'pcm_s16le', sampleRateHz: 16000, channels: 1, endianness: 'little',
+      expectedBytes: 2000, expectedFrames: 1000, totalChunks: 1, ownerId: '',
+    });
+    assert.equal(missingOwnerInit.ok, false);
+    assert.equal(missingOwnerInit.statusCode, 403);
+    assert.equal(missingOwnerInit.code, 'TRANSFER_OWNER_REQUIRED');
+
     const s14A = mgr.initTransfer({
       format: 'pcm_s16le',
       sampleRateHz: 16000,
@@ -529,6 +538,15 @@ test('Scenarios 6, 7, 8, 9, 10, 11, 12, 13, 14, 15: Error handling, chunk order,
     assert.equal(s14B.ok, true);
 
     // Cross-owner chunk append rejected with 403 TRANSFER_OWNER_MISMATCH
+    // An omitted/blank owner must not inherit access to a client-owned transfer.
+    const missingOwnerChunk = mgr.appendChunk({
+      transferId: s14A.transferId!, chunkIndex: 0,
+      chunkBase64: Buffer.alloc(2000).toString('base64'), ownerId: '',
+    });
+    assert.equal(missingOwnerChunk.ok, false);
+    assert.equal(missingOwnerChunk.statusCode, 403);
+    assert.equal(missingOwnerChunk.code, 'TRANSFER_OWNER_MISMATCH');
+
     const hijack = mgr.appendChunk({
       transferId: s14A.transferId!,
       chunkIndex: 0,
@@ -546,6 +564,10 @@ test('Scenarios 6, 7, 8, 9, 10, 11, 12, 13, 14, 15: Error handling, chunk order,
       chunkBase64: Buffer.alloc(1000).toString('base64'),
       ownerId: 'owner-B',
     });
+    const missingOwnerFinalize = mgr.finalizeTransfer(s14B.transferId!, { ownerId: '' });
+    assert.equal(missingOwnerFinalize.ok, false);
+    assert.equal(missingOwnerFinalize.statusCode, 403);
+    assert.equal(missingOwnerFinalize.code, 'TRANSFER_OWNER_MISMATCH');
     mgr.finalizeTransfer(s14B.transferId!, { ownerId: 'owner-B' });
     const srcB = mgr.acquireAudioSource(s14B.transferId!, { ownerId: 'owner-B' }).source!;
     await srcB.close('COMPLETED');
