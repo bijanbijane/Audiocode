@@ -54,7 +54,9 @@ const SHERPA_RUNTIME_ROOT = process.env.AVAPARDAZ_SHERPA_RUNTIME_DIR?.trim() || 
 const SHERPA_RIZEH_MODEL_DIR = process.env.AVAPARDAZ_SHERPA_RIZEH_MODEL_DIR?.trim() || path.join(AVAPARDAZ_USER_MODEL_ROOT, 'sherpa-onnx-nemo-ctc-fa-shenava-rizeh-v1.0-non-streaming-int8-2026-06-26');
 const SHAHAB_KOOCHIK_MODEL_DIR = process.env.AVAPARDAZ_SHERPA_KOOCHIK_MODEL_DIR?.trim() || path.join(AVAPARDAZ_USER_MODEL_ROOT, 'shahab-koochik-v1.0-sherpa-onnx');
 const SHERPA_BINARY_SOURCE = path.join(SHERPA_RUNTIME_ROOT, 'bin', RELEASE_TARGET.sherpaBinaryName);
-const SHERPA_ONNXRUNTIME_LIBRARY_SOURCE = process.env.AVAPARDAZ_SHERPA_RUNTIME_LIB_DIR?.trim() || (fs.existsSync(path.join(SHERPA_RUNTIME_ROOT, 'lib')) ? path.join(SHERPA_RUNTIME_ROOT, 'lib') : path.join(SHERPA_RUNTIME_ROOT, 'lib', `python${SHERPA_PYTHON_VERSION}`, 'site-packages', 'sherpa_onnx', 'lib'));
+const DIRECT_SHERPA_RUNTIME_LIB_DIR = path.join(SHERPA_RUNTIME_ROOT, 'lib');
+const DIRECT_SHERPA_RUNTIME_HAS_LIBRARIES = fs.existsSync(DIRECT_SHERPA_RUNTIME_LIB_DIR) && fs.readdirSync(DIRECT_SHERPA_RUNTIME_LIB_DIR).some((name) => /\\.(?:dll|dylib|so(?:\\.\\d+)*)$/i.test(name));
+const SHERPA_ONNXRUNTIME_LIBRARY_SOURCE = process.env.AVAPARDAZ_SHERPA_RUNTIME_LIB_DIR?.trim() || (DIRECT_SHERPA_RUNTIME_HAS_LIBRARIES ? DIRECT_SHERPA_RUNTIME_LIB_DIR : path.join(SHERPA_RUNTIME_ROOT, 'lib', `python${SHERPA_PYTHON_VERSION}`, 'site-packages', 'sherpa_onnx', 'lib'));
 const SHAHAB_KOOCHIK_MODEL_BYTES = 458_819_249;
 const SHAHAB_KOOCHIK_MODEL_SHA256 = '6a564b5541920ce1c37bbc91d22e4b3a6838648b9b327eb88997e8db1f90950d';
 const SHAHAB_KOOCHIK_TOKENS_BYTES = 12_236;
