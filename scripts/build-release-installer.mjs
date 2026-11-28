@@ -259,6 +259,15 @@ import * as os from 'node:os';
 import { fileURLToPath } from 'node:url';
 
 const args = process.argv.slice(2);
+if (process.platform !== '${RELEASE_TARGET.platform}' || process.arch !== '${RELEASE_TARGET.arch}') {
+  console.error('[AvaPardaz Installer] This package targets ${RELEASE_TARGET.id}; current runtime is', `${process.platform}-${process.arch}`);
+  process.exit(3);
+}
+const nodeMajorVersion = Number(process.versions.node.split('.')[0]);
+if (!Number.isInteger(nodeMajorVersion) || nodeMajorVersion < 20) {
+  console.error('[AvaPardaz Installer] Node.js 20 or newer is required. Current version:', process.versions.node);
+  process.exit(4);
+}
 if (args.includes('--help') || args.includes('-h')) {
   console.log('AvaPardaz Installer ${RELEASE_VERSION}');
   console.log('Usage: node ./installer/install.mjs [--target=<empty-directory>]');
@@ -316,6 +325,14 @@ SCRIPT_DIR="$(cd "$(dirname "\${BASH_SOURCE[0]}")" && pwd)"
 node "\${SCRIPT_DIR}/install.mjs" "$@"
 `;
 fs.writeFileSync(path.join(installerDir, 'install-macos.sh'), installMacosSh, { mode: 0o755 });
+
+const installWindowsPs1 = `$ErrorActionPreference = 'Stop'
+$scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+$node = Get-Command node -ErrorAction Stop
+& $node.Source (Join-Path $scriptDir 'install.mjs') @args
+exit $LASTEXITCODE
+`;
+fs.writeFileSync(path.join(installerDir, 'install-windows.ps1'), installWindowsPs1, 'utf8');
 
 const uninstallMjsContent = `#!/usr/bin/env node
 /**
@@ -472,11 +489,11 @@ const docsMap = {
 بسته نصبی آواپرداز شامل رابط کاربری، Local Companion، موتور بومی Sherpa-ONNX CPU، مدل اصلی فارسی Shenava Koochik FP32 و افزونه Adobe Audition CEP است. مدل سبک‌تر Shenava-Rizeh INT8 فقط در صورت بسته‌بندی اختیاری در دسترس خواهد بود. پس از نصب، استنتاج آفلاین است.
 
 ### مراحل نصب:
-1. بسته نصبی \`avapardaz-installer-v${RELEASE_VERSION}.tar.gz\` را استخراج کنید.
+1. بسته مختص ${RELEASE_TARGET.id} یعنی \`avapardaz-installer-v${RELEASE_VERSION}-${RELEASE_TARGET.id}.tar.gz\` را استخراج کنید.
 2. اسکریپت نصب خودکار را اجرا کنید:
-   - **macOS / Linux**: اجرای \`./installer/install-macos.sh\`
-   - **CLI / Custom Path**: اجرای \`node ./installer/install.mjs --target=$HOME/AvaPardaz\`
-3. نصاب فقط روی مسیر نصب خالی اجرا می‌شود و پوشهٔ موجود یا داده‌های قبلی را بازنویسی نمی‌کند. یکپارچگی مدل فارسی و باینری‌های Native پیش از ساخت بسته بررسی می‌شود.
+   - **macOS**: اجرای \`./installer/install-macos.sh\`
+   - **Windows 11**: اجرای \`powershell -ExecutionPolicy Bypass -File .\\installer\\install-windows.ps1\`
+3. بسته فقط روی ${RELEASE_TARGET.osLabel} / ${RELEASE_TARGET.architectureLabel} اجرا می‌شود و در صورت عدم تطابق OS/CPU یا Node.js کمتر از نسخه 20، پیش از کپی فایل‌ها متوقف خواهد شد.
 `,
   'QUICK-START-GUIDE.md': `# راهنمای شروع سریع آواپرداز (Quick-Start Guide)
 
