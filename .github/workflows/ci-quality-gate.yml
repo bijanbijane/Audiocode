@@ -137,3 +137,36 @@ jobs:
           AVAPARDAZ_EXPECTED_TARGET: ${{ matrix.target }}
           AVAPARDAZ_RUNTIME_OUTPUT_DIR: ${{ runner.temp }}/avapardaz-native-runtime
         run: bunx tsx scripts/provision-release-native-runtime.ts
+
+
+  koochik-model-provenance:
+    if: github.event_name == 'pull_request' && github.head_ref == 'feat/r6-target-specific-release-packaging'
+    name: Koochik Model Provenance & Apache License Verification
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Install Dependencies from Frozen Bun Lockfile
+        run: bun install --frozen-lockfile
+
+      - name: Restore pinned Koochik model cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/avapardaz-koochik-model
+          key: avapardaz-koochik-${{ hashFiles('src/asr-core/KoochikModelProvenance.mjs') }}
+
+      - name: Provision pinned model, verify ONNX/tokens hashes and Apache license
+        run: bunx tsx scripts/provision-release-koochik-model.ts --outdir=${{ runner.temp }}/avapardaz-koochik-model
+
+      - name: Run model provenance/license regression tests
+        run: bunx vitest run scripts/koochik-model-provenance.spec.ts
