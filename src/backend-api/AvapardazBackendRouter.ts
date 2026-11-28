@@ -47,6 +47,27 @@ export interface CreateAvapardazBackendRouterOptions {
   readonly resolveRemoteAddress?: (req: express.Request) => string | undefined;
 }
 
+function isAllowedCompanionHostHeader(hostHeader: string | undefined): boolean {
+  if (!hostHeader || typeof hostHeader !== 'string') return false;
+  const host = hostHeader.trim().toLowerCase();
+  return (
+    /^localhost(?::\\d{1,5})?$/.test(host) ||
+    /^127\\.0\\.0\\.1(?::\\d{1,5})?$/.test(host) ||
+    /^\\[::1\\](?::\\d{1,5})?$/.test(host)
+  );
+}
+
+function isAllowedCompanionOrigin(originHeader: string | undefined): boolean {
+  if (originHeader === undefined || originHeader === '' || originHeader === 'null') return true;
+  const origin = originHeader.trim().toLowerCase();
+  if (origin.startsWith('file://')) return true;
+  return (
+    /^https?:\\/\\/localhost(?::\\d{1,5})?$/.test(origin) ||
+    /^https?:\\/\\/127\\.0\\.0\\.1(?::\\d{1,5})?$/.test(origin) ||
+    /^https?:\\/\\/\\[::1\\](?::\\d{1,5})?$/.test(origin)
+  );
+}
+
 function mapUnifiedErrorStatus(err: UnifiedProcessingError): number {
   switch (err.code) {
     case 'INVALID_PROCESSING_REQUEST':
@@ -109,7 +130,7 @@ export function createAvapardazBackendRouter(options?: CreateAvapardazBackendRou
         execution_model: 'PLUGIN_FIRST_LOCAL_FIRST_UNIFIED',
         registered_capabilities: capabilities.length,
         active_projects: projectService.listProjects().length,
-        tracked_jobs: jobManager.listJobs(200).length,
+        tracked_jobs: jobManager.getTrackedJobCount(),
       });
     } catch (err) {
       next(err);
@@ -420,8 +441,16 @@ export function createAvapardazBackendRouter(options?: CreateAvapardazBackendRou
   // ── 6. Plugin-to-Companion Loopback-Protected Versioned IPC Bridge ────────
   const getRemoteAddr = (req: express.Request): string | undefined =>
     options?.resolveRemoteAddress ? options.resolveRemoteAddress(req) : req.socket.remoteAddress;
+  const isAllowedCompanionRequest = (req: express.Request, res: express.Response): boolean => {
+    if (!isAllowedCompanionHostHeader(req.headers.host) || !isAllowedCompanionOrigin(req.headers.origin)) {
+      res.status(403).json({ error: 'COMPANION_ORIGIN_BLOCKED', message: 'Companion IPC requires an approved loopback Host and Origin.' });
+      return false;
+    }
+    return true;
+  };
 
   router.post('/companion/handshake', (req, res) => {
+    if (!isAllowedCompanionRequest(req, res)) return;
     const outcome = companionIpcBridge.handshake(
       (req.body ?? {}) as CompanionHandshakeRequest,
       getRemoteAddr(req),
@@ -430,6 +459,7 @@ export function createAvapardazBackendRouter(options?: CreateAvapardazBackendRou
   });
 
   router.post('/companion/ipc', async (req, res) => {
+    if (!isAllowedCompanionRequest(req, res)) return;
     const authHeader = req.headers.authorization;
     const bearer =
       typeof authHeader === 'string' && authHeader.startsWith('Bearer ')
@@ -444,6 +474,12 @@ export function createAvapardazBackendRouter(options?: CreateAvapardazBackendRou
 
     if (!auth.ok || !auth.envelope) {
       res.status(auth.statusCode).json({ error: auth.code, message: auth.message });
+      return;
+    }
+
+    const sessionOwnerId = typeof auth.ownerId === 'string' ? auth.ownerId.trim() : '';
+    if (!sessionOwnerId) {
+      res.status(403).json({ error: 'IPC_OWNER_REQUIRED', message: 'Authenticated Companion owner identity is required.' });
       return;
     }
 
@@ -474,11 +510,16 @@ export function createAvapardazBackendRouter(options?: CreateAvapardazBackendRou
         case 'JOB_SUBMIT': {
           const submitted = jobManager.submitJob(
             auth.envelope.payload as CanonicalOperationEnvelope,
+            { ownerId: sessionOwnerId },
           );
           res.status(submitted.deduplicated ? 200 : 202).json({
             deduplicated: submitted.deduplicated,
             job: submitted.job,
           });
+          return;
+        }
+        case 'JOB_LIST': {
+          res.json({ jobs: jobManager.listJobs(200, sessionOwnerId) });
           return;
         }
         case 'JOB_STATUS': {
@@ -490,7 +531,7 @@ export function createAvapardazBackendRouter(options?: CreateAvapardazBackendRou
             });
             return;
           }
-          const job = jobManager.getJob(p.job_id.trim());
+          const job = jobManager.getJob(p.job_id.trim(), sessionOwnerId);
           if (!job) {
             res.status(404).json({ error: 'JOB_NOT_FOUND' });
             return;
@@ -507,7 +548,7 @@ export function createAvapardazBackendRouter(options?: CreateAvapardazBackendRou
             });
             return;
           }
-          const job = jobManager.cancelJob(p.job_id.trim());
+          const job = jobManager.cancelJob(p.job_id.trim(), sessionOwnerId);
           if (!job) {
             res.status(404).json({ error: 'JOB_NOT_FOUND' });
             return;
