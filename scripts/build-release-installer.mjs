@@ -19,6 +19,7 @@ import * as crypto from 'node:crypto';
 import * as os from 'node:os';
 import { execSync } from 'node:child_process';
 import { assertRuntimeTargetMatches, resolveAvapardazReleaseTarget } from './release-targets.mjs';
+import { assertNativeBinaryArchitecture } from './verify-native-binary.mjs';
 
 const REPO_ROOT = process.cwd();
 const RELEASE_TARGET = resolveAvapardazReleaseTarget({
@@ -188,14 +189,24 @@ if (fs.existsSync(sherpaPythonWorkerSource)) {
 if (!fs.existsSync(SHERPA_BINARY_SOURCE)) {
   throw new Error(`SHERPA_OFFLINE_BINARY_MISSING: ${SHERPA_BINARY_SOURCE}`);
 }
+assertNativeBinaryArchitecture({
+  filePath: SHERPA_BINARY_SOURCE,
+  platform: RELEASE_TARGET.platform,
+  arch: RELEASE_TARGET.arch,
+});
 const sherpaStandaloneBinary = path.join(payloadDir, 'runtime', 'sherpa-venv', 'bin', path.basename(SHERPA_BINARY_SOURCE));
 fs.copyFileSync(SHERPA_BINARY_SOURCE, sherpaStandaloneBinary);
 fs.chmodSync(sherpaStandaloneBinary, 0o755);
 
 const onnxRuntimeLibrarySource = path.join(SHERPA_ONNXRUNTIME_LIBRARY_SOURCE, RELEASE_TARGET.onnxRuntimeLibraryName);
-if (!onnxRuntimeLibrarySource) {
-  throw new Error(`SHERPA_ONNXRUNTIME_LIBRARY_MISSING: ${SHERPA_ONNXRUNTIME_LIBRARY_SOURCE}`);
+if (!fs.existsSync(onnxRuntimeLibrarySource) || !fs.statSync(onnxRuntimeLibrarySource).isFile()) {
+  throw new Error(`SHERPA_ONNXRUNTIME_LIBRARY_MISSING: ${onnxRuntimeLibrarySource}`);
 }
+assertNativeBinaryArchitecture({
+  filePath: onnxRuntimeLibrarySource,
+  platform: RELEASE_TARGET.platform,
+  arch: RELEASE_TARGET.arch,
+});
 const sherpaLibraryOutput = path.join(
   payloadDir, 'runtime', 'sherpa-venv', 'lib', `python${SHERPA_PYTHON_VERSION}`, 'site-packages', 'sherpa_onnx', 'lib',
 );
