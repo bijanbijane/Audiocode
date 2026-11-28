@@ -722,14 +722,25 @@ export class ComponentUpdateOrchestrator {
   }
 
   /**
-   * Recovers an interrupted update after physically removing its staged artifact.
-   * The cleanup callback is mandatory whenever a staging directory is recorded. If
-   * cleanup fails, the state and staging reference remain intact so startup recovery
-   * can be retried without falsely reporting that disk cleanup succeeded.
+   * Recovers an interrupted update through a filesystem/runtime adapter.
+   * The adapter must reconcile the active installation to the previous known-good
+   * version when activation may have started, then remove only abandoned staging or
+   * partial-download data. It receives the exact interrupted state so it can avoid
+   * deleting a directory that has become the active installation.
+   *
+   * If adapter recovery fails, the state and artifact references remain intact for
+   * retry; the orchestrator never reports rollback based on an in-memory version edit.
    */
   public async recoverInterruptedUpdate(
     component: ReleaseComponentKind,
-    cleanupStagingArtifact: (stagingDir: string) => Promise<void>,
+    recoverInterruptedArtifact: (context: {
+      readonly component: ReleaseComponentKind;
+      readonly interruptedState: ComponentUpdateState;
+      readonly activeVersion: string;
+      readonly previousKnownGoodVersion: string | null;
+      readonly candidateVersion: string | null;
+      readonly stagingDir: string | null;
+    }) => Promise<void>,
   ): Promise<ComponentSlotRecord> {
     const cur = this.getSlot(component);
     const interruptedStates: ComponentUpdateState[] = [
@@ -745,23 +756,28 @@ export class ComponentUpdateOrchestrator {
       return cur;
     }
 
-    if (cur.stagingDir) {
-      try {
-        await cleanupStagingArtifact(cur.stagingDir);
-      } catch (error) {
-        throw new Error(
-          `STAGING_CLEANUP_FAILED: could not remove interrupted artifact at ${cur.stagingDir}: ${error instanceof Error ? error.message : String(error)}`,
-        );
-      }
+    try {
+      await recoverInterruptedArtifact({
+        component,
+        interruptedState: cur.state,
+        activeVersion: cur.activeVersion,
+        previousKnownGoodVersion: cur.previousKnownGoodVersion,
+        candidateVersion: cur.candidateVersion,
+        stagingDir: cur.stagingDir,
+      });
+    } catch (error) {
+      throw new Error(
+        `INTERRUPTED_UPDATE_RECOVERY_FAILED: ${error instanceof Error ? error.message : String(error)}`,
+      );
     }
 
     const targetVersion = cur.previousKnownGoodVersion ?? cur.activeVersion;
     if (cur.state !== 'UPDATE_ROLLBACK_PENDING') {
       if (LEGAL_UPDATE_TRANSITIONS[cur.state].includes('UPDATE_ROLLBACK_PENDING')) {
-        this.transition(component, 'UPDATE_ROLLBACK_PENDING', 'Detected interrupted update on restart; staged artifact cleanup completed.');
+        this.transition(component, 'UPDATE_ROLLBACK_PENDING', 'Detected interrupted update on restart; runtime rollback and artifact recovery completed.');
       } else {
-        this.transition(component, 'UPDATE_FAILED', 'Detected interrupted pre-activation update on restart; staged artifact cleanup completed.');
-        this.transition(component, 'UPDATE_ROLLBACK_PENDING', 'Cleaning up interrupted staging state.');
+        this.transition(component, 'UPDATE_FAILED', 'Detected interrupted pre-activation update on restart; runtime rollback and artifact recovery completed.');
+        this.transition(component, 'UPDATE_ROLLBACK_PENDING', 'Finalizing interrupted update recovery.');
       }
     }
     return this.transition(component, 'UPDATE_ROLLED_BACK', `Recovered cleanly to known-good version ${targetVersion}.`, {
