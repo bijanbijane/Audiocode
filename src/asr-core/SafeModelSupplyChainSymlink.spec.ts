@@ -56,7 +56,7 @@ function createTarWithSymlinkChain(): string {
     '  alias.type = tarfile.SYMTYPE',
     "  alias.linkname = 'libonnxruntime.1.28.2.dylib'",
     '  tf.addfile(alias)',
-  ].join('\\n');
+  ].join('\n');
   const result = spawnSync(pythonBin, ['-c', script, archivePath], {
     encoding: 'utf8',
     timeout: 15_000,
