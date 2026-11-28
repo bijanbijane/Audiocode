@@ -499,7 +499,7 @@ export class LocalCompanionService {
     readonly audioBase64?: string;
     readonly uploadId?: string;
     readonly transferId?: string;
-    readonly ownerId?: string;
+    readonly ownerId: string;
     readonly filename?: string;
     readonly sourceIdentity?: CompanionSourceIdentity;
     readonly maxChunkDurationSec?: number;
@@ -512,6 +512,15 @@ export class LocalCompanionService {
     readonly code?: string;
     readonly message?: string;
   } {
+    if (typeof params.ownerId !== 'string' || params.ownerId.trim().length === 0) {
+      return {
+        ok: false,
+        statusCode: 403,
+        code: 'JOB_OWNER_REQUIRED',
+        message: 'An authenticated ownerId is required to submit a Companion job.',
+      };
+    }
+
     if (this.lifecycleManager.getState() === 'SHUTTING_DOWN') {
       return {
         ok: false,
@@ -686,7 +695,7 @@ export class LocalCompanionService {
     const entry: InternalJobEntry = {
       record: initialRecord,
       abortController,
-      ownerId: params.ownerId ?? 'local-default',
+      ownerId: params.ownerId.trim(),
     };
     this.jobs.set(jobId, entry);
     this.trimOldJobs();
