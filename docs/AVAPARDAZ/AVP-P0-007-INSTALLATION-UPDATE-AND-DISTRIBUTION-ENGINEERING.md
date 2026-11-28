@@ -61,9 +61,22 @@ Hosted-runner evidence on PR #7 head `5d31165ee455f288c8de67baeb8b1c086fc21f62`:
 Safe extraction rejects links by default. The explicit native-runtime mode materializes only relative, same-directory library symlinks under `lib` as regular files; path traversal, absolute links, hardlinks, symlink chains, and links outside `lib` remain rejected.
 
 Remaining release acceptance:
-- Full package build using the production web bundle and verified Persian model payloads.
+- Physical clean install, repair, upgrade, rollback, and uninstall on Windows 11 and macOS 14/15; the hosted cross-target unsigned Installer + Update build and tarball hash/model/runtime provenance gates now PASS for all three targets.
 - Clean install, repair, upgrade, rollback, and uninstall on physical macOS 14/15 and Windows 11.
 - Adobe Audition 25.x CEP installation/registration and Companion startup/reconnect/cancel workflows.
 - Final package signing, pinned trust-root verification, and update signature enforcement.
 
-Latest fully validated head `c800f3f218ce6973946b4bc4320ed3ead17bc911` completed both applicable workflows successfully: AVAPARDAZ Quality Gates Levels 1–5; Architecture Governance with Vitest 29 files / 123 tests, 32 Node reliability/fault-injection tests, TypeScript compilation, zero-circular dependency check, SBOM, license audit, E2E quality gates, production build and release-manifest verification. Native binary parser tests passed on four runners and pinned native runtime provisioning + CLI smoke tests passed on all three approved target architectures. The earlier obsolete assertion and malformed symlink fixture were corrected.
+Latest fully validated full native/package CI head `337844e6b0b00228dbd1d6781e3c331c4344c6ee` completed the Architecture Governance workflow successfully: AVAPARDAZ Quality Gates Levels 1–5; Architecture Governance with Vitest 30 files / 130 tests, 32 Node reliability/fault-injection tests, TypeScript compilation, zero-circular dependency check, SBOM, license audit, E2E quality gates, production build and release-manifest verification. Native binary parser tests passed on four runners; pinned native runtime provisioning + CLI smoke tests passed on all three approved target architectures; all six unsigned target-specific Installer/Update tarballs passed SHA-256/byte-length checks and embedded model/runtime provenance validation. The earlier obsolete manifest assertion and malformed symlink fixture were corrected. The current branch head is `54a1da21778dc0dd852840c2b5662104a82c5664`; its AVAPARDAZ Levels 1–5 workflow passed.
+
+
+## 12. Cross-target package build evidence (2026-11-28)
+
+GitHub Actions run `46143509617` completed successfully on PR #7 commit `337844e6b0b00228dbd1d6781e3c331c4344c6ee`:
+
+- Production web bundle and pinned Koochik model provisioning: PASS.
+- Native runtime artifacts for darwin-arm64, darwin-x64, win32-x64: PASS.
+- Six unsigned artifacts were built: Installer + Update for each approved target.
+- CI recomputed byte length and SHA-256 for each tarball and checked target ID, immutable model revision and Apache-2.0 license metadata: PASS for all three targets.
+- Manifest-only artifact `avapardaz-target-release-manifests` uploaded; unsigned tarballs were not published.
+
+This is hosted build/integrity evidence. It does not certify physical Windows 11/macOS 14 acceptance, Adobe Audition 25.x integration, signature/trust-root verification, or update activation/rollback.
