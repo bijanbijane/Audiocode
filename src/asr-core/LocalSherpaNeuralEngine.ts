@@ -1143,6 +1143,7 @@ export class LocalSherpaNeuralEngine {
             maxSingleFileBytes: 300 * 1024 * 1024,
             maxTotalBytes: 600 * 1024 * 1024,
             allowExecutablesInBin: true,
+            allowRelativeLibrarySymlinks: target !== null,
             pythonBin: process.platform === 'win32' ? 'python' : 'python3',
           });
           const extractedRoot = fs
