@@ -201,7 +201,7 @@ export interface CompanionAudioTransferInitRequest {
   readonly expectedFrames: number;
   readonly totalChunks: number;
   readonly expectedSha256?: string;
-  readonly ownerId?: string;
+  readonly ownerId: string;
 }
 
 export interface CompanionAudioTransferChunkRequest {
@@ -210,7 +210,7 @@ export interface CompanionAudioTransferChunkRequest {
   readonly chunkBase64?: string;
   readonly chunkBytes?: Buffer;
   readonly chunkSha256?: string;
-  readonly ownerId?: string;
+  readonly ownerId: string;
 }
 
 export interface FinalizedAudioTransfer {
@@ -302,7 +302,6 @@ interface ActiveAudioTransferSession {
 }
 
 const ALLOWED_FORMATS = new Set<CompanionAudioTransferFormat>(['pcm_f32le', 'pcm_s16le', 'wav']);
-const DEFAULT_OWNER_ID = 'local-default';
 
 /**
  * Parses and validates a WAV (RIFF or RF64) header from a bounded initial buffer (<= 4096 bytes).
@@ -842,6 +841,10 @@ export class CompanionAudioTransferManager {
   } {
     this.sweepExpired();
 
+    if (typeof req.ownerId !== 'string' || req.ownerId.trim().length === 0) {
+      return { ok: false, statusCode: 403, code: 'TRANSFER_OWNER_REQUIRED', message: 'A non-empty ownerId is required to initialize an audio transfer.' };
+    }
+
     if (!ALLOWED_FORMATS.has(req.format)) {
       return {
         ok: false,
@@ -944,10 +947,7 @@ export class CompanionAudioTransferManager {
     }
 
     const transferId = `xfr_${crypto.randomBytes(16).toString('hex')}`;
-    const ownerId =
-      typeof req.ownerId === 'string' && req.ownerId.trim().length > 0
-        ? req.ownerId.trim()
-        : DEFAULT_OWNER_ID;
+    const ownerId = req.ownerId.trim();
     const safeName =
       typeof req.filename === 'string' && req.filename.trim().length > 0
         ? path.basename(req.filename.trim()).replace(/[^a-zA-Z0-9._\-\u0600-\u06FF]/g, '_')
@@ -1001,9 +1001,9 @@ export class CompanionAudioTransferManager {
 
   private validateOwner(
     sess: ActiveAudioTransferSession,
-    ownerId?: string,
+    ownerId: string,
   ): { readonly ok: boolean; readonly statusCode: number; readonly code?: string; readonly message?: string } {
-    if (ownerId !== undefined && ownerId.trim().length > 0 && ownerId.trim() !== sess.ownerId) {
+    if (typeof ownerId !== 'string' || ownerId.trim().length === 0 || ownerId.trim() !== sess.ownerId) {
       return {
         ok: false,
         statusCode: 403,
@@ -1214,7 +1214,7 @@ export class CompanionAudioTransferManager {
 
   public finalizeTransfer(
     transferId: string,
-    options?: { readonly ownerId?: string },
+    options: { readonly ownerId: string },
   ): {
     readonly ok: boolean;
     readonly statusCode: number;
@@ -1372,7 +1372,7 @@ export class CompanionAudioTransferManager {
    */
   public acquireAudioSource(
     transferId: string,
-    options?: { readonly ownerId?: string },
+    options: { readonly ownerId: string },
   ): {
     readonly ok: boolean;
     readonly statusCode: number;
@@ -1743,7 +1743,7 @@ export class CompanionAudioTransferManager {
    */
   public consumeFinalizedTransferAsWav(
     transferId: string,
-    options?: { readonly ownerId?: string },
+    options: { readonly ownerId: string },
   ): {
     readonly ok: boolean;
     readonly statusCode: number;
@@ -1860,12 +1860,12 @@ export class CompanionAudioTransferManager {
     };
   }
 
-  public abortTransfer(transferId: string, options?: { readonly ownerId?: string }): boolean {
+  public abortTransfer(transferId: string, options: { readonly ownerId: string }): boolean {
     const sess = this.sessions.get(transferId);
     if (!sess) return false;
     if (
-      options?.ownerId !== undefined &&
-      options.ownerId.trim().length > 0 &&
+      typeof options?.ownerId !== 'string' ||
+      options.ownerId.trim().length === 0 ||
       options.ownerId.trim() !== sess.ownerId
     ) {
       return false;
