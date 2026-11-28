@@ -447,11 +447,50 @@ test('AVP-P0-007: update orchestration requires real Ed25519 signatures, binds m
     verifyPostActivationHealth: async () => ({ ok: true }),
     restorePreviousVersion: async () => true,
   });
-  const recoveredReady = interruptedReadyOrch.recoverInterruptedUpdate('NATIVE_COMPANION');
+  let cleanedInterruptedPath: string | null = null;
+  const recoveredReady = await interruptedReadyOrch.recoverInterruptedUpdate(
+    'NATIVE_COMPANION',
+    async (stagingDir) => {
+      cleanedInterruptedPath = stagingDir;
+    },
+  );
+  assert.equal(cleanedInterruptedPath, '/tmp/interrupted-ready-stage');
   assert.equal(recoveredReady.state, 'UPDATE_ROLLED_BACK');
   assert.equal(recoveredReady.activeVersion, '1.0.0');
   assert.equal(recoveredReady.candidateVersion, null);
   assert.equal(recoveredReady.stagingDir, null);
+
+  // Failed physical cleanup must preserve the interrupted state and staging reference for retry.
+  const cleanupFailureOrch = new ComponentUpdateOrchestrator({
+    BROWSER_APP: '1.0.0',
+    NATIVE_COMPANION: '1.0.0',
+    AUDITION_CEP_EXTENSION: '1.0.0',
+    MODEL_ARTIFACT: '1.0.0',
+  }, trustedSigningKeys);
+  cleanupFailureOrch.pinActiveJob('render-cleanup-failure');
+  await cleanupFailureOrch.executeSafeUpdate({
+    manifest: signManifest({ component: 'NATIVE_COMPANION', version: '1.1.0', sha256Hex: goodHash, sizeBytes: 10_000_000 }),
+    availableDiskBytes: 50_000_000,
+    downloadAndVerifySha256: async () => ({ ok: true, actualSha256Hex: goodHash }),
+    stageArtifact: async () => ({ ok: true, stagingDir: '/tmp/interrupted-cleanup-failure' }),
+    activateArtifact: async () => ({ ok: true }),
+    verifyPostActivationHealth: async () => ({ ok: true }),
+    restorePreviousVersion: async () => true,
+  });
+  await assert.rejects(
+    cleanupFailureOrch.recoverInterruptedUpdate('NATIVE_COMPANION', async () => {
+      throw new Error('simulated filesystem cleanup failure');
+    }),
+    /STAGING_CLEANUP_FAILED/,
+  );
+  assert.equal(cleanupFailureOrch.getSlot('NATIVE_COMPANION').state, 'UPDATE_READY');
+  assert.equal(cleanupFailureOrch.getSlot('NATIVE_COMPANION').stagingDir, '/tmp/interrupted-cleanup-failure');
+  const recoveredAfterCleanupRetry = await cleanupFailureOrch.recoverInterruptedUpdate(
+    'NATIVE_COMPANION',
+    async () => undefined,
+  );
+  assert.equal(recoveredAfterCleanupRetry.state, 'UPDATE_ROLLED_BACK');
+  assert.equal(recoveredAfterCleanupRetry.stagingDir, null);
 
   // SemVer prerelease ordering permits beta.2 after beta.1.
   const prereleaseOrch = new ComponentUpdateOrchestrator({
