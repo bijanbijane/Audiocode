@@ -716,7 +716,7 @@ with tarfile.open(archive_path, "r:bz2") as tf:
                 fail("TAR_SYMLINK_FORBIDDEN", f"Symlink entry forbidden: {raw_name}")
             if raw_name.startswith("/") or (len(raw_name) >= 2 and raw_name[1] == ":"):
                 fail("TAR_PATH_TRAVERSAL_BLOCKED", f"Absolute symlink path forbidden: {raw_name}")
-            if not member.linkname or "\\x00" in member.linkname or "\\\\" in member.linkname:
+            if not member.linkname or "\\x00" in member.linkname or "\\\\" in member.linkname or member.linkname.startswith("/") or (len(member.linkname) >= 2 and member.linkname[1] == ":"):
                 fail("TAR_PATH_TRAVERSAL_BLOCKED", f"Illegal symlink target: {member.linkname!r}")
             raw_parts = [p for p in raw_name.split("/") if p not in ("", ".")]
             link_parts = [p for p in member.linkname.split("/") if p not in ("", ".")]
