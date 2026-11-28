@@ -78,3 +78,11 @@ export function assertRuntimeTargetMatches({ target, runtimeTarget }) {
   }
   return true;
 }
+
+export function isNativeRuntimeSharedLibraryName(name) {
+  return /\.(?:dll|dylib|so(?:\.\d+)*)$/i.test(name);
+}
+
+export function isVersionedOnnxRuntimeDylibName(name) {
+  return /^libonnxruntime\.\d+(?:\.\d+)*\.dylib$/.test(name);
+}
