@@ -95,3 +95,31 @@ The V1 target CPU floor is now enforced at install time and qualified during run
 - Vitest CPU probe regression tests passed as part of the 31-file / 134-test suite. Real hosted Windows x64, macOS 15 Intel and macOS 15 Apple Silicon probes all passed in run `46144552901`.
 
 Physical Windows 11 and macOS 14/15 host acceptance remains open. Signing, trust-root pinning, signature enforcement and real Adobe Audition 25.x integration remain separate acceptance gates.
+
+
+## 14. R6-WP03 — Final hosted CI verification on latest PR #7 head (2026-11-28)
+
+The documentation-only branch head `3b165f185f0e908b97921294f0e28a07f34e77c9` was checked after the preceding R6-WP03 implementation and documentation updates. Both applicable workflows completed successfully on this exact commit:
+
+- [AVAPARDAZ Quality & Release Gates — run 46145136813](https://github.com/bijanbijane/Audiocode/actions/runs/46145136813): SUCCESS. Level 1 typecheck/build, Levels 2–4 offline ASR/VAD/diarization, canonical P0 regression suite, and Level 5 CEP manifest/CSP and dependency-audit availability checks all completed.
+- [Architecture Governance, Reliability & Release Quality Gate — run 46145136799](https://github.com/bijanbijane/Audiocode/actions/runs/46145136799): SUCCESS. Pinned Koochik model/license verification, four-runner native binary parser matrix, three-target native runtime provisioning, CPU feature checks, TypeScript compilation, Vitest integration/quality suites, Node reliability/fault-injection tests, E2E quality gates, SBOM/license checks, production build/release manifest, and six-package cross-target Installer/Update build with hash and embedded-manifest verification all completed.
+
+The latest checked head is therefore CI-green. The verified result remains limited to hosted CI and unsigned package artifacts. It does not close physical Windows 11/macOS 14/15 installation, live Adobe Audition 25.x CEP registration, Companion startup/reconnect/cancel on target hosts, cryptographic release signing, pinned trust-root verification, or signed update activation/rollback.
+
+### Current disposition
+
+- Hosted native runtime, CPU preflight, model provenance, unsigned package build and integrity checks: **PASS**.
+- Latest PR #7 head CI: **PASS** on the exact commit above.
+- Physical target-host installation and Audition workflow: **OPEN / NOT RUN**.
+- Cryptographic signing and update trust enforcement: **OPEN / NOT IMPLEMENTED**.
+- PR #7: **OPEN / DRAFT / NOT MERGED**; PR #6 remains its open draft base.
+- `main` remains unchanged at `e73394f8e00e477f1de0046e04fd233681610563`.
+
+### Next engineering work
+
+1. Implement a real signature-verification boundary that consumes signed manifest bytes and verifies them against an explicitly pinned trust root; never trust a caller-supplied `signatureStatus` as proof of authenticity.
+2. Keep release signing key provisioning separate from repository code. No private key or production credential may be committed.
+3. Add install/update integration tests proving signature failure blocks staging/activation and that valid signatures are bound to the exact manifest and artifact digest.
+4. Complete physical clean-install, repair, upgrade, rollback and uninstall checks on the three approved host targets, then validate CEP registration and Companion lifecycle in Audition 25.x.
+
+The signing implementation must remain fail-closed until the owner-approved trust-root/public-key material and key-rotation/revocation policy are available. No release was signed or published in this session.
