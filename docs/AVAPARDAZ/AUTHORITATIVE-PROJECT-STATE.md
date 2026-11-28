@@ -518,3 +518,63 @@ This addendum supersedes only older claims about the current primary Persian mod
 ### ۱۹.۳. وضعیت پذیرش
 
 R0 همچنان **IN PROGRESS** است. دامنه و مسیر تحویل مصوب‌اند، اما تعیین دقیق ماتریس Audition/macOS/Windows، مدل اعتماد توزیع داخلی، baseline اجرایی CI و دسترسی به میزبان‌های فیزیکی/مجاز هر دو سیستم‌عامل هنوز برای خروج از R0 لازم‌اند. تا آن زمان، هیچ Gate عبور نکرده است.
+
+
+---
+
+## ۲۰. R0 / R6 وضعیت جاری پس از تصمیم مالک (2026-11-28)
+
+این بخش، وضعیت اجرایی جدیدتر را به snapshot تاریخی بخش ۱۹ اضافه می‌کند؛ سوابق قبلی حذف نشده‌اند.
+
+### ۲۰.۱. تصمیم مصوب ماتریس میزبان
+
+تصمیم مالک پروژه در 2026-11-28 در ADR-027 ثبت شد:
+
+| Target ID | سیستم‌عامل | معماری | Host |
+|---|---|---|---|
+| darwin-arm64 | macOS 14/15 | Apple Silicon | Adobe Audition 25.x |
+| darwin-x64 | macOS 14/15 | Intel | Adobe Audition 25.x |
+| win32-x64 | Windows 11 | x64 | Adobe Audition 25.x |
+
+این تصمیم، ابهام انتخاب ماتریس را حل می‌کند؛ هیچ‌یک از سه target هنوز از نظر runtime واقعی یا Host فیزیکی VERIFIED / ACCEPTED نیست.
+
+### ۲۰.۲. GitHub و شاخه‌ها
+
+- مخزن رسمی: bijanbijane/Audiocode. پاسخ فعلی GitHub API مقدار private=false را برمی‌گرداند؛ بنابراین عبارت «خصوصی» در snapshot قبلی با metadata فعلی API سازگار نیست و باید به‌عنوان مغایرت تاریخی تلقی شود.
+- main همچنان روی e73394f8e00e477f1de0046e04fd233681610563 قرار دارد و در این جلسه تغییر نکرد.
+- PR #6: شاخه docs/r0-baseline-audit-2026-11-27، OPEN / DRAFT / NOT MERGED؛ head برابر 4632e84f29221d70bf2a308aefb340ae429f731a.
+- PR #7: شاخه feat/r6-target-specific-release-packaging، OPEN / DRAFT / NOT MERGED؛ head در آخرین بررسی a31199a2a4352ced2eac6a6b1b70e5018c13c22b؛ به‌صورت stacked روی head PR #6 قرار دارد.
+- PR #7 شامل ۱۱ فایل، ۲۷۹ اضافه و ۳۳ حذف در آخرین بررسی بود.
+
+### ۲۰.۳. CI و قابلیت اتکا به شواهد
+
+- چهار Workflow روی head PR #6 یعنی 4632e84... با نتیجه SUCCESS پایان یافتند: AVAPARDAZ Quality Gates، Architecture Governance، Separated Web/API Container Build و Standalone Platform API Readiness.
+- برای PR #7 در آخرین بررسی هیچ Check Run یا Workflow Run قابل مشاهده نبود. Workflowهای فعلی pull request را فقط برای target branchهای main/master فیلتر می‌کنند؛ PR #7 به شاخه R0 هدف‌گذاری شده است. بنابراین تست‌های کد جدید NOT TRIGGERED / NOT AVAILABLE هستند، نه PASS.
+- GitHub hostname از shell محلی قابل resolve نبود؛ clone و اجرای محلی تست‌ها انجام نشد.
+- هیچ native runtime artifact، installer package یا تست واقعی macOS/Windows/Audition در این جلسه تولید یا اجرا نشد.
+
+### ۲۰.۴. پیاده‌سازی هدف‌محور R6
+
+در PR #7:
+- scripts/release-targets.mjs منبع واحد سه target مصوب و نام دقیق فایل‌های native Sherpa / ONNX Runtime است.
+- بسته‌ساز از target صریح استفاده می‌کند، runtime target mismatch را fail-closed رد می‌کند، نام artifactها را target-specific می‌کند و target/build-host را در manifest ثبت می‌کند.
+- Installer تولیدشده OS/CPU اشتباه و Node.js کمتر از 20 را پیش از کپی payload رد می‌کند؛ wrapper ویندوز PowerShell نیز تولید می‌شود.
+- metadata موتور Release با سه target مصوب همگام شده و regression tests اضافه شده‌اند.
+
+محدودیت مهم: AVAPARDAZ_SHERPA_RUNTIME_TARGET فقط assertion در زمان build است؛ اثبات رمزنگاری‌شده یا بررسی format/architecture باینری نیست.
+
+### ۲۰.۵. وضعیت واقعی R0
+
+- ماتریس هدف: APPROVED.
+- انتخاب سه target در metadata و packager: IMPLEMENTED IN PR #7; CI NOT RUN.
+- native runtime payload برای هر سه target: NOT AVAILABLE / NOT QUALIFIED.
+- نصب CEP در مسیر واقعی Adobe، ثبت/راه‌اندازی Companion، update/rollback یکپارچه و signature verification: OPEN.
+- تست فیزیکی Windows 11 x64، macOS 14/15 Apple Silicon و Intel با Audition 25.x: NOT RUN.
+- سیاست داخلی signing/trust و مدل اجرای Companion: OPEN.
+- R0 و R6: IN PROGRESS — NOT ACCEPTED.
+
+مراجع:
+- DECISION-LOG.md — ADR-027
+- HARDWARE-COMPATIBILITY-MATRIX.md — Section 3
+- R0-DISTRIBUTION-TRUST-AUDIT-2026-11-28.md — Section 8
+- PR #7 — target-specific packaging
