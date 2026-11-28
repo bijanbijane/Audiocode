@@ -145,3 +145,32 @@ The explicit runtime-target variable is a build provenance assertion, not crypto
 - Internal signing/trust policy, pinned signature verification, Companion startup registration, CEP registration into the host's actual extension directory, and atomic update/rollback integration remain open.
 
 The platform matrix is **APPROVED**, but platform support is still **NOT VERIFIED**. R0 distribution work remains IN PROGRESS.
+
+
+### 8.5. Native binary architecture verification and CI evidence (2026-11-28)
+
+The follow-up implementation adds `scripts/verify-native-binary.mjs`:
+
+- macOS: parses thin Mach-O CPU type and Universal/Fat Mach-O architecture slices; accepts only the requested `arm64` or `x64` slice.
+- Windows: validates the DOS header, PE signature, and PE Machine field; the current approved Windows target is `x64`.
+- The packager validates both the Sherpa executable and the selected ONNX Runtime shared library before copying either into the release payload.
+- A missing ONNX Runtime library now fails explicitly. The prior check tested only whether a non-empty path string existed, which could never detect a missing file.
+- Synthetic regression coverage includes Mach-O arm64, Mach-O x64, Universal Mach-O, PE x64, missing/malformed binaries, and architecture mismatch.
+
+**Automated evidence on PR #7 head `4959fdddb3f3a7205a800e80562de76b282aa2ec`:**
+
+| Workflow | Result |
+|---|---|
+| AVAPARDAZ Quality & Release Gates | SUCCESS |
+| Architecture Governance, Reliability & Release Quality Gate | SUCCESS |
+| TypeScript compilation / lint | PASS |
+| Vitest | 26 files / 109 tests PASS |
+| Native binary verifier suite | 4 tests PASS |
+| Unit / reliability / fault-injection | PASS |
+| End-to-end quality gates | PASS |
+| Production build and release manifest verification | PASS |
+| Audition CEP manifest / CSP hygiene | PASS |
+
+The first two CI attempts exposed a nested-template syntax error and then strict TypeScript fixture typing errors; both were corrected before the successful head above. These results validate the code paths and synthetic fixtures on GitHub's Linux runner. They do **not** prove that supplied native runtime payload bytes are valid for any of the three destination operating systems, nor do they replace execution on physical macOS/Windows hosts with Audition 25.x.
+
+Remaining gates are unchanged: real target runtime acquisition/build, artifact provenance/signing, physical-host installation and update/rollback tests, CEP host registration, and Companion startup/lifecycle validation.
