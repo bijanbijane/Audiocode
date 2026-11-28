@@ -233,26 +233,26 @@ The safe extractor continues to reject symlinks by default. For these pinned nat
 
 ### 8.8. Latest CI checkpoint — PASS
 
-Latest fully validated PR #7 CI head for the full native + package matrix: `337844e6b0b00228dbd1d6781e3c331c4344c6ee`.
+Latest fully validated PR #7 CI head for the full native + package matrix: `b60afa999b7a0892c81742ac8710b893cdbac4ba`.
 
 Both applicable GitHub Actions workflows completed with `SUCCESS`:
 
 - **AVAPARDAZ Quality & Release Gates:** Levels 1–5 all PASS, including production web build, ORT/ASR/DSP, IPC/security, CEP packaging and supply-chain gates.
-- **Architecture Governance, Reliability & Release Quality Gate:** Vitest 30 files / 130 tests PASS; Node unit/reliability/fault-injection suite 32 tests PASS; TypeScript compilation, zero-circular dependency check (730 files), SBOM generation, license audit, production build, E2E quality gates and release-manifest verification PASS.
+- **Architecture Governance, Reliability & Release Quality Gate:** Vitest 31 files / 134 tests PASS (including CPU preflight regression cases); Node unit/reliability/fault-injection suite 32 tests PASS; TypeScript compilation, zero-circular dependency check (730 files), SBOM generation, license audit, production build, E2E quality gates and release-manifest verification PASS.
 - The same Architecture workflow's native binary parser matrix passed on Ubuntu, macOS 15 arm64, macOS 15 Intel, and Windows x64.
-- Its three real native runtime provisioning jobs passed on macOS 15 arm64, macOS 15 Intel, and Windows Server 2025 x64, including pinned archive SHA-256/byte verification, binary/library architecture validation and actual CLI `--help` smoke tests.
-- **Cross-target Internal Installer Package Build:** PASS. Built unsigned Installer and Update tarballs for all three targets (six packages total); verified every tarball byte length/SHA-256 and the embedded target/model provenance. All three targets printed `installer/update hashes and model/runtime provenance PASS`; the manifest-only CI artifact was uploaded (artifact ID `15262947641`).
+- Its three real native runtime provisioning jobs passed on macOS 15 arm64, macOS 15 Intel, and Windows Server 2025 x64, including pinned archive SHA-256/byte verification, binary/library architecture validation, actual CLI `--help` smoke tests, and CPU feature probes (`NEON`, `AVX2`, `AVX2`) on the corresponding hosts.
+- **Cross-target Internal Installer Package Build:** PASS. Built unsigned Installer and Update tarballs for all three targets (six packages total); verified every tarball byte length/SHA-256 and the embedded target/model provenance. All three targets printed `hashes, embedded manifest, installer syntax and provenance PASS`; generated `install.mjs`, `uninstall.mjs`, and CPU helper passed `node --check`, macOS shell wrappers passed `bash -n`, and the manifest-only CI artifact was uploaded (artifact ID `15263232073`).
 
-The earlier stale source assertion and malformed symlink test fixture were corrected; the latest full run is green. This does **not** mean the full release installer or physical Adobe hosts are accepted.
+The earlier stale source assertion and malformed symlink test fixture were corrected; the full native/runtime/package and installer syntax verification run is green. This does **not** mean the full release installer or physical Adobe hosts are accepted.
 
 GitHub-hosted macOS 14 runners are retired; current CI validates macOS 15 arm64 and Intel. Windows hosted smoke is Windows Server 2025, not Windows 11. Physical-host and Audition acceptance remain separate gates.
 
 
 ### 8.9. CPU floor and runtime manifest integrity
 
-The shared target registry declares `requiredCpuFeatures`: `NEON` for `darwin-arm64`, and `AVX2` for the two x86_64 Audition 25.x targets. The package manifest and native runtime manifest carry this requirement. This is a declared host requirement, **not** a runtime CPUID probe. Adobe's published Audition 25.x requirements specify AVX2 for Windows and Intel macOS; the official requirement is linked in `HARDWARE-COMPATIBILITY-MATRIX.md`.
+The shared target registry declares `requiredCpuFeatures`: `NEON` for `darwin-arm64`, and `AVX2` for the two x86_64 Audition 25.x targets. These are now actively probed: Intel macOS uses `sysctl -n hw.optional.avx2_0`; Windows x64 uses `IsProcessorFeaturePresent(PF_AVX2_INSTRUCTIONS_AVAILABLE=40)` through PowerShell; Apple Silicon accepts NEON as an AArch64 baseline only for `darwin-arm64`. Unsupported feature/target pairs fail closed. The generated installer performs this check before creating or copying installation files.
 
-The package builder now refuses a target runtime without `runtime-manifest.json`. It checks target ID, pinned archive name/bytes/SHA-256, executable hash, ONNX library hash, and the complete shared-library set and hashes. It embeds the verified manifest into the package payload and records its hash in the package manifest. This is local build provenance/integrity validation; release signing and trust-root verification are still mandatory and not implemented.
+The provisioner runs the CPU probe on the actual target host and records `cpuFeatureProbe.required/checked` in `runtime-manifest.json`. The package builder requires those values to match the target's required features, checks target ID, pinned archive name/bytes/SHA-256, executable hash, ONNX library hash, and the complete shared-library set and hashes. It embeds the verified manifest and CPU probe evidence into the package payload and package manifest. This is local build provenance/integrity validation; release signing and trust-root verification are still mandatory and not implemented.
 
 
 ### 8.10. Koochik model license provenance
@@ -265,12 +265,12 @@ The new provisioner pins this exact revision and verifies:
 - LICENSE contains the Apache License 2.0 text,
 - model manifest records repository, immutable revision, license and hashes.
 
-The package builder now refuses an unmanifested model directory and embeds README, LICENSE and `model-manifest.json` in the release payload. CI has a cached Koochik provisioning/license-validation job; its first run is pending after the workflow update. The CI provenance/license job passed on run `46143509617`. Details: `MODEL-LICENSE-AUDIT-2026-11-28.md`.
+The package builder now refuses an unmanifested model directory and embeds README, LICENSE and `model-manifest.json` in the release payload. CI has a cached Koochik provisioning/license-validation job; its first run is pending after the workflow update. The CI provenance/license job passed on run `46144552901`. Details: `MODEL-LICENSE-AUDIT-2026-11-28.md`.
 
 
 ### 8.11. Cross-target package build and manifest integrity — PASS
 
-On PR #7 head `337844e6b0b00228dbd1d6781e3c331c4344c6ee`, the `Cross-target Internal Installer Package Build` job completed successfully after the three verified runtime artifacts and pinned Koochik model were downloaded.
+On PR #7 head `b60afa999b7a0892c81742ac8710b893cdbac4ba`, the `Cross-target Internal Installer Package Build` job completed successfully after the three verified runtime artifacts and pinned Koochik model were downloaded.
 
 | Target | Installer tarball | Update tarball | Integrity / provenance |
 |---|---:|---:|---|
@@ -278,8 +278,8 @@ On PR #7 head `337844e6b0b00228dbd1d6781e3c331c4344c6ee`, the `Cross-target Inte
 | darwin-x64 | 446.04 MiB | 446.04 MiB | PASS |
 | win32-x64 | 442.00 MiB | 442.00 MiB | PASS |
 
-For all six packages, CI recomputed the tarball byte length and SHA-256, checked target ID, immutable Koochik revision and Apache-2.0 license metadata, and emitted a PASS line for each target. The `avapardaz-target-release-manifests` artifact was uploaded (artifact ID `15262947641`). The unsigned tarballs remained in the ephemeral runner workspace and were not published.
+For all six packages, CI recomputed the tarball byte length and SHA-256, checked target ID, immutable Koochik revision and Apache-2.0 license metadata, and emitted a PASS line for each target. The `avapardaz-target-release-manifests` artifact was uploaded (artifact ID `15263232073`). The unsigned tarballs remained in the ephemeral runner workspace and were not published.
 
 The corrected schema assertion reads `packageManifest.components.primaryPersianAsrModel`; the earlier root-level assertion was incorrect. This closes the hosted CI package-build and integrity gate, not signing, installation, update activation, or physical-host acceptance.
 
-Latest feature head after removing a duplicate runtime matrix job: `54a1da21778dc0dd852840c2b5662104a82c5664`. Its AVAPARDAZ Levels 1–5 workflow passed. The architecture workflow rerun is separately validating the same native/package matrix; a transient Artifact Service timeout occurred during macOS arm64 artifact upload, while provisioning itself passed, and that job was retried.
+Latest fully validated feature head: `b60afa999b7a0892c81742ac8710b893cdbac4ba`. Architecture Governance run `46144552901` completed SUCCESS; all three CPU probes and all six unsigned Installer/Update package integrity checks passed.
