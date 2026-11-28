@@ -808,3 +808,18 @@ Before merge, each backend/platform change should be tied to a required shared-c
 2. Reconcile PR #6's backend/platform changes against the approved Audition-only internal scope before merge.
 3. Decide whether same-user local processes are inside the Companion threat model; if yes, design and test stronger per-install proof of possession.
 4. Obtain authorized macOS and Windows hosts with real Adobe Audition for live acceptance.
+
+
+## 18. Owner-approved internal platform matrix (2026-11-28)
+
+The owner explicitly approved the target matrix below; it is no longer a candidate list:
+
+| Target ID | Operating system | Architecture | Host |
+|---|---|---|---|
+| `darwin-arm64` | macOS 14 / 15 | Apple Silicon | Adobe Audition 25.x |
+| `darwin-x64` | macOS 14 / 15 | Intel | Adobe Audition 25.x |
+| `win32-x64` | Windows 11 | x64 | Adobe Audition 25.x |
+
+Approval resolves the R0 platform-selection decision only. It does not imply successful packaging, native runtime compatibility, live host support, or acceptance. Those require separate target-specific CI artifacts and physical-host validation.
+
+The target-specific release packaging implementation and its remaining evidence gaps are recorded in `R0-DISTRIBUTION-TRUST-AUDIT-2026-11-28.md` Section 8 and `AVP-P0-007-INSTALLATION-UPDATE-AND-DISTRIBUTION-ENGINEERING.md` Section 10.
