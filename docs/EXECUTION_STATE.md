@@ -13,7 +13,7 @@
 - Previously validated implementation HEAD: `bc8dfc2d1ae568528f39010c8c0a41cd35506606`.
 - Latest owner-boundary hardening code HEAD: `654f35df583d3d7eeb127ecc7aefa15b33c8755d` (Level 1 and AVAPARDAZ Levels 1–5 CI passed; architecture and separated-container workflows still running at update time).
 - PR: [#6 — R0 baseline and Audition CEP ASR boundary](https://github.com/bijanbijane/Audiocode/pull/6) — OPEN, DRAFT, not merged.
-- Latest PR metadata observed before this documentation update: 38 changed files; 146 commits; 2,434 additions; 209 deletions.
+- Latest PR metadata observed: 38 changed files; 149 commits; 2,437 additions; 209 deletions.
 - All implementation changes in this execution are on the PR branch through GitHub. No local Mac checkout is used.
 
 ## Roadmap status
