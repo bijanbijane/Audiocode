@@ -30,6 +30,9 @@ import {
   evaluateComponentCompatibility,
   evaluateFirstRunReadiness,
   ComponentUpdateOrchestrator,
+  canonicalizeUpdateManifest,
+  type UpdateManifest,
+  type UpdateManifestPayload,
   buildSafeUninstallPlan,
   validateDeploymentConfiguration,
 } from './ProductDeliveryAndUpdateEngine';
@@ -243,25 +246,36 @@ test('AVP-P0-007: independent component compatibility, first-run readiness, safe
   assert.ok(unsafeProd.errors.length >= 4);
 });
 
-test('AVP-P0-007: 17-state ComponentUpdateOrchestrator performs atomic update, rejects bad sig/hash/disk, and rolls back failed activation', async () => {
+test('AVP-P0-007: update orchestration requires real Ed25519 signatures, binds metadata and digest, and rolls back failed activation', async () => {
+  const keyPair = crypto.generateKeyPairSync('ed25519');
+  const publicKeyDer = keyPair.publicKey.export({ type: 'spki', format: 'der' }) as Buffer;
+  const trustedSigningKeys = {
+    'avp-test-release-key': new Uint8Array(publicKeyDer.subarray(-32)),
+  };
   const orch = new ComponentUpdateOrchestrator({
     BROWSER_APP: '1.0.0',
     NATIVE_COMPANION: '1.0.0',
     AUDITION_CEP_EXTENSION: '1.0.0',
     MODEL_ARTIFACT: '1.0.0',
-  });
+  }, trustedSigningKeys);
   const goodHash = 'a'.repeat(64);
+  const signManifest = (payload: UpdateManifestPayload): UpdateManifest => ({
+    ...payload,
+    signature: {
+      algorithm: 'Ed25519',
+      keyId: 'avp-test-release-key',
+      signatureBase64: crypto.sign(null, Buffer.from(canonicalizeUpdateManifest(payload, 'avp-test-release-key')), keyPair.privateKey).toString('base64'),
+    },
+  });
 
-  // 1. Successful verified update
+  // 1. A real Ed25519 signature from the pinned test key permits the update.
   const okRes = await orch.executeSafeUpdate({
-    manifest: {
+    manifest: signManifest({
       component: 'NATIVE_COMPANION',
       version: '1.1.0',
       sha256Hex: goodHash,
       sizeBytes: 10_000_000,
-      signatureStatus: 'SIGNATURE_VERIFIED',
-    },
-    requireCryptographicSignature: true,
+    }),
     availableDiskBytes: 50_000_000,
     downloadAndVerifySha256: async () => ({ ok: true, actualSha256Hex: goodHash }),
     stageArtifact: async () => ({ ok: true, stagingDir: '/tmp/stage-1.1.0' }),
@@ -274,17 +288,248 @@ test('AVP-P0-007: 17-state ComponentUpdateOrchestrator performs atomic update, r
   assert.equal(okRes.slot.activeVersion, '1.1.0');
   assert.equal(okRes.slot.previousKnownGoodVersion, '1.0.0');
 
-  // 2. Post-activation health failure triggers automatic rollback to 1.1.0
+  // 2. Older releases and replay of the active version are rejected before download.
+  for (const replayVersion of ['1.0.9', '1.1.0']) {
+    let replayDownloaded = false;
+    const replayRes = await orch.executeSafeUpdate({
+      manifest: signManifest({
+        component: 'NATIVE_COMPANION',
+        version: replayVersion,
+        sha256Hex: goodHash,
+        sizeBytes: 10_000_000,
+      }),
+      availableDiskBytes: 50_000_000,
+      downloadAndVerifySha256: async () => {
+        replayDownloaded = true;
+        return { ok: true, actualSha256Hex: goodHash };
+      },
+      stageArtifact: async () => ({ ok: true, stagingDir: '/tmp/replay-must-not-stage' }),
+      activateArtifact: async () => ({ ok: true }),
+      verifyPostActivationHealth: async () => ({ ok: true }),
+      restorePreviousVersion: async () => true,
+    });
+    assert.equal(replayRes.ok, false);
+    assert.equal(replayRes.slot.lastError, 'UPDATE_VERSION_NOT_NEWER');
+    assert.equal(replayDownloaded, false);
+  }
+
+  // A pinned render job defers activation; after release, the staged artifact resumes without re-download.
+  const deferredOrch = new ComponentUpdateOrchestrator({
+    BROWSER_APP: '1.0.0',
+    NATIVE_COMPANION: '1.0.0',
+    AUDITION_CEP_EXTENSION: '1.0.0',
+    MODEL_ARTIFACT: '1.0.0',
+  }, trustedSigningKeys);
+  deferredOrch.pinActiveJob('render-1');
+  const deferredRes = await deferredOrch.executeSafeUpdate({
+    manifest: signManifest({
+      component: 'NATIVE_COMPANION',
+      version: '1.1.0',
+      sha256Hex: goodHash,
+      sizeBytes: 10_000_000,
+    }),
+    availableDiskBytes: 50_000_000,
+    downloadAndVerifySha256: async () => ({ ok: true, actualSha256Hex: goodHash }),
+    stageArtifact: async () => ({ ok: true, stagingDir: '/tmp/deferred-stage-1.1.0' }),
+    activateArtifact: async () => ({ ok: true }),
+    verifyPostActivationHealth: async () => ({ ok: true }),
+    restorePreviousVersion: async () => true,
+  });
+  assert.equal(deferredRes.ok, false);
+  assert.equal(deferredRes.slot.state, 'UPDATE_READY');
+  assert.equal(deferredRes.slot.activeVersion, '1.0.0');
+  assert.equal(deferredRes.slot.previousKnownGoodVersion, '1.0.0');
+
+  let activatedBeforePinRelease = false;
+  const stillPinnedRes = await deferredOrch.resumeStagedUpdate({
+    component: 'NATIVE_COMPANION',
+    activateArtifact: async () => {
+      activatedBeforePinRelease = true;
+      return { ok: true };
+    },
+    verifyPostActivationHealth: async () => ({ ok: true }),
+    restorePreviousVersion: async () => true,
+  });
+  assert.equal(stillPinnedRes.ok, false);
+  assert.equal(activatedBeforePinRelease, false);
+
+  deferredOrch.releasePinnedJob('render-1');
+  let resumedStagingPath: string | null = null;
+  const resumedRes = await deferredOrch.resumeStagedUpdate({
+    component: 'NATIVE_COMPANION',
+    activateArtifact: async (stagingDir) => {
+      resumedStagingPath = stagingDir;
+      return { ok: true };
+    },
+    verifyPostActivationHealth: async () => ({ ok: true }),
+    restorePreviousVersion: async () => true,
+  });
+  assert.equal(resumedRes.ok, true);
+  assert.equal(resumedStagingPath, '/tmp/deferred-stage-1.1.0');
+  assert.equal(resumedRes.slot.activeVersion, '1.1.0');
+  assert.equal(resumedRes.slot.state, 'UPDATE_VERIFIED');
+
+  // Deferred activation callbacks may throw; the orchestrator must still enter rollback.
+  const throwingActivationOrch = new ComponentUpdateOrchestrator({
+    BROWSER_APP: '1.0.0',
+    NATIVE_COMPANION: '1.0.0',
+    AUDITION_CEP_EXTENSION: '1.0.0',
+    MODEL_ARTIFACT: '1.0.0',
+  }, trustedSigningKeys);
+  throwingActivationOrch.pinActiveJob('render-throw-activation');
+  await throwingActivationOrch.executeSafeUpdate({
+    manifest: signManifest({ component: 'NATIVE_COMPANION', version: '1.1.0', sha256Hex: goodHash, sizeBytes: 10_000_000 }),
+    availableDiskBytes: 50_000_000,
+    downloadAndVerifySha256: async () => ({ ok: true, actualSha256Hex: goodHash }),
+    stageArtifact: async () => ({ ok: true, stagingDir: '/tmp/deferred-throw-activation' }),
+    activateArtifact: async () => ({ ok: true }),
+    verifyPostActivationHealth: async () => ({ ok: true }),
+    restorePreviousVersion: async () => true,
+  });
+  throwingActivationOrch.releasePinnedJob('render-throw-activation');
+  const thrownActivationRes = await throwingActivationOrch.resumeStagedUpdate({
+    component: 'NATIVE_COMPANION',
+    activateArtifact: async () => { throw new Error('simulated activation exception'); },
+    verifyPostActivationHealth: async () => ({ ok: true }),
+    restorePreviousVersion: async () => true,
+  });
+  assert.equal(thrownActivationRes.rolledBack, true);
+  assert.equal(thrownActivationRes.slot.state, 'UPDATE_ROLLED_BACK');
+  assert.equal(thrownActivationRes.slot.activeVersion, '1.0.0');
+
+  // A thrown health probe also rolls back; a thrown restore callback fails closed.
+  const throwingHealthOrch = new ComponentUpdateOrchestrator({
+    BROWSER_APP: '1.0.0',
+    NATIVE_COMPANION: '1.0.0',
+    AUDITION_CEP_EXTENSION: '1.0.0',
+    MODEL_ARTIFACT: '1.0.0',
+  }, trustedSigningKeys);
+  throwingHealthOrch.pinActiveJob('render-throw-health');
+  await throwingHealthOrch.executeSafeUpdate({
+    manifest: signManifest({ component: 'NATIVE_COMPANION', version: '1.1.0', sha256Hex: goodHash, sizeBytes: 10_000_000 }),
+    availableDiskBytes: 50_000_000,
+    downloadAndVerifySha256: async () => ({ ok: true, actualSha256Hex: goodHash }),
+    stageArtifact: async () => ({ ok: true, stagingDir: '/tmp/deferred-throw-health' }),
+    activateArtifact: async () => ({ ok: true }),
+    verifyPostActivationHealth: async () => ({ ok: true }),
+    restorePreviousVersion: async () => true,
+  });
+  throwingHealthOrch.releasePinnedJob('render-throw-health');
+  const thrownHealthRes = await throwingHealthOrch.resumeStagedUpdate({
+    component: 'NATIVE_COMPANION',
+    activateArtifact: async () => ({ ok: true }),
+    verifyPostActivationHealth: async () => { throw new Error('simulated health exception'); },
+    restorePreviousVersion: async () => true,
+  });
+  assert.equal(thrownHealthRes.rolledBack, true);
+  assert.equal(thrownHealthRes.slot.state, 'UPDATE_ROLLED_BACK');
+  assert.equal(thrownHealthRes.slot.activeVersion, '1.0.0');
+
+  // Restart recovery must clear the staged UPDATE_READY reference and preserve the active version.
+  const interruptedReadyOrch = new ComponentUpdateOrchestrator({
+    BROWSER_APP: '1.0.0',
+    NATIVE_COMPANION: '1.0.0',
+    AUDITION_CEP_EXTENSION: '1.0.0',
+    MODEL_ARTIFACT: '1.0.0',
+  }, trustedSigningKeys);
+  interruptedReadyOrch.pinActiveJob('render-2');
+  await interruptedReadyOrch.executeSafeUpdate({
+    manifest: signManifest({
+      component: 'NATIVE_COMPANION',
+      version: '1.1.0',
+      sha256Hex: goodHash,
+      sizeBytes: 10_000_000,
+    }),
+    availableDiskBytes: 50_000_000,
+    downloadAndVerifySha256: async () => ({ ok: true, actualSha256Hex: goodHash }),
+    stageArtifact: async () => ({ ok: true, stagingDir: '/tmp/interrupted-ready-stage' }),
+    activateArtifact: async () => ({ ok: true }),
+    verifyPostActivationHealth: async () => ({ ok: true }),
+    restorePreviousVersion: async () => true,
+  });
+  let cleanedInterruptedPath: string | null = null;
+  const recoveredReady = await interruptedReadyOrch.recoverInterruptedUpdate(
+    'NATIVE_COMPANION',
+    async (context) => {
+      cleanedInterruptedPath = context.stagingDir;
+      assert.equal(context.component, 'NATIVE_COMPANION');
+      assert.equal(context.interruptedState, 'UPDATE_READY');
+      assert.equal(context.activeVersion, '1.0.0');
+      assert.equal(context.previousKnownGoodVersion, '1.0.0');
+      assert.equal(context.candidateVersion, '1.1.0');
+    },
+  );
+  assert.equal(cleanedInterruptedPath, '/tmp/interrupted-ready-stage');
+  assert.equal(recoveredReady.state, 'UPDATE_ROLLED_BACK');
+  assert.equal(recoveredReady.activeVersion, '1.0.0');
+  assert.equal(recoveredReady.candidateVersion, null);
+  assert.equal(recoveredReady.stagingDir, null);
+
+  // Failed physical cleanup must preserve the interrupted state and staging reference for retry.
+  const cleanupFailureOrch = new ComponentUpdateOrchestrator({
+    BROWSER_APP: '1.0.0',
+    NATIVE_COMPANION: '1.0.0',
+    AUDITION_CEP_EXTENSION: '1.0.0',
+    MODEL_ARTIFACT: '1.0.0',
+  }, trustedSigningKeys);
+  cleanupFailureOrch.pinActiveJob('render-cleanup-failure');
+  await cleanupFailureOrch.executeSafeUpdate({
+    manifest: signManifest({ component: 'NATIVE_COMPANION', version: '1.1.0', sha256Hex: goodHash, sizeBytes: 10_000_000 }),
+    availableDiskBytes: 50_000_000,
+    downloadAndVerifySha256: async () => ({ ok: true, actualSha256Hex: goodHash }),
+    stageArtifact: async () => ({ ok: true, stagingDir: '/tmp/interrupted-cleanup-failure' }),
+    activateArtifact: async () => ({ ok: true }),
+    verifyPostActivationHealth: async () => ({ ok: true }),
+    restorePreviousVersion: async () => true,
+  });
+  await assert.rejects(
+    cleanupFailureOrch.recoverInterruptedUpdate('NATIVE_COMPANION', async () => {
+      throw new Error('simulated filesystem cleanup failure');
+    }),
+    /INTERRUPTED_UPDATE_RECOVERY_FAILED/,
+  );
+  assert.equal(cleanupFailureOrch.getSlot('NATIVE_COMPANION').state, 'UPDATE_READY');
+  assert.equal(cleanupFailureOrch.getSlot('NATIVE_COMPANION').stagingDir, '/tmp/interrupted-cleanup-failure');
+  const recoveredAfterCleanupRetry = await cleanupFailureOrch.recoverInterruptedUpdate(
+    'NATIVE_COMPANION',
+    async () => undefined,
+  );
+  assert.equal(recoveredAfterCleanupRetry.state, 'UPDATE_ROLLED_BACK');
+  assert.equal(recoveredAfterCleanupRetry.stagingDir, null);
+
+  // SemVer prerelease ordering permits beta.2 after beta.1.
+  const prereleaseOrch = new ComponentUpdateOrchestrator({
+    BROWSER_APP: '1.0.0',
+    NATIVE_COMPANION: '2.0.0-beta.1',
+    AUDITION_CEP_EXTENSION: '1.0.0',
+    MODEL_ARTIFACT: '1.0.0',
+  }, trustedSigningKeys);
+  const prereleaseRes = await prereleaseOrch.executeSafeUpdate({
+    manifest: signManifest({
+      component: 'NATIVE_COMPANION',
+      version: '2.0.0-beta.2',
+      sha256Hex: goodHash,
+      sizeBytes: 10_000_000,
+    }),
+    availableDiskBytes: 50_000_000,
+    downloadAndVerifySha256: async () => ({ ok: true, actualSha256Hex: goodHash }),
+    stageArtifact: async () => ({ ok: true, stagingDir: '/tmp/stage-beta-2' }),
+    activateArtifact: async () => ({ ok: true }),
+    verifyPostActivationHealth: async () => ({ ok: true }),
+    restorePreviousVersion: async () => true,
+  });
+  assert.equal(prereleaseRes.ok, true);
+  assert.equal(prereleaseRes.slot.activeVersion, '2.0.0-beta.2');
+
+  // 3. Post-activation health failure triggers automatic rollback to 1.1.0.
   let restoredTo: string | null = null;
   const rollbackRes = await orch.executeSafeUpdate({
-    manifest: {
+    manifest: signManifest({
       component: 'NATIVE_COMPANION',
       version: '1.2.0',
       sha256Hex: goodHash,
       sizeBytes: 10_000_000,
-      signatureStatus: 'SIGNATURE_VERIFIED',
-    },
-    requireCryptographicSignature: true,
+    }),
     availableDiskBytes: 50_000_000,
     downloadAndVerifySha256: async () => ({ ok: true, actualSha256Hex: goodHash }),
     stageArtifact: async () => ({ ok: true, stagingDir: '/tmp/stage-1.2.0' }),
@@ -301,23 +546,78 @@ test('AVP-P0-007: 17-state ComponentUpdateOrchestrator performs atomic update, r
   assert.equal(rollbackRes.slot.activeVersion, '1.1.0');
   assert.equal(rollbackRes.slot.state, 'UPDATE_ROLLED_BACK');
 
-  // 3. Reject invalid cryptographic signature before download
-  let downloadedOnBadSig = false;
-  const badSigRes = await orch.executeSafeUpdate({
-    manifest: {
+  // 3. A tampered manifest digest is rejected before any download.
+  let downloadedOnTamperedManifest = false;
+  const validButAltered = signManifest({
+    component: 'NATIVE_COMPANION',
+    version: '1.3.0',
+    sha256Hex: goodHash,
+    sizeBytes: 10_000_000,
+  });
+  const tamperedRes = await orch.executeSafeUpdate({
+    manifest: { ...validButAltered, sha256Hex: 'b'.repeat(64) },
+    availableDiskBytes: 50_000_000,
+    downloadAndVerifySha256: async () => {
+      downloadedOnTamperedManifest = true;
+      return { ok: true, actualSha256Hex: 'b'.repeat(64) };
+    },
+    stageArtifact: async () => ({ ok: true, stagingDir: '/tmp/stage-1.3.0' }),
+    activateArtifact: async () => ({ ok: true }),
+    verifyPostActivationHealth: async () => ({ ok: true }),
+    restorePreviousVersion: async () => true,
+  });
+  assert.equal(tamperedRes.ok, false);
+  assert.equal(downloadedOnTamperedManifest, false);
+  assert.equal(tamperedRes.slot.lastError, 'UPDATE_AUTHENTICITY_FAILED');
+
+  // 4. A valid signature is still rejected if its key is not in the pinned trust store.
+  const noTrustRoot = new ComponentUpdateOrchestrator({
+    BROWSER_APP: '1.0.0',
+    NATIVE_COMPANION: '1.0.0',
+    AUDITION_CEP_EXTENSION: '1.0.0',
+    MODEL_ARTIFACT: '1.0.0',
+  });
+  let downloadedWithoutTrustRoot = false;
+  const noTrustRes = await noTrustRoot.executeSafeUpdate({
+    manifest: signManifest({
       component: 'NATIVE_COMPANION',
-      version: '1.3.0',
+      version: '1.1.0',
       sha256Hex: goodHash,
       sizeBytes: 10_000_000,
-      signatureStatus: 'SIGNATURE_INVALID',
+    }),
+    availableDiskBytes: 50_000_000,
+    downloadAndVerifySha256: async () => {
+      downloadedWithoutTrustRoot = true;
+      return { ok: true, actualSha256Hex: goodHash };
     },
-    requireCryptographicSignature: true,
+    stageArtifact: async () => ({ ok: true, stagingDir: '/tmp/stage-no-root' }),
+    activateArtifact: async () => ({ ok: true }),
+    verifyPostActivationHealth: async () => ({ ok: true }),
+    restorePreviousVersion: async () => true,
+  });
+  assert.equal(noTrustRes.ok, false);
+  assert.equal(downloadedWithoutTrustRoot, false);
+  assert.equal(noTrustRes.slot.lastError, 'UPDATE_AUTHENTICITY_FAILED');
+
+  // 5. A cryptographically malformed signature is rejected before download.
+  let downloadedOnBadSig = false;
+  const badSigManifest = signManifest({
+    component: 'NATIVE_COMPANION',
+    version: '1.4.0',
+    sha256Hex: goodHash,
+    sizeBytes: 10_000_000,
+  });
+  const badSigRes = await orch.executeSafeUpdate({
+    manifest: {
+      ...badSigManifest,
+      signature: { ...badSigManifest.signature, signatureBase64: 'A'.repeat(88) },
+    },
     availableDiskBytes: 50_000_000,
     downloadAndVerifySha256: async () => {
       downloadedOnBadSig = true;
       return { ok: true, actualSha256Hex: goodHash };
     },
-    stageArtifact: async () => ({ ok: true, stagingDir: '/tmp/stage-1.3.0' }),
+    stageArtifact: async () => ({ ok: true, stagingDir: '/tmp/stage-bad-signature' }),
     activateArtifact: async () => ({ ok: true }),
     verifyPostActivationHealth: async () => ({ ok: true }),
     restorePreviousVersion: async () => true,

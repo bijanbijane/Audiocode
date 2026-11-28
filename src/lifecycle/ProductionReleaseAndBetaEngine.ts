@@ -71,8 +71,8 @@ export const AVAPARDAZ_BETA_RELEASE_IDENTITY = Object.freeze({
   modelVersion: '1.0.0',
   ipcProtocolVersion: '1.0.0',
   extensionBundleId: 'ir.avapardaz.audition.cep',
-  primaryTargetPlatform: 'darwin-arm64 (macOS Apple Silicon M2 / 8 GB Unified Memory)',
-  supportedPlatforms: ['darwin-arm64', 'linux-x64'] as const,
+  primaryTargetPlatform: 'darwin-arm64 (macOS 14/15 Apple Silicon)',
+  supportedPlatforms: ['darwin-arm64', 'darwin-x64', 'win32-x64'] as const,
   buildDateIso: new Date().toISOString(),
 });
 
@@ -211,6 +211,54 @@ export function computeDirectorySizeSync(dirPath: string): number {
     }
   }
   return total;
+}
+
+function syncPathToDiskSync(targetPath: string, directory = false): void {
+  let fd: number | undefined;
+  try {
+    fd = fs.openSync(targetPath, 'r');
+    fs.fsyncSync(fd);
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    // Windows does not consistently expose directory handles through Node's
+    // fs.open; file contents are still fsynced there, but directory-entry
+    // durability must be validated on supported host/filesystem combinations.
+    if (!(directory && process.platform === 'win32' && ['EACCES', 'EPERM', 'EINVAL', 'EISDIR', 'ENOTSUP'].includes(code ?? ''))) {
+      throw error;
+    }
+  } finally {
+    if (fd !== undefined) fs.closeSync(fd);
+  }
+}
+
+function syncDirectoryTreeToDiskSync(rootDir: string): void {
+  const entries = fs.readdirSync(rootDir, { withFileTypes: true });
+  for (const entry of entries) {
+    const entryPath = path.join(rootDir, entry.name);
+    const stat = fs.lstatSync(entryPath);
+    if (stat.isSymbolicLink()) continue;
+    if (stat.isDirectory()) {
+      syncDirectoryTreeToDiskSync(entryPath);
+    } else if (stat.isFile()) {
+      syncPathToDiskSync(entryPath);
+    }
+  }
+  syncPathToDiskSync(rootDir, true);
+}
+
+function writeFileAtomicallyAndSyncSync(filePath: string, content: string, mode = 0o600): void {
+  const directory = path.dirname(filePath);
+  fs.mkdirSync(directory, { recursive: true, mode: 0o700 });
+  const temporaryPath = filePath + '.tmp-' + process.pid + '-' + crypto.randomBytes(8).toString('hex');
+  try {
+    fs.writeFileSync(temporaryPath, content, { encoding: 'utf8', flag: 'wx', mode });
+    syncPathToDiskSync(temporaryPath);
+    fs.renameSync(temporaryPath, filePath);
+    syncPathToDiskSync(directory, true);
+  } catch (error) {
+    fs.rmSync(temporaryPath, { force: true });
+    throw error;
+  }
 }
 
 function copyDirectoryRecursiveSync(srcDir: string, destDir: string): void {
@@ -1136,7 +1184,191 @@ export interface UpdateExecutionReport {
  * Never uses a cloud update server; operates deterministically on local signed/checksummed update packages.
  */
 export class AvapardazPackageUpdateManager {
-  constructor(private readonly layout: InstalledDirectoryLayout) {}
+  constructor(private readonly layout: InstalledDirectoryLayout) {
+    this.recoverInterruptedUpdates();
+  }
+
+  /**
+   * Cross-process, installation-wide mutex. A directory creation is the atomic
+   * acquisition primitive on supported local filesystems. Unknown/remote owners
+   * fail closed; only a provably dead same-host PID may be reclaimed.
+   */
+  private withOperationLock<T>(operation: () => T): T {
+    fs.mkdirSync(this.layout.backupsDir, { recursive: true, mode: 0o700 });
+    const lockDir = path.join(this.layout.backupsDir, '.update-operation-lock');
+    const recoveryLockDir = lockDir + '.recovery';
+    const acquire = () => fs.mkdirSync(lockDir, { mode: 0o700 });
+    try {
+      acquire();
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+      try {
+        fs.mkdirSync(recoveryLockDir, { mode: 0o700 });
+      } catch (recoveryError) {
+        if ((recoveryError as NodeJS.ErrnoException).code === 'EEXIST') {
+          throw new Error('UPDATE_OPERATION_LOCKED');
+        }
+        throw recoveryError;
+      }
+      try {
+        const ownerPath = path.join(lockDir, 'owner.json');
+        let stale = false;
+        try {
+          const owner = JSON.parse(fs.readFileSync(ownerPath, 'utf8')) as {
+            pid?: number; hostname?: string; acquiredAt?: number;
+          };
+          if (owner.hostname === os.hostname() && Number.isSafeInteger(owner.pid) && (owner.pid as number) > 0) {
+            try {
+              process.kill(owner.pid as number, 0);
+            } catch (probeError) {
+              stale = (probeError as NodeJS.ErrnoException).code === 'ESRCH';
+            }
+          }
+        } catch (ownerError) {
+          if ((ownerError as NodeJS.ErrnoException).code === 'ENOENT') {
+            try {
+              stale = Date.now() - fs.statSync(lockDir).mtimeMs > 30_000;
+            } catch {
+              stale = false;
+            }
+          }
+        }
+        if (!stale) throw new Error('UPDATE_OPERATION_LOCKED');
+        const quarantine = lockDir + '.stale-' + process.pid + '-' + Date.now() + '-' + crypto.randomBytes(6).toString('hex');
+        try {
+          fs.renameSync(lockDir, quarantine);
+        } catch (renameError) {
+          if ((renameError as NodeJS.ErrnoException).code === 'ENOENT') throw new Error('UPDATE_OPERATION_LOCKED');
+          throw renameError;
+        }
+        fs.rmSync(quarantine, { recursive: true, force: true });
+        acquire();
+      } finally {
+        fs.rmSync(recoveryLockDir, { recursive: true, force: true });
+      }
+    }
+
+    const token = crypto.randomBytes(16).toString('hex');
+    const ownerPath = path.join(lockDir, 'owner.json');
+    try {
+      fs.writeFileSync(ownerPath, JSON.stringify({
+        pid: process.pid,
+        hostname: os.hostname(),
+        acquiredAt: Date.now(),
+        token,
+      }), { encoding: 'utf8', flag: 'wx', mode: 0o600 });
+      return operation();
+    } finally {
+      try {
+        const owner = JSON.parse(fs.readFileSync(ownerPath, 'utf8')) as { token?: string };
+        if (owner.token === token) fs.rmSync(lockDir, { recursive: true, force: true });
+      } catch (cleanupError) {
+        // If owner creation itself failed, this process still owns the empty directory.
+        if ((cleanupError as NodeJS.ErrnoException).code === 'ENOENT') {
+          fs.rmSync(lockDir, { recursive: true, force: true });
+        }
+        // Preserve an unexpected/replaced lock rather than releasing another owner's lease.
+      }
+    }
+  }
+
+  private journalPath(backupDir: string): string {
+    return path.join(backupDir, 'activation-journal');
+  }
+
+  private markActivationPhase(backupDir: string, phase: 'PREPARED' | 'OLD_MOVED' | 'NEW_MOVED' | 'COMMITTED'): void {
+    const journalDir = this.journalPath(backupDir);
+    fs.mkdirSync(journalDir, { recursive: true, mode: 0o700 });
+    const marker = path.join(journalDir, phase);
+    if (!fs.existsSync(marker)) {
+      fs.mkdirSync(marker, { mode: 0o700 });
+      syncPathToDiskSync(journalDir, true);
+      syncPathToDiskSync(backupDir, true);
+    }
+  }
+
+  /** Restore any update whose activation did not reach its committed marker. */
+  public recoverInterruptedUpdates(): void {
+    this.withOperationLock(() => this.recoverInterruptedUpdatesUnlocked());
+  }
+
+  private recoverInterruptedUpdatesUnlocked(): void {
+    if (!fs.existsSync(this.layout.backupsDir)) return;
+    for (const entry of fs.readdirSync(this.layout.backupsDir, { withFileTypes: true })) {
+      if (!entry.isDirectory() || !entry.name.startsWith('bkp_')) continue;
+      const backupDir = this.resolveBackupDir(entry.name);
+      const journalDir = this.journalPath(backupDir);
+      if (!fs.existsSync(journalDir)) continue;
+      const component = this.componentFromBackupId(entry.name);
+      const targetDir = this.resolveComponentTargetDir(component);
+      const componentBackupDir = path.join(backupDir, 'component');
+      const token = entry.name.replace(/[^a-zA-Z0-9_-]/g, '_');
+      const sibling = (suffix: string) => path.join(path.dirname(targetDir), '.' + path.basename(targetDir) + '.' + token + suffix);
+      if (fs.existsSync(path.join(journalDir, 'COMMITTED'))) {
+        fs.rmSync(sibling('.stage'), { recursive: true, force: true });
+        fs.rmSync(path.join(this.layout.tempDir, 'stage_' + entry.name), { recursive: true, force: true });
+        fs.rmSync(sibling('.displaced'), { recursive: true, force: true });
+        fs.rmSync(sibling('.restore'), { recursive: true, force: true });
+        fs.rmSync(journalDir, { recursive: true, force: true });
+        continue;
+      }
+      const stageDir = sibling('.stage');
+      const displacedDir = sibling('.displaced');
+      const restoreDir = sibling('.restore');
+      try {
+        if (fs.existsSync(componentBackupDir)) {
+          fs.rmSync(restoreDir, { recursive: true, force: true });
+          copyDirectoryRecursiveSync(componentBackupDir, restoreDir);
+          syncDirectoryTreeToDiskSync(restoreDir);
+          fs.rmSync(displacedDir, { recursive: true, force: true });
+          if (fs.existsSync(targetDir)) fs.renameSync(targetDir, displacedDir);
+          syncPathToDiskSync(path.dirname(targetDir), true);
+          fs.renameSync(restoreDir, targetDir);
+          syncPathToDiskSync(path.dirname(targetDir), true);
+        } else {
+          fs.rmSync(targetDir, { recursive: true, force: true });
+          syncPathToDiskSync(path.dirname(targetDir), true);
+        }
+        const manifestBackupPath = path.join(backupDir, 'manifest.backup.json');
+        if (fs.existsSync(manifestBackupPath)) {
+          const priorManifest = JSON.parse(fs.readFileSync(manifestBackupPath, 'utf8')) as InstallationConfigManifest;
+          this.writeManifest(priorManifest);
+        }
+        fs.rmSync(stageDir, { recursive: true, force: true });
+        fs.rmSync(path.join(this.layout.tempDir, 'stage_' + entry.name), { recursive: true, force: true });
+        fs.rmSync(displacedDir, { recursive: true, force: true });
+        fs.rmSync(restoreDir, { recursive: true, force: true });
+        syncPathToDiskSync(path.dirname(targetDir), true);
+        fs.rmSync(journalDir, { recursive: true, force: true });
+        syncPathToDiskSync(backupDir, true);
+      } catch (error) {
+        throw new Error('INTERRUPTED_UPDATE_RECOVERY_FAILED: ' + entry.name + ': ' + (error instanceof Error ? error.message : String(error)));
+      }
+    }
+  }
+
+  private componentFromBackupId(backupId: string): UpdatablePackageComponent {
+    const match = /^bkp_(application|cep_plugin|companion|native_runtime|asr_model)_[A-Za-z0-9.+_-]{1,180}$/.exec(backupId);
+    if (!match) throw new Error('INVALID_UPDATE_BACKUP_ID');
+    switch (match[1]) {
+      case 'application': return 'APPLICATION';
+      case 'cep_plugin': return 'CEP_PLUGIN';
+      case 'companion': return 'COMPANION';
+      case 'native_runtime': return 'NATIVE_RUNTIME';
+      case 'asr_model': return 'ASR_MODEL';
+      default: throw new Error('INVALID_UPDATE_BACKUP_COMPONENT');
+    }
+  }
+
+  private resolveBackupDir(backupId: string): string {
+    this.componentFromBackupId(backupId);
+    const root = path.resolve(this.layout.backupsDir);
+    const candidate = path.resolve(root, backupId);
+    if (path.dirname(candidate) !== root || path.basename(candidate) !== backupId) {
+      throw new Error('UPDATE_BACKUP_PATH_OUTSIDE_ROOT');
+    }
+    return candidate;
+  }
 
   private resolveComponentTargetDir(component: UpdatablePackageComponent): string {
     switch (component) {
@@ -1162,7 +1394,7 @@ export class AvapardazPackageUpdateManager {
 
   private writeManifest(manifest: InstallationConfigManifest): void {
     const p = path.join(this.layout.configDir, 'installation-manifest.json');
-    fs.writeFileSync(p, JSON.stringify(manifest, null, 2), { encoding: 'utf8', mode: 0o600 });
+    writeFileAtomicallyAndSyncSync(p, JSON.stringify(manifest, null, 2), 0o600);
   }
 
   private getComponentVersion(
@@ -1240,6 +1472,33 @@ export class AvapardazPackageUpdateManager {
   }
 
   public applyUpdate(params: {
+    readonly pkg: LocalUpdatePackageSpec;
+    readonly hasActiveProcessingSession?: boolean;
+    readonly simulatedAvailableDiskBytes?: number;
+    readonly customPostUpdateHealthCheck?: () => { readonly ok: boolean; readonly reason?: string };
+    readonly simulateInterruptDuringActivation?: boolean;
+  }): UpdateExecutionReport {
+    try {
+      return this.withOperationLock(() => this.applyUpdateUnlocked(params));
+    } catch (error) {
+      if (!(error instanceof Error) || error.message !== 'UPDATE_OPERATION_LOCKED') throw error;
+      const manifest = this.readManifest();
+      const previousVersion = this.getComponentVersion(manifest, params.pkg.component);
+      return {
+        ok: false,
+        rolledBack: false,
+        deferredDueToActiveSession: false,
+        component: params.pkg.component,
+        previousVersion,
+        activeVersion: previousVersion,
+        errorCode: 'UPDATE_OPERATION_LOCKED',
+        messageFa: 'عملیات نصب یا بازیابی دیگری در حال اجرا است؛ این درخواست بدون تغییر فایل‌ها متوقف شد.',
+        backupId: null,
+      };
+    }
+  }
+
+  private applyUpdateUnlocked(params: {
     readonly pkg: LocalUpdatePackageSpec;
     readonly hasActiveProcessingSession?: boolean;
     readonly simulatedAvailableDiskBytes?: number;
@@ -1356,7 +1615,7 @@ export class AvapardazPackageUpdateManager {
     // 6. Staging & Backup
     const backupId = `bkp_${pkg.component.toLowerCase()}_${prevVersion}_${Date.now()}`;
     const backupDir = path.join(this.layout.backupsDir, backupId);
-    const stageDir = path.join(this.layout.tempDir, `stage_${pkg.updateId}_${Date.now()}`);
+    const stageDir = path.join(this.layout.tempDir, 'stage_' + backupId);
 
     fs.mkdirSync(this.layout.backupsDir, { recursive: true, mode: 0o700 });
     fs.mkdirSync(this.layout.tempDir, { recursive: true, mode: 0o700 });
@@ -1378,21 +1637,38 @@ export class AvapardazPackageUpdateManager {
       const componentBackupTarget = path.join(backupDir, 'component');
       if (fs.existsSync(targetDir)) {
         copyDirectoryRecursiveSync(targetDir, componentBackupTarget);
+        syncDirectoryTreeToDiskSync(componentBackupTarget);
       }
-      fs.writeFileSync(
+      writeFileAtomicallyAndSyncSync(
         path.join(backupDir, 'manifest.backup.json'),
         JSON.stringify(manifest, null, 2),
-        'utf8',
+        0o600,
       );
+      syncPathToDiskSync(backupDir, true);
+      syncPathToDiskSync(this.layout.backupsDir, true);
 
-      // 7. Atomic Installation
+      // 7. Journaled activation: prepare beside target to keep rename operations on one volume.
+      const siblingToken = backupId.replace(/[^a-zA-Z0-9_-]/g, '_');
+      const activationStageDir = path.join(path.dirname(targetDir), '.' + path.basename(targetDir) + '.' + siblingToken + '.stage');
+      const displacedDir = path.join(path.dirname(targetDir), '.' + path.basename(targetDir) + '.' + siblingToken + '.displaced');
+      fs.mkdirSync(path.dirname(targetDir), { recursive: true, mode: 0o755 });
+      this.markActivationPhase(backupDir, 'PREPARED');
+      fs.rmSync(activationStageDir, { recursive: true, force: true });
+      copyDirectoryRecursiveSync(stageDir, activationStageDir);
+      syncDirectoryTreeToDiskSync(activationStageDir);
+      syncPathToDiskSync(path.dirname(activationStageDir), true);
       if (params.simulateInterruptDuringActivation) {
         throw new Error('SIMULATED_INTERRUPTION_DURING_UPDATE_ACTIVATION');
       }
-
-      fs.rmSync(targetDir, { recursive: true, force: true });
-      fs.mkdirSync(path.dirname(targetDir), { recursive: true, mode: 0o755 });
-      copyDirectoryRecursiveSync(stageDir, targetDir);
+      fs.rmSync(displacedDir, { recursive: true, force: true });
+      if (fs.existsSync(targetDir)) {
+        fs.renameSync(targetDir, displacedDir);
+        syncPathToDiskSync(path.dirname(targetDir), true);
+      }
+      this.markActivationPhase(backupDir, 'OLD_MOVED');
+      fs.renameSync(activationStageDir, targetDir);
+      syncPathToDiskSync(path.dirname(targetDir), true);
+      this.markActivationPhase(backupDir, 'NEW_MOVED');
 
       // Ensure executable bits on binaries after update
       if (pkg.component === 'NATIVE_RUNTIME') {
@@ -1425,6 +1701,11 @@ export class AvapardazPackageUpdateManager {
         );
       }
 
+      this.markActivationPhase(backupDir, 'COMMITTED');
+      fs.rmSync(displacedDir, { recursive: true, force: true });
+      syncPathToDiskSync(path.dirname(targetDir), true);
+      fs.rmSync(this.journalPath(backupDir), { recursive: true, force: true });
+      syncPathToDiskSync(backupDir, true);
       return {
         ok: true,
         rolledBack: false,
@@ -1438,7 +1719,7 @@ export class AvapardazPackageUpdateManager {
     } catch (err) {
       // Automatic Rollback to backupId
       const reason = err instanceof Error ? err.message : String(err);
-      const rb = this.rollbackToBackup(backupId);
+      const rb = this.rollbackToBackupUnlocked(backupId);
       return {
         ok: false,
         rolledBack: rb.ok,
@@ -1464,7 +1745,27 @@ export class AvapardazPackageUpdateManager {
     readonly restoredVersion?: string;
     readonly messageFa: string;
   } {
-    const backupDir = path.join(this.layout.backupsDir, backupId);
+    try {
+      return this.withOperationLock(() => this.rollbackToBackupUnlocked(backupId));
+    } catch (error) {
+      if (error instanceof Error && error.message === 'UPDATE_OPERATION_LOCKED') {
+        return { ok: false, messageFa: 'عملیات نصب یا بازیابی دیگری در حال اجرا است؛ بازگردانی انجام نشد.' };
+      }
+      throw error;
+    }
+  }
+
+  private rollbackToBackupUnlocked(backupId: string): {
+    readonly ok: boolean;
+    readonly restoredVersion?: string;
+    readonly messageFa: string;
+  } {
+    let backupDir: string;
+    try {
+      backupDir = this.resolveBackupDir(backupId);
+    } catch {
+      return { ok: false, messageFa: 'شناسه نسخه پشتیبان نامعتبر است.' };
+    }
     const manifestBackupPath = path.join(backupDir, 'manifest.backup.json');
     const componentBackupDir = path.join(backupDir, 'component');
 
@@ -1479,27 +1780,40 @@ export class AvapardazPackageUpdateManager {
       fs.readFileSync(manifestBackupPath, 'utf8'),
     ) as InstallationConfigManifest;
 
-    let component: UpdatablePackageComponent = 'APPLICATION';
-    if (backupId.includes('_cep_plugin_')) component = 'CEP_PLUGIN';
-    else if (backupId.includes('_companion_')) component = 'COMPANION';
-    else if (backupId.includes('_native_runtime_')) component = 'NATIVE_RUNTIME';
-    else if (backupId.includes('_asr_model_')) component = 'ASR_MODEL';
+    const component = this.componentFromBackupId(backupId);
 
     const targetDir = this.resolveComponentTargetDir(component);
+    const token = backupId.replace(/[^a-zA-Z0-9_-]/g, '_');
+    const siblingPrefix = '.' + path.basename(targetDir) + '.' + token;
+    const restoreDir = path.join(path.dirname(targetDir), siblingPrefix + '.restore');
+    const displacedDir = path.join(path.dirname(targetDir), siblingPrefix + '.displaced');
+    this.markActivationPhase(backupDir, 'PREPARED');
+    fs.mkdirSync(path.dirname(targetDir), { recursive: true, mode: 0o755 });
     if (fs.existsSync(componentBackupDir)) {
-      const tempRestore = path.join(this.layout.tempDir, `rb_stage_${Date.now()}`);
-      fs.mkdirSync(this.layout.tempDir, { recursive: true, mode: 0o700 });
-      try {
-        copyDirectoryRecursiveSync(componentBackupDir, tempRestore);
-        fs.rmSync(targetDir, { recursive: true, force: true });
-        fs.mkdirSync(path.dirname(targetDir), { recursive: true, mode: 0o755 });
-        copyDirectoryRecursiveSync(tempRestore, targetDir);
-      } finally {
-        fs.rmSync(tempRestore, { recursive: true, force: true });
+      fs.rmSync(restoreDir, { recursive: true, force: true });
+      copyDirectoryRecursiveSync(componentBackupDir, restoreDir);
+      syncDirectoryTreeToDiskSync(restoreDir);
+      fs.rmSync(displacedDir, { recursive: true, force: true });
+      if (fs.existsSync(targetDir)) {
+        fs.renameSync(targetDir, displacedDir);
+        syncPathToDiskSync(path.dirname(targetDir), true);
       }
+      this.markActivationPhase(backupDir, 'OLD_MOVED');
+      fs.renameSync(restoreDir, targetDir);
+      syncPathToDiskSync(path.dirname(targetDir), true);
+    } else {
+      fs.rmSync(targetDir, { recursive: true, force: true });
+      syncPathToDiskSync(path.dirname(targetDir), true);
+      this.markActivationPhase(backupDir, 'OLD_MOVED');
     }
-
+    this.markActivationPhase(backupDir, 'NEW_MOVED');
     this.writeManifest(backedUpManifest);
+    this.markActivationPhase(backupDir, 'COMMITTED');
+    fs.rmSync(displacedDir, { recursive: true, force: true });
+    fs.rmSync(restoreDir, { recursive: true, force: true });
+    syncPathToDiskSync(path.dirname(targetDir), true);
+    fs.rmSync(this.journalPath(backupDir), { recursive: true, force: true });
+    syncPathToDiskSync(backupDir, true);
     const restoredVersion = this.getComponentVersion(backedUpManifest, component);
     return {
       ok: true,

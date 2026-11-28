@@ -57,20 +57,28 @@
 
 | OS | CPU Arch | Extension Path | Companion Native Runtime | Current Status (`PHASE-00`) | Evidence & Constraints |
 | :--- | :---: | :--- | :--- | :---: | :--- |
-| **Windows 10/11** | `x86_64` | Adobe Audition CEP Panel + ExtendScript | `NATIVE_X86_64` (`SSE4.2` baseline + optional `AVX2`) | `Unverified` | Requires desktop Audition >= v24.0 + Windows x64 Companion build (`PHASE-03`/`PHASE-04`) |
-| **Windows 11** | `ARM64` | CEP Panel (only where target Audition release supports ARM64) | `NATIVE_ARM64` (`NEON`) | `Unverified` | Verify official Adobe Audition system requirements for ARM64 before shipping |
-| **macOS** | `ARM64` (Apple Silicon) | Adobe Audition CEP Panel + ExtendScript | `NATIVE_ARM64` (`NEON` + Accelerate/Metal optional) | `Unverified` | Primary macOS desktop target; requires macOS Audition host verification |
-| **macOS** | `x86_64` (Intel) | Adobe Audition CEP Panel (supported Audition versions only) | `NATIVE_X86_64` (`SSE4.2` / `AVX2`) | `Unverified` | Compatibility target; do not make AVX2 mandatory |
+| **Windows 11** | `x86_64` | Adobe Audition CEP Panel + ExtendScript | `NATIVE_X86_64` (AVX2 required for Audition 25.x) | `Unverified` (hosted runtime smoke PASS) | Target ID: `win32-x64`; Adobe requires Intel 6th Gen+ / AMD Ryzen 1000+ with AVX2; runtime smoke ran on Windows Server 2025 x64, not physical Windows 11 |
+| **Windows 11** | `ARM64` | N/A for internal V1 | N/A | `Out of Scope` | Windows ARM64 is not part of the owner-approved internal V1 matrix |
+| **macOS 14 / 15** | `ARM64` (Apple Silicon) | Adobe Audition CEP Panel + ExtendScript | `NATIVE_ARM64` (`NEON` + Accelerate/Metal optional) | `Unverified` (hosted runtime smoke PASS) | Target ID: `darwin-arm64`; runtime smoke passed on macOS 15 arm64; physical macOS 14/15 + Audition acceptance still required |
+| **macOS 14 / 15** | `x86_64` (Intel) | Adobe Audition CEP Panel + ExtendScript | `NATIVE_X86_64` (AVX2 required for Audition 25.x) | `Unverified` (hosted runtime smoke PASS) | Target ID: `darwin-x64`; Adobe requires Intel 6th Gen+ with AVX2; runtime smoke passed on macOS 15 Intel; physical host/Audition acceptance still required |
 | **Linux** | `x86_64` / `ARM64` | N/A | N/A (Linux Companion usable only for CI/dev CLI testing) | `Unsupported` (Adobe Audition does not exist on Linux) | Linux users run **Product B (Web App)** |
+
+
+
+**Internal V1 scope decision (ADR-027, 2026-11-28):** Windows 11 x64, macOS 14/15 Apple Silicon, and macOS 14/15 Intel, all with Adobe Audition 25.x. Official Sherpa-ONNX v2.0.2 payloads now pass SHA-256, architecture, and CLI smoke checks on hosted macOS 15 arm64/Intel and Windows Server 2025 x64 runners. `Unverified` remains the product acceptance status until physical-host and Audition tests pass.
+
+
+
+**Adobe host CPU floor:** Adobe Audition 25.x lists AVX2 as required on Windows and Intel macOS, with Intel 6th Gen+ / AMD Ryzen 1000+ processors. This requirement applies to the approved x86_64 Audition targets even if the generic native ASR baseline supports older CPUs. Source: https://helpx.adobe.com/audition/desktop/system-requirements/2025.html
 
 ### 3.2 Native CPU Feature Groups (`Companion Runtime`)
 
 | Feature Group | Requirement Policy | Status (`PHASE-00`) | Fallback Strategy |
 | :--- | :--- | :---: | :--- |
-| **`NATIVE_X86_64` (Baseline `SSE4.2`)** | Mandatory floor for x86_64 Windows/macOS builds | `Unverified` (no native binary built yet) | Reject unsupported pre-SSE4.2 CPUs clearly; never fall back to cloud |
-| **`AVX2_CAPABLE`** | Optional acceleration dispatch (NEVER mandatory across all builds) | `Unverified` | Runtime CPUID dispatch down to SSE4.2 baseline build |
+| **`NATIVE_X86_64` (generic baseline `SSE4.2`)** | Generic native ASR baseline; Adobe Audition 25.x V1 hosts additionally require AVX2 | Official Sherpa assets pinned and hosted-runtime smoke-tested; CPU ISA floor of the Sherpa build not independently audited | Fail closed on architecture mismatch; for Audition 25.x reject x86_64 hosts without AVX2; never fall back to cloud |
+| **`AVX2_CAPABLE`** | Mandatory host requirement for Adobe Audition 25.x on Windows x64 and Intel macOS; optional only for non-Audition generic workloads | Adobe requirement confirmed; Sherpa runtime instruction-set dispatch not independently audited | Reject unsupported Audition hosts clearly; no cloud fallback |
 | **`AVX512`** | Optional workstation optimization (`TIER-3`) | `Unverified` | Dispatch down to `AVX2` or `SSE4.2` |
-| **`NATIVE_ARM64` + `NEON_CAPABLE`** | Standard for Apple Silicon & Windows ARM64 | `Unverified` | Baseline ARMv8 NEON build |
+| **`NATIVE_ARM64` + `NEON_CAPABLE`** | Standard for Apple Silicon & Windows ARM64 | Official macOS arm64 Sherpa binary architecture and CLI smoke PASS; physical host/Audition remains unverified | Baseline ARMv8 NEON build |
 
 ---
 

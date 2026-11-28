@@ -193,7 +193,79 @@ describe('Phase 1C-H & 1C-I: Installer, First-Run Health, Clean-Env Execution, A
       );
       const pkgHashInfo = AvapardazPackageUpdateManager.computePackagePathSha256(updateSourceDir);
 
+      // A live owner must block a second manager; a provably dead same-host PID is reclaimable.
+      const operationLockDir = path.join(installed.layout.backupsDir, '.update-operation-lock');
+      fs.mkdirSync(operationLockDir, { recursive: true });
+      fs.writeFileSync(path.join(operationLockDir, 'owner.json'), JSON.stringify({
+        pid: process.pid,
+        hostname: os.hostname(),
+        acquiredAt: Date.now(),
+        token: 'live-test-owner',
+      }), 'utf8');
+      assert.throws(
+        () => new AvapardazPackageUpdateManager(installed.layout),
+        /UPDATE_OPERATION_LOCKED/,
+      );
+      fs.rmSync(operationLockDir, { recursive: true, force: true });
+
+      fs.mkdirSync(operationLockDir, { recursive: true });
+      fs.writeFileSync(path.join(operationLockDir, 'owner.json'), JSON.stringify({
+        pid: 2147483647,
+        hostname: os.hostname(),
+        acquiredAt: Date.now(),
+        token: 'dead-test-owner',
+      }), 'utf8');
       const updater = new AvapardazPackageUpdateManager(installed.layout);
+      assert.strictEqual(fs.existsSync(operationLockDir), false);
+
+      // Recover a process-crash simulation after the new directory became visible but before commit.
+      const recoveryBackupId = 'bkp_companion_1.0.0_recovery';
+      const recoveryBackupDir = path.join(installed.layout.backupsDir, recoveryBackupId);
+      const originalCompanionEntry = fs.readFileSync(
+        path.join(installed.layout.companionDir, 'avapardaz-companion.mjs'),
+        'utf8',
+      );
+      fs.mkdirSync(path.join(recoveryBackupDir, 'component'), { recursive: true });
+      fs.cpSync(installed.layout.companionDir, path.join(recoveryBackupDir, 'component'), { recursive: true });
+      fs.copyFileSync(
+        path.join(installed.layout.configDir, 'installation-manifest.json'),
+        path.join(recoveryBackupDir, 'manifest.backup.json'),
+      );
+      fs.mkdirSync(path.join(recoveryBackupDir, 'activation-journal', 'NEW_MOVED'), { recursive: true });
+      fs.writeFileSync(
+        path.join(installed.layout.companionDir, 'avapardaz-companion.mjs'),
+        'INTERRUPTED_NEW_VERSION',
+        'utf8',
+      );
+      new AvapardazPackageUpdateManager(installed.layout);
+      assert.strictEqual(
+        fs.readFileSync(path.join(installed.layout.companionDir, 'avapardaz-companion.mjs'), 'utf8'),
+        originalCompanionEntry,
+      );
+      assert.strictEqual(fs.existsSync(path.join(recoveryBackupDir, 'activation-journal')), false);
+
+      // Recover the earlier crash window where the old target was moved aside but the new target was not renamed in.
+      const oldMovedBackupId = 'bkp_companion_1.0.0_old_moved_recovery';
+      const oldMovedBackupDir = path.join(installed.layout.backupsDir, oldMovedBackupId);
+      fs.mkdirSync(path.join(oldMovedBackupDir, 'component'), { recursive: true });
+      fs.cpSync(installed.layout.companionDir, path.join(oldMovedBackupDir, 'component'), { recursive: true });
+      fs.copyFileSync(
+        path.join(installed.layout.configDir, 'installation-manifest.json'),
+        path.join(oldMovedBackupDir, 'manifest.backup.json'),
+      );
+      fs.mkdirSync(path.join(oldMovedBackupDir, 'activation-journal', 'OLD_MOVED'), { recursive: true });
+      const displacedCompanion = path.join(
+        path.dirname(installed.layout.companionDir),
+        '.' + path.basename(installed.layout.companionDir) + '.' + oldMovedBackupId + '.displaced',
+      );
+      fs.renameSync(installed.layout.companionDir, displacedCompanion);
+      new AvapardazPackageUpdateManager(installed.layout);
+      assert.strictEqual(fs.existsSync(installed.layout.companionDir), true);
+      assert.strictEqual(
+        fs.readFileSync(path.join(installed.layout.companionDir, 'avapardaz-companion.mjs'), 'utf8'),
+        originalCompanionEntry,
+      );
+      assert.strictEqual(fs.existsSync(displacedCompanion), false);
 
       // 1. Defer update when an active editing session is running
       const deferred = updater.applyUpdate({
@@ -228,6 +300,10 @@ describe('Phase 1C-H & 1C-I: Installer, First-Run Health, Clean-Env Execution, A
       assert.strictEqual(badHash.ok, false);
       assert.strictEqual(badHash.errorCode, 'UPDATE_HASH_MISMATCH');
 
+      // A competing manager cannot start a second update from inside the first update's health check.
+      const competingUpdater = new AvapardazPackageUpdateManager(installed.layout);
+      let concurrentAttempt: ReturnType<typeof competingUpdater.applyUpdate> | undefined;
+
       // 3. Simulate failed post-update health check -> must automatically rollback to 1.0.0
       const autoRolledBack = updater.applyUpdate({
         pkg: {
@@ -240,11 +316,28 @@ describe('Phase 1C-H & 1C-I: Installer, First-Run Health, Clean-Env Execution, A
           sizeBytes: pkgHashInfo.totalBytes,
           releaseNotesFa: 'شکست تست سلامت',
         },
-        customPostUpdateHealthCheck: () => ({ ok: false, reason: 'SIMULATED_HEALTH_FAILURE' }),
+        customPostUpdateHealthCheck: () => {
+          concurrentAttempt = competingUpdater.applyUpdate({
+            pkg: {
+              updateId: 'upd-concurrent',
+              component: 'COMPANION',
+              targetVersion: '1.2.0',
+              minCompatibleIpcProtocol: '1.0.0',
+              sourcePath: updateSourceDir,
+              expectedSha256: pkgHashInfo.sha256,
+              sizeBytes: pkgHashInfo.totalBytes,
+              releaseNotesFa: 'درخواست هم‌زمان آزمایشی',
+            },
+          });
+          return { ok: false, reason: 'SIMULATED_HEALTH_FAILURE' };
+        },
       });
       assert.strictEqual(autoRolledBack.ok, false);
       assert.strictEqual(autoRolledBack.rolledBack, true);
       assert.strictEqual(autoRolledBack.activeVersion, '1.0.0');
+      assert.ok(concurrentAttempt);
+      assert.strictEqual(concurrentAttempt!.ok, false);
+      assert.strictEqual(concurrentAttempt!.errorCode, 'UPDATE_OPERATION_LOCKED');
 
       // 4. Successful update to 1.1.0
       const updated = updater.applyUpdate({
@@ -262,6 +355,23 @@ describe('Phase 1C-H & 1C-I: Installer, First-Run Health, Clean-Env Execution, A
       assert.strictEqual(updated.ok, true);
       assert.strictEqual(updated.activeVersion, '1.1.0');
       assert.strictEqual(fs.existsSync(userProjectPath), true);
+
+      // Reject traversal-shaped backup IDs before reading any backup manifest or touching installed paths.
+      const outsideBackupDir = path.resolve(installed.layout.backupsDir, '..', 'outside-backup');
+      fs.mkdirSync(path.join(outsideBackupDir, 'component'), { recursive: true });
+      fs.copyFileSync(
+        path.join(installed.layout.configDir, 'installation-manifest.json'),
+        path.join(outsideBackupDir, 'manifest.backup.json'),
+      );
+      fs.writeFileSync(path.join(outsideBackupDir, 'component', 'attacker-marker.txt'), 'must-not-be-installed', 'utf8');
+      const appMarkerBeforeInvalidRollback = fs.existsSync(path.join(installed.layout.appDir, 'attacker-marker.txt'));
+      const invalidRollback = updater.rollbackToBackup('../outside-backup');
+      assert.strictEqual(invalidRollback.ok, false);
+      assert.strictEqual(
+        fs.existsSync(path.join(installed.layout.appDir, 'attacker-marker.txt')),
+        appMarkerBeforeInvalidRollback,
+      );
+      fs.rmSync(outsideBackupDir, { recursive: true, force: true });
 
       // 5. Explicit manual rollback to 1.0.0
       const manualRollback = updater.rollbackToBackup(updated.backupId!);

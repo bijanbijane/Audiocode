@@ -8,7 +8,7 @@
  * 3. Minimal standalone Sherpa-ONNX CPU Runtime (`sherpa-onnx-offline` + ONNX Runtime shared library)
  * 4. Primary Persian Koochik FastConformer CTC FP32 model, with optional Rizeh INT8 fallback
  * 5. Adobe Audition CEP Extension (`ir.avapardaz.audition.cep`)
- * 6. Executable CLI/macOS/Linux Installer (`install.mjs`, `install-macos.sh`, `uninstall.mjs`)
+ * 6. Target-specific macOS / Windows 11 Installer (`install.mjs`, `install-macos.sh`, `install-windows.ps1`, `uninstall.mjs`)
  * 7. Release & Update Tarballs (`avapardaz-installer-v2.0.0-beta.1.tar.gz`, `avapardaz-update-v2.0.0-beta.2.tar.gz`)
  * 8. Full User, Release, Update, Rollback, Uninstall & License Documentation (`dist-release/docs/`)
  */
@@ -18,8 +18,16 @@ import * as path from 'node:path';
 import * as crypto from 'node:crypto';
 import * as os from 'node:os';
 import { execSync } from 'node:child_process';
+import { assertRuntimeTargetMatches, isNativeRuntimeSharedLibraryName, isVersionedOnnxRuntimeDylibName, resolveAvapardazReleaseTarget } from './release-targets.mjs';
+import { assertNativeBinaryArchitecture } from './verify-native-binary.mjs';
+import { SHAHAB_KOOCHIK_MODEL_PROVENANCE, verifyKoochikModelDirectory } from '../src/asr-core/KoochikModelProvenance.mjs';
 
 const REPO_ROOT = process.cwd();
+const RELEASE_TARGET = resolveAvapardazReleaseTarget({
+  platform: process.env.AVAPARDAZ_TARGET_PLATFORM?.trim() || process.platform,
+  arch: process.env.AVAPARDAZ_TARGET_ARCH?.trim() || process.arch,
+});
+assertRuntimeTargetMatches({ target: RELEASE_TARGET, runtimeTarget: process.env.AVAPARDAZ_SHERPA_RUNTIME_TARGET?.trim() });
 const RELEASE_VERSION = '2.0.0-beta.1';
 const NEXT_UPDATE_VERSION = '2.0.0-beta.2';
 const BUILD_TIMESTAMP = new Date();
@@ -35,21 +43,25 @@ const GIT_DIRTY_FILE_COUNT = GIT_STATUS.split(/\r?\n/).filter(Boolean).length;
 const WEB_DIST_ROOT = path.resolve(process.env.AVAPARDAZ_WEB_DIST_DIR?.trim() || path.join(REPO_ROOT, 'dist'));
 const outputArg = process.argv.find((arg) => arg.startsWith('--outdir='))?.slice('--outdir='.length);
 const DIST_RELEASE = path.resolve(outputArg?.trim() || path.join(REPO_ROOT, 'dist-release'));
-const PKG_ROOT = path.join(DIST_RELEASE, `avapardaz-v${RELEASE_VERSION}`);
-const UPDATE_STAGE_ROOT = path.join(DIST_RELEASE, `update-stage-v${NEXT_UPDATE_VERSION}`);
+const PKG_ROOT = path.join(DIST_RELEASE, `avapardaz-v${RELEASE_VERSION}-${RELEASE_TARGET.id}`);
+const UPDATE_STAGE_ROOT = path.join(DIST_RELEASE, `update-stage-v${NEXT_UPDATE_VERSION}-${RELEASE_TARGET.id}`);
 const DOCS_OUT_DIR = path.join(DIST_RELEASE, 'docs');
 
 const SHERPA_PYTHON_VERSION = process.env.AVAPARDAZ_SHERPA_PYTHON_VERSION?.trim() || '3.11';
 const AVAPARDAZ_USER_MODEL_ROOT = process.env.AVAPARDAZ_MODELS_DIR?.trim() || path.join(os.homedir(), '.avapardaz', 'models');
-const SHERPA_RUNTIME_ROOT = process.env.AVAPARDAZ_SHERPA_RUNTIME_DIR?.trim() || path.join(os.homedir(), '.avapardaz', 'runtime', 'sherpa-venv');
+const TARGET_SHERPA_RUNTIME_ROOT = path.join(os.homedir(), '.avapardaz', 'runtime', 'targets', RELEASE_TARGET.id);
+const LEGACY_SHERPA_RUNTIME_ROOT = path.join(os.homedir(), '.avapardaz', 'runtime', 'sherpa-venv');
+const SHERPA_RUNTIME_ROOT = process.env.AVAPARDAZ_SHERPA_RUNTIME_DIR?.trim() || (fs.existsSync(TARGET_SHERPA_RUNTIME_ROOT) ? TARGET_SHERPA_RUNTIME_ROOT : LEGACY_SHERPA_RUNTIME_ROOT);
 const SHERPA_RIZEH_MODEL_DIR = process.env.AVAPARDAZ_SHERPA_RIZEH_MODEL_DIR?.trim() || path.join(AVAPARDAZ_USER_MODEL_ROOT, 'sherpa-onnx-nemo-ctc-fa-shenava-rizeh-v1.0-non-streaming-int8-2026-06-26');
 const SHAHAB_KOOCHIK_MODEL_DIR = process.env.AVAPARDAZ_SHERPA_KOOCHIK_MODEL_DIR?.trim() || path.join(AVAPARDAZ_USER_MODEL_ROOT, 'shahab-koochik-v1.0-sherpa-onnx');
-const SHERPA_BINARY_SOURCE = path.join(SHERPA_RUNTIME_ROOT, 'bin', process.platform === 'win32' ? 'sherpa-onnx-offline.exe' : 'sherpa-onnx-offline');
-const SHERPA_ONNXRUNTIME_LIBRARY_SOURCE = path.join(SHERPA_RUNTIME_ROOT, 'lib', `python${SHERPA_PYTHON_VERSION}`, 'site-packages', 'sherpa_onnx', 'lib');
-const SHAHAB_KOOCHIK_MODEL_BYTES = 458_819_249;
-const SHAHAB_KOOCHIK_MODEL_SHA256 = '6a564b5541920ce1c37bbc91d22e4b3a6838648b9b327eb88997e8db1f90950d';
-const SHAHAB_KOOCHIK_TOKENS_BYTES = 12_236;
-const SHAHAB_KOOCHIK_TOKENS_SHA256 = '8e192963f6e666dfa5721e5cbd4710bc1ef592460a45f08cefc94b2db16a6954';
+const SHERPA_BINARY_SOURCE = path.join(SHERPA_RUNTIME_ROOT, 'bin', RELEASE_TARGET.sherpaBinaryName);
+const DIRECT_SHERPA_RUNTIME_LIB_DIR = path.join(SHERPA_RUNTIME_ROOT, 'lib');
+const DIRECT_SHERPA_RUNTIME_HAS_LIBRARIES = fs.existsSync(DIRECT_SHERPA_RUNTIME_LIB_DIR) && fs.readdirSync(DIRECT_SHERPA_RUNTIME_LIB_DIR).some(isNativeRuntimeSharedLibraryName);
+const SHERPA_ONNXRUNTIME_LIBRARY_SOURCE = process.env.AVAPARDAZ_SHERPA_RUNTIME_LIB_DIR?.trim() || (DIRECT_SHERPA_RUNTIME_HAS_LIBRARIES ? DIRECT_SHERPA_RUNTIME_LIB_DIR : path.join(SHERPA_RUNTIME_ROOT, 'lib', `python${SHERPA_PYTHON_VERSION}`, 'site-packages', 'sherpa_onnx', 'lib'));
+const SHAHAB_KOOCHIK_MODEL_BYTES = SHAHAB_KOOCHIK_MODEL_PROVENANCE.model.bytes;
+const SHAHAB_KOOCHIK_MODEL_SHA256 = SHAHAB_KOOCHIK_MODEL_PROVENANCE.model.sha256;
+const SHAHAB_KOOCHIK_TOKENS_BYTES = SHAHAB_KOOCHIK_MODEL_PROVENANCE.tokens.bytes;
+const SHAHAB_KOOCHIK_TOKENS_SHA256 = SHAHAB_KOOCHIK_MODEL_PROVENANCE.tokens.sha256;
 
 function computeSha256(filePath) {
   const hash = crypto.createHash('sha256');
@@ -182,45 +194,100 @@ if (fs.existsSync(sherpaPythonWorkerSource)) {
 if (!fs.existsSync(SHERPA_BINARY_SOURCE)) {
   throw new Error(`SHERPA_OFFLINE_BINARY_MISSING: ${SHERPA_BINARY_SOURCE}`);
 }
+assertNativeBinaryArchitecture({
+  filePath: SHERPA_BINARY_SOURCE,
+  platform: RELEASE_TARGET.platform,
+  arch: RELEASE_TARGET.arch,
+});
 const sherpaStandaloneBinary = path.join(payloadDir, 'runtime', 'sherpa-venv', 'bin', path.basename(SHERPA_BINARY_SOURCE));
 fs.copyFileSync(SHERPA_BINARY_SOURCE, sherpaStandaloneBinary);
 fs.chmodSync(sherpaStandaloneBinary, 0o755);
 
-const onnxRuntimeLibrary = path.join(SHERPA_ONNXRUNTIME_LIBRARY_SOURCE, 'libonnxruntime.dylib');
-const onnxRuntimeLibraryLinux = path.join(SHERPA_ONNXRUNTIME_LIBRARY_SOURCE, 'libonnxruntime.so');
-const onnxRuntimeLibraryWindows = path.join(SHERPA_ONNXRUNTIME_LIBRARY_SOURCE, 'onnxruntime.dll');
-const onnxRuntimeLibrarySource = [onnxRuntimeLibrary, onnxRuntimeLibraryLinux, onnxRuntimeLibraryWindows]
-  .find((candidate) => fs.existsSync(candidate));
-if (!onnxRuntimeLibrarySource) {
-  throw new Error(`SHERPA_ONNXRUNTIME_LIBRARY_MISSING: ${SHERPA_ONNXRUNTIME_LIBRARY_SOURCE}`);
+const availableRuntimeLibraries = fs.readdirSync(SHERPA_ONNXRUNTIME_LIBRARY_SOURCE, { withFileTypes: true })
+  .filter((entry) => entry.isFile() && isNativeRuntimeSharedLibraryName(entry.name))
+  .map((entry) => entry.name);
+const onnxRuntimeLibraryName = availableRuntimeLibraries.includes(RELEASE_TARGET.onnxRuntimeLibraryName)
+  ? RELEASE_TARGET.onnxRuntimeLibraryName
+  : RELEASE_TARGET.platform === 'darwin'
+    ? availableRuntimeLibraries.find(isVersionedOnnxRuntimeDylibName)
+    : undefined;
+if (!onnxRuntimeLibraryName) {
+  throw new Error(`SHERPA_ONNXRUNTIME_LIBRARY_MISSING: expected ${RELEASE_TARGET.onnxRuntimeLibraryName} in ${SHERPA_ONNXRUNTIME_LIBRARY_SOURCE}`);
 }
+const onnxRuntimeLibrarySource = path.join(SHERPA_ONNXRUNTIME_LIBRARY_SOURCE, onnxRuntimeLibraryName);
+assertNativeBinaryArchitecture({
+  filePath: onnxRuntimeLibrarySource,
+  platform: RELEASE_TARGET.platform,
+  arch: RELEASE_TARGET.arch,
+});
+if (availableRuntimeLibraries.length === 0) {
+  throw new Error(`SHERPA_RUNTIME_SHARED_LIBRARIES_MISSING: ${SHERPA_ONNXRUNTIME_LIBRARY_SOURCE}`);
+}
+for (const libraryName of availableRuntimeLibraries) {
+  assertNativeBinaryArchitecture({
+    filePath: path.join(SHERPA_ONNXRUNTIME_LIBRARY_SOURCE, libraryName),
+    platform: RELEASE_TARGET.platform,
+    arch: RELEASE_TARGET.arch,
+  });
+}
+const runtimeManifestSource = path.join(SHERPA_RUNTIME_ROOT, 'runtime-manifest.json');
+if (!fs.existsSync(runtimeManifestSource)) {
+  throw new Error(`SHERPA_RUNTIME_MANIFEST_MISSING: ${runtimeManifestSource}; run scripts/provision-release-native-runtime.ts first.`);
+}
+const runtimeManifest = JSON.parse(fs.readFileSync(runtimeManifestSource, 'utf8'));
+if (
+  runtimeManifest.schemaVersion !== 1
+  || runtimeManifest.targetId !== RELEASE_TARGET.id
+  || JSON.stringify(runtimeManifest.requiredCpuFeatures) !== JSON.stringify(RELEASE_TARGET.requiredCpuFeatures)
+  || JSON.stringify(runtimeManifest.cpuFeatureProbe?.required) !== JSON.stringify(RELEASE_TARGET.requiredCpuFeatures)
+  || JSON.stringify(runtimeManifest.cpuFeatureProbe?.checked) !== JSON.stringify(RELEASE_TARGET.requiredCpuFeatures)
+  || runtimeManifest.archiveName !== RELEASE_TARGET.runtimeArchive.fileName
+  || runtimeManifest.archiveSha256 !== RELEASE_TARGET.runtimeArchive.sha256
+  || runtimeManifest.archiveBytes !== RELEASE_TARGET.runtimeArchive.bytes
+  || runtimeManifest.binaryName !== RELEASE_TARGET.sherpaBinaryName
+  || runtimeManifest.binarySha256 !== computeSha256(SHERPA_BINARY_SOURCE)
+  || runtimeManifest.onnxRuntimeLibraryName !== onnxRuntimeLibraryName
+  || runtimeManifest.onnxRuntimeLibrarySha256 !== computeSha256(onnxRuntimeLibrarySource)
+) {
+  throw new Error('SHERPA_RUNTIME_MANIFEST_PROVENANCE_MISMATCH');
+}
+const manifestLibraries = new Map((runtimeManifest.sharedLibraries ?? []).map((library) => [library.name, library]));
+if (manifestLibraries.size !== availableRuntimeLibraries.length) {
+  throw new Error('SHERPA_RUNTIME_MANIFEST_LIBRARY_SET_MISMATCH');
+}
+for (const libraryName of availableRuntimeLibraries) {
+  const entry = manifestLibraries.get(libraryName);
+  const libraryPath = path.join(SHERPA_ONNXRUNTIME_LIBRARY_SOURCE, libraryName);
+  if (!entry || entry.bytes !== fs.statSync(libraryPath).size || entry.sha256 !== computeSha256(libraryPath)) {
+    throw new Error(`SHERPA_RUNTIME_MANIFEST_LIBRARY_INTEGRITY_FAILED: ${libraryName}`);
+  }
+}
+const runtimeManifestPayload = path.join(payloadDir, 'runtime', 'sherpa-venv', 'runtime-manifest.json');
+fs.copyFileSync(runtimeManifestSource, runtimeManifestPayload);
 const sherpaLibraryOutput = path.join(
   payloadDir, 'runtime', 'sherpa-venv', 'lib', `python${SHERPA_PYTHON_VERSION}`, 'site-packages', 'sherpa_onnx', 'lib',
 );
 fs.mkdirSync(sherpaLibraryOutput, { recursive: true });
-// The tested native CLI has one non-system dependency: libonnxruntime.
-// Copy only that library; Python extension modules and C API libraries are not runtime dependencies of this CLI.
-fs.copyFileSync(onnxRuntimeLibrarySource, path.join(sherpaLibraryOutput, path.basename(onnxRuntimeLibrarySource)));
-fs.chmodSync(path.join(sherpaLibraryOutput, path.basename(onnxRuntimeLibrarySource)), 0o755);
-
-// 6. Copy the primary Persian Koochik model, and keep Rizeh as a lightweight fallback.
-const koochikSourceModel = path.join(SHAHAB_KOOCHIK_MODEL_DIR, 'model.onnx');
-const koochikSourceTokens = path.join(SHAHAB_KOOCHIK_MODEL_DIR, 'tokens.txt');
-const koochikSourceLicense = path.join(SHAHAB_KOOCHIK_MODEL_DIR, 'LICENSE');
-const koochikSourceReadme = path.join(SHAHAB_KOOCHIK_MODEL_DIR, 'README.md');
-for (const [source, expectedBytes, expectedHash, label] of [
-  [koochikSourceModel, SHAHAB_KOOCHIK_MODEL_BYTES, SHAHAB_KOOCHIK_MODEL_SHA256, 'KOOCHIK_ONNX'],
-  [koochikSourceTokens, SHAHAB_KOOCHIK_TOKENS_BYTES, SHAHAB_KOOCHIK_TOKENS_SHA256, 'KOOCHIK_TOKENS'],
-]) {
-  if (!fs.existsSync(source)) throw new Error(`${label}_MISSING: ${source}`);
-  const stat = fs.statSync(source);
-  if (!stat.isFile() || stat.size !== expectedBytes || computeSha256(source) !== expectedHash) {
-    throw new Error(`${label}_INTEGRITY_FAILED: ${source}`);
-  }
+// Preserve every shared library shipped beside the CLI; Windows and macOS can have
+// additional runtime dependencies beyond the ONNX Runtime library itself.
+for (const libraryName of availableRuntimeLibraries) {
+  const source = path.join(SHERPA_ONNXRUNTIME_LIBRARY_SOURCE, libraryName);
+  const destination = path.join(sherpaLibraryOutput, libraryName);
+  fs.copyFileSync(source, destination);
+  if (RELEASE_TARGET.platform !== 'win32') fs.chmodSync(destination, 0o755);
 }
+
+// 6. Copy the primary Persian Koochik model only from the pinned, Apache-licensed revision.
+const koochikProvenance = verifyKoochikModelDirectory(SHAHAB_KOOCHIK_MODEL_DIR);
+const koochikSourceModel = path.join(SHAHAB_KOOCHIK_MODEL_DIR, SHAHAB_KOOCHIK_MODEL_PROVENANCE.model.fileName);
+const koochikSourceTokens = path.join(SHAHAB_KOOCHIK_MODEL_DIR, SHAHAB_KOOCHIK_MODEL_PROVENANCE.tokens.fileName);
+const koochikSourceLicense = path.join(SHAHAB_KOOCHIK_MODEL_DIR, SHAHAB_KOOCHIK_MODEL_PROVENANCE.licenseFileName);
+const koochikSourceReadme = path.join(SHAHAB_KOOCHIK_MODEL_DIR, SHAHAB_KOOCHIK_MODEL_PROVENANCE.readmeFileName);
+const koochikSourceManifest = koochikProvenance.manifestPath;
 const koochikPayloadDir = path.join(payloadDir, 'models', 'shahab-koochik-v1.0-sherpa-onnx');
-for (const source of [koochikSourceModel, koochikSourceTokens, koochikSourceLicense, koochikSourceReadme]) {
-  if (fs.existsSync(source)) fs.copyFileSync(source, path.join(koochikPayloadDir, path.basename(source)));
+fs.mkdirSync(koochikPayloadDir, { recursive: true });
+for (const source of [koochikSourceModel, koochikSourceTokens, koochikSourceLicense, koochikSourceReadme, koochikSourceManifest]) {
+  fs.copyFileSync(source, path.join(koochikPayloadDir, path.basename(source)));
 }
 
 // Optional smaller Shenava-Rizeh fallback model; never block a Koochik-only release.
@@ -255,13 +322,28 @@ import * as path from 'node:path';
 import * as crypto from 'node:crypto';
 import * as os from 'node:os';
 import { fileURLToPath } from 'node:url';
+import { verifyRequiredCpuFeatures } from './cpu-feature-preflight.mjs';
 
 const args = process.argv.slice(2);
+if (process.platform !== '${RELEASE_TARGET.platform}' || process.arch !== '${RELEASE_TARGET.arch}') {
+  console.error('[AvaPardaz Installer] This package targets ${RELEASE_TARGET.id}; current runtime is ' + process.platform + '-' + process.arch);
+  process.exit(3);
+}
+const nodeMajorVersion = Number(process.versions.node.split('.')[0]);
+if (!Number.isInteger(nodeMajorVersion) || nodeMajorVersion < 20) {
+  console.error('[AvaPardaz Installer] Node.js 20 or newer is required. Current version:', process.versions.node);
+  process.exit(4);
+}
 if (args.includes('--help') || args.includes('-h')) {
   console.log('AvaPardaz Installer ${RELEASE_VERSION}');
   console.log('Usage: node ./installer/install.mjs [--target=<empty-directory>]');
   console.log('Requires Node.js 20 or newer. The installer refuses to overwrite an existing non-empty target.');
   process.exit(0);
+}
+const cpuPreflight = verifyRequiredCpuFeatures(${JSON.stringify(RELEASE_TARGET.requiredCpuFeatures)});
+if (!cpuPreflight.supported) {
+  console.error('[AvaPardaz Installer] CPU requirement not met:', cpuPreflight.reason);
+  process.exit(5);
 }
 const targetArg = args.find((a) => a.startsWith('--target='));
 const targetRoot = targetArg ? path.resolve(targetArg.slice('--target='.length)) : path.join(os.homedir(), 'AvaPardaz');
@@ -306,6 +388,7 @@ copyRecursive(path.join(payloadRoot, 'cep-extension'), path.join(targetRoot, 'ce
 
 console.log('[AvaPardaz Installer] Installation completed successfully.');
 `;
+fs.copyFileSync(path.join(REPO_ROOT, 'scripts', 'cpu-feature-preflight.mjs'), path.join(installerDir, 'cpu-feature-preflight.mjs'));
 fs.writeFileSync(path.join(installerDir, 'install.mjs'), installMjsContent, { mode: 0o755 });
 
 const installMacosSh = `#!/usr/bin/env bash
@@ -314,6 +397,14 @@ SCRIPT_DIR="$(cd "$(dirname "\${BASH_SOURCE[0]}")" && pwd)"
 node "\${SCRIPT_DIR}/install.mjs" "$@"
 `;
 fs.writeFileSync(path.join(installerDir, 'install-macos.sh'), installMacosSh, { mode: 0o755 });
+
+const installWindowsPs1 = `$ErrorActionPreference = 'Stop'
+$scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+$node = Get-Command node -ErrorAction Stop
+& $node.Source (Join-Path $scriptDir 'install.mjs') @args
+exit $LASTEXITCODE
+`;
+fs.writeFileSync(path.join(installerDir, 'install-windows.ps1'), installWindowsPs1, 'utf8');
 
 const uninstallMjsContent = `#!/usr/bin/env node
 /**
@@ -351,6 +442,15 @@ const bridgeBinPath = path.join(payloadDir, 'runtime', 'bin', 'sherpa-onnx-strea
 
 const packageManifest = {
   productName: 'AvaPardaz (آواپرداز)',
+  target: {
+    id: RELEASE_TARGET.id,
+    platform: RELEASE_TARGET.platform,
+    arch: RELEASE_TARGET.arch,
+    os: RELEASE_TARGET.osLabel,
+    architecture: RELEASE_TARGET.architectureLabel,
+    requiredCpuFeatures: RELEASE_TARGET.requiredCpuFeatures,
+  },
+  buildHost: { platform: process.platform, arch: process.arch },
   version: RELEASE_VERSION,
   releaseChannel: 'BETA',
   buildId: BUILD_ID,
@@ -360,7 +460,7 @@ const packageManifest = {
   workingTreeDirty: GIT_WORKTREE_DIRTY,
   dirtyFileCount: GIT_DIRTY_FILE_COUNT,
   buildStatus: 'LOCAL_UNRELEASED_WORKTREE_BUILD',
-  architecture: `${process.platform}-${process.arch}`,
+  architecture: RELEASE_TARGET.id,
   components: {
     webApp: { path: 'payload/app/index.html', version: RELEASE_VERSION },
     companion: {
@@ -381,6 +481,15 @@ const packageManifest = {
         sha256: fs.existsSync(sherpaBinPath) ? computeSha256(sherpaBinPath) : null,
         sizeBytes: fs.existsSync(sherpaBinPath) ? fs.statSync(sherpaBinPath).size : 0,
       },
+      sherpaRuntimeProvenance: {
+        path: 'payload/runtime/sherpa-venv/runtime-manifest.json',
+        sha256: computeSha256(runtimeManifestPayload),
+        sizeBytes: fs.statSync(runtimeManifestPayload).size,
+        archiveName: runtimeManifest.archiveName,
+        archiveSha256: runtimeManifest.archiveSha256,
+        archiveBytes: runtimeManifest.archiveBytes,
+        cpuFeatureProbe: runtimeManifest.cpuFeatureProbe,
+      },
       sherpaStreamingBridgeBinary: {
         path: 'payload/runtime/bin/sherpa-onnx-streaming-bridge',
         sha256: fs.existsSync(bridgeBinPath) ? computeSha256(bridgeBinPath) : null,
@@ -389,10 +498,21 @@ const packageManifest = {
     },
     primaryPersianAsrModel: {
       modelId: 'Reza2kn/Shenava-Koochik-v1.0-sherpa-onnx',
+      repository: SHAHAB_KOOCHIK_MODEL_PROVENANCE.repository,
+      revision: SHAHAB_KOOCHIK_MODEL_PROVENANCE.revision,
       architecture: 'NeMo FastConformer-CTC',
       quantization: 'FP32',
       language: 'fa',
       licenseSpdx: 'Apache-2.0',
+      licenseFile: {
+        path: 'payload/models/shahab-koochik-v1.0-sherpa-onnx/LICENSE',
+        sha256: computeSha256(koochikSourceLicense),
+      },
+      modelManifest: {
+        path: 'payload/models/shahab-koochik-v1.0-sherpa-onnx/model-manifest.json',
+        sha256: computeSha256(koochikSourceManifest),
+        sizeBytes: fs.statSync(koochikSourceManifest).size,
+      },
       modelOnnx: {
         path: 'payload/models/shahab-koochik-v1.0-sherpa-onnx/model.onnx',
         sha256: fs.existsSync(koochikModelPath) ? computeSha256(koochikModelPath) : null,
@@ -448,11 +568,11 @@ fs.writeFileSync(
 );
 
 // 11. Create Release & Update tarballs
-const installerTarball = path.join(DIST_RELEASE, `avapardaz-installer-v${RELEASE_VERSION}.tar.gz`);
-const updateTarball = path.join(DIST_RELEASE, `avapardaz-update-v${NEXT_UPDATE_VERSION}.tar.gz`);
+const installerTarball = path.join(DIST_RELEASE, `avapardaz-installer-v${RELEASE_VERSION}-${RELEASE_TARGET.id}.tar.gz`);
+const updateTarball = path.join(DIST_RELEASE, `avapardaz-update-v${NEXT_UPDATE_VERSION}-${RELEASE_TARGET.id}.tar.gz`);
 
-execSync(`tar -czf "${installerTarball}" -C "${DIST_RELEASE}" "avapardaz-v${RELEASE_VERSION}"`);
-execSync(`tar -czf "${updateTarball}" -C "${DIST_RELEASE}" "update-stage-v${NEXT_UPDATE_VERSION}"`);
+execSync(`tar -czf "${installerTarball}" -C "${DIST_RELEASE}" "avapardaz-v${RELEASE_VERSION}-${RELEASE_TARGET.id}"`);
+execSync(`tar -czf "${updateTarball}" -C "${DIST_RELEASE}" "update-stage-v${NEXT_UPDATE_VERSION}-${RELEASE_TARGET.id}"`);
 
 // 12. Write all required User, Release, Update, Rollback, Uninstall & License documentation
 const docsMap = {
@@ -462,11 +582,12 @@ const docsMap = {
 بسته نصبی آواپرداز شامل رابط کاربری، Local Companion، موتور بومی Sherpa-ONNX CPU، مدل اصلی فارسی Shenava Koochik FP32 و افزونه Adobe Audition CEP است. مدل سبک‌تر Shenava-Rizeh INT8 فقط در صورت بسته‌بندی اختیاری در دسترس خواهد بود. پس از نصب، استنتاج آفلاین است.
 
 ### مراحل نصب:
-1. بسته نصبی \`avapardaz-installer-v${RELEASE_VERSION}.tar.gz\` را استخراج کنید.
+1. بسته مختص ${RELEASE_TARGET.id} یعنی \`avapardaz-installer-v${RELEASE_VERSION}-${RELEASE_TARGET.id}.tar.gz\` را استخراج کنید.
 2. اسکریپت نصب خودکار را اجرا کنید:
-   - **macOS / Linux**: اجرای \`./installer/install-macos.sh\`
-   - **CLI / Custom Path**: اجرای \`node ./installer/install.mjs --target=$HOME/AvaPardaz\`
-3. نصاب فقط روی مسیر نصب خالی اجرا می‌شود و پوشهٔ موجود یا داده‌های قبلی را بازنویسی نمی‌کند. یکپارچگی مدل فارسی و باینری‌های Native پیش از ساخت بسته بررسی می‌شود.
+   - **macOS**: اجرای \`./installer/install-macos.sh\`
+   - **Windows 11**: اجرای \`powershell -ExecutionPolicy Bypass -File .\\installer\\install-windows.ps1\`
+3. بسته فقط روی ${RELEASE_TARGET.osLabel} / ${RELEASE_TARGET.architectureLabel} اجرا می‌شود و در صورت عدم تطابق OS/CPU یا Node.js کمتر از نسخه 20، پیش از کپی فایل‌ها متوقف خواهد شد.
+4. برای Adobe Audition 25.x، پردازنده‌های Intel/AMD روی Windows و Intel Mac باید AVX2 داشته باشند؛ حداقل مدل‌های اعلام‌شده توسط Adobe، Intel نسل ۶ یا AMD Ryzen 1000 هستند.
 `,
   'QUICK-START-GUIDE.md': `# راهنمای شروع سریع آواپرداز (Quick-Start Guide)
 
@@ -480,12 +601,13 @@ const docsMap = {
 
 | مشخصه | حداقل سیستم مورد نیاز | سیستم پیشنهادی |
 |---|---|---|
-| **سیستم‌عامل** | macOS 13+ (Apple Silicon / Intel) یا Ubuntu 22.04+ / Debian 12+ (x86_64) | macOS 14+ (Apple M2/M3) یا Linux x86_64 مدرن |
-| **پردازنده (CPU)** | ۴ هسته پردازشی ۶۴ بیتی | ۸ هسته پردازشی یا بالاتر |
-| **حافظه رم (RAM)** | حداقل ۴ گیگابایت فضای قابل استفاده برای برنامه و موتور ASR | ۸ تا ۱۶ گیگابایت |
-| **فضای دیسک** | ۵۰۰ مگابایت برای نصب + ۲ گیگابایت فضای موقت پردازش صوت | ۵ گیگابایت SSD آزاد |
-| **میزبان تدوین** | Adobe Audition 2023/2024/2025 (نسخه ۲۳.۰ به بالا) یا اجرای مستقل وب/Companion | Adobe Audition 24.x |
-| **اتصال اینترنت** | **نیاز ندارد** (کاملاً آفلاین پس از نصب) | نیاز ندارد |
+| **سیستم‌عامل** | Windows 11 x64 یا macOS 14/15 (Apple Silicon یا Intel) | Windows 11 x64 یا macOS 15 |
+| **پردازنده (CPU)** | Windows و Intel Mac: پشتیبانی AVX2؛ حداقل Intel نسل ۶ یا AMD Ryzen 1000؛ Apple Silicon: M1 یا جدیدتر | Intel نسل ۱۱+ / Ryzen 3000+ یا Apple Silicon Pro |
+| **حافظه رم (RAM)** | حداقل ۸ گیگابایت | ۱۶ گیگابایت یا بیشتر |
+| **فضای دیسک** | حداقل ۸ گیگابایت برای نصب + فضای موقت پردازش صوت | SSD پرسرعت با حداقل ۵ گیگابایت فضای آزاد اضافی |
+| **میزبان تدوین** | Adobe Audition 25.x | Adobe Audition 25.x |
+| **نصاب** | Node.js 20 یا جدیدتر | Node.js 22 یا جدیدتر |
+| **اتصال اینترنت** | برای دریافت بسته و فعال‌سازی Adobe لازم است؛ پردازش ASR پس از نصب آفلاین است | اتصال برای فعال‌سازی Adobe لازم است |
 `,
   'RELEASE-NOTES.md': `# یادداشت‌های انتشار آواپرداز (Release Notes — v${RELEASE_VERSION})
 

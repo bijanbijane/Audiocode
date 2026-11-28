@@ -22,6 +22,8 @@ import path from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
 import { createInterface } from 'node:readline';
 import { fileURLToPath } from 'node:url';
+import { assertNativeBinaryArchitecture } from './NativeBinaryArchitecture.mjs';
+import { resolveAvapardazReleaseTarget } from './NativeReleaseTargets.mjs';
 import {
   ALLOWED_MODEL_DOWNLOAD_HOSTS,
   activateDirectoryAtomically,
@@ -170,8 +172,10 @@ const DEFAULT_MODEL_SEARCH_DIRS = [
 const DEFAULT_BINARY_CANDIDATES = [
   process.env.AVAPARDAZ_SHERPA_BIN,
   // Per-user isolated Python wheel installation (macOS Apple Silicon / Linux / Windows).
-  path.join(os.homedir(), '.avapardaz', 'runtime', 'sherpa-venv', 'bin', 'sherpa-onnx-offline'),
-  path.join(AVAPARDAZ_HOME, 'runtime', 'sherpa-venv', 'bin', 'sherpa-onnx-offline'),
+  path.join(os.homedir(), '.avapardaz', 'runtime', 'sherpa-venv', 'bin', process.platform === 'win32' ? 'sherpa-onnx-offline.exe' : 'sherpa-onnx-offline'),
+  path.join(os.homedir(), '.avapardaz', 'runtime', 'targets', `${process.platform}-${process.arch}`, 'bin', process.platform === 'win32' ? 'sherpa-onnx-offline.exe' : 'sherpa-onnx-offline'),
+  path.join(AVAPARDAZ_HOME, 'runtime', 'targets', `${process.platform}-${process.arch}`, 'bin', process.platform === 'win32' ? 'sherpa-onnx-offline.exe' : 'sherpa-onnx-offline'),
+  path.join(AVAPARDAZ_HOME, 'runtime', 'sherpa-venv', 'bin', process.platform === 'win32' ? 'sherpa-onnx-offline.exe' : 'sherpa-onnx-offline'),
   path.join(os.homedir(), '.avapardaz', 'runtime', 'sherpa-venv', 'Scripts', 'sherpa-onnx-offline.exe'),
   path.join(os.homedir(), '.avapardaz', 'runtime', 'bin', 'sherpa-onnx-offline'),
   path.join(AVAPARDAZ_HOME, 'runtime', 'bin', process.platform === 'win32' ? 'sherpa-onnx-offline.exe' : 'sherpa-onnx-offline'),
@@ -354,6 +358,73 @@ export function verifyShahabKoochikModelFiles(modelDirectory: string): boolean {
   );
 }
 
+export function isSherpaRuntimeLibraryName(fileName: string, platform = process.platform): boolean {
+  if (platform === 'win32') {
+    return /^(?:onnxruntime(?:_providers_[a-z0-9_]+)?|sherpa-onnx-c-api)\.dll$/i.test(fileName);
+  }
+  if (platform === 'darwin') {
+    return /^lib(?:onnxruntime|sherpa-onnx-c-api)(?:\.\d+(?:\.\d+)*)?\.dylib$/.test(fileName);
+  }
+  return /^lib(?:onnxruntime|sherpa-onnx-c-api)\.so(?:\.\d+)*$/.test(fileName);
+}
+
+export function sherpaLibraryPathEnvironmentVariable(platform = process.platform): 'DYLD_LIBRARY_PATH' | 'LD_LIBRARY_PATH' | 'PATH' {
+  if (platform === 'darwin') return 'DYLD_LIBRARY_PATH';
+  if (platform === 'win32') return 'PATH';
+  return 'LD_LIBRARY_PATH';
+}
+
+function verifyTargetRuntimeManifest(binaryPath: string, libDir: string, target: ReturnType<typeof resolveAvapardazReleaseTarget>): boolean {
+  try {
+    const runtimeRoot = path.dirname(path.dirname(binaryPath));
+    const manifestPath = path.join(runtimeRoot, 'runtime-manifest.json');
+    if (!fs.existsSync(manifestPath)) return false;
+    const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+    const hashFile = (filePath: string): string => {
+      const hash = crypto.createHash('sha256');
+      const fd = fs.openSync(filePath, 'r');
+      try {
+        const chunk = Buffer.allocUnsafe(1024 * 1024);
+        let bytesRead = 0;
+        while ((bytesRead = fs.readSync(fd, chunk, 0, chunk.length, null)) > 0) {
+          hash.update(chunk.subarray(0, bytesRead));
+        }
+      } finally {
+        fs.closeSync(fd);
+      }
+      return hash.digest('hex');
+    };
+    if (
+      manifest.schemaVersion !== 1
+      || manifest.targetId !== target.id
+      || JSON.stringify(manifest.requiredCpuFeatures) !== JSON.stringify(target.requiredCpuFeatures)
+      || manifest.archiveName !== target.runtimeArchive.fileName
+      || manifest.archiveSha256 !== target.runtimeArchive.sha256
+      || manifest.archiveBytes !== target.runtimeArchive.bytes
+      || manifest.binaryName !== target.sherpaBinaryName
+      || manifest.binaryBytes !== fs.statSync(binaryPath).size
+      || manifest.binarySha256 !== hashFile(binaryPath)
+    ) return false;
+    const libraries = fs.readdirSync(libDir)
+      .filter((name) => isSherpaRuntimeLibraryName(name, target.platform));
+    const expectedLibraries = new Map<string, { name: string; bytes: number; sha256: string }>((manifest.sharedLibraries ?? []).map((library: { name: string; bytes: number; sha256: string }) => [library.name, library] as const));
+    if (libraries.length === 0 || libraries.length !== expectedLibraries.size) return false;
+    for (const name of libraries) {
+      const filePath = path.join(libDir, name);
+      const expected = expectedLibraries.get(name);
+      if (!expected || expected.bytes !== fs.statSync(filePath).size || expected.sha256 !== hashFile(filePath)) return false;
+    }
+    const onnxLibrary = libraries.find((name) => name === target.onnxRuntimeLibraryName)
+      ?? (target.platform === 'darwin' ? libraries.find((name) => /^libonnxruntime\\.\\d+(?:\\.\\d+)*\\.dylib$/.test(name)) : undefined);
+    if (!onnxLibrary || manifest.onnxRuntimeLibraryName !== onnxLibrary) return false;
+    const onnxPath = path.join(libDir, onnxLibrary);
+    return manifest.onnxRuntimeLibraryBytes === fs.statSync(onnxPath).size
+      && manifest.onnxRuntimeLibrarySha256 === hashFile(onnxPath);
+  } catch {
+    return false;
+  }
+}
+
 function detectSherpaBinary(): { binaryPath: string | null; libDir: string | null } {
   const executableName = process.platform === 'win32' ? 'sherpa-onnx-offline.exe' : 'sherpa-onnx-offline';
   const pathCandidates = (process.env.PATH ?? '')
@@ -377,11 +448,24 @@ function detectSherpaBinary(): { binaryPath: string | null; libDir: string | nul
       ];
       const libDir = libraryCandidates.find((directory) => {
         try {
-          return fs.readdirSync(directory).some((name) => /^lib(?:onnxruntime|sherpa-onnx-c-api)\.(?:dylib|so(?:\.|$))/.test(name));
+          return fs.readdirSync(directory).some((name) => isSherpaRuntimeLibraryName(name));
         } catch {
           return false;
         }
       }) ?? null;
+      if (libDir && (process.platform === 'darwin' || process.platform === 'win32')) {
+        try {
+          const target = resolveAvapardazReleaseTarget();
+          assertNativeBinaryArchitecture({ filePath: candidate, platform: target.platform, arch: target.arch });
+          for (const name of fs.readdirSync(libDir)) {
+            if (!isSherpaRuntimeLibraryName(name, target.platform)) continue;
+            assertNativeBinaryArchitecture({ filePath: path.join(libDir, name), platform: target.platform, arch: target.arch });
+          }
+          if (!verifyTargetRuntimeManifest(candidate, libDir, target)) continue;
+        } catch {
+          continue;
+        }
+      }
       return { binaryPath: candidate, libDir };
     } catch {
       // continue searching
@@ -1072,23 +1156,25 @@ export class LocalSherpaNeuralEngine {
       return ensured;
     })();
 
-    this.ensureShenavaArtifactsPromise = task.finally(() => {
-      if (this.ensureShenavaArtifactsPromise === task) {
+    const wrappedTask = task.finally(() => {
+      if (this.ensureShenavaArtifactsPromise === wrappedTask) {
         this.ensureShenavaArtifactsPromise = null;
       }
     });
-
-    return this.ensureShenavaArtifactsPromise;
+    this.ensureShenavaArtifactsPromise = wrappedTask;
+    return wrappedTask;
   }
 
   public async installShenavaRizehRuntime(options?: {
     readonly signal?: AbortSignal;
   }): Promise<LocalNeuralRuntimeStatus> {
-    if (process.platform !== 'linux' || process.arch !== 'x64') {
-      throw new Error(
-        `NATIVE_INSTALLER_UNSUPPORTED_PLATFORM: Automatic server-side installer targets linux-x64 (current: ${process.platform}-${process.arch}).`,
-      );
-    }
+    const isLegacyLinuxX64 = process.platform === 'linux' && process.arch === 'x64';
+    const target = isLegacyLinuxX64 ? null : resolveAvapardazReleaseTarget();
+    const runtimeArchiveName = target?.runtimeArchive.fileName ?? SHENAVA_RIZEH_RUNTIME_RELEASE.runtimeArchiveName;
+    const runtimeUrl = target?.runtimeArchive.url ?? SHENAVA_RIZEH_RUNTIME_RELEASE.runtimeUrl;
+    const runtimeDir = target
+      ? path.join(os.homedir(), '.avapardaz', 'runtime', 'targets', target.id)
+      : path.join(os.homedir(), '.avapardaz', 'runtime');
 
     if (this.installShenavaRuntimePromise) {
       return this.installShenavaRuntimePromise;
@@ -1097,43 +1183,126 @@ export class LocalSherpaNeuralEngine {
     const task = (async (): Promise<LocalNeuralRuntimeStatus> => {
       const baseDir = path.join(os.homedir(), '.avapardaz');
       const downloadsDir = path.join(baseDir, 'downloads');
-      const runtimeDir = path.join(baseDir, 'runtime');
       fs.mkdirSync(downloadsDir, { recursive: true });
-      fs.mkdirSync(baseDir, { recursive: true });
+      fs.mkdirSync(path.dirname(runtimeDir), { recursive: true });
 
-      const { binaryPath } = detectSherpaBinary();
-      if (!binaryPath) {
-        const rtArchive = path.join(
-          downloadsDir,
-          `${Date.now()}_${process.pid}_${SHENAVA_RIZEH_RUNTIME_RELEASE.runtimeArchiveName}`,
-        );
+      const { binaryPath, libDir } = detectSherpaBinary();
+      if (!binaryPath || (target !== null && !libDir)) {
+        const rtArchive = path.join(downloadsDir, Date.now() + '_' + process.pid + '_' + runtimeArchiveName);
         const rtTempExtract = fs.mkdtempSync(path.join(downloadsDir, 'avp-rt-stage-'));
         try {
-          await downloadFileWithRedirects(SHENAVA_RIZEH_RUNTIME_RELEASE.runtimeUrl, rtArchive, {
+          const expectedBytes = target?.runtimeArchive.bytes;
+          const expectedSha256 = target?.runtimeArchive.sha256;
+          await downloadFileWithRedirects(runtimeUrl, rtArchive, {
             allowedHosts: ALLOWED_MODEL_DOWNLOAD_HOSTS,
             maxRedirects: 5,
-            maxBytes: 250 * 1024 * 1024, // 250 MiB ceiling for runtime archive
+            maxBytes: expectedBytes ?? 250 * 1024 * 1024,
+            ...(expectedBytes && expectedSha256 ? { expectedBytes, expectedSha256Hex: expectedSha256 } : {}),
             connectTimeoutMs: 15_000,
             totalTimeoutMs: 240_000,
             signal: options?.signal,
           });
           await extractTarBz2Safe(rtArchive, rtTempExtract, {
-            maxFiles: 512,
-            maxSingleFileBytes: 150 * 1024 * 1024,
-            maxTotalBytes: 400 * 1024 * 1024,
+            maxFiles: 4096,
+            maxSingleFileBytes: 300 * 1024 * 1024,
+            maxTotalBytes: 600 * 1024 * 1024,
             allowExecutablesInBin: true,
+            allowRelativeLibrarySymlinks: target !== null,
+            pythonBin: process.platform === 'win32' ? 'python' : 'python3',
           });
           const extractedRoot = fs
             .readdirSync(rtTempExtract, { withFileTypes: true })
-            .find((d) => d.isDirectory())?.name;
+            .find((entry) => entry.isDirectory())?.name;
           const srcRoot = extractedRoot ? path.join(rtTempExtract, extractedRoot) : rtTempExtract;
 
           await activateDirectoryAtomically({
             stagedDir: srcRoot,
             targetDir: runtimeDir,
             validateStaged: (dir) => {
-              const stagedBin = path.join(dir, 'bin', 'sherpa-onnx-offline');
+              const stagedBinName = target?.sherpaBinaryName ?? 'sherpa-onnx-offline';
+              const stagedBin = path.join(dir, 'bin', stagedBinName);
               if (!fs.existsSync(stagedBin) || fs.lstatSync(stagedBin).isSymbolicLink()) return false;
+              if (target) {
+                const collectFiles = (root: string): string[] => {
+                  const files: string[] = [];
+                  for (const entry of fs.readdirSync(root, { withFileTypes: true })) {
+                    const fullPath = path.join(root, entry.name);
+                    if (entry.isSymbolicLink()) return [];
+                    if (entry.isDirectory()) files.push(...collectFiles(fullPath));
+                    else if (entry.isFile()) files.push(fullPath);
+                  }
+                  return files;
+                };
+                const nativeLibraries = collectFiles(dir)
+                  .filter((file) => isSherpaRuntimeLibraryName(path.basename(file), target.platform));
+                const onnxRuntimeLibrary = nativeLibraries.find(
+                  (file) => path.basename(file) === target.onnxRuntimeLibraryName,
+                ) ?? (target.platform === 'darwin'
+                  ? nativeLibraries.find((file) => /^libonnxruntime\.\d+(?:\.\d+)*\.dylib$/.test(path.basename(file)))
+                  : undefined);
+                if (!onnxRuntimeLibrary || nativeLibraries.length === 0) return false;
+                try {
+                  assertNativeBinaryArchitecture({ filePath: stagedBin, platform: target.platform, arch: target.arch });
+                  for (const library of nativeLibraries) {
+                    assertNativeBinaryArchitecture({ filePath: library, platform: target.platform, arch: target.arch });
+                  }
+                } catch {
+                  return false;
+                }
+                if (target.platform !== 'win32') fs.chmodSync(stagedBin, 0o755);
+                const libraryDir = path.dirname(onnxRuntimeLibrary);
+                const env: NodeJS.ProcessEnv = {
+                  ...process.env,
+                  [sherpaLibraryPathEnvironmentVariable(target.platform)]: [libraryDir, process.env[sherpaLibraryPathEnvironmentVariable(target.platform)]].filter(Boolean).join(path.delimiter),
+                };
+                const smoke = spawnSync(stagedBin, ['--help'], {
+                  env,
+                  encoding: 'utf8',
+                  timeout: 30_000,
+                  maxBuffer: 8 * 1024 * 1024,
+                  windowsHide: true,
+                });
+                if (smoke.error || smoke.status !== 0) return false;
+                const hashFile = (filePath: string): string => {
+                  const hash = crypto.createHash('sha256');
+                  const fd = fs.openSync(filePath, 'r');
+                  try {
+                    const chunk = Buffer.allocUnsafe(1024 * 1024);
+                    let bytesRead = 0;
+                    while ((bytesRead = fs.readSync(fd, chunk, 0, chunk.length, null)) > 0) {
+                      hash.update(chunk.subarray(0, bytesRead));
+                    }
+                  } finally {
+                    fs.closeSync(fd);
+                  }
+                  return hash.digest('hex');
+                };
+                const runtimeManifest = {
+                  schemaVersion: 1,
+                  product: 'AVAPARDAZ',
+                  targetId: target.id,
+                  requiredCpuFeatures: target.requiredCpuFeatures,
+                  runtimeVersion: 'v2.0.2',
+                  archiveName: target.runtimeArchive.fileName,
+                  archiveBytes: target.runtimeArchive.bytes,
+                  archiveSha256: target.runtimeArchive.sha256,
+                  binaryName: target.sherpaBinaryName,
+                  binaryBytes: fs.statSync(stagedBin).size,
+                  binarySha256: hashFile(stagedBin),
+                  onnxRuntimeLibraryName: path.basename(onnxRuntimeLibrary),
+                  onnxRuntimeLibraryBytes: fs.statSync(onnxRuntimeLibrary).size,
+                  onnxRuntimeLibrarySha256: hashFile(onnxRuntimeLibrary),
+                  sharedLibraries: nativeLibraries.filter((library) => path.dirname(library) === libraryDir).map((library) => ({
+                    name: path.basename(library),
+                    bytes: fs.statSync(library).size,
+                    sha256: hashFile(library),
+                  })),
+                  smokeTest: { command: '--help', exitCode: 0 },
+                  provisionedAt: new Date().toISOString(),
+                };
+                fs.writeFileSync(path.join(dir, 'runtime-manifest.json'), JSON.stringify(runtimeManifest, null, 2), 'utf8');
+                return true;
+              }
               fs.chmodSync(stagedBin, 0o755);
               return fs.statSync(stagedBin).size > 0;
             },
@@ -1148,15 +1317,14 @@ export class LocalSherpaNeuralEngine {
       return this.getStatus();
     })();
 
-    this.installShenavaRuntimePromise = task.finally(() => {
-      if (this.installShenavaRuntimePromise === task) {
+    const wrappedTask = task.finally(() => {
+      if (this.installShenavaRuntimePromise === wrappedTask) {
         this.installShenavaRuntimePromise = null;
       }
     });
-
-    return this.installShenavaRuntimePromise;
+    this.installShenavaRuntimePromise = wrappedTask;
+    return wrappedTask;
   }
-
   public unloadActiveModel(): { readonly unloadedModelId: string | null; readonly rssMb: number } {
     const prev = this.activeModelId;
     this.activeModelId = null;
@@ -1393,7 +1561,7 @@ export class LocalSherpaNeuralEngine {
       TRANSFORMERS_OFFLINE: '1',
     };
     if (params.libDir) {
-      const libraryPathName = process.platform === 'darwin' ? 'DYLD_LIBRARY_PATH' : 'LD_LIBRARY_PATH';
+      const libraryPathName = sherpaLibraryPathEnvironmentVariable();
       env[libraryPathName] = `${params.libDir}${path.delimiter}${env[libraryPathName] ?? ''}`;
     }
 

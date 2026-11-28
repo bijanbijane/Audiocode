@@ -518,3 +518,215 @@ This addendum supersedes only older claims about the current primary Persian mod
 ### ۱۹.۳. وضعیت پذیرش
 
 R0 همچنان **IN PROGRESS** است. دامنه و مسیر تحویل مصوب‌اند، اما تعیین دقیق ماتریس Audition/macOS/Windows، مدل اعتماد توزیع داخلی، baseline اجرایی CI و دسترسی به میزبان‌های فیزیکی/مجاز هر دو سیستم‌عامل هنوز برای خروج از R0 لازم‌اند. تا آن زمان، هیچ Gate عبور نکرده است.
+
+
+---
+
+## ۲۰. R0 / R6 وضعیت جاری پس از تصمیم مالک (2026-11-28)
+
+این بخش، وضعیت اجرایی جدیدتر را به snapshot تاریخی بخش ۱۹ اضافه می‌کند؛ سوابق قبلی حذف نشده‌اند.
+
+### ۲۰.۱. تصمیم مصوب ماتریس میزبان
+
+تصمیم مالک پروژه در 2026-11-28 در ADR-027 ثبت شد:
+
+| Target ID | سیستم‌عامل | معماری | Host |
+|---|---|---|---|
+| darwin-arm64 | macOS 14/15 | Apple Silicon | Adobe Audition 25.x |
+| darwin-x64 | macOS 14/15 | Intel | Adobe Audition 25.x |
+| win32-x64 | Windows 11 | x64 | Adobe Audition 25.x |
+
+این تصمیم، ابهام انتخاب ماتریس را حل می‌کند؛ هیچ‌یک از سه target هنوز از نظر runtime واقعی یا Host فیزیکی VERIFIED / ACCEPTED نیست.
+
+### ۲۰.۲. GitHub و شاخه‌ها
+
+- مخزن رسمی: bijanbijane/Audiocode. پاسخ فعلی GitHub API مقدار private=false را برمی‌گرداند؛ بنابراین عبارت «خصوصی» در snapshot قبلی با metadata فعلی API سازگار نیست و باید به‌عنوان مغایرت تاریخی تلقی شود.
+- main همچنان روی e73394f8e00e477f1de0046e04fd233681610563 قرار دارد و در این جلسه تغییر نکرد.
+- PR #6: شاخه docs/r0-baseline-audit-2026-11-27، OPEN / DRAFT / NOT MERGED؛ head برابر 4632e84f29221d70bf2a308aefb340ae429f731a.
+- PR #7: شاخه feat/r6-target-specific-release-packaging، OPEN / DRAFT / NOT MERGED؛ head در آخرین بررسی a31199a2a4352ced2eac6a6b1b70e5018c13c22b؛ به‌صورت stacked روی head PR #6 قرار دارد.
+- PR #7 شامل ۱۱ فایل، ۲۷۹ اضافه و ۳۳ حذف در آخرین بررسی بود.
+
+### ۲۰.۳. CI و قابلیت اتکا به شواهد
+
+- چهار Workflow روی head PR #6 یعنی 4632e84... با نتیجه SUCCESS پایان یافتند: AVAPARDAZ Quality Gates، Architecture Governance، Separated Web/API Container Build و Standalone Platform API Readiness.
+- برای PR #7 در آخرین بررسی هیچ Check Run یا Workflow Run قابل مشاهده نبود. Workflowهای فعلی pull request را فقط برای target branchهای main/master فیلتر می‌کنند؛ PR #7 به شاخه R0 هدف‌گذاری شده است. بنابراین تست‌های کد جدید NOT TRIGGERED / NOT AVAILABLE هستند، نه PASS.
+- GitHub hostname از shell محلی قابل resolve نبود؛ clone و اجرای محلی تست‌ها انجام نشد.
+- هیچ native runtime artifact، installer package یا تست واقعی macOS/Windows/Audition در این جلسه تولید یا اجرا نشد.
+
+### ۲۰.۴. پیاده‌سازی هدف‌محور R6
+
+در PR #7:
+- scripts/release-targets.mjs منبع واحد سه target مصوب و نام دقیق فایل‌های native Sherpa / ONNX Runtime است.
+- بسته‌ساز از target صریح استفاده می‌کند، runtime target mismatch را fail-closed رد می‌کند، نام artifactها را target-specific می‌کند و target/build-host را در manifest ثبت می‌کند.
+- Installer تولیدشده OS/CPU اشتباه و Node.js کمتر از 20 را پیش از کپی payload رد می‌کند؛ wrapper ویندوز PowerShell نیز تولید می‌شود.
+- metadata موتور Release با سه target مصوب همگام شده و regression tests اضافه شده‌اند.
+
+محدودیت مهم: AVAPARDAZ_SHERPA_RUNTIME_TARGET فقط assertion در زمان build است؛ اثبات رمزنگاری‌شده یا بررسی format/architecture باینری نیست.
+
+### ۲۰.۵. وضعیت واقعی R0
+
+- ماتریس هدف: APPROVED.
+- انتخاب سه target در metadata و packager: IMPLEMENTED IN PR #7; CI NOT RUN.
+- native runtime payload برای هر سه target: NOT AVAILABLE / NOT QUALIFIED.
+- نصب CEP در مسیر واقعی Adobe، ثبت/راه‌اندازی Companion، update/rollback یکپارچه و signature verification: OPEN.
+- تست فیزیکی Windows 11 x64، macOS 14/15 Apple Silicon و Intel با Audition 25.x: NOT RUN.
+- سیاست داخلی signing/trust و مدل اجرای Companion: OPEN.
+- R0 و R6: IN PROGRESS — NOT ACCEPTED.
+
+مراجع:
+- DECISION-LOG.md — ADR-027
+- HARDWARE-COMPATIBILITY-MATRIX.md — Section 3
+- R0-DISTRIBUTION-TRUST-AUDIT-2026-11-28.md — Section 8
+- PR #7 — target-specific packaging
+
+
+### ۲۰.۶. به‌روزرسانی پس از Native Runtime Qualification CI
+
+در commit برابر با 4959fdddb3f3a7205a800e80562de76b282aa2ec:
+
+- ماژول scripts/verify-native-binary.mjs معماری Mach-O و PE را از header واقعی می‌خواند؛ متغیر target به‌تنهایی مبنای اعتماد نیست.
+- بسته‌ساز هر دو باینری Sherpa و ONNX Runtime را پیش از کپی بررسی می‌کند و فایل ONNX مفقود را fail-closed رد می‌کند.
+- تست synthetic معماری در scripts/verify-native-binary.spec.ts قرار گرفته و در Vitest کشف می‌شود.
+- AVAPARDAZ Quality & Release Gates: SUCCESS.
+- Architecture Governance, Reliability & Release Quality Gate: SUCCESS.
+- Vitest: 26 فایل و 109 تست PASS؛ تست verifier چهار مورد PASS.
+- Unit/reliability/fault-injection، End-to-End Quality Gates، Production Build و Release Manifest Verification: PASS.
+- CI ابتدا دو ایراد را کشف کرد (nested template literal و type annotation) که پیش از این head اصلاح شدند.
+
+این شواهد، کد parser و تست‌های synthetic را روی runner لینوکس تأیید می‌کند؛ به معنی اجرای Runtimeهای واقعی macOS/Windows یا پذیرش Audition نیست. سه runtime واقعی هنوز تهیه/ساخته و روی میزبان مقصد تأیید نشده‌اند.
+
+وضعیت جاری: **CI PASS ON PR #7 HEAD 4959fdd؛ NATIVE PAYLOAD / PHYSICAL HOST ACCEPTANCE STILL OPEN.**
+
+
+### ۲۰.۷. شواهد اجرای parser روی سه سیستم‌عامل
+
+در PR #7 head برابر با 52e4eda48e8bd9a37ec61ca24ec8e4e544d330ee، ماتریس اختصاصی parser با موفقیت روی هر سه runner تکمیل شد:
+
+| Runner | معماری واقعی runner | نتیجه |
+|---|---|---|
+| macos-latest | darwin-arm64 | 5/5 PASS |
+| ubuntu-latest | linux-x64 | 5/5 PASS |
+| windows-latest | win32-x64 | 5/5 PASS |
+
+هر runner از lockfile ثابت Bun استفاده کرد و پنج تست Mach-O / PE را اجرا کرد. این نتیجه، portability تست و parser را روی این محیط‌ها تأیید می‌کند؛ اثبات native runtime payloadهای محصول یا نصب واقعی روی سه target مصوب نیست.
+
+AVAPARDAZ Quality & Release Gates نیز روی همین head SUCCESS شده است. Architecture Governance workflow در آخرین checkpoint هنوز در حال اجرا بود؛ نتیجه نهایی آن باید جداگانه تأیید شود.
+
+
+### ۲۰.۸. تأمین و smoke test واقعی Sherpa Runtime برای سه پلتفرم
+
+در PR #7 head برابر با 5d31165ee455f288c8de67baeb8b1c086fc21f62، سه job مستقل Provisioning موفق شدند:
+
+| Target | Hosted runner | باینری/کتابخانه | نتیجه |
+|---|---|---|---|
+| darwin-arm64 | macOS 15 Apple Silicon | Mach-O arm64، سه dylib | SHA-256 + architecture + `--help`: PASS |
+| darwin-x64 | macOS 15 Intel | Mach-O x64، سه dylib | SHA-256 + architecture + `--help`: PASS |
+| win32-x64 | Windows Server 2025 x64 | PE x64، دو DLL | SHA-256 + architecture + `--help`: PASS |
+
+سه asset از release رسمی Sherpa-ONNX v2.0.2 دریافت می‌شوند؛ bytes و SHA-256 در NativeReleaseTargets ثبت شده‌اند. Provisioner با SafeModelSupplyChain دانلود و استخراج می‌کند، باینری و تمام shared libraryها را از نظر معماری بررسی می‌کند و سپس executable واقعی را با `--help` اجرا می‌کند. Runtime manifest در مسیر target-specific نوشته می‌شود؛ هیچ باینری به Git commit نشده است.
+
+SafeModelSupplyChain همچنان symlink را به‌صورت پیش‌فرض رد می‌کند. برای assetهای native پین‌شده فقط symlink نسبی در همان پوشه lib materialize می‌شود؛ target باید regular file در همان پوشه باشد. hardlink، path traversal، absolute link و symlink chain رد می‌شوند.
+
+LocalSherpaNeuralEngine نیز برای سه target پشتیبانی provisioning پیدا کرده است؛ Windows DLL discovery و PATH handling و macOS versioned dylib discovery اصلاح شده‌اند.
+
+### ۲۰.۹. محدودیت پذیرش باقی‌مانده
+
+- macOS 14 runnerهای GitHub Actions بازنشسته شده‌اند؛ CI فعلی macOS 15 arm64 و Intel را تست می‌کند.
+- Windows smoke روی Windows Server 2025 x64 است، نه Windows 11.
+- Full cross-target unsigned Installer + Update package build با production web bundle و مدل Koochik تأییدشده برای هر سه target اجرا شد؛ شش tarball ساخته و SHA-256/byte-length و model/runtime provenance آن‌ها PASS شد. این artifactها منتشر یا امضا نشده‌اند.
+- Windows 11 و macOS 14/15 روی میزبان فیزیکی، Adobe Audition 25.x، CEP registration، Companion startup، signing/trust، update و rollback هنوز ACCEPTED نیستند.
+- Assertion قدیمی Manifest که مدل را در ریشه packageManifest می‌خواند اصلاح شد تا از `components.primaryPersianAsrModel` استفاده کند. اجرای اصلاح‌شده full package gate را با PASS به پایان رساند.
+
+وضعیت: **Native runtime qualification + hosted cross-target unsigned Installer/Update build and integrity gates PASS. Physical installation, Audition integration, signing/trust and update acceptance remain IN PROGRESS.**
+
+
+### ۲۰.۱۰. Runtime provenance enforcement و CPU floor
+
+- Target registry اکنون ویژگی CPU لازم را ثبت می‌کند: `NEON` برای Apple Silicon و `AVX2` برای Intel macOS و Windows x64. این metadata در runtime manifest و package manifest ذخیره می‌شود؛ هنوز CPUID enforcement در Installer پیاده‌سازی نشده است.
+- مطابق مستندات رسمی Adobe Audition 25.x، AVX2 برای Windows و Intel macOS لازم است؛ Hardware Compatibility Matrix و فایل System Requirements تولیدی با این الزام همگام شدند.
+- Package builder بدون `runtime-manifest.json` معتبر ادامه نمی‌دهد؛ target ID، archive hash/bytes، executable hash، ONNX library hash و مجموعه کامل shared-library hashها را تطبیق می‌دهد و manifest را در payload نهایی embed می‌کند.
+- `LocalSherpaNeuralEngine` نیز پس از smoke test همین manifest را ثبت و هنگام کشف runtime، hashها و target را بررسی می‌کند.
+- دو ایراد single-flight promise cleanup در نصب Runtime و دریافت مدل اصلاح شد؛ قبلاً callback مقدار promise wrapper را با task اصلی مقایسه می‌کرد و cache هرگز پاک نمی‌شد، بنابراین retry پس از settlement ممکن نبود.
+
+Latest fully validated full native/package CI head: `337844e6b0b00228dbd1d6781e3c331c4344c6ee`. Both applicable workflows completed SUCCESS: AVAPARDAZ Quality & Release Gates Levels 1–5; Architecture Governance with Vitest 30 files / 130 tests, Node reliability/fault-injection 32 tests, TypeScript compilation, zero-circular dependency check across 730 files, SBOM, license audit, E2E quality gates, production build, release manifest verification, all four native parser runners, all three native runtime provisioning targets, and the cross-target Installer/Update build with six tarball hash and provenance checks. Current branch head is `54a1da21778dc0dd852840c2b5662104a82c5664`; its AVAPARDAZ Levels 1–5 workflow passed. A subsequent architecture run hit a transient GitHub Artifact Service timeout on macOS arm64 upload after provisioning passed; the failed upload job was retried. This evidence remains specific to commit `337844e` for the full package gate.
+
+
+---
+
+## ۲۱. R6-WP02 — Native Runtime Qualification و Cross-target Package CI (2026-11-28)
+
+### ۲۱.۱. تغییرات Workflow
+
+- `.github/workflows/ci-quality-gate.yml` در PR #7 با نسخه کامل workflow شاخه پایه همگام شد؛ native binary parser، سه native runtime provisioning job، Koochik provenance و cross-target package build حفظ شدند.
+- PR branch filter شامل شاخه stacked پایه شد تا workflow برای PR #7 اجرا شود.
+- خطای assertion مربوط به package model provenance اصلاح شد: مدل اصلی زیر `packageManifest.components.primaryPersianAsrModel` قرار دارد، نه root object.
+- Job ماتریس تکراری در Workflow دیگر حذف شد تا provisioning مجدد و غیرضروری رخ ندهد.
+
+### ۲۱.۲. شواهد CI روی commit b60afa9
+
+| Gate | نتیجه |
+|---|---|
+| AVAPARDAZ Levels 1–5 | PASS |
+| Architecture Governance / TypeScript / circular dependency / SBOM / license | PASS |
+| Vitest | 31 files / 134 tests PASS (شامل CPU preflight regression tests) |
+| Node reliability / fault-injection | 32 tests PASS |
+| Native binary format parser | Ubuntu, macOS 15 arm64, macOS 15 Intel, Windows x64 — PASS |
+| Sherpa runtime provisioning + CPU probes | darwin-arm64 (NEON), darwin-x64 (AVX2), win32-x64 (AVX2) — PASS |
+| Koochik immutable revision / SHA-256 / Apache license | PASS |
+| Cross-target unsigned Installer + Update build | PASS — شش tarball |
+| Six tarball bytes/SHA-256 + embedded manifest + installer syntax + model/runtime/CPU provenance | PASS برای هر سه target |
+
+Artifactهای runtime برای هر سه هدف و artifact نهایی manifest-only با شناسه `15263232073` در GitHub Actions ذخیره شدند. Generated `install.mjs`, `uninstall.mjs`, و `cpu-feature-preflight.mjs` با `node --check` بررسی شدند؛ macOS shell wrapper نیز `bash -n` را گذراند. بسته‌های unsigned در CI منتشر نشدند.
+
+### ۲۱.۳. محدودیت‌های باقی‌مانده
+
+- Hosted macOS 15 arm64 و Intel، جایگزین آزمون macOS 14 فیزیکی نیستند.
+- Windows Server 2025 x64، جایگزین آزمون Windows 11 فیزیکی نیست.
+- Adobe Audition 25.x، CEP registration و Companion lifecycle هنوز روی میزبان واقعی تست نشده‌اند.
+- Installer امضا نشده است؛ trust-root pinning، signature verification و update signature enforcement هنوز باز هستند.
+- نصب تمیز، repair، upgrade، rollback و uninstall روی میزبان‌های فیزیکی هنوز اجرا نشده‌اند.
+- CPU feature preflight اکنون در Installer اجرا می‌شود: Intel macOS از `sysctl hw.optional.avx2_0`، Windows x64 از `IsProcessorFeaturePresent(40)` و Apple Silicon از NEON baseline استفاده می‌کند. Runtime provisioner نتیجه واقعی host را در manifest ثبت می‌کند و packager آن را الزام می‌کند.
+
+### ۲۱.۴. وضعیت Git
+
+- PR #7: OPEN / DRAFT / NOT MERGED.
+- Latest fully validated branch head در زمان این ثبت: `b60afa999b7a0892c81742ac8710b893cdbac4ba`.
+- `main` بدون تغییر مانده است.
+- R6 hosted packaging/integrity gates: **PASS**؛ internal distribution trust و physical acceptance: **OPEN**.
+
+
+---
+
+## ۲۲. R6-WP03 — CPU Feature Floor Enforcement و Installer Artifact Smoke (2026-11-28)
+
+### ۲۲.۱. Implementation
+
+- `scripts/cpu-feature-preflight.mjs` یک helper مستقل و fail-closed برای CPU requirement است.
+- Generated installer این helper را همراه خود بسته‌بندی می‌کند و پیش از ساخت مسیر نصب یا کپی payload، target CPU feature را بررسی می‌کند.
+- Runtime provisioner فقط روی host هم‌معماری اجرا می‌شود، CPU feature را probe می‌کند و `cpuFeatureProbe.required/checked` را در `runtime-manifest.json` ثبت می‌کند.
+- Packager runtime manifest را رد می‌کند اگر CPU probe مفقود یا با target registry نامنطبق باشد؛ package manifest نیز نتیجه probe را نگه می‌دارد.
+- Regression tests برای NEON baseline، macOS Intel AVX2، Windows AVX2، feature ناشناخته و target نامعتبر اضافه شدند.
+
+### ۲۲.۲. CI Evidence
+
+Architecture Governance run `46144552901` روی commit `b60afa999b7a0892c81742ac8710b893cdbac4ba` با نتیجه SUCCESS پایان یافت:
+
+- TypeScript compilation: PASS.
+- Vitest: 31 files / 134 tests PASS.
+- Node reliability/fault-injection: 32 tests PASS.
+- Native parser tests: Ubuntu، macOS 15 arm64، macOS 15 Intel، Windows x64 — PASS.
+- Actual host CPU probes: Windows AVX2، macOS Intel AVX2، Apple Silicon NEON — PASS.
+- Runtime provisioning، archive hashes، binary/library architecture و Sherpa `--help` smoke: هر سه target PASS.
+- Cross-target Installer + Update build: شش unsigned tarball PASS.
+- Embedded package manifest، installer/uninstaller/CPU helper syntax، macOS shell wrapper syntax، tarball byte length/SHA-256 و model/runtime/CPU provenance: PASS.
+
+Artifact manifest ID: `15263232073`. هیچ tarball امضاشده یا production release منتشر نشد.
+
+### ۲۲.۳. Remaining Acceptance
+
+- Physical Windows 11 و macOS 14/15 acceptance.
+- Adobe Audition 25.x CEP/Companion integration.
+- Code signing، pinned trust root و signed update enforcement.
+- Clean install، repair، upgrade، rollback و uninstall روی میزبان واقعی.
+
+R0/R6 hosted packaging و CPU gates: **PASS**؛ release trust و physical acceptance: **OPEN**.

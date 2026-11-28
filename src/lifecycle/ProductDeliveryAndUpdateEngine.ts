@@ -69,6 +69,53 @@ function parseSemver(v: string): [number, number, number] | null {
 }
 
 /**
+ * Compares strict SemVer release versions, including prerelease precedence.
+ * Returns null for malformed versions so callers can fail closed.
+ */
+function compareReleaseVersions(left: string, right: string): number | null {
+  const parse = (value: string) => {
+    const match = value.trim().match(
+      /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/,
+    );
+    if (!match || ![match[1], match[2], match[3]].every((part) => Number.isSafeInteger(Number(part)))) return null;
+    return {
+      core: [Number(match[1]), Number(match[2]), Number(match[3])] as const,
+      prerelease: match[4]?.split('.') ?? null,
+    };
+  };
+  const a = parse(left);
+  const b = parse(right);
+  if (!a || !b) return null;
+
+  for (let i = 0; i < 3; i += 1) {
+    if (a.core[i] !== b.core[i]) return a.core[i] > b.core[i] ? 1 : -1;
+  }
+  if (a.prerelease === null || b.prerelease === null) {
+    if (a.prerelease === b.prerelease) return 0;
+    return a.prerelease === null ? 1 : -1;
+  }
+  const length = Math.max(a.prerelease.length, b.prerelease.length);
+  for (let i = 0; i < length; i += 1) {
+    const ai = a.prerelease[i];
+    const bi = b.prerelease[i];
+    if (ai === undefined || bi === undefined) {
+      if (ai === bi) return 0;
+      return ai === undefined ? -1 : 1;
+    }
+    if (ai === bi) continue;
+    const an = /^(0|[1-9]\d*)$/.test(ai);
+    const bn = /^(0|[1-9]\d*)$/.test(bi);
+    if (an && bn) {
+      if (ai.length !== bi.length) return ai.length > bi.length ? 1 : -1;
+      return ai > bi ? 1 : -1;
+    }
+    if (an !== bn) return an ? -1 : 1;
+    return ai > bi ? 1 : -1;
+  }
+  return 0;
+}
+
+/**
  * Evaluates cross-component version compatibility before permitting activation or job start.
  */
 export function evaluateComponentCompatibility(params: {
@@ -262,14 +309,89 @@ const LEGAL_UPDATE_TRANSITIONS: Readonly<Record<ComponentUpdateState, readonly C
   UPDATE_ROLLED_BACK: ['UPDATE_DISCOVERED'],
 };
 
-export interface UpdateManifest {
+export interface UpdateManifestPayload {
   readonly component: ReleaseComponentKind;
   readonly version: string;
   readonly minCompatibleIpcProtocol?: string;
   readonly sha256Hex: string;
   readonly sizeBytes: number;
-  readonly signatureStatus: 'SIGNATURE_VERIFIED' | 'UNSIGNED_CHECKSUM_ONLY' | 'SIGNATURE_INVALID';
   readonly releaseNotes?: string;
+}
+
+export interface UpdateManifestSignature {
+  readonly algorithm: 'Ed25519';
+  readonly keyId: string;
+  readonly signatureBase64: string;
+}
+
+export interface UpdateManifest extends UpdateManifestPayload {
+  readonly signature: UpdateManifestSignature;
+}
+
+/** Stable, versioned field order: the signature binds update identity and artifact digest. */
+export function canonicalizeUpdateManifest(manifest: UpdateManifestPayload, keyId: string): string {
+  return JSON.stringify({
+    schemaVersion: '1.0.0',
+    signatureAlgorithm: 'Ed25519',
+    keyId,
+    component: manifest.component,
+    version: manifest.version,
+    minCompatibleIpcProtocol: manifest.minCompatibleIpcProtocol ?? null,
+    sha256Hex: manifest.sha256Hex.toLowerCase(),
+    sizeBytes: manifest.sizeBytes,
+    releaseNotes: manifest.releaseNotes ?? null,
+  });
+}
+
+function toOwnedArrayBuffer(bytes: Uint8Array): ArrayBuffer {
+  const buffer = new ArrayBuffer(bytes.byteLength);
+  new Uint8Array(buffer).set(bytes);
+  return buffer;
+}
+
+function decodeUpdateSignatureBase64(value: string): Uint8Array | null {
+  if (!/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(value)) return null;
+  try {
+    const decoded = atob(value);
+    return Uint8Array.from(decoded, (character) => character.charCodeAt(0));
+  } catch {
+    return null;
+  }
+}
+
+async function verifyUpdateManifestSignature(
+  manifest: UpdateManifest,
+  trustedSigningKeys: ReadonlyMap<string, Uint8Array>,
+): Promise<boolean> {
+  const signature = manifest?.signature;
+  if (
+    !signature ||
+    typeof signature !== 'object' ||
+    signature.algorithm !== 'Ed25519' ||
+    typeof signature.keyId !== 'string' ||
+    !/^[A-Za-z0-9._-]{1,64}$/.test(signature.keyId) ||
+    typeof signature.signatureBase64 !== 'string'
+  ) return false;
+
+  const publicKeyBytes = trustedSigningKeys.get(signature.keyId);
+  const signatureBytes = decodeUpdateSignatureBase64(signature.signatureBase64);
+  const subtle = globalThis.crypto?.subtle;
+  if (!publicKeyBytes || publicKeyBytes.length !== 32 || !signatureBytes || signatureBytes.length !== 64 || !subtle) {
+    return false;
+  }
+
+  try {
+    const publicKey = await subtle.importKey('raw', toOwnedArrayBuffer(publicKeyBytes), { name: 'Ed25519' }, false, ['verify']);
+    const payload = new TextEncoder().encode(canonicalizeUpdateManifest(manifest, signature.keyId));
+    return await subtle.verify(
+      { name: 'Ed25519' },
+      publicKey,
+      toOwnedArrayBuffer(signatureBytes),
+      toOwnedArrayBuffer(payload),
+    );
+  } catch {
+    return false;
+  }
 }
 
 export interface ComponentSlotRecord {
@@ -286,8 +408,20 @@ export interface ComponentSlotRecord {
 export class ComponentUpdateOrchestrator {
   private readonly slots = new Map<ReleaseComponentKind, ComponentSlotRecord>();
   private readonly activePinnedJobs = new Set<string>();
+  private readonly trustedSigningKeys: ReadonlyMap<string, Uint8Array>;
 
-  constructor(initialVersions: Readonly<Record<ReleaseComponentKind, string>>) {
+  constructor(
+    initialVersions: Readonly<Record<ReleaseComponentKind, string>>,
+    trustedSigningKeys: Readonly<Record<string, Uint8Array>> = {},
+  ) {
+    const pinnedKeys = new Map<string, Uint8Array>();
+    for (const [keyId, publicKeyBytes] of Object.entries(trustedSigningKeys)) {
+      if (!/^[A-Za-z0-9._-]{1,64}$/.test(keyId) || publicKeyBytes.length !== 32) {
+        throw new Error('INVALID_RELEASE_TRUST_ROOT');
+      }
+      pinnedKeys.set(keyId, new Uint8Array(publicKeyBytes));
+    }
+    this.trustedSigningKeys = pinnedKeys;
     for (const [comp, ver] of Object.entries(initialVersions) as [ReleaseComponentKind, string][]) {
       this.slots.set(comp, {
         component: comp,
@@ -343,7 +477,6 @@ export class ComponentUpdateOrchestrator {
    */
   public async executeSafeUpdate(params: {
     readonly manifest: UpdateManifest;
-    readonly requireCryptographicSignature?: boolean;
     readonly availableDiskBytes: number;
     readonly downloadAndVerifySha256: () => Promise<{ readonly ok: boolean; readonly actualSha256Hex?: string; readonly error?: string }>;
     readonly stageArtifact: () => Promise<{ readonly ok: boolean; readonly stagingDir?: string; readonly error?: string }>;
@@ -361,7 +494,7 @@ export class ComponentUpdateOrchestrator {
     });
 
     // 1. Metadata validation
-    if (!parseSemver(manifest.version) || !/^[a-f0-9]{64}$/i.test(manifest.sha256Hex) || manifest.sizeBytes <= 0) {
+    if (!parseSemver(manifest.version) || !/^[a-f0-9]{64}$/i.test(manifest.sha256Hex) || !Number.isSafeInteger(manifest.sizeBytes) || manifest.sizeBytes <= 0) {
       const failed = this.transition(comp, 'UPDATE_FAILED', 'Invalid update manifest metadata.', {
         lastError: 'INVALID_UPDATE_MANIFEST',
       });
@@ -384,17 +517,26 @@ export class ComponentUpdateOrchestrator {
     }
     this.transition(comp, 'UPDATE_COMPATIBILITY_CHECKED', 'Component compatibility verified.');
 
-    // 3. Authenticity check (NEVER accept INVALID signature; enforce signature when required)
-    if (
-      manifest.signatureStatus === 'SIGNATURE_INVALID' ||
-      (params.requireCryptographicSignature && manifest.signatureStatus !== 'SIGNATURE_VERIFIED')
-    ) {
-      const failed = this.transition(comp, 'UPDATE_FAILED', `Authenticity rejected (${manifest.signatureStatus}).`, {
+    // 3. Authenticity check: cryptographic Ed25519 verification against constructor-pinned keys is mandatory.
+    // Caller-supplied status strings are deliberately not part of the manifest contract.
+    const signatureVerified = await verifyUpdateManifestSignature(manifest, this.trustedSigningKeys);
+    if (!signatureVerified) {
+      const failed = this.transition(comp, 'UPDATE_FAILED', 'Release manifest signature is missing, untrusted, malformed, or invalid.', {
         lastError: 'UPDATE_AUTHENTICITY_FAILED',
       });
       return { ok: false, slot: failed, rolledBack: false };
     }
-    this.transition(comp, 'UPDATE_AUTHENTICITY_VERIFIED', `Authenticity checked (${manifest.signatureStatus}).`);
+    this.transition(comp, 'UPDATE_AUTHENTICITY_VERIFIED', `Ed25519 signature verified with trusted key ${manifest.signature.keyId}.`);
+
+    // 3.1. Anti-rollback / replay protection. A valid signature never authorizes an older
+    // or already-active release. SemVer prerelease precedence is respected (beta.2 > beta.1).
+    const versionOrder = compareReleaseVersions(manifest.version, initial.activeVersion);
+    if (versionOrder === null || versionOrder <= 0) {
+      const failed = this.transition(comp, 'UPDATE_FAILED', 'Update version is not strictly newer than the active release.', {
+        lastError: 'UPDATE_VERSION_NOT_NEWER',
+      });
+      return { ok: false, slot: failed, rolledBack: false };
+    }
 
     // 4. Storage preflight (require 2x size headroom for staging + active preservation)
     if (params.availableDiskBytes < manifest.sizeBytes * 2) {
@@ -407,7 +549,12 @@ export class ComponentUpdateOrchestrator {
     this.transition(comp, 'UPDATE_DOWNLOADING', 'Downloading artifact.');
 
     // 5. Download & SHA-256 verification
-    const dl = await params.downloadAndVerifySha256();
+    let dl: { readonly ok: boolean; readonly actualSha256Hex?: string; readonly error?: string };
+    try {
+      dl = await params.downloadAndVerifySha256();
+    } catch (error) {
+      dl = { ok: false, error: `Download callback threw: ${error instanceof Error ? error.message : String(error)}` };
+    }
     if (!dl.ok) {
       const failed = this.transition(comp, 'UPDATE_FAILED', dl.error ?? 'Download failed.', {
         lastError: 'UPDATE_DOWNLOAD_FAILED',
@@ -425,7 +572,12 @@ export class ComponentUpdateOrchestrator {
     this.transition(comp, 'UPDATE_INTEGRITY_VERIFIED', 'SHA-256 checksum matched manifest.');
 
     // 6. Staging
-    const staged = await params.stageArtifact();
+    let staged: { readonly ok: boolean; readonly stagingDir?: string; readonly error?: string };
+    try {
+      staged = await params.stageArtifact();
+    } catch (error) {
+      staged = { ok: false, error: `Staging callback threw: ${error instanceof Error ? error.message : String(error)}` };
+    }
     if (!staged.ok || !staged.stagingDir) {
       const failed = this.transition(comp, 'UPDATE_FAILED', staged.error ?? 'Staging failed.', {
         lastError: 'UPDATE_STAGING_FAILED',
@@ -438,7 +590,9 @@ export class ComponentUpdateOrchestrator {
 
     // Defer activation if active inference/render job is pinned
     if (this.activePinnedJobs.size > 0) {
-      const ready = this.transition(comp, 'UPDATE_READY', 'Update staged & ready; waiting for active jobs to complete.');
+      const ready = this.transition(comp, 'UPDATE_READY', 'Update staged & ready; waiting for active jobs to complete.', {
+        previousKnownGoodVersion: initial.activeVersion,
+      });
       return { ok: false, slot: ready, rolledBack: false };
     }
     this.transition(comp, 'UPDATE_READY', 'Ready for atomic activation.');
@@ -449,7 +603,12 @@ export class ComponentUpdateOrchestrator {
       previousKnownGoodVersion: prevKnownGood,
     });
 
-    const act = await params.activateArtifact(staged.stagingDir);
+    let act: { readonly ok: boolean; readonly error?: string };
+    try {
+      act = await params.activateArtifact(staged.stagingDir);
+    } catch (error) {
+      act = { ok: false, error: `Activation callback threw: ${error instanceof Error ? error.message : String(error)}` };
+    }
     if (!act.ok) {
       return this.performRollback(comp, prevKnownGood, act.error ?? 'Activation failed.', params.restorePreviousVersion);
     }
@@ -459,7 +618,12 @@ export class ComponentUpdateOrchestrator {
     });
     this.transition(comp, 'UPDATE_VERIFICATION_PENDING', 'Running post-update health verification.');
 
-    const health = await params.verifyPostActivationHealth();
+    let health: { readonly ok: boolean; readonly error?: string };
+    try {
+      health = await params.verifyPostActivationHealth();
+    } catch (error) {
+      health = { ok: false, error: `Post-activation health callback threw: ${error instanceof Error ? error.message : String(error)}` };
+    }
     if (!health.ok) {
       return this.performRollback(
         comp,
@@ -477,13 +641,113 @@ export class ComponentUpdateOrchestrator {
     return { ok: true, slot: verified, rolledBack: false };
   }
 
-  /** Recovers safely from a power-loss / interrupted update found at next startup */
-  public recoverInterruptedUpdate(component: ReleaseComponentKind): ComponentSlotRecord {
+  /**
+   * Resumes a verified, staged update after active inference/render jobs have released their pins.
+   * The staged bytes are reused; this path never downloads or re-stages the artifact.
+   */
+  public async resumeStagedUpdate(params: {
+    readonly component: ReleaseComponentKind;
+    readonly activateArtifact: (stagingDir: string) => Promise<{ readonly ok: boolean; readonly error?: string }>;
+    readonly verifyPostActivationHealth: () => Promise<{ readonly ok: boolean; readonly error?: string }>;
+    readonly restorePreviousVersion: (prevVersion: string) => Promise<boolean>;
+  }): Promise<{ readonly ok: boolean; readonly slot: ComponentSlotRecord; readonly rolledBack: boolean }> {
+    const current = this.getSlot(params.component);
+    if (current.state !== 'UPDATE_READY') {
+      return { ok: false, slot: current, rolledBack: false };
+    }
+    if (this.activePinnedJobs.size > 0) {
+      return { ok: false, slot: current, rolledBack: false };
+    }
+
+    const candidateVersion = current.candidateVersion;
+    const stagingDir = current.stagingDir;
+    const previousVersion = current.previousKnownGoodVersion;
+    const versionOrder = candidateVersion
+      ? compareReleaseVersions(candidateVersion, current.activeVersion)
+      : null;
+    if (!candidateVersion || !stagingDir || !previousVersion || versionOrder === null || versionOrder <= 0) {
+      const failed = this.transition(params.component, 'UPDATE_FAILED', 'Staged update metadata is incomplete or no longer newer than the active release.', {
+        lastError: 'INVALID_STAGED_UPDATE',
+      });
+      return { ok: false, slot: failed, rolledBack: false };
+    }
+
+    this.transition(params.component, 'UPDATE_ACTIVATING', `Resuming staged update ${candidateVersion} after active jobs completed.`);
+    let activation: { readonly ok: boolean; readonly error?: string };
+    try {
+      activation = await params.activateArtifact(stagingDir);
+    } catch (error) {
+      activation = {
+        ok: false,
+        error: `Deferred activation threw: ${error instanceof Error ? error.message : String(error)}`,
+      };
+    }
+    if (!activation.ok) {
+      return this.performRollback(
+        params.component,
+        previousVersion,
+        activation.error ?? 'Deferred activation failed.',
+        params.restorePreviousVersion,
+      );
+    }
+
+    this.transition(params.component, 'UPDATE_ACTIVATED', 'Activated deferred staged update.', {
+      activeVersion: candidateVersion,
+    });
+    this.transition(params.component, 'UPDATE_VERIFICATION_PENDING', 'Running post-update health verification.');
+    let health: { readonly ok: boolean; readonly error?: string };
+    try {
+      health = await params.verifyPostActivationHealth();
+    } catch (error) {
+      health = {
+        ok: false,
+        error: `Deferred post-activation health check threw: ${error instanceof Error ? error.message : String(error)}`,
+      };
+    }
+    if (!health.ok) {
+      return this.performRollback(
+        params.component,
+        previousVersion,
+        health.error ?? 'Deferred update health check failed.',
+        params.restorePreviousVersion,
+      );
+    }
+
+    const verified = this.transition(params.component, 'UPDATE_VERIFIED', 'Deferred update passed post-activation health verification.', {
+      candidateVersion: null,
+      stagingDir: null,
+      lastError: null,
+    });
+    return { ok: true, slot: verified, rolledBack: false };
+  }
+
+  /**
+   * Recovers an interrupted update through a filesystem/runtime adapter.
+   * The adapter must reconcile the active installation to the previous known-good
+   * version when activation may have started, then remove only abandoned staging or
+   * partial-download data. It receives the exact interrupted state so it can avoid
+   * deleting a directory that has become the active installation.
+   *
+   * If adapter recovery fails, the state and artifact references remain intact for
+   * retry; the orchestrator never reports rollback based on an in-memory version edit.
+   */
+  public async recoverInterruptedUpdate(
+    component: ReleaseComponentKind,
+    recoverInterruptedArtifact: (context: {
+      readonly component: ReleaseComponentKind;
+      readonly interruptedState: ComponentUpdateState;
+      readonly activeVersion: string;
+      readonly previousKnownGoodVersion: string | null;
+      readonly candidateVersion: string | null;
+      readonly stagingDir: string | null;
+    }) => Promise<void>,
+  ): Promise<ComponentSlotRecord> {
     const cur = this.getSlot(component);
     const interruptedStates: ComponentUpdateState[] = [
       'UPDATE_DOWNLOADING',
       'UPDATE_DOWNLOADED',
       'UPDATE_STAGED',
+      'UPDATE_READY',
       'UPDATE_ACTIVATING',
       'UPDATE_VERIFICATION_PENDING',
       'UPDATE_ROLLBACK_PENDING',
@@ -491,13 +755,29 @@ export class ComponentUpdateOrchestrator {
     if (!interruptedStates.includes(cur.state)) {
       return cur;
     }
+
+    try {
+      await recoverInterruptedArtifact({
+        component,
+        interruptedState: cur.state,
+        activeVersion: cur.activeVersion,
+        previousKnownGoodVersion: cur.previousKnownGoodVersion,
+        candidateVersion: cur.candidateVersion,
+        stagingDir: cur.stagingDir,
+      });
+    } catch (error) {
+      throw new Error(
+        `INTERRUPTED_UPDATE_RECOVERY_FAILED: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+
     const targetVersion = cur.previousKnownGoodVersion ?? cur.activeVersion;
     if (cur.state !== 'UPDATE_ROLLBACK_PENDING') {
       if (LEGAL_UPDATE_TRANSITIONS[cur.state].includes('UPDATE_ROLLBACK_PENDING')) {
-        this.transition(component, 'UPDATE_ROLLBACK_PENDING', 'Detected interrupted update on restart.');
+        this.transition(component, 'UPDATE_ROLLBACK_PENDING', 'Detected interrupted update on restart; runtime rollback and artifact recovery completed.');
       } else {
-        this.transition(component, 'UPDATE_FAILED', 'Detected interrupted pre-activation update on restart.');
-        this.transition(component, 'UPDATE_ROLLBACK_PENDING', 'Cleaning up interrupted staging state.');
+        this.transition(component, 'UPDATE_FAILED', 'Detected interrupted pre-activation update on restart; runtime rollback and artifact recovery completed.');
+        this.transition(component, 'UPDATE_ROLLBACK_PENDING', 'Finalizing interrupted update recovery.');
       }
     }
     return this.transition(component, 'UPDATE_ROLLED_BACK', `Recovered cleanly to known-good version ${targetVersion}.`, {
@@ -515,7 +795,15 @@ export class ComponentUpdateOrchestrator {
     restoreFn: (prevVersion: string) => Promise<boolean>,
   ): Promise<{ readonly ok: boolean; readonly slot: ComponentSlotRecord; readonly rolledBack: boolean }> {
     this.transition(component, 'UPDATE_ROLLBACK_PENDING', reason, { lastError: reason });
-    const restored = await restoreFn(prevKnownGood);
+    let restored = false;
+    try {
+      restored = await restoreFn(prevKnownGood);
+    } catch (error) {
+      const failed = this.transition(component, 'UPDATE_FAILED', 'Rollback restoration threw an exception.', {
+        lastError: `ROLLBACK_FAILED: ${reason}; restore threw: ${error instanceof Error ? error.message : String(error)}`,
+      });
+      return { ok: false, slot: failed, rolledBack: false };
+    }
     if (!restored) {
       const failed = this.transition(component, 'UPDATE_FAILED', 'Rollback restoration failed.', {
         lastError: `ROLLBACK_FAILED: ${reason}`,

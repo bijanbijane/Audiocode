@@ -27,14 +27,23 @@ import { promisify } from 'node:util';
 const execFileAsync = promisify(execFile);
 
 /**
- * Explicit allowlist grounded strictly in the real documented model/runtime URLs
- * in `LocalSherpaNeuralEngine.ts` (`github.com/k2-fsa/sherpa-onnx/releases/download/...`)
- * and GitHub Releases asset redirect hosts.
+ * Exact HTTPS hosts used by GitHub Releases and the official Hugging Face Hub/Xet
+ * download path. Keep this explicit; do not use wildcard suffix matching.
  */
 export const ALLOWED_MODEL_DOWNLOAD_HOSTS: readonly string[] = Object.freeze([
   'github.com',
   'objects.githubusercontent.com',
   'release-assets.githubusercontent.com',
+  'huggingface.co',
+  'cas-server.xethub.hf.co',
+  'cas-server.xethub-eu.hf.co',
+  'transfer.xethub.hf.co',
+  'transfer.xethub-eu.hf.co',
+  'us.aws.cdn.hf.co',
+  'us.gcp.cdn.hf.co',
+  'cdn-lfs-us-1.hf.co',
+  'cdn-lfs-eu-1.hf.co',
+  'cas-bridge.xethub.hf.co',
 ]);
 
 export type ModelSupplyChainErrorCode =
@@ -118,6 +127,8 @@ export interface SafeTarExtractOptions {
   readonly maxSingleFileBytes?: number;
   readonly maxTotalBytes?: number;
   readonly allowExecutablesInBin?: boolean;
+  /** Materialize only relative symlinks whose source and target are regular files in the same lib directory. */
+  readonly allowRelativeLibrarySymlinks?: boolean;
   /** Optional strict allowlist of normalized relative file paths permitted in archive. */
   readonly allowedRelativePaths?: readonly string[];
   readonly timeoutMs?: number;
@@ -680,7 +691,8 @@ max_files = int(sys.argv[3])
 max_single_bytes = int(sys.argv[4])
 max_total_bytes = int(sys.argv[5])
 allow_exec_bin = sys.argv[6] == "1"
-allowed_paths_json = sys.argv[7]
+allow_relative_library_symlinks = sys.argv[7] == "1"
+allowed_paths_json = sys.argv[8]
 allowed_paths = set(json.loads(allowed_paths_json)) if allowed_paths_json else None
 
 def fail(code, msg):
@@ -693,6 +705,7 @@ seen_files = set()
 extracted_files = []
 file_count = 0
 total_bytes = 0
+pending_library_symlinks = []
 
 def assert_no_symlink_components(base_real, rel_parts):
     cur = base_real
@@ -708,7 +721,39 @@ with tarfile.open(archive_path, "r:bz2") as tf:
             fail("TAR_PATH_TRAVERSAL_BLOCKED", f"Illegal archive entry name: {raw_name!r}")
 
         if member.issym():
-            fail("TAR_SYMLINK_FORBIDDEN", f"Symlink entry forbidden: {raw_name}")
+            if not allow_relative_library_symlinks:
+                fail("TAR_SYMLINK_FORBIDDEN", f"Symlink entry forbidden: {raw_name}")
+            if raw_name.startswith("/") or (len(raw_name) >= 2 and raw_name[1] == ":"):
+                fail("TAR_PATH_TRAVERSAL_BLOCKED", f"Absolute symlink path forbidden: {raw_name}")
+            if not member.linkname or "\\x00" in member.linkname or "\\\\" in member.linkname or member.linkname.startswith("/") or (len(member.linkname) >= 2 and member.linkname[1] == ":"):
+                fail("TAR_PATH_TRAVERSAL_BLOCKED", f"Illegal symlink target: {member.linkname!r}")
+            raw_parts = [p for p in raw_name.split("/") if p not in ("", ".")]
+            link_parts = [p for p in member.linkname.split("/") if p not in ("", ".")]
+            if any(p == ".." for p in raw_parts + link_parts):
+                fail("TAR_PATH_TRAVERSAL_BLOCKED", f"Parent traversal in symlink: {raw_name} -> {member.linkname}")
+            if len(raw_parts) < 2 or raw_parts[-2] != "lib" or not link_parts:
+                fail("TAR_SYMLINK_FORBIDDEN", f"Only same-directory lib symlinks are allowed: {raw_name}")
+            rel_norm = posixpath.join(*raw_parts)
+            target_rel = posixpath.normpath(posixpath.join(posixpath.dirname(rel_norm), *link_parts))
+            if posixpath.dirname(target_rel) != posixpath.dirname(rel_norm) or target_rel == rel_norm:
+                fail("TAR_SYMLINK_FORBIDDEN", f"Symlink target must remain in the same lib directory: {raw_name}")
+            target_path = os.path.realpath(os.path.join(root_real, *target_rel.split("/")))
+            try:
+                common = os.path.commonpath([root_real, target_path])
+            except ValueError:
+                fail("TAR_ESCAPE_ROOT_BLOCKED", f"Symlink escapes root: {raw_name}")
+            if common != root_real or target_path == root_real:
+                fail("TAR_ESCAPE_ROOT_BLOCKED", f"Symlink escapes root: {raw_name}")
+            if rel_norm in seen_files:
+                fail("TAR_DUPLICATE_ENTRY_BLOCKED", f"Duplicate archive entry: {rel_norm}")
+            seen_files.add(rel_norm)
+            file_count += 1
+            if file_count > max_files:
+                fail("TAR_TOO_MANY_FILES", f"Archive exceeds max file count ({max_files})")
+            if allowed_paths is not None and rel_norm not in allowed_paths:
+                fail("TAR_MANIFEST_MISMATCH", f"Unexpected symlink not in manifest: {rel_norm}")
+            pending_library_symlinks.append((rel_norm, target_rel))
+            continue
         if member.islnk():
             fail("TAR_HARDLINK_FORBIDDEN", f"Hardlink entry forbidden: {raw_name}")
         if member.ischr() or member.isblk() or member.isfifo() or member.isdev():
@@ -788,6 +833,38 @@ with tarfile.open(archive_path, "r:bz2") as tf:
         os.chmod(target_path, safe_mode)
         extracted_files.append(rel_norm)
 
+# Materialize narrowly-scoped lib symlink aliases as regular files. This avoids
+# preserving filesystem links in the installed runtime while retaining expected dylib names.
+pending_library_symlink_names = {rel_link for rel_link, _ in pending_library_symlinks}
+for rel_link, rel_target in pending_library_symlinks:
+    if rel_target in pending_library_symlink_names:
+        fail("TAR_SYMLINK_FORBIDDEN", f"Symlink chains are forbidden: {rel_link} -> {rel_target}")
+for rel_link, rel_target in pending_library_symlinks:
+    target_abs = os.path.realpath(os.path.join(root_real, *rel_target.split("/")))
+    try:
+        common = os.path.commonpath([root_real, target_abs])
+    except ValueError:
+        fail("TAR_ESCAPE_ROOT_BLOCKED", f"Symlink target escapes root: {rel_link}")
+    if common != root_real or not os.path.isfile(target_abs) or os.path.islink(target_abs):
+        fail("TAR_SYMLINK_FORBIDDEN", f"Symlink target must be an extracted regular file: {rel_link} -> {rel_target}")
+    link_abs = os.path.join(root_real, *rel_link.split("/"))
+    if os.path.lexists(link_abs):
+        fail("TAR_DUPLICATE_ENTRY_BLOCKED", f"Symlink destination already exists: {rel_link}")
+    target_size = os.path.getsize(target_abs)
+    if target_size > max_single_bytes or total_bytes + target_size > max_total_bytes:
+        fail("TAR_BOMB_LIMIT_EXCEEDED", f"Materialized symlink exceeds extraction byte limits: {rel_link}")
+    with open(target_abs, "rb") as src, open(link_abs, "xb") as dst:
+        while True:
+            buf = src.read(65536)
+            if not buf:
+                break
+            total_bytes += len(buf)
+            if total_bytes > max_total_bytes:
+                fail("TAR_BOMB_LIMIT_EXCEEDED", f"Materialized symlink exceeded total byte limit: {rel_link}")
+            dst.write(buf)
+    os.chmod(link_abs, 0o644)
+    extracted_files.append(rel_link)
+
 print(json.dumps({"extractedFiles": extracted_files, "totalBytes": total_bytes}))
 `;
 
@@ -818,6 +895,7 @@ export async function extractTarBz2Safe(
   const maxSingleFileBytes = Math.max(1024, options?.maxSingleFileBytes ?? 128 * 1024 * 1024);
   const maxTotalBytes = Math.max(1024, options?.maxTotalBytes ?? 256 * 1024 * 1024);
   const allowExecBin = options?.allowExecutablesInBin ? '1' : '0';
+  const allowRelativeLibrarySymlinks = options?.allowRelativeLibrarySymlinks ? '1' : '0';
   const allowedJson = options?.allowedRelativePaths ? JSON.stringify(options.allowedRelativePaths) : '';
   const timeoutMs = Math.max(1_000, options?.timeoutMs ?? 120_000);
   const pythonBin = options?.pythonBin ?? 'python3';
@@ -837,6 +915,7 @@ export async function extractTarBz2Safe(
         String(maxSingleFileBytes),
         String(maxTotalBytes),
         allowExecBin,
+        allowRelativeLibrarySymlinks,
         allowedJson,
       ],
       {
