@@ -11,7 +11,8 @@
 - Main baseline / current main HEAD observed: `e73394f8e00e477f1de0046e04fd233681610563`
 - Working branch: `docs/r0-baseline-audit-2026-11-27`
 - Previously validated implementation HEAD: `bc8dfc2d1ae568528f39010c8c0a41cd35506606`.
-- Latest owner-boundary hardening code HEAD: `654f35df583d3d7eeb127ecc7aefa15b33c8755d` (all four code-validation workflows passed).
+- Latest fully validated owner-boundary hardening code HEAD: `654f35df583d3d7eeb127ecc7aefa15b33c8755d` (all four workflows passed).
+- Follow-up regression-test HEAD: `5367356fc6f4efdfcee15091c7ac8da3a55d8537`; pending CI after correcting a test-only unbound-method fixture error discovered on the preceding test head `ce7c55751daca083fffae7fae1d884fa3f287906`.
 - PR: [#6 — R0 baseline and Audition CEP ASR boundary](https://github.com/bijanbijane/Audiocode/pull/6) — OPEN, DRAFT, not merged.
 - Latest PR metadata observed before this execution-state refresh: 38 changed files; 150 commits; 2,437 additions; 209 deletions.
 - All implementation changes in this execution are on the PR branch through GitHub. No local Mac checkout is used.
@@ -23,7 +24,7 @@ R0 — Baseline, scope and dual-platform release gates: **IN PROGRESS**. CI base
 | Task | Priority | Status | Evidence / remaining acceptance |
 |---|---:|---|---|
 | R0-BASE-01 — Record repository baseline and reconcile approved delivery scope | P0 | IMPLEMENTED | Initial audit: `docs/AVAPARDAZ/R0-BASELINE-AUDIT-2026-11-27.md`; approved scope is mirrored in the delivery roadmap. R0 exit criteria remain open. |
-| R0-CI-02 — Establish executable CI baseline | P0 | PASS — CI EXECUTED | Baseline workflows passed on `bc8dfc2`; latest owner-boundary code HEAD `654f35d` also passed all four workflows: Architecture Governance / Reliability, Web+API container build, AVAPARDAZ Quality Gates Levels 1–5, and Standalone Platform API Readiness. Exact run IDs are recorded below. |
+| R0-CI-02 — Establish executable CI baseline | P0 | PASS — CI EXECUTED on `654f35d`; follow-up test head pending | All four workflows passed on `654f35d`. On follow-up head `ce7c557`, the new staged-upload regression test exposed a test-fixture issue: extracted class methods were invoked without binding `this`, causing `sweepExpiredUploads` access to fail. The test now calls those methods with the service receiver on head `5367356`; CI has not yet validated this correction. |
 | R0-SEC-08 — Enforce session ownership for Companion jobs | P0 | IMPLEMENTED / TESTED | Jobs and staged audio resources use a stable, random 256-bit client-instance capability scoped by host. A renewed IPC session from the same CEP installation can recover its jobs; another client, including another Audition client, receives 404. Job accessors require an explicit owner. HTTP regression coverage passed in Level 2–4 and architecture suites. |
 | R0-IPC-03 — Version and isolate the Audition CEP transcript boundary | P1 | IMPLEMENTED / TESTED | CEP DTO, mapper, independent schema negotiation, execution-mode-specific result serialization and HTTP integration coverage passed in the quality suite. |
 | R0-CONSUMER-04 — Complete repository-wide IPC consumer inventory | P1 | IN PROGRESS | Reviewed CEP `app.js`, `CompanionWebClient`, the Companion HTTP dispatcher, `LocalCompanionService`, and `CompanionAudioTransfer`. Companion transfer init/chunk/finalize/acquire/consume/abort and staged-upload init/chunk/abort now require explicit owner identity; transfer and staged-upload submission also fail closed when owner identity is absent. Authenticated HTTP routes pass the owner. Missing-owner transfer-init/chunk/finalize regression tests were added. Full repository-wide semantic caller inventory remains open; retain legacy response fields until closure. |
@@ -47,7 +48,7 @@ R0 — Baseline, scope and dual-platform release gates: **IN PROGRESS**. CI base
 
 ## Validation evidence
 
-Validated implementation heads: baseline `bc8dfc2d1ae568528f39010c8c0a41cd35506606`; latest owner-boundary hardening `654f35df583d3d7eeb127ecc7aefa15b33c8755d`.
+Validated implementation heads: baseline `bc8dfc2d1ae568528f39010c8c0a41cd35506606`; owner-boundary hardening `654f35df583d3d7eeb127ecc7aefa15b33c8755d`. Follow-up regression-test fix: `5367356fc6f4efdfcee15091c7ac8da3a55d8537` (CI pending).
 
 | Check | Result | Evidence |
 |---|---|---|
@@ -59,7 +60,7 @@ Validated implementation heads: baseline `bc8dfc2d1ae568528f39010c8c0a41cd355066
 | Web/API container build | PASS | Baseline run `46070705150`; owner-boundary hardening run `46115664312` passed. Independent web and API images built successfully. |
 | TypeScript compilation / zero circular dependencies / SBOM | PASS | Architecture workflow `46070705179`. |
 | Live Audition host tests | BLOCKED | No authorized live macOS and Windows hosts; CI packaging is not equivalent to live-host acceptance. |
-| Owner-boundary hardening CI | PASS — EXECUTED | Commit `654f35df583d3d7eeb127ecc7aefa15b33c8755d`; Architecture Governance / Reliability run `46115664304`, AVAPARDAZ Levels 1–5 run `46115664383`, separated Web/API container build run `46115664312`, and Standalone Platform API run `46115664297` all completed successfully.
+| Owner-boundary hardening CI | PASS — EXECUTED on `654f35df583d3d7eeb127ecc7aefa15b33c8755d` | Architecture Governance / Reliability run `46115664304`, AVAPARDAZ Levels 1–5 run `46115664383`, separated Web/API container build run `46115664312`, and Standalone Platform API run `46115664297` all completed successfully. Follow-up test head `ce7c557` had 38/39 canonical P0 tests pass; the sole failure was the new test fixture calling a class method unbound (not a product-code failure). Corrected in `5367356`; awaiting rerun.
 
 Non-blocking observations from the production build:
 - Vite reports one or more minified chunks above 500 kB; consider code splitting after profiling and without weakening the current release gate.
