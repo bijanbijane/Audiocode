@@ -193,7 +193,30 @@ describe('Phase 1C-H & 1C-I: Installer, First-Run Health, Clean-Env Execution, A
       );
       const pkgHashInfo = AvapardazPackageUpdateManager.computePackagePathSha256(updateSourceDir);
 
+      // A live owner must block a second manager; a provably dead same-host PID is reclaimable.
+      const operationLockDir = path.join(installed.layout.backupsDir, '.update-operation-lock');
+      fs.mkdirSync(operationLockDir, { recursive: true });
+      fs.writeFileSync(path.join(operationLockDir, 'owner.json'), JSON.stringify({
+        pid: process.pid,
+        hostname: os.hostname(),
+        acquiredAt: Date.now(),
+        token: 'live-test-owner',
+      }), 'utf8');
+      assert.throws(
+        () => new AvapardazPackageUpdateManager(installed.layout),
+        /UPDATE_OPERATION_LOCKED/,
+      );
+      fs.rmSync(operationLockDir, { recursive: true, force: true });
+
+      fs.mkdirSync(operationLockDir, { recursive: true });
+      fs.writeFileSync(path.join(operationLockDir, 'owner.json'), JSON.stringify({
+        pid: 2147483647,
+        hostname: os.hostname(),
+        acquiredAt: Date.now(),
+        token: 'dead-test-owner',
+      }), 'utf8');
       const updater = new AvapardazPackageUpdateManager(installed.layout);
+      assert.strictEqual(fs.existsSync(operationLockDir), false);
 
       // Recover a process-crash simulation after the new directory became visible but before commit.
       const recoveryBackupId = 'bkp_companion_1.0.0_recovery';
@@ -277,6 +300,10 @@ describe('Phase 1C-H & 1C-I: Installer, First-Run Health, Clean-Env Execution, A
       assert.strictEqual(badHash.ok, false);
       assert.strictEqual(badHash.errorCode, 'UPDATE_HASH_MISMATCH');
 
+      // A competing manager cannot start a second update from inside the first update's health check.
+      const competingUpdater = new AvapardazPackageUpdateManager(installed.layout);
+      let concurrentAttempt: ReturnType<typeof competingUpdater.applyUpdate> | undefined;
+
       // 3. Simulate failed post-update health check -> must automatically rollback to 1.0.0
       const autoRolledBack = updater.applyUpdate({
         pkg: {
@@ -289,11 +316,28 @@ describe('Phase 1C-H & 1C-I: Installer, First-Run Health, Clean-Env Execution, A
           sizeBytes: pkgHashInfo.totalBytes,
           releaseNotesFa: 'شکست تست سلامت',
         },
-        customPostUpdateHealthCheck: () => ({ ok: false, reason: 'SIMULATED_HEALTH_FAILURE' }),
+        customPostUpdateHealthCheck: () => {
+          concurrentAttempt = competingUpdater.applyUpdate({
+            pkg: {
+              updateId: 'upd-concurrent',
+              component: 'COMPANION',
+              targetVersion: '1.2.0',
+              minCompatibleIpcProtocol: '1.0.0',
+              sourcePath: updateSourceDir,
+              expectedSha256: pkgHashInfo.sha256,
+              sizeBytes: pkgHashInfo.totalBytes,
+              releaseNotesFa: 'درخواست هم‌زمان آزمایشی',
+            },
+          });
+          return { ok: false, reason: 'SIMULATED_HEALTH_FAILURE' };
+        },
       });
       assert.strictEqual(autoRolledBack.ok, false);
       assert.strictEqual(autoRolledBack.rolledBack, true);
       assert.strictEqual(autoRolledBack.activeVersion, '1.0.0');
+      assert.ok(concurrentAttempt);
+      assert.strictEqual(concurrentAttempt!.ok, false);
+      assert.strictEqual(concurrentAttempt!.errorCode, 'UPDATE_OPERATION_LOCKED');
 
       // 4. Successful update to 1.1.0
       const updated = updater.applyUpdate({
