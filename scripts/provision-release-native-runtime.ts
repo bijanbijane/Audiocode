@@ -90,18 +90,54 @@ async function main(): Promise<void> {
       throw new Error(`RUNTIME_DESTINATION_EXISTS_UNVERIFIED: refusing to overwrite ${outputRoot}`);
     }
     const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8')) as {
+      schemaVersion?: number;
       targetId?: string;
+      requiredCpuFeatures?: string[];
+      archiveName?: string;
       archiveSha256?: string;
+      archiveBytes?: number;
       binaryName?: string;
+      binaryBytes?: number;
+      binarySha256?: string;
       onnxRuntimeLibraryName?: string;
+      onnxRuntimeLibraryBytes?: number;
+      onnxRuntimeLibrarySha256?: string;
+      sharedLibraries?: Array<{ name: string; bytes: number; sha256: string }>;
     };
-    if (manifest.targetId !== target.id || manifest.archiveSha256 !== archive.sha256) {
+    if (
+      manifest.schemaVersion !== 1
+      || manifest.targetId !== target.id
+      || JSON.stringify(manifest.requiredCpuFeatures) !== JSON.stringify(target.requiredCpuFeatures)
+      || manifest.archiveName !== archive.fileName
+      || manifest.archiveSha256 !== archive.sha256
+      || manifest.archiveBytes !== archive.bytes
+      || manifest.binaryName !== target.sherpaBinaryName
+    ) {
       throw new Error(`RUNTIME_DESTINATION_EXISTS_DIFFERENT_PROVENANCE: refusing to overwrite ${outputRoot}`);
     }
     const binaryPath = path.join(outputRoot, 'bin', target.sherpaBinaryName);
-    const libraryPath = path.join(outputRoot, 'lib', manifest.onnxRuntimeLibraryName ?? target.onnxRuntimeLibraryName);
+    if (!fs.existsSync(binaryPath) || manifest.binaryBytes !== fs.statSync(binaryPath).size || manifest.binarySha256 !== sha256(binaryPath)) {
+      throw new Error('RUNTIME_DESTINATION_BINARY_INTEGRITY_FAILED');
+    }
     assertNativeBinaryArchitecture({ filePath: binaryPath, platform: target.platform, arch: target.arch });
-    assertNativeBinaryArchitecture({ filePath: libraryPath, platform: target.platform, arch: target.arch });
+    const sharedLibraries = manifest.sharedLibraries ?? [];
+    if (sharedLibraries.length === 0) throw new Error('RUNTIME_DESTINATION_LIBRARY_MANIFEST_MISSING');
+    for (const entry of sharedLibraries) {
+      const libraryPath = path.join(outputRoot, 'lib', entry.name);
+      if (!fs.existsSync(libraryPath) || entry.bytes !== fs.statSync(libraryPath).size || entry.sha256 !== sha256(libraryPath)) {
+        throw new Error(`RUNTIME_DESTINATION_LIBRARY_INTEGRITY_FAILED: ${entry.name}`);
+      }
+      assertNativeBinaryArchitecture({ filePath: libraryPath, platform: target.platform, arch: target.arch });
+    }
+    const onnxRuntimeEntry = sharedLibraries.find((entry) => entry.name === manifest.onnxRuntimeLibraryName);
+    if (
+      !onnxRuntimeEntry
+      || manifest.onnxRuntimeLibraryBytes !== onnxRuntimeEntry.bytes
+      || manifest.onnxRuntimeLibrarySha256 !== onnxRuntimeEntry.sha256
+    ) {
+      throw new Error('RUNTIME_DESTINATION_ONNX_MANIFEST_MISMATCH');
+    }
+    const libraryPath = path.join(outputRoot, 'lib', onnxRuntimeEntry.name);
     smokeTest(binaryPath, path.dirname(libraryPath), target.platform);
     console.log(`Verified existing ${target.id} Sherpa runtime at ${outputRoot}`);
     return;
