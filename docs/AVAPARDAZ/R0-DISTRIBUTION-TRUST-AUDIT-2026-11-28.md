@@ -236,3 +236,10 @@ The safe extractor continues to reject symlinks by default. For these pinned nat
 The first full Vitest run after the runtime packaging changes passed 28 files / 119 tests and failed one stale source assertion in `scripts/build-release-installer.spec.ts` that still expected the removed `!fs.existsSync(onnxRuntimeLibrarySource)` expression. That assertion was removed; latest head CI is rerunning. The native parser matrix and all three real runtime provisioning jobs passed on the prior head above.
 
 GitHub-hosted macOS 14 runners are retired; current CI validates macOS 15 arm64 and Intel. Windows hosted smoke is Windows Server 2025, not Windows 11. Physical-host and Audition acceptance remain separate gates.
+
+
+### 8.9. CPU floor and runtime manifest integrity
+
+The shared target registry declares `requiredCpuFeatures`: `NEON` for `darwin-arm64`, and `AVX2` for the two x86_64 Audition 25.x targets. The package manifest and native runtime manifest carry this requirement. This is a declared host requirement, **not** a runtime CPUID probe. Adobe's published Audition 25.x requirements specify AVX2 for Windows and Intel macOS; the official requirement is linked in `HARDWARE-COMPATIBILITY-MATRIX.md`.
+
+The package builder now refuses a target runtime without `runtime-manifest.json`. It checks target ID, pinned archive name/bytes/SHA-256, executable hash, ONNX library hash, and the complete shared-library set and hashes. It embeds the verified manifest into the package payload and records its hash in the package manifest. This is local build provenance/integrity validation; release signing and trust-root verification are still mandatory and not implemented.
