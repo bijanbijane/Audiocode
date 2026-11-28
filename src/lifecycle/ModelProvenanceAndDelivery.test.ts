@@ -264,7 +264,7 @@ test('AVP-P0-007: update orchestration requires real Ed25519 signatures, binds m
     signature: {
       algorithm: 'Ed25519',
       keyId: 'avp-test-release-key',
-      signatureBase64: crypto.sign(null, Buffer.from(canonicalizeUpdateManifest(payload)), keyPair.privateKey).toString('base64'),
+      signatureBase64: crypto.sign(null, Buffer.from(canonicalizeUpdateManifest(payload, 'avp-test-release-key')), keyPair.privateKey).toString('base64'),
     },
   });
 
