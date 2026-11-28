@@ -71,13 +71,14 @@ describe('AvapardazBackendRouter Companion IPC isolation', () => {
     baseUrl = `http://127.0.0.1:${address.port}`;
   }
 
-  async function post(path: string, body: unknown, options?: { token?: string; origin?: string }): Promise<Response> {
+  async function post(path: string, body: unknown, options?: { token?: string; origin?: string; secFetchSite?: string }): Promise<Response> {
     return fetch(`${baseUrl}${path}`, {
       method: 'POST',
       headers: {
         'content-type': 'application/json',
         ...(options?.token ? { authorization: `Bearer ${options.token}` } : {}),
         ...(options?.origin ? { origin: options.origin } : {}),
+        ...(options?.secFetchSite ? { 'sec-fetch-site': options.secFetchSite } : {}),
       },
       body: JSON.stringify(body),
     });
@@ -134,6 +135,10 @@ describe('AvapardazBackendRouter Companion IPC isolation', () => {
     expect(jobBId).not.toBe(jobAId);
 
     expect((await ipc(ownerA, 'JOB_STATUS', { job_id: jobAId })).status).toBe(200);
+    const reconnectA = await ipc(ownerA, 'JOB_RECONNECT', { job_id: jobAId });
+    expect(reconnectA.status).toBe(200);
+    expect((await reconnectA.json() as { reconnected: boolean }).reconnected).toBe(true);
+    expect((await ipc(ownerB, 'JOB_RECONNECT', { job_id: jobAId })).status).toBe(404);
     expect((await ipc(ownerB, 'JOB_STATUS', { job_id: jobAId })).status).toBe(404);
     expect((await ipc(ownerB, 'JOB_CANCEL', { job_id: jobAId })).status).toBe(404);
     expect((await ipc(ownerA, 'JOB_CANCEL', { job_id: jobAId })).status).toBe(200);
@@ -142,6 +147,21 @@ describe('AvapardazBackendRouter Companion IPC isolation', () => {
     const listB = await ipc(ownerB, 'JOB_LIST', {});
     expect((await listA.json() as { jobs: Array<{ job_id: string }> }).jobs.map((job) => job.job_id)).toEqual([jobAId]);
     expect((await listB.json() as { jobs: Array<{ job_id: string }> }).jobs.map((job) => job.job_id)).toEqual([jobBId]);
+  });
+
+  it('rejects sandboxed null-Origin cross-site Companion handshakes', async () => {
+    await startRouter();
+    const response = await post('/companion/handshake', {
+      ipc_protocol_version: COMPANION_IPC_PROTOCOL_VERSION,
+      host_id: 'cli-test',
+      host_version: '1.0.0',
+      panel_version: '1.0.0',
+      host_adapter_version: HOST_ADAPTER_VERSION,
+      expected_contract_version: CANONICAL_CONTRACT_VERSION,
+      client_instance_id: 'd'.repeat(64),
+    }, { origin: 'null', secFetchSite: 'cross-site' });
+    expect(response.status).toBe(403);
+    expect((await response.json() as { error: string }).error).toBe('COMPANION_ORIGIN_BLOCKED');
   });
 
   it('rejects Companion handshakes from an untrusted Origin', async () => {
