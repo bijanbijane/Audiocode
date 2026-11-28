@@ -351,3 +351,5 @@ A regression test simulates a crash after the new directory is visible but befor
 - CI for the new commit is pending; do not treat the regression test as passed until the relevant workflow reports success.
 
 Follow-up hardening: the staging path is now deterministically derived from the backup ID, and the PREPARED journal marker is written before copying the activation-side staging directory. Startup recovery therefore also removes the original staged payload if the process stops during preparation. Manual rollback now uses the same journaled sibling-directory restoration protocol; a missing prior component is explicitly removed rather than left active. These paths are covered by the recovery regression fixture, with hosted CI still pending.
+
+The recovery regression now covers both critical rename windows: after the new directory has been moved into the target (NEW_MOVED) and after the old directory has been displaced but before the new one is installed (OLD_MOVED). Both are exercised by constructing a fresh manager and asserting the known-good companion payload is restored.
