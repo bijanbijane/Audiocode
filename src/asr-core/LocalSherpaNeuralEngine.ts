@@ -1155,13 +1155,13 @@ export class LocalSherpaNeuralEngine {
       return ensured;
     })();
 
-    this.ensureShenavaArtifactsPromise = task.finally(() => {
-      if (this.ensureShenavaArtifactsPromise === task) {
+    const wrappedTask = task.finally(() => {
+      if (this.ensureShenavaArtifactsPromise === wrappedTask) {
         this.ensureShenavaArtifactsPromise = null;
       }
     });
-
-    return this.ensureShenavaArtifactsPromise;
+    this.ensureShenavaArtifactsPromise = wrappedTask;
+    return wrappedTask;
   }
 
   public async installShenavaRizehRuntime(options?: {
