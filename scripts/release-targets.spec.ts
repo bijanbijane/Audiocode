@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 import {
   AVAPARDAZ_RELEASE_TARGETS,
   assertRuntimeTargetMatches,
+  isNativeRuntimeSharedLibraryName,
+  isVersionedOnnxRuntimeDylibName,
   resolveAvapardazReleaseTarget,
 } from './release-targets.mjs';
 
@@ -24,6 +26,16 @@ describe('AVAPARDAZ internal release target matrix', () => {
       expect(target.runtimeArchive.sha256).toMatch(/^[a-f0-9]{64}$/);
       expect(target.runtimeArchive.url).toContain(target.runtimeArchive.fileName);
     }
+  });
+
+  it('recognizes native shared-library filenames and versioned macOS ONNX libraries', () => {
+    expect(isNativeRuntimeSharedLibraryName('onnxruntime.dll')).toBe(true);
+    expect(isNativeRuntimeSharedLibraryName('libonnxruntime.dylib')).toBe(true);
+    expect(isNativeRuntimeSharedLibraryName('libonnxruntime.1.22.0.dylib')).toBe(true);
+    expect(isNativeRuntimeSharedLibraryName('libonnxruntime.so.1')).toBe(true);
+    expect(isNativeRuntimeSharedLibraryName('README.md')).toBe(false);
+    expect(isVersionedOnnxRuntimeDylibName('libonnxruntime.1.22.0.dylib')).toBe(true);
+    expect(isVersionedOnnxRuntimeDylibName('libonnxruntime.dylib')).toBe(false);
   });
 
   it('selects native runtime artifacts by target rather than the packager host', () => {
