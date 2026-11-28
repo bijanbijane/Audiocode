@@ -237,6 +237,7 @@ const runtimeManifest = JSON.parse(fs.readFileSync(runtimeManifestSource, 'utf8'
 if (
   runtimeManifest.schemaVersion !== 1
   || runtimeManifest.targetId !== RELEASE_TARGET.id
+  || JSON.stringify(runtimeManifest.requiredCpuFeatures) !== JSON.stringify(RELEASE_TARGET.requiredCpuFeatures)
   || runtimeManifest.archiveName !== RELEASE_TARGET.runtimeArchive.fileName
   || runtimeManifest.archiveSha256 !== RELEASE_TARGET.runtimeArchive.sha256
   || runtimeManifest.archiveBytes !== RELEASE_TARGET.runtimeArchive.bytes
