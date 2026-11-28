@@ -239,6 +239,8 @@ if (
   runtimeManifest.schemaVersion !== 1
   || runtimeManifest.targetId !== RELEASE_TARGET.id
   || JSON.stringify(runtimeManifest.requiredCpuFeatures) !== JSON.stringify(RELEASE_TARGET.requiredCpuFeatures)
+  || JSON.stringify(runtimeManifest.cpuFeatureProbe?.required) !== JSON.stringify(RELEASE_TARGET.requiredCpuFeatures)
+  || JSON.stringify(runtimeManifest.cpuFeatureProbe?.checked) !== JSON.stringify(RELEASE_TARGET.requiredCpuFeatures)
   || runtimeManifest.archiveName !== RELEASE_TARGET.runtimeArchive.fileName
   || runtimeManifest.archiveSha256 !== RELEASE_TARGET.runtimeArchive.sha256
   || runtimeManifest.archiveBytes !== RELEASE_TARGET.runtimeArchive.bytes
@@ -486,6 +488,7 @@ const packageManifest = {
         archiveName: runtimeManifest.archiveName,
         archiveSha256: runtimeManifest.archiveSha256,
         archiveBytes: runtimeManifest.archiveBytes,
+        cpuFeatureProbe: runtimeManifest.cpuFeatureProbe,
       },
       sherpaStreamingBridgeBinary: {
         path: 'payload/runtime/bin/sherpa-onnx-streaming-bridge',
