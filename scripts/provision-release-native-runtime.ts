@@ -10,6 +10,7 @@ import {
   extractTarBz2Safe,
 } from '../src/asr-core/SafeModelSupplyChain';
 import { resolveAvapardazReleaseTarget } from './release-targets.mjs';
+import { verifyRequiredCpuFeatures } from './cpu-feature-preflight.mjs';
 import { assertNativeBinaryArchitecture } from './verify-native-binary.mjs';
 
 function sha256(filePath: string): string {
@@ -76,6 +77,10 @@ async function main(): Promise<void> {
   if (expectedTarget && expectedTarget !== target.id) {
     throw new Error(`RUNTIME_HOST_TARGET_MISMATCH: expected ${expectedTarget}, actual runner is ${target.id}`);
   }
+  const cpuFeatureProbe = verifyRequiredCpuFeatures(target.requiredCpuFeatures);
+  if (!cpuFeatureProbe.supported) {
+    throw new Error(`RUNTIME_CPU_FEATURE_UNSUPPORTED: ${cpuFeatureProbe.reason}`);
+  }
   const archive = target.runtimeArchive;
   const outputRoot = path.resolve(
     process.env.AVAPARDAZ_RUNTIME_OUTPUT_DIR?.trim()
@@ -93,6 +98,7 @@ async function main(): Promise<void> {
       schemaVersion?: number;
       targetId?: string;
       requiredCpuFeatures?: string[];
+      cpuFeatureProbe?: { required?: string[]; checked?: string[] };
       archiveName?: string;
       archiveSha256?: string;
       archiveBytes?: number;
@@ -108,6 +114,8 @@ async function main(): Promise<void> {
       manifest.schemaVersion !== 1
       || manifest.targetId !== target.id
       || JSON.stringify(manifest.requiredCpuFeatures) !== JSON.stringify(target.requiredCpuFeatures)
+      || JSON.stringify(manifest.cpuFeatureProbe?.required) !== JSON.stringify(target.requiredCpuFeatures)
+      || JSON.stringify(manifest.cpuFeatureProbe?.checked) !== JSON.stringify(target.requiredCpuFeatures)
       || manifest.archiveName !== archive.fileName
       || manifest.archiveSha256 !== archive.sha256
       || manifest.archiveBytes !== archive.bytes
@@ -207,6 +215,10 @@ async function main(): Promise<void> {
       product: 'AVAPARDAZ',
       targetId: target.id,
       requiredCpuFeatures: target.requiredCpuFeatures,
+      cpuFeatureProbe: {
+        required: target.requiredCpuFeatures,
+        checked: cpuFeatureProbe.checked,
+      },
       runtimeVersion: 'v2.0.2',
       archiveName: archive.fileName,
       archiveBytes: archive.bytes,
@@ -229,7 +241,7 @@ async function main(): Promise<void> {
       throw new Error(`RUNTIME_DESTINATION_RACE: destination appeared during provisioning: ${outputRoot}`);
     }
     fs.renameSync(stageRoot, outputRoot);
-    console.log(JSON.stringify({ target: target.id, outputRoot, archive: archive.fileName, archiveSha256: archive.sha256, binary: target.sherpaBinaryName, onnxRuntimeLibrary: path.basename(stagedOnnxLibrary), sharedLibraryCount: sharedLibraries.length }, null, 2));
+    console.log(JSON.stringify({ target: target.id, outputRoot, archive: archive.fileName, archiveSha256: archive.sha256, cpuFeatureProbe: cpuFeatureProbe.checked, binary: target.sherpaBinaryName, onnxRuntimeLibrary: path.basename(stagedOnnxLibrary), sharedLibraryCount: sharedLibraries.length }, null, 2));
   } finally {
     fs.rmSync(workspace, { recursive: true, force: true });
     if (fs.existsSync(stageRoot)) fs.rmSync(stageRoot, { recursive: true, force: true });
