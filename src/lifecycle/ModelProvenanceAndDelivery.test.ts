@@ -288,7 +288,56 @@ test('AVP-P0-007: update orchestration requires real Ed25519 signatures, binds m
   assert.equal(okRes.slot.activeVersion, '1.1.0');
   assert.equal(okRes.slot.previousKnownGoodVersion, '1.0.0');
 
-  // 2. Post-activation health failure triggers automatic rollback to 1.1.0.
+  // 2. Older releases and replay of the active version are rejected before download.
+  for (const replayVersion of ['1.0.9', '1.1.0']) {
+    let replayDownloaded = false;
+    const replayRes = await orch.executeSafeUpdate({
+      manifest: signManifest({
+        component: 'NATIVE_COMPANION',
+        version: replayVersion,
+        sha256Hex: goodHash,
+        sizeBytes: 10_000_000,
+      }),
+      availableDiskBytes: 50_000_000,
+      downloadAndVerifySha256: async () => {
+        replayDownloaded = true;
+        return { ok: true, actualSha256Hex: goodHash };
+      },
+      stageArtifact: async () => ({ ok: true, stagingDir: '/tmp/replay-must-not-stage' }),
+      activateArtifact: async () => ({ ok: true }),
+      verifyPostActivationHealth: async () => ({ ok: true }),
+      restorePreviousVersion: async () => true,
+    });
+    assert.equal(replayRes.ok, false);
+    assert.equal(replayRes.slot.lastError, 'UPDATE_VERSION_NOT_NEWER');
+    assert.equal(replayDownloaded, false);
+  }
+
+  // SemVer prerelease ordering permits beta.2 after beta.1.
+  const prereleaseOrch = new ComponentUpdateOrchestrator({
+    BROWSER_APP: '1.0.0',
+    NATIVE_COMPANION: '2.0.0-beta.1',
+    AUDITION_CEP_EXTENSION: '1.0.0',
+    MODEL_ARTIFACT: '1.0.0',
+  }, trustedSigningKeys);
+  const prereleaseRes = await prereleaseOrch.executeSafeUpdate({
+    manifest: signManifest({
+      component: 'NATIVE_COMPANION',
+      version: '2.0.0-beta.2',
+      sha256Hex: goodHash,
+      sizeBytes: 10_000_000,
+    }),
+    availableDiskBytes: 50_000_000,
+    downloadAndVerifySha256: async () => ({ ok: true, actualSha256Hex: goodHash }),
+    stageArtifact: async () => ({ ok: true, stagingDir: '/tmp/stage-beta-2' }),
+    activateArtifact: async () => ({ ok: true }),
+    verifyPostActivationHealth: async () => ({ ok: true }),
+    restorePreviousVersion: async () => true,
+  });
+  assert.equal(prereleaseRes.ok, true);
+  assert.equal(prereleaseRes.slot.activeVersion, '2.0.0-beta.2');
+
+  // 3. Post-activation health failure triggers automatic rollback to 1.1.0.
   let restoredTo: string | null = null;
   const rollbackRes = await orch.executeSafeUpdate({
     manifest: signManifest({
