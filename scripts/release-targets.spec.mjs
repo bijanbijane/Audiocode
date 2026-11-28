@@ -46,7 +46,8 @@ describe('AVAPARDAZ internal release target matrix', () => {
 
   it('fails closed when the native runtime provenance does not match the release target', () => {
     const target = resolveAvapardazReleaseTarget({ platform: 'win32', arch: 'x64' });
-    expect(assertRuntimeTargetMatches({ target, runtimeTarget: 'darwin-arm64' }))
-      .toBeTruthy();
+    expect(() => assertRuntimeTargetMatches({ target, runtimeTarget: 'darwin-arm64' }))
+      .toThrowError(/RUNTIME_TARGET_MISMATCH/);
+    expect(assertRuntimeTargetMatches({ target, runtimeTarget: 'win32-x64' })).toBe(true);
   });
 });
