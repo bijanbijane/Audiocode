@@ -11,10 +11,10 @@
 - Main baseline / current main HEAD observed: `e73394f8e00e477f1de0046e04fd233681610563`
 - Working branch: `docs/r0-baseline-audit-2026-11-27`
 - Previously validated implementation HEAD: `bc8dfc2d1ae568528f39010c8c0a41cd35506606`.
-- Latest fully validated code HEAD: `1eab866d127651d5bea1630a98380358a5b66320` (all four workflows passed: Architecture/Reliability `46123690079`, AVAPARDAZ Quality Gates `46123690043`, Web/API containers `46123690110`, Platform API `46123690045`). Latest PR HEAD `d054b90885fe63db11a40485a774918c08f701b9` is documentation-only after this code head.
+- Latest fully validated code HEAD: `1eab866d127651d5bea1630a98380358a5b66320` (all four workflows passed: Architecture/Reliability `46123690079`, AVAPARDAZ Quality Gates `46123690043`, Web/API containers `46123690110`, Platform API `46123690045`). Latest PR HEAD `52a52f0825e0f8224a6a9facfcd15a6e5ca3ba0a` is documentation-only after this code head.
 - Follow-up regression-test HEAD: `5367356fc6f4efdfcee15091c7ac8da3a55d8537`; All four workflows passed: AVAPARDAZ Levels 1–5 (`46116543390`), Platform API (`46116543388`), separated Web/API container build (`46116543398`), and Architecture/Reliability (`46116543436`).
 - PR: [#6 — R0 baseline and Audition CEP ASR boundary](https://github.com/bijanbijane/Audiocode/pull/6) — OPEN, DRAFT, not merged.
-- Latest PR metadata observed: 45 changed files; 204 commits. PR remains open/draft; no merge.
+- Latest PR metadata observed: 45 changed files; 206 commits. PR remains open/draft; no merge.
 - All implementation changes in this execution are on the PR branch through GitHub. No local Mac checkout is used.
 
 ## Roadmap status
