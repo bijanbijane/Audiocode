@@ -1103,11 +1103,13 @@ export class LocalSherpaNeuralEngine {
   public async installShenavaRizehRuntime(options?: {
     readonly signal?: AbortSignal;
   }): Promise<LocalNeuralRuntimeStatus> {
-    if (process.platform !== 'linux' || process.arch !== 'x64') {
-      throw new Error(
-        `NATIVE_INSTALLER_UNSUPPORTED_PLATFORM: Automatic server-side installer targets linux-x64 (current: ${process.platform}-${process.arch}).`,
-      );
-    }
+    const isLegacyLinuxX64 = process.platform === 'linux' && process.arch === 'x64';
+    const target = isLegacyLinuxX64 ? null : resolveAvapardazReleaseTarget();
+    const runtimeArchiveName = target?.runtimeArchive.fileName ?? SHENAVA_RIZEH_RUNTIME_RELEASE.runtimeArchiveName;
+    const runtimeUrl = target?.runtimeArchive.url ?? SHENAVA_RIZEH_RUNTIME_RELEASE.runtimeUrl;
+    const runtimeDir = target
+      ? path.join(os.homedir(), '.avapardaz', 'runtime', 'targets', target.id)
+      : path.join(os.homedir(), '.avapardaz', 'runtime');
 
     if (this.installShenavaRuntimePromise) {
       return this.installShenavaRuntimePromise;
@@ -1116,43 +1118,86 @@ export class LocalSherpaNeuralEngine {
     const task = (async (): Promise<LocalNeuralRuntimeStatus> => {
       const baseDir = path.join(os.homedir(), '.avapardaz');
       const downloadsDir = path.join(baseDir, 'downloads');
-      const runtimeDir = path.join(baseDir, 'runtime');
       fs.mkdirSync(downloadsDir, { recursive: true });
-      fs.mkdirSync(baseDir, { recursive: true });
+      fs.mkdirSync(path.dirname(runtimeDir), { recursive: true });
 
       const { binaryPath } = detectSherpaBinary();
       if (!binaryPath) {
-        const rtArchive = path.join(
-          downloadsDir,
-          `${Date.now()}_${process.pid}_${SHENAVA_RIZEH_RUNTIME_RELEASE.runtimeArchiveName}`,
-        );
+        const rtArchive = path.join(downloadsDir, Date.now() + '_' + process.pid + '_' + runtimeArchiveName);
         const rtTempExtract = fs.mkdtempSync(path.join(downloadsDir, 'avp-rt-stage-'));
         try {
-          await downloadFileWithRedirects(SHENAVA_RIZEH_RUNTIME_RELEASE.runtimeUrl, rtArchive, {
+          const expectedBytes = target?.runtimeArchive.bytes;
+          const expectedSha256 = target?.runtimeArchive.sha256;
+          await downloadFileWithRedirects(runtimeUrl, rtArchive, {
             allowedHosts: ALLOWED_MODEL_DOWNLOAD_HOSTS,
             maxRedirects: 5,
-            maxBytes: 250 * 1024 * 1024, // 250 MiB ceiling for runtime archive
+            maxBytes: expectedBytes ?? 250 * 1024 * 1024,
+            ...(expectedBytes && expectedSha256 ? { expectedBytes, expectedSha256Hex: expectedSha256 } : {}),
             connectTimeoutMs: 15_000,
             totalTimeoutMs: 240_000,
             signal: options?.signal,
           });
           await extractTarBz2Safe(rtArchive, rtTempExtract, {
-            maxFiles: 512,
-            maxSingleFileBytes: 150 * 1024 * 1024,
-            maxTotalBytes: 400 * 1024 * 1024,
+            maxFiles: 4096,
+            maxSingleFileBytes: 300 * 1024 * 1024,
+            maxTotalBytes: 600 * 1024 * 1024,
             allowExecutablesInBin: true,
+            pythonBin: process.platform === 'win32' ? 'python' : 'python3',
           });
           const extractedRoot = fs
             .readdirSync(rtTempExtract, { withFileTypes: true })
-            .find((d) => d.isDirectory())?.name;
+            .find((entry) => entry.isDirectory())?.name;
           const srcRoot = extractedRoot ? path.join(rtTempExtract, extractedRoot) : rtTempExtract;
 
           await activateDirectoryAtomically({
             stagedDir: srcRoot,
             targetDir: runtimeDir,
             validateStaged: (dir) => {
-              const stagedBin = path.join(dir, 'bin', 'sherpa-onnx-offline');
+              const stagedBinName = target?.sherpaBinaryName ?? 'sherpa-onnx-offline';
+              const stagedBin = path.join(dir, 'bin', stagedBinName);
               if (!fs.existsSync(stagedBin) || fs.lstatSync(stagedBin).isSymbolicLink()) return false;
+              if (target) {
+                const collectFiles = (root: string): string[] => {
+                  const files: string[] = [];
+                  for (const entry of fs.readdirSync(root, { withFileTypes: true })) {
+                    const fullPath = path.join(root, entry.name);
+                    if (entry.isSymbolicLink()) return [];
+                    if (entry.isDirectory()) files.push(...collectFiles(fullPath));
+                    else if (entry.isFile()) files.push(fullPath);
+                  }
+                  return files;
+                };
+                const nativeLibraries = collectFiles(dir)
+                  .filter((file) => isSherpaRuntimeLibraryName(path.basename(file), target.platform));
+                const onnxRuntimeLibrary = nativeLibraries.find(
+                  (file) => path.basename(file) === target.onnxRuntimeLibraryName,
+                ) ?? (target.platform === 'darwin'
+                  ? nativeLibraries.find((file) => /^libonnxruntime\.\d+(?:\.\d+)*\.dylib$/.test(path.basename(file)))
+                  : undefined);
+                if (!onnxRuntimeLibrary || nativeLibraries.length === 0) return false;
+                try {
+                  assertNativeBinaryArchitecture({ filePath: stagedBin, platform: target.platform, arch: target.arch });
+                  for (const library of nativeLibraries) {
+                    assertNativeBinaryArchitecture({ filePath: library, platform: target.platform, arch: target.arch });
+                  }
+                } catch {
+                  return false;
+                }
+                if (target.platform !== 'win32') fs.chmodSync(stagedBin, 0o755);
+                const libraryDir = path.dirname(onnxRuntimeLibrary);
+                const env: NodeJS.ProcessEnv = {
+                  ...process.env,
+                  [sherpaLibraryPathEnvironmentVariable(target.platform)]: [libraryDir, process.env[sherpaLibraryPathEnvironmentVariable(target.platform)]].filter(Boolean).join(path.delimiter),
+                };
+                const smoke = spawnSync(stagedBin, ['--help'], {
+                  env,
+                  encoding: 'utf8',
+                  timeout: 30_000,
+                  maxBuffer: 8 * 1024 * 1024,
+                  windowsHide: true,
+                });
+                return !smoke.error && smoke.status === 0;
+              }
               fs.chmodSync(stagedBin, 0o755);
               return fs.statSync(stagedBin).size > 0;
             },
@@ -1175,7 +1220,6 @@ export class LocalSherpaNeuralEngine {
 
     return this.installShenavaRuntimePromise;
   }
-
   public unloadActiveModel(): { readonly unloadedModelId: string | null; readonly rssMb: number } {
     const prev = this.activeModelId;
     this.activeModelId = null;
