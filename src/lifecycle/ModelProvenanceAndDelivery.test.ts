@@ -486,7 +486,7 @@ test('AVP-P0-007: update orchestration requires real Ed25519 signatures, binds m
     cleanupFailureOrch.recoverInterruptedUpdate('NATIVE_COMPANION', async () => {
       throw new Error('simulated filesystem cleanup failure');
     }),
-    /STAGING_CLEANUP_FAILED/,
+    /INTERRUPTED_UPDATE_RECOVERY_FAILED/,
   );
   assert.equal(cleanupFailureOrch.getSlot('NATIVE_COMPANION').state, 'UPDATE_READY');
   assert.equal(cleanupFailureOrch.getSlot('NATIVE_COMPANION').stagingDir, '/tmp/interrupted-cleanup-failure');
