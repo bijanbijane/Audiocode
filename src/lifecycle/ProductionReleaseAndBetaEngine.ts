@@ -1159,15 +1159,18 @@ export class AvapardazPackageUpdateManager {
       const backupDir = path.join(this.layout.backupsDir, entry.name);
       const journalDir = this.journalPath(backupDir);
       if (!fs.existsSync(journalDir)) continue;
-      if (fs.existsSync(path.join(journalDir, 'COMMITTED'))) {
-        fs.rmSync(journalDir, { recursive: true, force: true });
-        continue;
-      }
       const component = this.componentFromBackupId(entry.name);
       const targetDir = this.resolveComponentTargetDir(component);
       const componentBackupDir = path.join(backupDir, 'component');
       const token = entry.name.replace(/[^a-zA-Z0-9_-]/g, '_');
       const sibling = (suffix: string) => path.join(path.dirname(targetDir), '.' + path.basename(targetDir) + '.' + token + suffix);
+      if (fs.existsSync(path.join(journalDir, 'COMMITTED'))) {
+        fs.rmSync(sibling('.stage'), { recursive: true, force: true });
+        fs.rmSync(sibling('.displaced'), { recursive: true, force: true });
+        fs.rmSync(sibling('.restore'), { recursive: true, force: true });
+        fs.rmSync(journalDir, { recursive: true, force: true });
+        continue;
+      }
       const stageDir = sibling('.stage');
       const displacedDir = sibling('.displaced');
       const restoreDir = sibling('.restore');
@@ -1500,8 +1503,8 @@ export class AvapardazPackageUpdateManager {
       }
 
       this.markActivationPhase(backupDir, 'COMMITTED');
-      fs.rmSync(this.journalPath(backupDir), { recursive: true, force: true });
       fs.rmSync(displacedDir, { recursive: true, force: true });
+      fs.rmSync(this.journalPath(backupDir), { recursive: true, force: true });
       return {
         ok: true,
         rolledBack: false,
@@ -1579,9 +1582,9 @@ export class AvapardazPackageUpdateManager {
     this.markActivationPhase(backupDir, 'NEW_MOVED');
     this.writeManifest(backedUpManifest);
     this.markActivationPhase(backupDir, 'COMMITTED');
-    fs.rmSync(this.journalPath(backupDir), { recursive: true, force: true });
     fs.rmSync(displacedDir, { recursive: true, force: true });
     fs.rmSync(restoreDir, { recursive: true, force: true });
+    fs.rmSync(this.journalPath(backupDir), { recursive: true, force: true });
     const restoredVersion = this.getComponentVersion(backedUpManifest, component);
     return {
       ok: true,
