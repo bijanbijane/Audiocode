@@ -1315,13 +1315,13 @@ export class LocalSherpaNeuralEngine {
       return this.getStatus();
     })();
 
-    this.installShenavaRuntimePromise = task.finally(() => {
-      if (this.installShenavaRuntimePromise === task) {
+    const wrappedTask = task.finally(() => {
+      if (this.installShenavaRuntimePromise === wrappedTask) {
         this.installShenavaRuntimePromise = null;
       }
     });
-
-    return this.installShenavaRuntimePromise;
+    this.installShenavaRuntimePromise = wrappedTask;
+    return wrappedTask;
   }
   public unloadActiveModel(): { readonly unloadedModelId: string | null; readonly rssMb: number } {
     const prev = this.activeModelId;
