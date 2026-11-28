@@ -450,8 +450,13 @@ test('AVP-P0-007: update orchestration requires real Ed25519 signatures, binds m
   let cleanedInterruptedPath: string | null = null;
   const recoveredReady = await interruptedReadyOrch.recoverInterruptedUpdate(
     'NATIVE_COMPANION',
-    async (stagingDir) => {
-      cleanedInterruptedPath = stagingDir;
+    async (context) => {
+      cleanedInterruptedPath = context.stagingDir;
+      assert.equal(context.component, 'NATIVE_COMPANION');
+      assert.equal(context.interruptedState, 'UPDATE_READY');
+      assert.equal(context.activeVersion, '1.0.0');
+      assert.equal(context.previousKnownGoodVersion, '1.0.0');
+      assert.equal(context.candidateVersion, '1.1.0');
     },
   );
   assert.equal(cleanedInterruptedPath, '/tmp/interrupted-ready-stage');
