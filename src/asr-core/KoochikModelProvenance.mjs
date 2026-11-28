@@ -42,7 +42,7 @@ export function validateKoochikModelLicense(readmeText, licenseText) {
   const licenseMatch = frontMatter[1].match(/^license:\s*([^\s#]+)/im);
   const licenseId = licenseMatch?.[1]?.trim().toLowerCase();
   if (licenseId !== SHAHAB_KOOCHIK_MODEL_PROVENANCE.licenseId) {
-    throw new Error(\`KOOCHIK_MODEL_LICENSE_METADATA_MISMATCH: expected apache-2.0, received \${licenseId ?? 'missing'}\`);
+    throw new Error('KOOCHIK_MODEL_LICENSE_METADATA_MISMATCH: expected apache-2.0, received ' + (licenseId ?? 'missing'));
   }
   if (
     !licenseText.includes('Apache License')
