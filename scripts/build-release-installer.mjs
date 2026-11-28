@@ -8,7 +8,7 @@
  * 3. Minimal standalone Sherpa-ONNX CPU Runtime (`sherpa-onnx-offline` + ONNX Runtime shared library)
  * 4. Primary Persian Koochik FastConformer CTC FP32 model, with optional Rizeh INT8 fallback
  * 5. Adobe Audition CEP Extension (`ir.avapardaz.audition.cep`)
- * 6. Executable CLI/macOS/Linux Installer (`install.mjs`, `install-macos.sh`, `uninstall.mjs`)
+ * 6. Target-specific macOS / Windows 11 Installer (`install.mjs`, `install-macos.sh`, `install-windows.ps1`, `uninstall.mjs`)
  * 7. Release & Update Tarballs (`avapardaz-installer-v2.0.0-beta.1.tar.gz`, `avapardaz-update-v2.0.0-beta.2.tar.gz`)
  * 8. Full User, Release, Update, Rollback, Uninstall & License Documentation (`dist-release/docs/`)
  */
