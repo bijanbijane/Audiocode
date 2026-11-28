@@ -131,6 +131,7 @@ async function main(): Promise<void> {
       maxSingleFileBytes: 300 * 1024 * 1024,
       maxTotalBytes: 600 * 1024 * 1024,
       allowExecutablesInBin: true,
+      allowRelativeLibrarySymlinks: true,
       timeoutMs: 180_000,
       pythonBin: target.platform === 'win32' ? 'python' : 'python3',
     });
