@@ -3,6 +3,7 @@ import { spawnSync as nodeSpawnSync } from 'node:child_process';
 export type CpuProbeSpawnResult = {
   status: number | null;
   stdout?: string | Buffer;
+  stderr?: string | Buffer;
   error?: Error | null;
 };
 
