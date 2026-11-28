@@ -638,3 +638,14 @@ LocalSherpaNeuralEngine نیز برای سه target پشتیبانی provisionin
 - در Vitest یک assertion منسوخ از نسخه قدیمی packager شکست خورد؛ assertion حذف شد و latest CI برای head جدید مجدداً در حال اجراست.
 
 وضعیت: **Native runtime assets pinned + real-host smoke verified on all three hosted target architectures. Product installer and Audition acceptance remain IN PROGRESS.**
+
+
+### ۲۰.۱۰. Runtime provenance enforcement و CPU floor
+
+- Target registry اکنون ویژگی CPU لازم را ثبت می‌کند: `NEON` برای Apple Silicon و `AVX2` برای Intel macOS و Windows x64. این metadata در runtime manifest و package manifest ذخیره می‌شود؛ هنوز CPUID enforcement در Installer پیاده‌سازی نشده است.
+- مطابق مستندات رسمی Adobe Audition 25.x، AVX2 برای Windows و Intel macOS لازم است؛ Hardware Compatibility Matrix و فایل System Requirements تولیدی با این الزام همگام شدند.
+- Package builder بدون `runtime-manifest.json` معتبر ادامه نمی‌دهد؛ target ID، archive hash/bytes، executable hash، ONNX library hash و مجموعه کامل shared-library hashها را تطبیق می‌دهد و manifest را در payload نهایی embed می‌کند.
+- `LocalSherpaNeuralEngine` نیز پس از smoke test همین manifest را ثبت و هنگام کشف runtime، hashها و target را بررسی می‌کند.
+- دو ایراد single-flight promise cleanup در نصب Runtime و دریافت مدل اصلاح شد؛ قبلاً callback مقدار promise wrapper را با task اصلی مقایسه می‌کرد و cache هرگز پاک نمی‌شد، بنابراین retry پس از settlement ممکن نبود.
+
+Latest branch head at this note: cb2e690f872e0d13bb2e3d48efa427560b452f3a. CI for this head is QUEUED; no pass claim is made until the latest run completes.
