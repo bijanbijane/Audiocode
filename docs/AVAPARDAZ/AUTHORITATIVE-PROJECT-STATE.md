@@ -596,3 +596,18 @@ R0 همچنان **IN PROGRESS** است. دامنه و مسیر تحویل مصو
 این شواهد، کد parser و تست‌های synthetic را روی runner لینوکس تأیید می‌کند؛ به معنی اجرای Runtimeهای واقعی macOS/Windows یا پذیرش Audition نیست. سه runtime واقعی هنوز تهیه/ساخته و روی میزبان مقصد تأیید نشده‌اند.
 
 وضعیت جاری: **CI PASS ON PR #7 HEAD 4959fdd؛ NATIVE PAYLOAD / PHYSICAL HOST ACCEPTANCE STILL OPEN.**
+
+
+### ۲۰.۷. شواهد اجرای parser روی سه سیستم‌عامل
+
+در PR #7 head برابر با 52e4eda48e8bd9a37ec61ca24ec8e4e544d330ee، ماتریس اختصاصی parser با موفقیت روی هر سه runner تکمیل شد:
+
+| Runner | معماری واقعی runner | نتیجه |
+|---|---|---|
+| macos-latest | darwin-arm64 | 5/5 PASS |
+| ubuntu-latest | linux-x64 | 5/5 PASS |
+| windows-latest | win32-x64 | 5/5 PASS |
+
+هر runner از lockfile ثابت Bun استفاده کرد و پنج تست Mach-O / PE را اجرا کرد. این نتیجه، portability تست و parser را روی این محیط‌ها تأیید می‌کند؛ اثبات native runtime payloadهای محصول یا نصب واقعی روی سه target مصوب نیست.
+
+AVAPARDAZ Quality & Release Gates نیز روی همین head SUCCESS شده است. Architecture Governance workflow در آخرین checkpoint هنوز در حال اجرا بود؛ نتیجه نهایی آن باید جداگانه تأیید شود.
