@@ -271,7 +271,7 @@ import { fileURLToPath } from 'node:url';
 
 const args = process.argv.slice(2);
 if (process.platform !== '${RELEASE_TARGET.platform}' || process.arch !== '${RELEASE_TARGET.arch}') {
-  console.error('[AvaPardaz Installer] This package targets ${RELEASE_TARGET.id}; current runtime is', `${process.platform}-${process.arch}`);
+  console.error('[AvaPardaz Installer] This package targets ${RELEASE_TARGET.id}; current runtime is ' + process.platform + '-' + process.arch);
   process.exit(3);
 }
 const nodeMajorVersion = Number(process.versions.node.split('.')[0]);
