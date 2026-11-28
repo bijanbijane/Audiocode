@@ -397,6 +397,7 @@ function verifyTargetRuntimeManifest(binaryPath: string, libDir: string, target:
     if (
       manifest.schemaVersion !== 1
       || manifest.targetId !== target.id
+      || JSON.stringify(manifest.requiredCpuFeatures) !== JSON.stringify(target.requiredCpuFeatures)
       || manifest.archiveName !== target.runtimeArchive.fileName
       || manifest.archiveSha256 !== target.runtimeArchive.sha256
       || manifest.archiveBytes !== target.runtimeArchive.bytes
