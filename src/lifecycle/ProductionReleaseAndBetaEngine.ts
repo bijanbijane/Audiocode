@@ -213,6 +213,54 @@ export function computeDirectorySizeSync(dirPath: string): number {
   return total;
 }
 
+function syncPathToDiskSync(targetPath: string, directory = false): void {
+  let fd: number | undefined;
+  try {
+    fd = fs.openSync(targetPath, 'r');
+    fs.fsyncSync(fd);
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    // Windows does not consistently expose directory handles through Node's
+    // fs.open; file contents are still fsynced there, but directory-entry
+    // durability must be validated on supported host/filesystem combinations.
+    if (!(directory && process.platform === 'win32' && ['EACCES', 'EPERM', 'EINVAL', 'EISDIR', 'ENOTSUP'].includes(code ?? ''))) {
+      throw error;
+    }
+  } finally {
+    if (fd !== undefined) fs.closeSync(fd);
+  }
+}
+
+function syncDirectoryTreeToDiskSync(rootDir: string): void {
+  const entries = fs.readdirSync(rootDir, { withFileTypes: true });
+  for (const entry of entries) {
+    const entryPath = path.join(rootDir, entry.name);
+    const stat = fs.lstatSync(entryPath);
+    if (stat.isSymbolicLink()) continue;
+    if (stat.isDirectory()) {
+      syncDirectoryTreeToDiskSync(entryPath);
+    } else if (stat.isFile()) {
+      syncPathToDiskSync(entryPath);
+    }
+  }
+  syncPathToDiskSync(rootDir, true);
+}
+
+function writeFileAtomicallyAndSyncSync(filePath: string, content: string, mode = 0o600): void {
+  const directory = path.dirname(filePath);
+  fs.mkdirSync(directory, { recursive: true, mode: 0o700 });
+  const temporaryPath = filePath + '.tmp-' + process.pid + '-' + crypto.randomBytes(8).toString('hex');
+  try {
+    fs.writeFileSync(temporaryPath, content, { encoding: 'utf8', flag: 'wx', mode });
+    syncPathToDiskSync(temporaryPath);
+    fs.renameSync(temporaryPath, filePath);
+    syncPathToDiskSync(directory, true);
+  } catch (error) {
+    fs.rmSync(temporaryPath, { force: true });
+    throw error;
+  }
+}
+
 function copyDirectoryRecursiveSync(srcDir: string, destDir: string): void {
   fs.mkdirSync(destDir, { recursive: true, mode: 0o755 });
   const entries = fs.readdirSync(srcDir, { withFileTypes: true });
@@ -1232,7 +1280,11 @@ export class AvapardazPackageUpdateManager {
     const journalDir = this.journalPath(backupDir);
     fs.mkdirSync(journalDir, { recursive: true, mode: 0o700 });
     const marker = path.join(journalDir, phase);
-    if (!fs.existsSync(marker)) fs.mkdirSync(marker, { mode: 0o700 });
+    if (!fs.existsSync(marker)) {
+      fs.mkdirSync(marker, { mode: 0o700 });
+      syncPathToDiskSync(journalDir, true);
+      syncPathToDiskSync(backupDir, true);
+    }
   }
 
   /** Restore any update whose activation did not reach its committed marker. */
@@ -1267,9 +1319,12 @@ export class AvapardazPackageUpdateManager {
         if (fs.existsSync(componentBackupDir)) {
           fs.rmSync(restoreDir, { recursive: true, force: true });
           copyDirectoryRecursiveSync(componentBackupDir, restoreDir);
+          syncDirectoryTreeToDiskSync(restoreDir);
           fs.rmSync(displacedDir, { recursive: true, force: true });
           if (fs.existsSync(targetDir)) fs.renameSync(targetDir, displacedDir);
+          syncPathToDiskSync(path.dirname(targetDir), true);
           fs.renameSync(restoreDir, targetDir);
+          syncPathToDiskSync(path.dirname(targetDir), true);
         } else {
           fs.rmSync(targetDir, { recursive: true, force: true });
         }
@@ -1336,7 +1391,7 @@ export class AvapardazPackageUpdateManager {
 
   private writeManifest(manifest: InstallationConfigManifest): void {
     const p = path.join(this.layout.configDir, 'installation-manifest.json');
-    fs.writeFileSync(p, JSON.stringify(manifest, null, 2), { encoding: 'utf8', mode: 0o600 });
+    writeFileAtomicallyAndSyncSync(p, JSON.stringify(manifest, null, 2), 0o600);
   }
 
   private getComponentVersion(
@@ -1579,12 +1634,15 @@ export class AvapardazPackageUpdateManager {
       const componentBackupTarget = path.join(backupDir, 'component');
       if (fs.existsSync(targetDir)) {
         copyDirectoryRecursiveSync(targetDir, componentBackupTarget);
+        syncDirectoryTreeToDiskSync(componentBackupTarget);
       }
-      fs.writeFileSync(
+      writeFileAtomicallyAndSyncSync(
         path.join(backupDir, 'manifest.backup.json'),
         JSON.stringify(manifest, null, 2),
-        'utf8',
+        0o600,
       );
+      syncPathToDiskSync(backupDir, true);
+      syncPathToDiskSync(this.layout.backupsDir, true);
 
       // 7. Journaled activation: prepare beside target to keep rename operations on one volume.
       const siblingToken = backupId.replace(/[^a-zA-Z0-9_-]/g, '_');
@@ -1594,13 +1652,19 @@ export class AvapardazPackageUpdateManager {
       this.markActivationPhase(backupDir, 'PREPARED');
       fs.rmSync(activationStageDir, { recursive: true, force: true });
       copyDirectoryRecursiveSync(stageDir, activationStageDir);
+      syncDirectoryTreeToDiskSync(activationStageDir);
+      syncPathToDiskSync(path.dirname(activationStageDir), true);
       if (params.simulateInterruptDuringActivation) {
         throw new Error('SIMULATED_INTERRUPTION_DURING_UPDATE_ACTIVATION');
       }
       fs.rmSync(displacedDir, { recursive: true, force: true });
-      if (fs.existsSync(targetDir)) fs.renameSync(targetDir, displacedDir);
+      if (fs.existsSync(targetDir)) {
+        fs.renameSync(targetDir, displacedDir);
+        syncPathToDiskSync(path.dirname(targetDir), true);
+      }
       this.markActivationPhase(backupDir, 'OLD_MOVED');
       fs.renameSync(activationStageDir, targetDir);
+      syncPathToDiskSync(path.dirname(targetDir), true);
       this.markActivationPhase(backupDir, 'NEW_MOVED');
 
       // Ensure executable bits on binaries after update
@@ -1636,7 +1700,9 @@ export class AvapardazPackageUpdateManager {
 
       this.markActivationPhase(backupDir, 'COMMITTED');
       fs.rmSync(displacedDir, { recursive: true, force: true });
+      syncPathToDiskSync(path.dirname(targetDir), true);
       fs.rmSync(this.journalPath(backupDir), { recursive: true, force: true });
+      syncPathToDiskSync(backupDir, true);
       return {
         ok: true,
         rolledBack: false,
