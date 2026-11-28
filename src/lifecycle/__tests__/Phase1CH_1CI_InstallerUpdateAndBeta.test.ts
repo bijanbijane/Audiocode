@@ -195,6 +195,32 @@ describe('Phase 1C-H & 1C-I: Installer, First-Run Health, Clean-Env Execution, A
 
       const updater = new AvapardazPackageUpdateManager(installed.layout);
 
+      // Recover a process-crash simulation after the new directory became visible but before commit.
+      const recoveryBackupId = 'bkp_companion_1.0.0_recovery';
+      const recoveryBackupDir = path.join(installed.layout.backupsDir, recoveryBackupId);
+      const originalCompanionEntry = fs.readFileSync(
+        path.join(installed.layout.companionDir, 'avapardaz-companion.mjs'),
+        'utf8',
+      );
+      fs.mkdirSync(path.join(recoveryBackupDir, 'component'), { recursive: true });
+      fs.cpSync(installed.layout.companionDir, path.join(recoveryBackupDir, 'component'), { recursive: true });
+      fs.copyFileSync(
+        path.join(installed.layout.configDir, 'installation-manifest.json'),
+        path.join(recoveryBackupDir, 'manifest.backup.json'),
+      );
+      fs.mkdirSync(path.join(recoveryBackupDir, 'activation-journal', 'NEW_MOVED'), { recursive: true });
+      fs.writeFileSync(
+        path.join(installed.layout.companionDir, 'avapardaz-companion.mjs'),
+        'INTERRUPTED_NEW_VERSION',
+        'utf8',
+      );
+      const recoveringUpdater = new AvapardazPackageUpdateManager(installed.layout);
+      assert.strictEqual(
+        fs.readFileSync(path.join(installed.layout.companionDir, 'avapardaz-companion.mjs'), 'utf8'),
+        originalCompanionEntry,
+      );
+      assert.strictEqual(fs.existsSync(path.join(recoveryBackupDir, 'activation-journal')), false);
+
       // 1. Defer update when an active editing session is running
       const deferred = updater.applyUpdate({
         pkg: {
