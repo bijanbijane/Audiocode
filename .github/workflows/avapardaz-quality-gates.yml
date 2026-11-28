@@ -4,7 +4,7 @@ on:
   push:
     branches: [main, master, codex/avapardaz-audio-engines]
   pull_request:
-    branches: [main, master]
+    branches: [main, master, docs/r0-baseline-audit-2026-11-27]
   workflow_dispatch:
 
 permissions:
@@ -108,3 +108,42 @@ jobs:
           else
             echo "::warning::Repository uses bun.lock; npm audit cannot audit this lockfile. Add a Bun-lockfile-compatible advisory scan before release."
           fi
+
+
+  native-release-runtime-qualification:
+    name: Native Runtime Qualification — ${{ matrix.target }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: darwin-arm64
+            runner: macos-15
+          - target: darwin-x64
+            runner: macos-15-intel
+          - target: win32-x64
+            runner: windows-2025
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: oven-sh/setup-bun@v2
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+      - name: Install dependencies from frozen bun.lock
+        run: bun install --frozen-lockfile
+      - name: Provision, hash-verify, inspect and execute native Sherpa runtime
+        env:
+          AVAPARDAZ_EXPECTED_TARGET: ${{ matrix.target }}
+          AVAPARDAZ_RUNTIME_OUTPUT_DIR: ${{ runner.temp }}/avapardaz-runtime/${{ matrix.target }}
+        run: bun run tsx scripts/provision-release-native-runtime.ts
+      - name: Upload qualified target runtime
+        uses: actions/upload-artifact@v4
+        with:
+          name: avapardaz-native-runtime-${{ matrix.target }}
+          path: ${{ runner.temp }}/avapardaz-runtime/${{ matrix.target }}
+          if-no-files-found: error
+          retention-days: 14
