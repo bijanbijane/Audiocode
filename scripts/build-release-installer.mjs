@@ -56,7 +56,7 @@ const SHERPA_RIZEH_MODEL_DIR = process.env.AVAPARDAZ_SHERPA_RIZEH_MODEL_DIR?.tri
 const SHAHAB_KOOCHIK_MODEL_DIR = process.env.AVAPARDAZ_SHERPA_KOOCHIK_MODEL_DIR?.trim() || path.join(AVAPARDAZ_USER_MODEL_ROOT, 'shahab-koochik-v1.0-sherpa-onnx');
 const SHERPA_BINARY_SOURCE = path.join(SHERPA_RUNTIME_ROOT, 'bin', RELEASE_TARGET.sherpaBinaryName);
 const DIRECT_SHERPA_RUNTIME_LIB_DIR = path.join(SHERPA_RUNTIME_ROOT, 'lib');
-const DIRECT_SHERPA_RUNTIME_HAS_LIBRARIES = fs.existsSync(DIRECT_SHERPA_RUNTIME_LIB_DIR) && fs.readdirSync(DIRECT_SHERPA_RUNTIME_LIB_DIR).some((name) => /\\.(?:dll|dylib|so(?:\\.\\d+)*)$/i.test(name));
+const DIRECT_SHERPA_RUNTIME_HAS_LIBRARIES = fs.existsSync(DIRECT_SHERPA_RUNTIME_LIB_DIR) && fs.readdirSync(DIRECT_SHERPA_RUNTIME_LIB_DIR).some((name) => /\.(?:dll|dylib|so(?:\.\d+)*)$/i.test(name));
 const SHERPA_ONNXRUNTIME_LIBRARY_SOURCE = process.env.AVAPARDAZ_SHERPA_RUNTIME_LIB_DIR?.trim() || (DIRECT_SHERPA_RUNTIME_HAS_LIBRARIES ? DIRECT_SHERPA_RUNTIME_LIB_DIR : path.join(SHERPA_RUNTIME_ROOT, 'lib', `python${SHERPA_PYTHON_VERSION}`, 'site-packages', 'sherpa_onnx', 'lib'));
 const SHAHAB_KOOCHIK_MODEL_BYTES = SHAHAB_KOOCHIK_MODEL_PROVENANCE.model.bytes;
 const SHAHAB_KOOCHIK_MODEL_SHA256 = SHAHAB_KOOCHIK_MODEL_PROVENANCE.model.sha256;
@@ -204,12 +204,12 @@ fs.copyFileSync(SHERPA_BINARY_SOURCE, sherpaStandaloneBinary);
 fs.chmodSync(sherpaStandaloneBinary, 0o755);
 
 const availableRuntimeLibraries = fs.readdirSync(SHERPA_ONNXRUNTIME_LIBRARY_SOURCE, { withFileTypes: true })
-  .filter((entry) => entry.isFile() && /\\.(?:dll|dylib|so(?:\\.\\d+)*)$/i.test(entry.name))
+  .filter((entry) => entry.isFile() && /\.(?:dll|dylib|so(?:\.\d+)*)$/i.test(entry.name))
   .map((entry) => entry.name);
 const onnxRuntimeLibraryName = availableRuntimeLibraries.includes(RELEASE_TARGET.onnxRuntimeLibraryName)
   ? RELEASE_TARGET.onnxRuntimeLibraryName
   : RELEASE_TARGET.platform === 'darwin'
-    ? availableRuntimeLibraries.find((name) => /^libonnxruntime\\.\\d+(?:\\.\\d+)*\\.dylib$/.test(name))
+    ? availableRuntimeLibraries.find((name) => /^libonnxruntime\.\d+(?:\.\d+)*\.dylib$/.test(name))
     : undefined;
 if (!onnxRuntimeLibraryName) {
   throw new Error(`SHERPA_ONNXRUNTIME_LIBRARY_MISSING: expected ${RELEASE_TARGET.onnxRuntimeLibraryName} in ${SHERPA_ONNXRUNTIME_LIBRARY_SOURCE}`);
