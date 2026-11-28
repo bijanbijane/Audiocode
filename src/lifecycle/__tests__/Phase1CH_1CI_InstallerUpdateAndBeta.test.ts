@@ -214,7 +214,7 @@ describe('Phase 1C-H & 1C-I: Installer, First-Run Health, Clean-Env Execution, A
         'INTERRUPTED_NEW_VERSION',
         'utf8',
       );
-      const recoveringUpdater = new AvapardazPackageUpdateManager(installed.layout);
+      new AvapardazPackageUpdateManager(installed.layout);
       assert.strictEqual(
         fs.readFileSync(path.join(installed.layout.companionDir, 'avapardaz-companion.mjs'), 'utf8'),
         originalCompanionEntry,
