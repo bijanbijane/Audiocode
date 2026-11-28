@@ -299,7 +299,7 @@ jobs:
               const installerDir = path.join(packageRoot, 'installer');
               const embeddedManifest = JSON.parse(fs.readFileSync(path.join(packageRoot, 'package-manifest.json'), 'utf8'));
               assert.deepStrictEqual(embeddedManifest, product, 'EMBEDDED_PACKAGE_MANIFEST_MISMATCH: ' + target);
-              for (const script of ['install.mjs', 'uninstall.mjs']) {
+              for (const script of ['install.mjs', 'uninstall.mjs', 'cpu-feature-preflight.mjs']) {
                 const scriptPath = path.join(installerDir, script);
                 if (!fs.existsSync(scriptPath)) throw new Error('INSTALLER_SCRIPT_MISSING: ' + target + '/' + script);
                 execFileSync(process.execPath, ['--check', scriptPath], { stdio: 'pipe' });
