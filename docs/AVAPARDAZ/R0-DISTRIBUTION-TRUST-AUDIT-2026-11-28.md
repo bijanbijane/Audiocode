@@ -317,3 +317,20 @@ The source change is committed to PR #7. CI runs triggered by the latest head `1
 - Key rotation, revocation, and emergency recovery policy remain open.
 - Release package manifests, installer/update tarballs, and generated installer-side signature verification remain unsigned/unimplemented.
 - Physical Windows 11 and macOS 14/15 installation, repair, upgrade, rollback, uninstall, and live Adobe Audition 25.x CEP/Companion acceptance remain unperformed.
+
+
+## Recovery cleanup hardening — 2026-11-28 (PR #7)
+
+A follow-up review found that the interrupted-update recovery path previously cleared `stagingDir` from the in-memory component slot without deleting the staged bytes from disk. This could orphan large unsigned update artifacts after a crash and incorrectly imply that cleanup had completed.
+
+The recovery contract is now asynchronous and requires a `cleanupStagingArtifact(stagingDir)` callback. When a staging directory is recorded, recovery invokes the callback before transitioning the state to `UPDATE_ROLLED_BACK` or clearing the path. If physical cleanup fails, recovery throws `STAGING_CLEANUP_FAILED` and preserves the original interrupted state and staging reference, allowing a safe retry. No cleanup is attempted for an empty staging reference.
+
+Regression coverage verifies that the recorded staging path is passed to cleanup, that a successful cleanup precedes clearing the state, and that a failed cleanup preserves the reference/state and can be retried.
+
+Implementation commits:
+- `947d670db46b269e63933818a275596b66b0c9aa` — require physical staging cleanup during interrupted-update recovery.
+- `e53d2936b324ce1e83c2c6792075fa9ab0b8608b` — test cleanup success, failure preservation, and retry.
+
+Validation on exact head `e53d2936b324ce1e83c2c6792075fa9ab0b8608b`: Architecture Governance run `46161082812` was queued at the time of this update. Do not treat this change as validated until the workflow completes successfully. The prior head `0bb931cf8b265a0dbfa7af41d69826c34c2c0321` passed AVAPARDAZ Levels 1–5 and all 10 Architecture Governance jobs, including all six unsigned package integrity checks.
+
+The callback is the filesystem boundary: production startup wiring must supply a deletion implementation that validates the staging path is within the application-owned staging root and removes only that directory. This code change does not itself prove physical-host startup wiring or production filesystem behavior.
