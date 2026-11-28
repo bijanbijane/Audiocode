@@ -279,9 +279,13 @@ jobs:
               }
             }
             const product = manifest.packageManifest;
-            if (product.primaryPersianAsrModel.revision !== '158e40e9ccf166c3655b7f4cd2abbfc7bbc87f7a'
-              || product.primaryPersianAsrModel.licenseSpdx !== 'Apache-2.0'
-              || product.target.id !== target) {
+            const primaryModel = product?.components?.primaryPersianAsrModel;
+            if (!product || !primaryModel) {
+              throw new Error('RELEASE_PACKAGE_MANIFEST_SCHEMA_INVALID: ' + target);
+            }
+            if (primaryModel.revision !== '158e40e9ccf166c3655b7f4cd2abbfc7bbc87f7a'
+              || primaryModel.licenseSpdx !== 'Apache-2.0'
+              || product.target?.id !== target) {
               throw new Error('RELEASE_PACKAGE_PROVENANCE_MISMATCH: ' + target);
             }
             process.stdout.write(target + ': installer/update hashes and model/runtime provenance PASS\n');
