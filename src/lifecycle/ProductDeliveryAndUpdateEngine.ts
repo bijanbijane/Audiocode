@@ -653,7 +653,15 @@ export class ComponentUpdateOrchestrator {
     }
 
     this.transition(params.component, 'UPDATE_ACTIVATING', `Resuming staged update ${candidateVersion} after active jobs completed.`);
-    const activation = await params.activateArtifact(stagingDir);
+    let activation: { readonly ok: boolean; readonly error?: string };
+    try {
+      activation = await params.activateArtifact(stagingDir);
+    } catch (error) {
+      activation = {
+        ok: false,
+        error: `Deferred activation threw: ${error instanceof Error ? error.message : String(error)}`,
+      };
+    }
     if (!activation.ok) {
       return this.performRollback(
         params.component,
@@ -667,7 +675,15 @@ export class ComponentUpdateOrchestrator {
       activeVersion: candidateVersion,
     });
     this.transition(params.component, 'UPDATE_VERIFICATION_PENDING', 'Running post-update health verification.');
-    const health = await params.verifyPostActivationHealth();
+    let health: { readonly ok: boolean; readonly error?: string };
+    try {
+      health = await params.verifyPostActivationHealth();
+    } catch (error) {
+      health = {
+        ok: false,
+        error: `Deferred post-activation health check threw: ${error instanceof Error ? error.message : String(error)}`,
+      };
+    }
     if (!health.ok) {
       return this.performRollback(
         params.component,
@@ -724,7 +740,15 @@ export class ComponentUpdateOrchestrator {
     restoreFn: (prevVersion: string) => Promise<boolean>,
   ): Promise<{ readonly ok: boolean; readonly slot: ComponentSlotRecord; readonly rolledBack: boolean }> {
     this.transition(component, 'UPDATE_ROLLBACK_PENDING', reason, { lastError: reason });
-    const restored = await restoreFn(prevKnownGood);
+    let restored = false;
+    try {
+      restored = await restoreFn(prevKnownGood);
+    } catch (error) {
+      const failed = this.transition(component, 'UPDATE_FAILED', 'Rollback restoration threw an exception.', {
+        lastError: `ROLLBACK_FAILED: ${reason}; restore threw: ${error instanceof Error ? error.message : String(error)}`,
+      });
+      return { ok: false, slot: failed, rolledBack: false };
+    }
     if (!restored) {
       const failed = this.transition(component, 'UPDATE_FAILED', 'Rollback restoration failed.', {
         lastError: `ROLLBACK_FAILED: ${reason}`,
