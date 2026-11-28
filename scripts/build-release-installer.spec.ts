@@ -34,6 +34,10 @@ describe('full release installer path resolution', () => {
     expect(packagerSource).toContain("install-windows.ps1");
     expect(packagerSource).toContain("process.platform !== '${RELEASE_TARGET.platform}'");
     expect(packagerSource).toContain("nodeMajorVersion < 20");
+    expect(packagerSource).toContain("verifyRequiredCpuFeatures");
+    expect(packagerSource).toContain("cpu-feature-preflight.mjs");
+    expect(packagerSource).toContain("CPU requirement not met");
+    expect(packagerSource).toContain("RELEASE_TARGET.requiredCpuFeatures");
     expect(packagerSource).not.toContain('path.dirname(new URL(import.meta.url).pathname)');
   });
 });
