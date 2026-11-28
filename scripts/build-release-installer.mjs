@@ -444,6 +444,7 @@ const packageManifest = {
     arch: RELEASE_TARGET.arch,
     os: RELEASE_TARGET.osLabel,
     architecture: RELEASE_TARGET.architectureLabel,
+    requiredCpuFeatures: RELEASE_TARGET.requiredCpuFeatures,
   },
   buildHost: { platform: process.platform, arch: process.arch },
   version: RELEASE_VERSION,
