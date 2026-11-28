@@ -93,10 +93,10 @@ Non-blocking observations from the production build:
 
 ## Next execution order
 
-1. Continue the remaining repository-wide semantic import/callsite review, including non-runtime modules that may consume legacy DTO fields; preserve compatibility until the inventory is complete.
-2. Obtain owner decisions for the exact dual-platform compatibility matrix and internal distribution trust model.
+1. Obtain owner approval for the exact Audition / macOS / Windows / hardware / audio-format compatibility matrix; keep the gate BLOCKED until recorded.
+2. Complete the internal installation, trust, signing and update-policy decision packet; distinguish existing packaging evidence from policy choices that require owner approval.
 3. Execute live Audition acceptance on both macOS and Windows when authorized hosts are available.
-4. Assess Vite chunk splitting and dependency deprecation separately from release-critical work.
+4. Preserve legacy transcript compatibility until persisted CEP draft migration is versioned and tested; assess Vite chunk splitting and dependency deprecation separately from release-critical work.
 
 ## Safety and release state
 
