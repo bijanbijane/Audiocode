@@ -1290,7 +1290,7 @@ export class LocalSherpaNeuralEngine {
                   onnxRuntimeLibraryName: path.basename(onnxRuntimeLibrary),
                   onnxRuntimeLibraryBytes: fs.statSync(onnxRuntimeLibrary).size,
                   onnxRuntimeLibrarySha256: hashFile(onnxRuntimeLibrary),
-                  sharedLibraries: nativeLibraries.map((library) => ({
+                  sharedLibraries: nativeLibraries.filter((library) => path.dirname(library) === libraryDir).map((library) => ({
                     name: path.basename(library),
                     bytes: fs.statSync(library).size,
                     sha256: hashFile(library),
