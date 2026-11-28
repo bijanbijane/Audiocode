@@ -66,8 +66,12 @@ describe('safe native runtime archive symlink materialization', () => {
       .rejects.toThrow(/TAR_SYMLINK_FORBIDDEN/);
   });
 
-  it('rejects parent traversal even when library symlink materialization is enabled', async () => {
-    const archive = createTarWithLibrarySymlink('../../outside.dylib');
+  it.each([
+    '../../outside.dylib',
+    '/tmp/outside.dylib',
+    'C:/Windows/system32/outside.dll',
+  ])('rejects unsafe symlink target %s even when library symlink materialization is enabled', async (linkName) => {
+    const archive = createTarWithLibrarySymlink(linkName);
     const output = fs.mkdtempSync(path.join(os.tmpdir(), 'avp-safe-tar-output-'));
     tempDirs.push(output);
     await expect(extractTarBz2Safe(archive, output, {
