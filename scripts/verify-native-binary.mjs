@@ -11,14 +11,19 @@ const PE_MACHINE = Object.freeze({
 function readMachCpuTypes(buffer) {
   if (buffer.length < 8) return null;
   const magic = buffer.readUInt32BE(0);
-  if (magic === 0xcafebabe || magic === 0xcafebabf) {
-    const is64 = magic === 0xcafebabf;
-    const count = buffer.readUInt32BE(4);
+  const littleEndianFatMagic = buffer.readUInt32LE(0);
+  if (magic === 0xcafebabe || magic === 0xcafebabf
+    || littleEndianFatMagic === 0xcafebabe || littleEndianFatMagic === 0xcafebabf) {
+    const littleEndian = magic !== 0xcafebabe && magic !== 0xcafebabf;
+    const fatMagic = littleEndian ? littleEndianFatMagic : magic;
+    const is64 = fatMagic === 0xcafebabf;
+    const readUInt32 = littleEndian ? Buffer.prototype.readUInt32LE : Buffer.prototype.readUInt32BE;
+    const count = readUInt32.call(buffer, 4);
     const entrySize = is64 ? 32 : 20;
     if (count > 128 || buffer.length < 8 + count * entrySize) return null;
     const cpus = [];
     for (let index = 0; index < count; index += 1) {
-      cpus.push(buffer.readUInt32BE(8 + index * entrySize));
+      cpus.push(readUInt32.call(buffer, 8 + index * entrySize));
     }
     return cpus;
   }
@@ -57,7 +62,7 @@ export function inspectNativeBinaryArchitecture(filePath, platform) {
     return machine === null ? null : (machine === PE_MACHINE.x64 ? 'x64' : `pe-machine-0x${machine.toString(16)}`);
   }
   if (platform === 'darwin') {
-    const header = Buffer.alloc(4096);
+    const header = Buffer.alloc(8192);
     const fd = fs.openSync(filePath, 'r');
     let bytes;
     try {
