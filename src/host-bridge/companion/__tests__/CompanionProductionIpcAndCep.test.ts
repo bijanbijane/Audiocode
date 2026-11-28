@@ -186,7 +186,7 @@ test('AVP-P0-004: CompanionAudioTransferManager validates PCM metadata, enforces
     assert.equal(ooo.code, 'OUT_OF_ORDER_CHUNK_REJECTED');
 
     // Corrupted chunk checksum rejected
-    const badHash = mgr.appendChunk({ transferId: tid, chunkIndex: 0, chunkBase64: c0.toString('base64'), chunkSha256: '0'.repeat(64) 
+    const badHash = mgr.appendChunk({ transferId: tid, chunkIndex: 0, chunkBase64: c0.toString('base64'), chunkSha256: '0'.repeat(64),
       ownerId: 'test-owner',});
     assert.equal(badHash.ok, false);
     assert.equal(badHash.code, 'CHUNK_CHECKSUM_MISMATCH');
