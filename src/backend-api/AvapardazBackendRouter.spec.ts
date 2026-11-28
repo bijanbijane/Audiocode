@@ -159,7 +159,22 @@ describe('AvapardazBackendRouter Companion IPC isolation', () => {
       host_adapter_version: HOST_ADAPTER_VERSION,
       expected_contract_version: CANONICAL_CONTRACT_VERSION,
       client_instance_id: 'd'.repeat(64),
-    }, { origin: 'null', secFetchSite: 'cross-site' });
+    }, { origin: 'null', secFetchSite: 'same-origin' });
+    expect(response.status).toBe(403);
+    expect((await response.json() as { error: string }).error).toBe('COMPANION_ORIGIN_BLOCKED');
+  });
+
+  it('rejects cross-site Fetch Metadata even when Origin is otherwise allowlisted', async () => {
+    await startRouter();
+    const response = await post('/companion/handshake', {
+      ipc_protocol_version: COMPANION_IPC_PROTOCOL_VERSION,
+      host_id: 'cli-test',
+      host_version: '1.0.0',
+      panel_version: '1.0.0',
+      host_adapter_version: HOST_ADAPTER_VERSION,
+      expected_contract_version: CANONICAL_CONTRACT_VERSION,
+      client_instance_id: 'e'.repeat(64),
+    }, { origin: 'http://localhost', secFetchSite: 'cross-site' });
     expect(response.status).toBe(403);
     expect((await response.json() as { error: string }).error).toBe('COMPANION_ORIGIN_BLOCKED');
   });
