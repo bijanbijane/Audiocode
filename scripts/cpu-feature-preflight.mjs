@@ -1,7 +1,13 @@
 import { spawnSync as nodeSpawnSync } from 'node:child_process';
 
+/** @type {CpuProbeSpawnSync} */
 const defaultSpawnSync = (command, args, options) =>
   nodeSpawnSync(command, [...args], options);
+
+/**
+ * @typedef {{ status: number | null, stdout?: string | Buffer, stderr?: string | Buffer, error?: Error | null }} CpuProbeSpawnResult
+ * @typedef {(command: string, args: string[], options: { encoding: 'utf8', timeout: number, windowsHide?: boolean }) => CpuProbeSpawnResult} CpuProbeSpawnSync
+ */
 
 const WINDOWS_AVX2_PROBE = [
   "$source = 'using System; using System.Runtime.InteropServices; public static class AvaPardazCpuProbe { [DllImport(\"kernel32.dll\")] public static extern bool IsProcessorFeaturePresent(uint feature); }'",
@@ -15,6 +21,10 @@ const WINDOWS_AVX2_PROBE = [
  * Windows uses the OS-supported IsProcessorFeaturePresent(PF_AVX2_INSTRUCTIONS_AVAILABLE)
  * API (feature ID 40); Intel macOS uses Apple's hw.optional.avx2_0 sysctl.
  * NEON is part of the required AArch64 baseline for the approved Apple Silicon target.
+ */
+/**
+ * @param {string[]} requiredCpuFeatures
+ * @param {{ platform?: string, arch?: string, spawnSync?: CpuProbeSpawnSync }} options
  */
 export function verifyRequiredCpuFeatures(requiredCpuFeatures = [], {
   platform = process.platform,
