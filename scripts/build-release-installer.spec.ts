@@ -19,6 +19,9 @@ describe('full release installer path resolution', () => {
     expect(packagerSource).toContain("assertNativeBinaryArchitecture");
     expect(packagerSource).toContain("filePath: SHERPA_BINARY_SOURCE");
     expect(packagerSource).toContain("filePath: onnxRuntimeLibrarySource");
+    expect(packagerSource).toContain("availableRuntimeLibraries");
+    expect(packagerSource).toContain("AVAPARDAZ_SHERPA_RUNTIME_LIB_DIR");
+    expect(packagerSource).toContain("RELEASE_TARGET.platform !== 'win32'");
     expect(packagerSource).toContain("!fs.existsSync(onnxRuntimeLibrarySource)");
     expect(packagerSource).toContain("RELEASE_TARGET.onnxRuntimeLibraryName");
     expect(packagerSource).toContain("install-windows.ps1");
