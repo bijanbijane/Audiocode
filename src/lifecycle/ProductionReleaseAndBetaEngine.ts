@@ -1573,6 +1573,12 @@ export class AvapardazPackageUpdateManager {
     }
 
     this.writeManifest(backedUpManifest);
+    const token = backupId.replace(/[^a-zA-Z0-9_-]/g, '_');
+    const siblingPrefix = '.' + path.basename(targetDir) + '.' + token;
+    fs.rmSync(this.journalPath(backupDir), { recursive: true, force: true });
+    fs.rmSync(path.join(path.dirname(targetDir), siblingPrefix + '.stage'), { recursive: true, force: true });
+    fs.rmSync(path.join(path.dirname(targetDir), siblingPrefix + '.displaced'), { recursive: true, force: true });
+    fs.rmSync(path.join(path.dirname(targetDir), siblingPrefix + '.restore'), { recursive: true, force: true });
     const restoredVersion = this.getComponentVersion(backedUpManifest, component);
     return {
       ok: true,
