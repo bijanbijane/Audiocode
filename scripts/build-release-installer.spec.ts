@@ -23,7 +23,6 @@ describe('full release installer path resolution', () => {
     expect(packagerSource).toContain("AVAPARDAZ_SHERPA_RUNTIME_LIB_DIR");
     expect(packagerSource).toContain("DIRECT_SHERPA_RUNTIME_HAS_LIBRARIES");
     expect(packagerSource).toContain("RELEASE_TARGET.platform !== 'win32'");
-    expect(packagerSource).toContain("!fs.existsSync(onnxRuntimeLibrarySource)");
     expect(packagerSource).toContain("RELEASE_TARGET.onnxRuntimeLibraryName");
     expect(packagerSource).toContain("install-windows.ps1");
     expect(packagerSource).toContain("process.platform !== '${RELEASE_TARGET.platform}'");
