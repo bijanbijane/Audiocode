@@ -323,9 +323,11 @@ The source change is committed to PR #7. CI runs triggered by the latest head `1
 
 A follow-up review found that the interrupted-update recovery path previously cleared `stagingDir` from the in-memory component slot without deleting the staged bytes from disk. This could orphan large unsigned update artifacts after a crash and incorrectly imply that cleanup had completed.
 
-The recovery contract is now asynchronous and requires a `cleanupStagingArtifact(stagingDir)` callback. When a staging directory is recorded, recovery invokes the callback before transitioning the state to `UPDATE_ROLLED_BACK` or clearing the path. If physical cleanup fails, recovery throws `STAGING_CLEANUP_FAILED` and preserves the original interrupted state and staging reference, allowing a safe retry. No cleanup is attempted for an empty staging reference.
+The recovery contract is now asynchronous and requires a runtime/filesystem adapter callback, `recoverInterruptedArtifact(context)`. The adapter receives the component, exact interrupted state, active and previous-known-good versions, candidate version, and staging path. This is intentionally broader than blind directory deletion: after `UPDATE_ACTIVATING` or `UPDATE_VERIFICATION_PENDING`, the staging path may have become the active installation. The adapter must reconcile the actual active pointer to the previous known-good installation when necessary, then remove only abandoned staging or partial-download data. It must never delete a directory merely because it was once recorded as a staging path.
 
-Regression coverage verifies that the recorded staging path is passed to cleanup, that a successful cleanup precedes clearing the state, and that a failed cleanup preserves the reference/state and can be retried.
+Only after the adapter completes successfully does the orchestrator transition to `UPDATE_ROLLED_BACK` and clear the candidate/staging references. If adapter recovery fails, it throws `INTERRUPTED_UPDATE_RECOVERY_FAILED` and preserves the interrupted state and references so recovery can be retried. This prevents the state machine from claiming that an in-memory version change performed a physical rollback.
+
+Regression coverage verifies the full recovery context is passed to the adapter and that a failed adapter preserves the interrupted state/path and can be retried.
 
 Implementation commits:
 - `947d670db46b269e63933818a275596b66b0c9aa` — require physical staging cleanup during interrupted-update recovery.
@@ -333,4 +335,4 @@ Implementation commits:
 
 Validation on exact head `e53d2936b324ce1e83c2c6792075fa9ab0b8608b`: Architecture Governance run `46161082812` was queued at the time of this update. Do not treat this change as validated until the workflow completes successfully. The prior head `0bb931cf8b265a0dbfa7af41d69826c34c2c0321` passed AVAPARDAZ Levels 1–5 and all 10 Architecture Governance jobs, including all six unsigned package integrity checks.
 
-The callback is the filesystem boundary: production startup wiring must supply a deletion implementation that validates the staging path is within the application-owned staging root and removes only that directory. This code change does not itself prove physical-host startup wiring or production filesystem behavior.
+The adapter is the runtime/filesystem boundary: production startup wiring must supply an implementation that safely restores the previous active pointer when activation may have started, validates all paths against application-owned roots, and removes only abandoned artifacts. This code change does not itself prove physical-host startup wiring or production filesystem behavior.
