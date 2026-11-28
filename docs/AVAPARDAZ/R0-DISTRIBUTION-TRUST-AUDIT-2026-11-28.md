@@ -252,3 +252,16 @@ GitHub-hosted macOS 14 runners are retired; current CI validates macOS 15 arm64 
 The shared target registry declares `requiredCpuFeatures`: `NEON` for `darwin-arm64`, and `AVX2` for the two x86_64 Audition 25.x targets. The package manifest and native runtime manifest carry this requirement. This is a declared host requirement, **not** a runtime CPUID probe. Adobe's published Audition 25.x requirements specify AVX2 for Windows and Intel macOS; the official requirement is linked in `HARDWARE-COMPATIBILITY-MATRIX.md`.
 
 The package builder now refuses a target runtime without `runtime-manifest.json`. It checks target ID, pinned archive name/bytes/SHA-256, executable hash, ONNX library hash, and the complete shared-library set and hashes. It embeds the verified manifest into the package payload and records its hash in the package manifest. This is local build provenance/integrity validation; release signing and trust-root verification are still mandatory and not implemented.
+
+
+### 8.10. Koochik model license provenance
+
+The Koochik model's initial upstream README at revision `b67cd889f37746469b1396cf4236682aec72fd6d` declared `cc-by-nc-4.0`, while later repository metadata was inconsistent. The author published the verified corrective commit [`158e40e9ccf166c3655b7f4cd2abbfc7bbc87f7a`](https://huggingface.co/Reza2kn/Shenava-Koochik-v1.0-sherpa-onnx/commit/158e40e9ccf166c3655b7f4cd2abbfc7bbc87f7a), changing README frontmatter to `apache-2.0` and adding the Apache 2.0 LICENSE file. The commit changes only README and LICENSE; the existing pinned model/token blobs remain unchanged.
+
+The new provisioner pins this exact revision and verifies:
+- model ONNX bytes/SHA-256 and tokens bytes/SHA-256,
+- README frontmatter says `apache-2.0`,
+- LICENSE contains the Apache License 2.0 text,
+- model manifest records repository, immutable revision, license and hashes.
+
+The package builder now refuses an unmanifested model directory and embeds README, LICENSE and `model-manifest.json` in the release payload. CI has a cached Koochik provisioning/license-validation job; its first run is pending after the workflow update. Details: `MODEL-LICENSE-AUDIT-2026-11-28.md`.
