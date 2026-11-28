@@ -22,6 +22,8 @@ import path from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
 import { createInterface } from 'node:readline';
 import { fileURLToPath } from 'node:url';
+import { assertNativeBinaryArchitecture } from './NativeBinaryArchitecture.mjs';
+import { resolveAvapardazReleaseTarget } from './NativeReleaseTargets.mjs';
 import {
   ALLOWED_MODEL_DOWNLOAD_HOSTS,
   activateDirectoryAtomically,
