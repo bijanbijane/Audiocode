@@ -1166,6 +1166,7 @@ export class AvapardazPackageUpdateManager {
       const sibling = (suffix: string) => path.join(path.dirname(targetDir), '.' + path.basename(targetDir) + '.' + token + suffix);
       if (fs.existsSync(path.join(journalDir, 'COMMITTED'))) {
         fs.rmSync(sibling('.stage'), { recursive: true, force: true });
+        fs.rmSync(path.join(this.layout.tempDir, 'stage_' + entry.name), { recursive: true, force: true });
         fs.rmSync(sibling('.displaced'), { recursive: true, force: true });
         fs.rmSync(sibling('.restore'), { recursive: true, force: true });
         fs.rmSync(journalDir, { recursive: true, force: true });
@@ -1190,6 +1191,7 @@ export class AvapardazPackageUpdateManager {
           this.writeManifest(priorManifest);
         }
         fs.rmSync(stageDir, { recursive: true, force: true });
+        fs.rmSync(path.join(this.layout.tempDir, 'stage_' + entry.name), { recursive: true, force: true });
         fs.rmSync(displacedDir, { recursive: true, force: true });
         fs.rmSync(restoreDir, { recursive: true, force: true });
         fs.rmSync(journalDir, { recursive: true, force: true });
@@ -1425,7 +1427,7 @@ export class AvapardazPackageUpdateManager {
     // 6. Staging & Backup
     const backupId = `bkp_${pkg.component.toLowerCase()}_${prevVersion}_${Date.now()}`;
     const backupDir = path.join(this.layout.backupsDir, backupId);
-    const stageDir = path.join(this.layout.tempDir, `stage_${pkg.updateId}_${Date.now()}`);
+    const stageDir = path.join(this.layout.tempDir, 'stage_' + backupId);
 
     fs.mkdirSync(this.layout.backupsDir, { recursive: true, mode: 0o700 });
     fs.mkdirSync(this.layout.tempDir, { recursive: true, mode: 0o700 });
@@ -1459,9 +1461,9 @@ export class AvapardazPackageUpdateManager {
       const activationStageDir = path.join(path.dirname(targetDir), '.' + path.basename(targetDir) + '.' + siblingToken + '.stage');
       const displacedDir = path.join(path.dirname(targetDir), '.' + path.basename(targetDir) + '.' + siblingToken + '.displaced');
       fs.mkdirSync(path.dirname(targetDir), { recursive: true, mode: 0o755 });
+      this.markActivationPhase(backupDir, 'PREPARED');
       fs.rmSync(activationStageDir, { recursive: true, force: true });
       copyDirectoryRecursiveSync(stageDir, activationStageDir);
-      this.markActivationPhase(backupDir, 'PREPARED');
       if (params.simulateInterruptDuringActivation) {
         throw new Error('SIMULATED_INTERRUPTION_DURING_UPDATE_ACTIVATION');
       }
