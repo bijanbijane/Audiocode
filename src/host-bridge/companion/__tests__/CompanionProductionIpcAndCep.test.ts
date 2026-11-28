@@ -159,7 +159,8 @@ test('AVP-P0-004: CompanionAudioTransferManager validates PCM metadata, enforces
       expectedBytes: 999,
       expectedFrames: 100,
       totalChunks: 2,
-    });
+    
+      ownerId: 'test-owner',});
     assert.equal(badInit.ok, false);
     assert.equal(badInit.code, 'AUDIO_METADATA_MISMATCH');
 
@@ -173,36 +174,42 @@ test('AVP-P0-004: CompanionAudioTransferManager validates PCM metadata, enforces
       expectedFrames: 100,
       totalChunks: 2,
       expectedSha256: fullSha,
-    });
+    
+      ownerId: 'test-owner',});
     assert.equal(init.ok, true);
     const tid = init.transferId!;
 
     // Out-of-order chunk 1 before chunk 0 rejected
-    const ooo = mgr.appendChunk({ transferId: tid, chunkIndex: 1, chunkBase64: c1.toString('base64'), chunkSha256: c1Sha });
+    const ooo = mgr.appendChunk({ transferId: tid, chunkIndex: 1, chunkBase64: c1.toString('base64'), chunkSha256: c1Sha 
+      ownerId: 'test-owner',});
     assert.equal(ooo.ok, false);
     assert.equal(ooo.code, 'OUT_OF_ORDER_CHUNK_REJECTED');
 
     // Corrupted chunk checksum rejected
-    const badHash = mgr.appendChunk({ transferId: tid, chunkIndex: 0, chunkBase64: c0.toString('base64'), chunkSha256: '0'.repeat(64) });
+    const badHash = mgr.appendChunk({ transferId: tid, chunkIndex: 0, chunkBase64: c0.toString('base64'), chunkSha256: '0'.repeat(64) 
+      ownerId: 'test-owner',});
     assert.equal(badHash.ok, false);
     assert.equal(badHash.code, 'CHUNK_CHECKSUM_MISMATCH');
 
     // Valid chunk 0
-    assert.equal(mgr.appendChunk({ transferId: tid, chunkIndex: 0, chunkBase64: c0.toString('base64'), chunkSha256: c0Sha }).ok, true);
+    assert.equal(mgr.appendChunk({ transferId: tid, chunkIndex: 0, chunkBase64: c0.toString('base64'), chunkSha256: c0Sha 
+      ownerId: 'test-owner',}).ok, true);
 
     // Duplicate chunk 0 rejected
-    const dup = mgr.appendChunk({ transferId: tid, chunkIndex: 0, chunkBase64: c0.toString('base64'), chunkSha256: c0Sha });
+    const dup = mgr.appendChunk({ transferId: tid, chunkIndex: 0, chunkBase64: c0.toString('base64'), chunkSha256: c0Sha 
+      ownerId: 'test-owner',});
     assert.equal(dup.ok, false);
     assert.equal(dup.code, 'DUPLICATE_CHUNK_REJECTED');
 
     // Valid chunk 1 & finalize
-    assert.equal(mgr.appendChunk({ transferId: tid, chunkIndex: 1, chunkBase64: c1.toString('base64'), chunkSha256: c1Sha }).ok, true);
-    const fin = mgr.finalizeTransfer(tid);
+    assert.equal(mgr.appendChunk({ transferId: tid, chunkIndex: 1, chunkBase64: c1.toString('base64'), chunkSha256: c1Sha 
+      ownerId: 'test-owner',}).ok, true);
+    const fin = mgr.finalizeTransfer(tid, { ownerId: 'test-owner' });
     assert.equal(fin.ok, true);
     assert.equal(fin.sha256, fullSha);
 
     // Consume converts to valid RIFF/WAVE and cleans up staging temp file
-    const consumed = mgr.consumeFinalizedTransferAsWav(tid);
+    const consumed = mgr.consumeFinalizedTransferAsWav(tid, { ownerId: 'test-owner' });
     assert.equal(consumed.ok, true);
     assert.equal(consumed.wavBytes!.subarray(0, 4).toString('ascii'), 'RIFF');
     assert.equal(mgr.getActiveSessionCount(), 0);
