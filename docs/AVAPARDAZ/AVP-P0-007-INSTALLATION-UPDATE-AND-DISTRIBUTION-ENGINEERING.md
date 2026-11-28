@@ -117,9 +117,47 @@ The latest checked head is therefore CI-green. The verified result remains limit
 
 ### Next engineering work
 
-1. Implement a real signature-verification boundary that consumes signed manifest bytes and verifies them against an explicitly pinned trust root; never trust a caller-supplied `signatureStatus` as proof of authenticity.
-2. Keep release signing key provisioning separate from repository code. No private key or production credential may be committed.
-3. Add install/update integration tests proving signature failure blocks staging/activation and that valid signatures are bound to the exact manifest and artifact digest.
+1. Provision the owner-approved Ed25519 public trust root to the application bootstrap and define key rotation, revocation and emergency recovery policy. The verifier contract is implemented and tested, but no production key is provisioned.
+2. Wire the verified signed-manifest contract into the actual installer/update artifact acquisition and activation path; the current change hardens `ComponentUpdateOrchestrator` but is not yet end-to-end release signing.
+3. Keep release signing key provisioning separate from repository code. No private key or production credential may be committed.
 4. Complete physical clean-install, repair, upgrade, rollback and uninstall checks on the three approved host targets, then validate CEP registration and Companion lifecycle in Audition 25.x.
 
-The signing implementation must remain fail-closed until the owner-approved trust-root/public-key material and key-rotation/revocation policy are available. No release was signed or published in this session.
+No release was signed or published in this session.
+
+
+## 15. R6-WP04 — Cryptographic update-manifest verification (2026-11-28)
+
+### Security defect corrected
+
+The former `ComponentUpdateOrchestrator.executeSafeUpdate` accepted the caller-supplied `manifest.signatureStatus` string as authenticity evidence. A caller could provide `SIGNATURE_VERIFIED` without a cryptographic check. The field was removed from the update manifest contract and is no longer trusted.
+
+### Implementation
+
+- Added a versioned canonical update-manifest representation that binds component, version, minimum compatible IPC protocol, artifact SHA-256, byte size, release notes, Ed25519 algorithm and signing key ID.
+- Added real Ed25519 verification through Web Crypto against a trust store injected into the orchestrator constructor.
+- The trust store validates key IDs and 32-byte raw public keys and clones the key bytes at construction.
+- Signature verification is mandatory and occurs before download, staging or activation. Missing, malformed, unknown-key, or invalid signatures fail closed with `UPDATE_AUTHENTICITY_FAILED`.
+- SHA-256 is still independently checked against the downloaded artifact after download; the signature binds the declared digest and metadata.
+- Added regression coverage using a real ephemeral Ed25519 keypair for successful update, rollback after post-activation health failure, tampered signed metadata/digest, missing trust root and malformed signature.
+- Private keys are generated only inside tests; no private or production signing material was committed.
+
+Implementation commits:
+- `bb69bb367e978a0ff6bf0a48ad3e8ba27bf2c92f` — Web Crypto buffer normalization and signing key-ID binding.
+- `cade77506ff548350d0a6fdd951cbfcd9ee36be3` — final regression suite and key-ID canonicalization.
+
+### Validation — exact PR #7 head `cade77506ff548350d0a6fdd951cbfcd9ee36be3`
+
+Both workflows completed SUCCESS:
+
+- [AVAPARDAZ Quality & Release Gates — run 46158334970](https://github.com/bijanbijane/Audiocode/actions/runs/46158334970): Level 1 typecheck/build; Levels 2–4 offline ASR/VAD/diarization, IPC/security and canonical P0 suites; Level 5 CEP/supply-chain checks all PASS. The canonical P0 suite reported **40/40 passed**, including test 26: `AVP-P0-007: update orchestration requires real Ed25519 signatures, binds metadata and digest, and rolls back failed activation`.
+- [Architecture Governance, Reliability & Release Quality Gate — run 46158334929](https://github.com/bijanbijane/Audiocode/actions/runs/46158334929): TypeScript compilation, Vitest integration/quality suites, Node unit/reliability/fault-injection (283/283), E2E quality gates, SBOM/license checks, production build/release manifest, four-runner native parser matrix, three-target native runtime provisioning/CPU probes and six-package cross-target Installer/Update hash/manifest verification all PASS.
+
+The first implementation attempt failed TypeScript 6 because Web Crypto requires `BufferSource` backed by `ArrayBuffer`. The correction copies byte views into owned `ArrayBuffer` objects. The final exact-head run above passed the typecheck and all applicable workflows.
+
+### Remaining limitations
+
+- The verifier has no production trust root yet. A production update will fail closed until an owner-approved public key set is provisioned by the trusted application bootstrap.
+- Key rotation, revocation and emergency recovery policy remain open owner decisions.
+- The installer/update package builder still produces unsigned artifacts; signing and signed package activation are not complete.
+- Physical Windows 11/macOS 14/15 installation and live Adobe Audition 25.x acceptance remain open.
+- PR #7 remains OPEN / DRAFT / NOT MERGED; `main` remains unchanged.
