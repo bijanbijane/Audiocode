@@ -4,7 +4,7 @@
 **Roadmap:** `AVP-DELIVERY-ROADMAP-1.1`  
 **Task:** `R0-DIST-07` — Internal installation and trust model  
 **Scope:** Internal V1 only; Adobe Audition CEP + Native Companion + shared Core; macOS and Windows  
-**Status:** `BLOCKED — owner decisions and platform implementation gaps`
+**Status:** `IN PROGRESS — platform matrix approved; packaging and trust implementation gaps remain`
 
 ## Executive finding
 
@@ -98,3 +98,50 @@ Do not mark `R0-DIST-07`, `R0-PLATFORM-05`, or `R0-HOST-06` complete based on pa
 6. Perform live Audition acceptance on authorized physical macOS and Windows hosts.
 
 **No installer was executed on a user's machine, no signing credentials were used, and no production or live-service operation was performed during this audit.**
+
+
+## 8. Owner decision and target-specific packaging implementation (2026-11-28)
+
+### 8.1. Approved internal host matrix
+
+The project owner approved the following exact target matrix for internal V1:
+
+| Target ID | OS | CPU architecture | Adobe Audition |
+|---|---|---|---|
+| `darwin-arm64` | macOS 14 / 15 | Apple Silicon | 25.x |
+| `darwin-x64` | macOS 14 / 15 | Intel | 25.x |
+| `win32-x64` | Windows 11 | x64 | 25.x |
+
+This resolves the previous owner decision about platform/architecture selection. It does **not** convert any target to VERIFIED or ACCEPTED; physical-host and Audition validation remains outstanding.
+
+### 8.2. Code changes on the follow-up engineering branch
+
+Branch: `feat/r6-target-specific-release-packaging`, based on the reviewed R0 documentation head.
+
+- Added `scripts/release-targets.mjs` as the single source of truth for the three approved native targets and target-specific Sherpa / ONNX Runtime filenames.
+- Added tests for the exact matrix, target artifact selection, unsupported target rejection, and runtime-target mismatch rejection.
+- Updated `scripts/build-release-installer.mjs` to select native runtime artifacts from the explicit release target rather than the packager host, require `AVAPARDAZ_SHERPA_RUNTIME_TARGET` to match, include target/build-host identity in the package manifest, and suffix package/update artifacts with the target ID.
+- Generated installers now reject a mismatched OS/CPU and Node.js versions below 20 before copying payload files.
+- Added a Windows PowerShell installer wrapper (`install-windows.ps1`) alongside the macOS wrapper.
+- Updated `ProductionReleaseAndBetaEngine` release metadata to `darwin-arm64`, `darwin-x64`, and `win32-x64`.
+
+### 8.3. Build invocation contract
+
+For each package, set all of the following explicitly:
+
+- `AVAPARDAZ_TARGET_PLATFORM`: `darwin` or `win32`
+- `AVAPARDAZ_TARGET_ARCH`: `arm64` or `x64`
+- `AVAPARDAZ_SHERPA_RUNTIME_TARGET`: exact target ID, such as `win32-x64`
+- `AVAPARDAZ_SHERPA_RUNTIME_DIR`: runtime directory containing the matching target's native binary and ONNX Runtime library
+
+The explicit runtime-target variable is a build provenance assertion, not cryptographic proof that the binary bytes truly match the target. The package still needs artifact-level inspection/signing and execution on the destination OS. Cross-target packaging must never reuse the host's native runtime merely because a filename happens to exist.
+
+### 8.4. Remaining blockers
+
+- Actual target-specific Sherpa runtime payloads have not been supplied or built for all three targets in this session.
+- The packager was not executed because the required production web build, model artifacts, and target-specific native runtime payloads were not available through this repository-only workflow.
+- The generated installer and PowerShell wrapper have not been executed on Windows 11; macOS 14/15 arm64 and Intel have not been executed on physical hosts.
+- Audition 25.x integration remains unverified on all three target IDs.
+- Internal signing/trust policy, pinned signature verification, Companion startup registration, CEP registration into the host's actual extension directory, and atomic update/rollback integration remain open.
+
+The platform matrix is **APPROVED**, but platform support is still **NOT VERIFIED**. R0 distribution work remains IN PROGRESS.
