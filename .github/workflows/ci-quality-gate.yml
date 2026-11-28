@@ -67,3 +67,31 @@ jobs:
           test -f dist/asr-stream-worklet.js
           test -f dist/release-manifest.json
           ls -la dist/ort/ort-wasm*.wasm
+
+  native-binary-format-compatibility:
+    name: Native Binary Format Verification — ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-14, windows-latest]
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Install Dependencies from Frozen Bun Lockfile
+        run: bun install --frozen-lockfile
+
+      - name: Record runner platform
+        run: node -p "'runner=' + process.platform + '-' + process.arch"
+
+      - name: Verify Mach-O and PE architecture parser fixtures
+        run: bunx vitest run scripts/verify-native-binary.spec.ts
