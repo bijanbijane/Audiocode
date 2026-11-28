@@ -231,9 +231,18 @@ For every target, the provisioning job verified the archive's exact byte count a
 
 The safe extractor continues to reject symlinks by default. For these pinned native archives only, it accepts same-directory relative symlinks under a `lib` directory and materializes them as regular files; absolute links, parent traversal, link chains, hardlinks, and links outside `lib` remain forbidden.
 
-### 8.8. Current CI follow-up
+### 8.8. Latest CI checkpoint — PASS
 
-The first full Vitest run after the runtime packaging changes passed 28 files / 119 tests and failed one stale source assertion in `scripts/build-release-installer.spec.ts` that still expected the removed `!fs.existsSync(onnxRuntimeLibrarySource)` expression. That assertion was removed; latest head CI is rerunning. The native parser matrix and all three real runtime provisioning jobs passed on the prior head above.
+Latest fully validated PR #7 head: `c800f3f218ce6973946b4bc4320ed3ead17bc911`.
+
+Both applicable GitHub Actions workflows completed with `SUCCESS`:
+
+- **AVAPARDAZ Quality & Release Gates:** Levels 1–5 all PASS, including production web build, ORT/ASR/DSP, IPC/security, CEP packaging and supply-chain gates.
+- **Architecture Governance, Reliability & Release Quality Gate:** Vitest 29 files / 123 tests PASS; Node unit/reliability/fault-injection suite 32 tests PASS; TypeScript compilation, zero-circular dependency check, SBOM generation, license audit, production build, E2E quality gates and release-manifest verification PASS.
+- The same Architecture workflow's native binary parser matrix passed on Ubuntu, macOS 15 arm64, macOS 15 Intel, and Windows x64.
+- Its three real native runtime provisioning jobs passed on macOS 15 arm64, macOS 15 Intel, and Windows Server 2025 x64, including pinned archive SHA-256/byte verification, binary/library architecture validation and actual CLI `--help` smoke tests.
+
+The earlier stale source assertion and malformed symlink test fixture were corrected; the latest full run is green. This does **not** mean the full release installer or physical Adobe hosts are accepted.
 
 GitHub-hosted macOS 14 runners are retired; current CI validates macOS 15 arm64 and Intel. Windows hosted smoke is Windows Server 2025, not Windows 11. Physical-host and Audition acceptance remain separate gates.
 
