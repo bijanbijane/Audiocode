@@ -57,11 +57,15 @@
 
 | OS | CPU Arch | Extension Path | Companion Native Runtime | Current Status (`PHASE-00`) | Evidence & Constraints |
 | :--- | :---: | :--- | :--- | :---: | :--- |
-| **Windows 10/11** | `x86_64` | Adobe Audition CEP Panel + ExtendScript | `NATIVE_X86_64` (`SSE4.2` baseline + optional `AVX2`) | `Unverified` | Requires desktop Audition >= v24.0 + Windows x64 Companion build (`PHASE-03`/`PHASE-04`) |
-| **Windows 11** | `ARM64` | CEP Panel (only where target Audition release supports ARM64) | `NATIVE_ARM64` (`NEON`) | `Unverified` | Verify official Adobe Audition system requirements for ARM64 before shipping |
-| **macOS** | `ARM64` (Apple Silicon) | Adobe Audition CEP Panel + ExtendScript | `NATIVE_ARM64` (`NEON` + Accelerate/Metal optional) | `Unverified` | Primary macOS desktop target; requires macOS Audition host verification |
-| **macOS** | `x86_64` (Intel) | Adobe Audition CEP Panel (supported Audition versions only) | `NATIVE_X86_64` (`SSE4.2` / `AVX2`) | `Unverified` | Compatibility target; do not make AVX2 mandatory |
+| **Windows 11** | `x86_64` | Adobe Audition CEP Panel + ExtendScript | `NATIVE_X86_64` (`SSE4.2` baseline + optional `AVX2`) | `Unverified` (owner-approved target) | Target ID: `win32-x64`; Adobe Audition 25.x; physical Windows 11 acceptance still required |
+| **Windows 11** | `ARM64` | N/A for internal V1 | N/A | `Out of Scope` | Windows ARM64 is not part of the owner-approved internal V1 matrix |
+| **macOS 14 / 15** | `ARM64` (Apple Silicon) | Adobe Audition CEP Panel + ExtendScript | `NATIVE_ARM64` (`NEON` + Accelerate/Metal optional) | `Unverified` (owner-approved target) | Target ID: `darwin-arm64`; Adobe Audition 25.x; physical Apple Silicon acceptance still required |
+| **macOS 14 / 15** | `x86_64` (Intel) | Adobe Audition CEP Panel + ExtendScript | `NATIVE_X86_64` (`SSE4.2` baseline + optional `AVX2`) | `Unverified` (owner-approved target) | Target ID: `darwin-x64`; Adobe Audition 25.x; physical Intel acceptance still required |
 | **Linux** | `x86_64` / `ARM64` | N/A | N/A (Linux Companion usable only for CI/dev CLI testing) | `Unsupported` (Adobe Audition does not exist on Linux) | Linux users run **Product B (Web App)** |
+
+
+
+**Internal V1 scope decision (ADR-027, 2026-11-28):** Windows 11 x64, macOS 14/15 Apple Silicon, and macOS 14/15 Intel, all with Adobe Audition 25.x. `Unverified` remains the evidence status until target-specific native runtime builds and physical-host tests pass.
 
 ### 3.2 Native CPU Feature Groups (`Companion Runtime`)
 
