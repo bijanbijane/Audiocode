@@ -320,6 +320,7 @@ import * as path from 'node:path';
 import * as crypto from 'node:crypto';
 import * as os from 'node:os';
 import { fileURLToPath } from 'node:url';
+import { verifyRequiredCpuFeatures } from './cpu-feature-preflight.mjs';
 
 const args = process.argv.slice(2);
 if (process.platform !== '${RELEASE_TARGET.platform}' || process.arch !== '${RELEASE_TARGET.arch}') {
@@ -336,6 +337,11 @@ if (args.includes('--help') || args.includes('-h')) {
   console.log('Usage: node ./installer/install.mjs [--target=<empty-directory>]');
   console.log('Requires Node.js 20 or newer. The installer refuses to overwrite an existing non-empty target.');
   process.exit(0);
+}
+const cpuPreflight = verifyRequiredCpuFeatures(${JSON.stringify(RELEASE_TARGET.requiredCpuFeatures)});
+if (!cpuPreflight.supported) {
+  console.error('[AvaPardaz Installer] CPU requirement not met:', cpuPreflight.reason);
+  process.exit(5);
 }
 const targetArg = args.find((a) => a.startsWith('--target='));
 const targetRoot = targetArg ? path.resolve(targetArg.slice('--target='.length)) : path.join(os.homedir(), 'AvaPardaz');
@@ -380,6 +386,7 @@ copyRecursive(path.join(payloadRoot, 'cep-extension'), path.join(targetRoot, 'ce
 
 console.log('[AvaPardaz Installer] Installation completed successfully.');
 `;
+fs.copyFileSync(path.join(REPO_ROOT, 'scripts', 'cpu-feature-preflight.mjs'), path.join(installerDir, 'cpu-feature-preflight.mjs'));
 fs.writeFileSync(path.join(installerDir, 'install.mjs'), installMjsContent, { mode: 0o755 });
 
 const installMacosSh = `#!/usr/bin/env bash
