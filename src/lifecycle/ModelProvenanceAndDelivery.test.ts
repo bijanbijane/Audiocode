@@ -369,7 +369,63 @@ test('AVP-P0-007: update orchestration requires real Ed25519 signatures, binds m
   assert.equal(resumedRes.slot.activeVersion, '1.1.0');
   assert.equal(resumedRes.slot.state, 'UPDATE_VERIFIED');
 
-  // Restart recovery must clean up a staged UPDATE_READY state and preserve the active version.
+  // Deferred activation callbacks may throw; the orchestrator must still enter rollback.
+  const throwingActivationOrch = new ComponentUpdateOrchestrator({
+    BROWSER_APP: '1.0.0',
+    NATIVE_COMPANION: '1.0.0',
+    AUDITION_CEP_EXTENSION: '1.0.0',
+    MODEL_ARTIFACT: '1.0.0',
+  }, trustedSigningKeys);
+  throwingActivationOrch.pinActiveJob('render-throw-activation');
+  await throwingActivationOrch.executeSafeUpdate({
+    manifest: signManifest({ component: 'NATIVE_COMPANION', version: '1.1.0', sha256Hex: goodHash, sizeBytes: 10_000_000 }),
+    availableDiskBytes: 50_000_000,
+    downloadAndVerifySha256: async () => ({ ok: true, actualSha256Hex: goodHash }),
+    stageArtifact: async () => ({ ok: true, stagingDir: '/tmp/deferred-throw-activation' }),
+    activateArtifact: async () => ({ ok: true }),
+    verifyPostActivationHealth: async () => ({ ok: true }),
+    restorePreviousVersion: async () => true,
+  });
+  throwingActivationOrch.releasePinnedJob('render-throw-activation');
+  const thrownActivationRes = await throwingActivationOrch.resumeStagedUpdate({
+    component: 'NATIVE_COMPANION',
+    activateArtifact: async () => { throw new Error('simulated activation exception'); },
+    verifyPostActivationHealth: async () => ({ ok: true }),
+    restorePreviousVersion: async () => true,
+  });
+  assert.equal(thrownActivationRes.rolledBack, true);
+  assert.equal(thrownActivationRes.slot.state, 'UPDATE_ROLLED_BACK');
+  assert.equal(thrownActivationRes.slot.activeVersion, '1.0.0');
+
+  // A thrown health probe also rolls back; a thrown restore callback fails closed.
+  const throwingHealthOrch = new ComponentUpdateOrchestrator({
+    BROWSER_APP: '1.0.0',
+    NATIVE_COMPANION: '1.0.0',
+    AUDITION_CEP_EXTENSION: '1.0.0',
+    MODEL_ARTIFACT: '1.0.0',
+  }, trustedSigningKeys);
+  throwingHealthOrch.pinActiveJob('render-throw-health');
+  await throwingHealthOrch.executeSafeUpdate({
+    manifest: signManifest({ component: 'NATIVE_COMPANION', version: '1.1.0', sha256Hex: goodHash, sizeBytes: 10_000_000 }),
+    availableDiskBytes: 50_000_000,
+    downloadAndVerifySha256: async () => ({ ok: true, actualSha256Hex: goodHash }),
+    stageArtifact: async () => ({ ok: true, stagingDir: '/tmp/deferred-throw-health' }),
+    activateArtifact: async () => ({ ok: true }),
+    verifyPostActivationHealth: async () => ({ ok: true }),
+    restorePreviousVersion: async () => true,
+  });
+  throwingHealthOrch.releasePinnedJob('render-throw-health');
+  const thrownHealthRes = await throwingHealthOrch.resumeStagedUpdate({
+    component: 'NATIVE_COMPANION',
+    activateArtifact: async () => ({ ok: true }),
+    verifyPostActivationHealth: async () => { throw new Error('simulated health exception'); },
+    restorePreviousVersion: async () => true,
+  });
+  assert.equal(thrownHealthRes.rolledBack, true);
+  assert.equal(thrownHealthRes.slot.state, 'UPDATE_ROLLED_BACK');
+  assert.equal(thrownHealthRes.slot.activeVersion, '1.0.0');
+
+  // Restart recovery must clear the staged UPDATE_READY reference and preserve the active version.
   const interruptedReadyOrch = new ComponentUpdateOrchestrator({
     BROWSER_APP: '1.0.0',
     NATIVE_COMPANION: '1.0.0',
