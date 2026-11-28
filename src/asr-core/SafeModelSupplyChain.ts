@@ -826,6 +826,10 @@ with tarfile.open(archive_path, "r:bz2") as tf:
 
 # Materialize narrowly-scoped lib symlink aliases as regular files. This avoids
 # preserving filesystem links in the installed runtime while retaining expected dylib names.
+pending_library_symlink_names = {rel_link for rel_link, _ in pending_library_symlinks}
+for rel_link, rel_target in pending_library_symlinks:
+    if rel_target in pending_library_symlink_names:
+        fail("TAR_SYMLINK_FORBIDDEN", f"Symlink chains are forbidden: {rel_link} -> {rel_target}")
 for rel_link, rel_target in pending_library_symlinks:
     target_abs = os.path.realpath(os.path.join(root_real, *rel_target.split("/")))
     try:
