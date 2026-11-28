@@ -69,6 +69,53 @@ function parseSemver(v: string): [number, number, number] | null {
 }
 
 /**
+ * Compares strict SemVer release versions, including prerelease precedence.
+ * Returns null for malformed versions so callers can fail closed.
+ */
+function compareReleaseVersions(left: string, right: string): number | null {
+  const parse = (value: string) => {
+    const match = value.trim().match(
+      /^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(?:-([0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*))?(?:\\+[0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*)?$/,
+    );
+    if (!match) return null;
+    return {
+      core: [Number(match[1]), Number(match[2]), Number(match[3])] as const,
+      prerelease: match[4]?.split('.') ?? null,
+    };
+  };
+  const a = parse(left);
+  const b = parse(right);
+  if (!a || !b) return null;
+
+  for (let i = 0; i < 3; i += 1) {
+    if (a.core[i] !== b.core[i]) return a.core[i] > b.core[i] ? 1 : -1;
+  }
+  if (a.prerelease === null || b.prerelease === null) {
+    if (a.prerelease === b.prerelease) return 0;
+    return a.prerelease === null ? 1 : -1;
+  }
+  const length = Math.max(a.prerelease.length, b.prerelease.length);
+  for (let i = 0; i < length; i += 1) {
+    const ai = a.prerelease[i];
+    const bi = b.prerelease[i];
+    if (ai === undefined || bi === undefined) {
+      if (ai === bi) return 0;
+      return ai === undefined ? -1 : 1;
+    }
+    if (ai === bi) continue;
+    const an = /^(0|[1-9]\\d*)$/.test(ai);
+    const bn = /^(0|[1-9]\\d*)$/.test(bi);
+    if (an && bn) {
+      if (ai.length !== bi.length) return ai.length > bi.length ? 1 : -1;
+      return ai > bi ? 1 : -1;
+    }
+    if (an !== bn) return an ? -1 : 1;
+    return ai > bi ? 1 : -1;
+  }
+  return 0;
+}
+
+/**
  * Evaluates cross-component version compatibility before permitting activation or job start.
  */
 export function evaluateComponentCompatibility(params: {
@@ -480,6 +527,16 @@ export class ComponentUpdateOrchestrator {
       return { ok: false, slot: failed, rolledBack: false };
     }
     this.transition(comp, 'UPDATE_AUTHENTICITY_VERIFIED', `Ed25519 signature verified with trusted key ${manifest.signature.keyId}.`);
+
+    // 3.1. Anti-rollback / replay protection. A valid signature never authorizes an older
+    // or already-active release. SemVer prerelease precedence is respected (beta.2 > beta.1).
+    const versionOrder = compareReleaseVersions(manifest.version, initial.activeVersion);
+    if (versionOrder === null || versionOrder <= 0) {
+      const failed = this.transition(comp, 'UPDATE_FAILED', 'Update version is not strictly newer than the active release.', {
+        lastError: 'UPDATE_VERSION_NOT_NEWER',
+      });
+      return { ok: false, slot: failed, rolledBack: false };
+    }
 
     // 4. Storage preflight (require 2x size headroom for staging + active preservation)
     if (params.availableDiskBytes < manifest.sizeBytes * 2) {
