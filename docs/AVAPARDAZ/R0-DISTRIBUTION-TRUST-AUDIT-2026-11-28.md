@@ -8,7 +8,7 @@
 
 ## Executive finding
 
-The repository contains packaging and update-engine components, but the current end-to-end installer path is not yet a verified macOS + Windows internal-release workflow. The CEP-only installers, full release packager, and lifecycle/update engine are separate pieces with incomplete integration. The release trust path is also not cryptographically closed: current CEP package metadata explicitly says unsigned and unnotarized, while the update engine accepts a caller-supplied signature-status enum and does not itself verify a signed manifest.
+The baseline findings below are retained as a historical snapshot. Follow-up work on PR #7 has since corrected the update-engine trust boundary: the caller-supplied signature-status enum was removed and the orchestrator now requires Ed25519 verification against constructor-pinned public keys. A further follow-up adds strict SemVer anti-rollback/replay checks. However, the end-to-end installer path is still not a verified macOS + Windows internal-release workflow: the package manifest and tarballs remain unsigned, the generated installer does not verify a detached signature against a provisioned trust root, and the full installer remains incompletely integrated with CEP registration and Companion lifecycle.
 
 Do not mark `R0-DIST-07`, `R0-PLATFORM-05`, or `R0-HOST-06` complete based on packaging-engine unit tests or Linux CI alone.
 
@@ -40,12 +40,15 @@ Do not mark `R0-DIST-07`, `R0-PLATFORM-05`, or `R0-HOST-06` complete based on pa
 - The generated install script previously resolved its own location from `new URL(import.meta.url).pathname`, which is unsafe for portable Windows file URLs. This was corrected on the PR branch in commit `a188667a125dac46b531137cf132b8db5f654910` by using `fileURLToPath(import.meta.url)`. The misleading “Zero-Terminal / Self-Contained” header/help was corrected in `1eab866d127651d5bea1630a98380358a5b66320` to state the Node.js 20+ requirement; a Vitest regression spec was added in `4da63a52631435e9bc9015a58baeda13dc99ab6d` and expanded to assert the runtime requirement. The installer regression spec passed 1/1 in Vitest on PR-head commit `3818431e5b18169a335eed5b54ab56e2e7f9b916` (Architecture Governance run [46131619653](https://github.com/bijanbijane/Audiocode/actions/runs/46131619653)); actual Windows execution remains unverified.
 - The packager validates the primary Koochik ONNX model and token file against pinned byte counts and SHA-256 values before copying them into the payload. The package manifest also records build identity, platform/architecture, dirty-worktree state, and per-component SHA-256 hashes. These are useful build-time integrity checks, but the manifest itself is unsigned and the generated installer does not authenticate it against a pinned trust root.
 
-### 3. Update authenticity is not yet end-to-end
+### 3. Update authenticity — baseline gap and current implementation
 
-- `src/lifecycle/ProductDeliveryAndUpdateEngine.ts` defines `UpdateManifest.signatureStatus` as a caller-provided enum: `SIGNATURE_VERIFIED`, `UNSIGNED_CHECKSUM_ONLY`, or `SIGNATURE_INVALID`.
-- `executeSafeUpdate` rejects an invalid status and rejects unsigned status only when the caller sets `requireCryptographicSignature: true`. That flag is optional and defaults to permissive behavior.
-- The engine validates the supplied status and SHA-256 value; it does not parse a signature, select a trusted public key, or perform cryptographic signature verification itself.
-- The current CEP package manifest explicitly declares unsigned/unnotarized output. No detached signature or repository-owned trust-root verification was identified in the reviewed packaging path.
+The first three bullets below describe the original baseline inspected during this audit; they are no longer current for PR #7:
+
+- **Baseline finding (superseded):** `UpdateManifest.signatureStatus` was a caller-provided enum and could be trusted without cryptographic proof.
+- **Baseline finding (superseded):** `requireCryptographicSignature` was optional and permissive by default.
+- **Current PR #7 implementation:** `UpdateManifest` now requires an Ed25519 signature object. `ComponentUpdateOrchestrator` verifies the canonical manifest with Web Crypto against constructor-pinned raw public keys before download/staging/activation. Missing, malformed, unknown-key, and invalid signatures fail closed. The signed payload binds the key ID, component, version, IPC compatibility floor, artifact SHA-256, byte size, and release notes.
+- **Current PR #7 follow-up:** strict SemVer comparison rejects any candidate version that is not strictly newer than the active component version, including same-version replay and downgrade; prerelease ordering is respected.
+- **Still open end-to-end:** the CEP/full-package release manifest and installer/update tarballs are still unsigned. The generated installer does not yet verify detached package signatures against a pinned trust root. No production public key is provisioned, and the package acquisition/activation path is not yet wired end-to-end to this verifier.
 
 ### 4. Install/uninstall ownership is split
 
@@ -60,7 +63,7 @@ Do not mark `R0-DIST-07`, `R0-PLATFORM-05`, or `R0-HOST-06` complete based on pa
 |---|---|---|
 | P0 | No verified Windows platform target in the release engine | Cannot claim approved dual-platform V1 support |
 | P0 | Full installer does not install/register the CEP extension or start Companion | A successful file copy does not yield a ready Audition workflow |
-| P0 | No end-to-end cryptographic package/update authenticity | SHA-256 manifest alone does not protect against artifact + manifest replacement |
+| P0 | No end-to-end cryptographic package authenticity (orchestrator Ed25519 is implemented, package signing/installer verification remain open) | SHA-256 manifest alone does not protect against artifact + manifest replacement |
 | P1 | No signed/notarized CEP ZXP or signed OS installer | Gatekeeper, SmartScreen, and CEP trust friction; production signing not ready |
 | P1 | Update tarball is staged metadata, not an applied atomic update | Update/rollback behavior is not proven by the generated artifact |
 | P1 | Node runtime is not bundled and the installer requires Node | “Self-contained / zero-terminal” installation claim is not met |
@@ -283,3 +286,34 @@ For all six packages, CI recomputed the tarball byte length and SHA-256, checked
 The corrected schema assertion reads `packageManifest.components.primaryPersianAsrModel`; the earlier root-level assertion was incorrect. This closes the hosted CI package-build and integrity gate, not signing, installation, update activation, or physical-host acceptance.
 
 Latest fully validated feature head: `b60afa999b7a0892c81742ac8710b893cdbac4ba`. Architecture Governance run `46144552901` completed SUCCESS; all three CPU probes and all six unsigned Installer/Update package integrity checks passed.
+
+
+## Follow-up engineering update — 2026-11-28 (PR #7)
+
+### Update-orchestrator trust boundary
+
+The original caller-controlled `signatureStatus` gap described in the historical baseline was fixed. The current orchestrator verifies a real Ed25519 signature against a constructor-injected trust store before any download, staging, or activation. The canonical payload binds update identity and artifact metadata. Trust roots are validated and copied on construction; no private or production key material is committed.
+
+### Anti-rollback and replay protection
+
+A signed update is not automatically authorized to move a component backwards. The orchestrator now compares the candidate and active versions using strict SemVer precedence after signature verification and before download. It rejects:
+- Any lower version (downgrade).
+- The exact active version (replay).
+- Malformed or non-comparable versions (fail closed).
+
+Prerelease precedence is covered: `2.0.0-beta.2` is newer than `2.0.0-beta.1`. Regression tests assert that downgrade/replay attempts do not invoke the download callback and that a valid prerelease upgrade succeeds.
+
+Implementation commits:
+- `59229a17eafc591f8de15f91e0c96b26a5657688` — anti-rollback/replay implementation and initial regression tests.
+- `14ede6a1ea194ca71a76f2a1915c1701655248d6` — strict SemVer parser escaping and safe-integer guard.
+
+### Validation status
+
+The source change is committed to PR #7. CI runs triggered by the latest head `14ede6a1ea194ca71a76f2a1915c1701655248d6` are running; do not treat the anti-rollback change as validated until both required workflows complete successfully.
+
+### Remaining blockers
+
+- No owner-approved production Ed25519 public trust root is provisioned.
+- Key rotation, revocation, and emergency recovery policy remain open.
+- Release package manifests, installer/update tarballs, and generated installer-side signature verification remain unsigned/unimplemented.
+- Physical Windows 11 and macOS 14/15 installation, repair, upgrade, rollback, uninstall, and live Adobe Audition 25.x CEP/Companion acceptance remain unperformed.
