@@ -171,6 +171,7 @@ const DEFAULT_BINARY_CANDIDATES = [
   process.env.AVAPARDAZ_SHERPA_BIN,
   // Per-user isolated Python wheel installation (macOS Apple Silicon / Linux / Windows).
   path.join(os.homedir(), '.avapardaz', 'runtime', 'sherpa-venv', 'bin', 'sherpa-onnx-offline'),
+  path.join(os.homedir(), '.avapardaz', 'runtime', 'targets', `${process.platform}-${process.arch}`, 'bin', process.platform === 'win32' ? 'sherpa-onnx-offline.exe' : 'sherpa-onnx-offline'),
   path.join(AVAPARDAZ_HOME, 'runtime', 'sherpa-venv', 'bin', 'sherpa-onnx-offline'),
   path.join(os.homedir(), '.avapardaz', 'runtime', 'sherpa-venv', 'Scripts', 'sherpa-onnx-offline.exe'),
   path.join(os.homedir(), '.avapardaz', 'runtime', 'bin', 'sherpa-onnx-offline'),
@@ -354,6 +355,22 @@ export function verifyShahabKoochikModelFiles(modelDirectory: string): boolean {
   );
 }
 
+export function isSherpaRuntimeLibraryName(fileName: string, platform = process.platform): boolean {
+  if (platform === 'win32') {
+    return /^(?:onnxruntime(?:_providers_[a-z0-9_]+)?|sherpa-onnx-c-api)\.dll$/i.test(fileName);
+  }
+  if (platform === 'darwin') {
+    return /^lib(?:onnxruntime|sherpa-onnx-c-api)(?:\.\d+(?:\.\d+)*)?\.dylib$/.test(fileName);
+  }
+  return /^lib(?:onnxruntime|sherpa-onnx-c-api)\.so(?:\.\d+)*$/.test(fileName);
+}
+
+export function sherpaLibraryPathEnvironmentVariable(platform = process.platform): 'DYLD_LIBRARY_PATH' | 'LD_LIBRARY_PATH' | 'PATH' {
+  if (platform === 'darwin') return 'DYLD_LIBRARY_PATH';
+  if (platform === 'win32') return 'PATH';
+  return 'LD_LIBRARY_PATH';
+}
+
 function detectSherpaBinary(): { binaryPath: string | null; libDir: string | null } {
   const executableName = process.platform === 'win32' ? 'sherpa-onnx-offline.exe' : 'sherpa-onnx-offline';
   const pathCandidates = (process.env.PATH ?? '')
@@ -377,7 +394,7 @@ function detectSherpaBinary(): { binaryPath: string | null; libDir: string | nul
       ];
       const libDir = libraryCandidates.find((directory) => {
         try {
-          return fs.readdirSync(directory).some((name) => /^lib(?:onnxruntime|sherpa-onnx-c-api)\.(?:dylib|so(?:\.|$))/.test(name));
+          return fs.readdirSync(directory).some((name) => isSherpaRuntimeLibraryName(name));
         } catch {
           return false;
         }
@@ -1393,7 +1410,7 @@ export class LocalSherpaNeuralEngine {
       TRANSFORMERS_OFFLINE: '1',
     };
     if (params.libDir) {
-      const libraryPathName = process.platform === 'darwin' ? 'DYLD_LIBRARY_PATH' : 'LD_LIBRARY_PATH';
+      const libraryPathName = sherpaLibraryPathEnvironmentVariable();
       env[libraryPathName] = `${params.libDir}${path.delimiter}${env[libraryPathName] ?? ''}`;
     }
 
